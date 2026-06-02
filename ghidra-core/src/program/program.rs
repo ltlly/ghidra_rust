@@ -692,6 +692,17 @@ impl Program {
         self.touch();
     }
     pub fn get_property(&self, key: &str) -> Option<&str> { self.global_properties.get(key).map(|s| s.as_str()) }
+    pub fn has_property(&self, key: &str) -> bool { self.global_properties.contains_key(key) }
+    pub fn remove_property(&mut self, key: &str) -> Option<String> {
+        let removed = self.global_properties.remove(key);
+        if removed.is_some() { self.touch(); }
+        removed
+    }
+    pub fn get_properties(&self) -> &HashMap<String, String> { &self.global_properties }
+    pub fn property_keys(&self) -> impl Iterator<Item = &str> {
+        self.global_properties.keys().map(String::as_str)
+    }
+    pub fn property_count(&self) -> usize { self.global_properties.len() }
 
     pub fn set_address_property(&mut self, addr: Address, key: impl Into<String>, value: impl Into<String>) {
         let key_str: String = key.into();
@@ -702,6 +713,192 @@ impl Program {
     pub fn get_address_property(&self, addr: &Address, key: &str) -> Option<&str> {
         self.address_properties.get(addr).and_then(|props| props.get(key)).map(|s| s.as_str())
     }
+    pub fn has_address_property(&self, addr: &Address, key: &str) -> bool {
+        self.address_properties
+            .get(addr)
+            .map(|props| props.contains_key(key))
+            .unwrap_or(false)
+    }
+    pub fn remove_address_property(&mut self, addr: &Address, key: &str) -> Option<String> {
+        let removed = if let Some(props) = self.address_properties.get_mut(addr) {
+            let removed = props.remove(key);
+            let should_remove_entry = props.is_empty();
+            let _ = props;
+            if should_remove_entry {
+                self.address_properties.remove(addr);
+            }
+            removed
+        } else {
+            None
+        };
+        if removed.is_some() { self.touch(); }
+        removed
+    }
+    pub fn get_address_properties(&self, addr: &Address) -> Option<&HashMap<String, String>> {
+        self.address_properties.get(addr)
+    }
+    pub fn address_property_keys(&self, addr: &Address) -> Vec<&str> {
+        self.address_properties
+            .get(addr)
+            .map(|props| props.keys().map(String::as_str).collect())
+            .unwrap_or_default()
+    }
+    pub fn get_address_property_addresses(&self) -> Vec<Address> {
+        self.address_properties.keys().copied().collect()
+    }
+    pub fn total_address_property_count(&self) -> usize {
+        self.address_properties.values().map(HashMap::len).sum()
+    }
+
+    // ---------- Program metadata helpers ----------
+    pub fn has_metadata(&self, key: &str) -> bool { self.metadata.contains_key(key) }
+    pub fn remove_metadata(&mut self, key: &str) -> Option<String> {
+        let removed = self.metadata.remove(key);
+        if removed.is_some() { self.touch(); }
+        removed
+    }
+    pub fn metadata_keys(&self) -> impl Iterator<Item = &str> {
+        self.metadata.keys().map(String::as_str)
+    }
+    pub fn metadata_count(&self) -> usize { self.metadata.len() }
+    pub fn get_creation_time(&self) -> SystemTime { self.creation_time }
+    pub fn get_language_id(&self) -> Option<&crate::program::lang::LanguageID> {
+        self.language.as_ref().map(|language| &language.id)
+    }
+    pub fn get_compiler_spec_id(&self) -> Option<&crate::program::lang::CompilerSpecID> {
+        self.compiler_spec.as_ref().map(|spec| &spec.id)
+    }
+    pub fn has_executable_path(&self) -> bool { self.executable_path.is_some() }
+    pub fn has_executable_format(&self) -> bool { self.executable_format.is_some() }
+    pub fn has_executable_md5(&self) -> bool { self.executable_md5.is_some() }
+    pub fn has_executable_sha256(&self) -> bool { self.executable_sha256.is_some() }
+    pub fn has_preferred_root_namespace_category_path(&self) -> bool {
+        self.preferred_root_namespace_category.is_some()
+    }
+    pub fn get_domain_file_name(&self) -> Option<&str> {
+        self.domain_file_path
+            .as_deref()
+            .and_then(|path| path.rsplit('/').next())
+    }
+    pub fn has_domain_file_path(&self) -> bool { self.domain_file_path.is_some() }
+    pub fn get_comment_map(&self) -> &HashMap<Address, Vec<Comment>> { &self.comments }
+    pub fn get_imports(&self) -> &[String] { &self.imports }
+    pub fn get_exports(&self) -> &[String] { &self.exports }
+    pub fn get_xrefs(&self) -> &HashMap<Address, Vec<Address>> { &self.xrefs }
+    pub fn has_comments(&self) -> bool { !self.comments.is_empty() }
+    pub fn has_imports(&self) -> bool { !self.imports.is_empty() }
+    pub fn has_exports(&self) -> bool { !self.exports.is_empty() }
+    pub fn has_xrefs(&self) -> bool { !self.xrefs.is_empty() }
+    pub fn has_file_path(&self) -> bool { self.file_path.is_some() }
+    pub fn executable_name(&self) -> Option<&str> {
+        self.executable_path
+            .as_deref()
+            .and_then(|path| path.rsplit('/').next())
+    }
+    pub fn executable_hashes(&self) -> (Option<&str>, Option<&str>) {
+        (self.get_executable_md5(), self.get_executable_sha256())
+    }
+    pub fn compiler_or<'a>(&'a self, default: &'a str) -> &'a str {
+        self.compiler_name.as_deref().unwrap_or(default)
+    }
+    pub fn get_property_or<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
+        self.get_property(key).unwrap_or(default)
+    }
+    pub fn get_metadata_value_or<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
+        self.get_metadata(key).unwrap_or(default)
+    }
+    pub fn get_address_property_or<'a>(&'a self, addr: &Address, key: &str, default: &'a str) -> &'a str {
+        self.get_address_property(addr, key).unwrap_or(default)
+    }
+
+    // ---------- Lightweight summary helpers ----------
+    pub fn has_symbol_at(&self, addr: &Address) -> bool { self.symbols.symbols.contains_key(addr) }
+    pub fn has_data_type_at(&self, addr: &Address) -> bool { self.applied_data_types.contains_key(addr) }
+    pub fn has_function_at(&self, addr: &Address) -> bool { self.functions.get_function_at(addr).is_some() }
+    pub fn has_bookmarks_at(&self, addr: &Address) -> bool { !self.bookmarks.get_bookmarks(addr).is_empty() }
+    pub fn has_reference_from(&self, addr: &Address) -> bool { self.references.has_references_from(*addr) }
+    pub fn has_reference_to(&self, addr: &Address) -> bool { self.references.has_references_to(*addr) }
+    pub fn get_symbol_count(&self) -> usize { self.symbols.symbols.len() }
+    pub fn get_data_type_count(&self) -> usize { self.applied_data_types.len() }
+    pub fn get_bookmark_count(&self) -> usize { self.bookmarks.num_bookmarks() }
+    pub fn get_external_count(&self) -> usize { self.externals.externals.len() }
+    pub fn get_memory_block_count(&self) -> usize { self.memory.get_blocks().len() }
+    pub fn has_memory(&self) -> bool { !self.memory.get_blocks().is_empty() }
+    pub fn get_memory_map_range(&self) -> Option<AddressRange> {
+        Some(AddressRange::new(self.get_min_address()?, self.get_max_address()?))
+    }
+    pub fn memory_contains(&self, addr: &Address) -> bool { self.memory.get_block(addr).is_some() }
+    pub fn get_applied_data_type_addresses(&self) -> Vec<Address> { self.applied_data_types.keys().copied().collect() }
+    pub fn get_symbol_addresses(&self) -> Vec<Address> { self.symbols.symbols.keys().copied().collect() }
+    pub fn get_bookmarked_addresses(&self) -> Vec<Address> { self.bookmarks.get_bookmark_addresses() }
+    pub fn get_reference_source_addresses(&self) -> Vec<Address> {
+        self.references.get_reference_source_iterator(Address::new(0), true)
+    }
+    pub fn get_reference_destination_addresses(&self) -> Vec<Address> {
+        self.references.get_reference_destination_iterator(Address::new(0), true)
+    }
+    pub fn get_function_addresses(&self) -> Vec<Address> { self.functions.get_function_entry_points() }
+    pub fn get_external_addresses(&self) -> Vec<Address> { self.externals.external_locations.keys().copied().collect() }
+    pub fn get_external_names_vec(&self) -> Vec<&str> { self.externals.externals.keys().map(String::as_str).collect() }
+    pub fn has_register_default(&self, register: &str) -> bool {
+        self.program_context.register_defaults.contains_key(register)
+    }
+    pub fn has_register_value(&self, addr: &Address, register: &str) -> bool {
+        self.program_context
+            .register_values
+            .get(addr)
+            .map(|regs| regs.contains_key(register))
+            .unwrap_or(false)
+    }
+    pub fn get_register_default(&self, register: &str) -> Option<&Vec<u8>> {
+        self.program_context.register_defaults.get(register)
+    }
+    pub fn get_register_defaults(&self) -> &HashMap<String, Vec<u8>> {
+        &self.program_context.register_defaults
+    }
+    pub fn get_register_values(&self, addr: &Address) -> Option<&HashMap<String, Vec<u8>>> {
+        self.program_context.register_values.get(addr)
+    }
+    pub fn has_flow_override_at(&self, addr: &Address) -> bool {
+        self.program_context.flow_override.contains_key(addr)
+    }
+    pub fn get_flow_overrides(&self) -> &HashMap<Address, FlowOverride> {
+        &self.program_context.flow_override
+    }
+    pub fn get_relocations(&self) -> Vec<Address> { self.relocations.relocations.keys().copied().collect() }
+    pub fn has_relocation_at(&self, addr: &Address) -> bool { self.relocations.relocations.contains_key(addr) }
+    pub fn has_tree_manager(&self) -> bool { self.tree_manager.is_some() }
+    pub fn has_language(&self) -> bool { self.language.is_some() }
+    pub fn has_compiler_spec(&self) -> bool { self.compiler_spec.is_some() }
+    pub fn has_change_set(&self) -> bool { self.change_set.is_some() }
+    pub fn undo_depth(&self) -> usize { self.undo_stack.len() }
+    pub fn redo_depth(&self) -> usize { self.redo_stack.len() }
+    pub fn has_undo(&self) -> bool { !self.undo_stack.is_empty() }
+    pub fn has_redo(&self) -> bool { !self.redo_stack.is_empty() }
+    pub fn image_base_offset(&self) -> u64 { self.image_base.offset }
+
+    // ---------- Legacy listing data helpers ----------
+    pub fn get_symbol_names(&self) -> Vec<&String> { self.symbols.by_name.keys().collect() }
+    pub fn get_listing_rows(&self) -> Vec<&ListingRow> { self.listing_data.rows.values().collect() }
+    pub fn get_listing_row_count(&self) -> usize { self.listing_data.rows.len() }
+    pub fn has_listing_rows(&self) -> bool { !self.listing_data.rows.is_empty() }
+    pub fn get_listing_row(&self, addr: &Address) -> Option<&ListingRow> { self.listing_data.rows.get(addr) }
+    pub fn get_listing_row_addresses(&self) -> Vec<Address> { self.listing_data.rows.keys().copied().collect() }
+    pub fn get_listing_data(&self) -> &ListingData { &self.listing_data }
+    pub fn get_listing_data_mut(&mut self) -> &mut ListingData { &mut self.listing_data }
+    pub fn get_listing_rows_by_label(&self, label: &str) -> Vec<&ListingRow> {
+        self.listing_data.rows.values().filter(|row| row.label.as_deref() == Some(label)).collect()
+    }
+    pub fn get_listing_rows_with_comments(&self) -> Vec<&ListingRow> {
+        self.listing_data.rows.values().filter(|row| row.comment.is_some()).collect()
+    }
+    pub fn listing_rows_sorted(&self) -> Vec<&ListingRow> {
+        let mut rows: Vec<&ListingRow> = self.listing_data.rows.values().collect();
+        rows.sort_by_key(|row| row.address);
+        rows
+    }
+    pub fn get_symbol_table_compat(&self) -> &SymbolTable { &self.symbol_table }
+    pub fn get_symbol_table_compat_mut(&mut self) -> &mut SymbolTable { &mut self.symbol_table }
 
     // ---------- Tree manager ----------
     pub fn get_tree_manager(&self) -> Option<&Arc<RwLock<SymbolTreeNode>>> { self.tree_manager.as_ref() }

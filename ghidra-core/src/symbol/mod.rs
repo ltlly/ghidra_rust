@@ -2666,6 +2666,22 @@ impl SymbolPath {
         Self { segments }
     }
 
+    pub fn from_delimited(path: &str) -> Self {
+        let mut segments: Vec<String> = path
+            .split("::")
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        if segments.is_empty() {
+            return Self::root();
+        }
+        if segments.first().map(String::as_str) != Some("Global") {
+            segments.insert(0, "Global".to_string());
+        }
+        Self { segments }
+    }
+
     pub fn parent(&self) -> Option<SymbolPath> {
         if self.segments.len() <= 1 {
             None
@@ -2682,6 +2698,57 @@ impl SymbolPath {
 
     pub fn is_root(&self) -> bool {
         self.segments.len() == 1
+    }
+
+    pub fn name(&self) -> &str {
+        self.segments
+            .last()
+            .map(String::as_str)
+            .unwrap_or("Global")
+    }
+
+    pub fn leaf_name(&self) -> Option<&str> {
+        self.segments.last().map(String::as_str)
+    }
+
+    pub fn as_slice(&self) -> &[String] {
+        &self.segments
+    }
+
+    pub fn len(&self) -> usize {
+        self.segments.len()
+    }
+
+    pub fn depth(&self) -> usize {
+        self.segments.len().saturating_sub(1)
+    }
+
+    pub fn child(&self, name: impl Into<String>) -> Self {
+        let mut segments = self.segments.clone();
+        segments.push(name.into());
+        Self { segments }
+    }
+
+    pub fn starts_with(&self, other: &SymbolPath) -> bool {
+        self.segments.starts_with(&other.segments)
+    }
+}
+
+impl From<&str> for SymbolPath {
+    fn from(path: &str) -> Self {
+        Self::from_delimited(path)
+    }
+}
+
+impl From<String> for SymbolPath {
+    fn from(path: String) -> Self {
+        Self::from_delimited(&path)
+    }
+}
+
+impl From<Vec<String>> for SymbolPath {
+    fn from(segments: Vec<String>) -> Self {
+        Self::from_segments(segments)
     }
 }
 
@@ -2754,6 +2821,64 @@ impl SymbolTreeNode {
             symbol: Some(symbol),
             children: Vec::new(),
         }
+    }
+
+    pub fn child_count(&self) -> usize {
+        self.children.len()
+    }
+
+    pub fn has_symbol(&self) -> bool {
+        self.symbol.is_some()
+    }
+
+    pub fn symbol(&self) -> Option<&Symbol> {
+        self.symbol.as_ref()
+    }
+
+    pub fn children(&self) -> &[SymbolTreeNode] {
+        &self.children
+    }
+
+    pub fn find_child(&self, name: &str) -> Option<&SymbolTreeNode> {
+        self.children.iter().find(|child| child.name == name)
+    }
+
+    pub fn get_child(&self, index: usize) -> Option<&SymbolTreeNode> {
+        self.children.get(index)
+    }
+
+    pub fn has_children(&self) -> bool {
+        !self.children.is_empty()
+    }
+
+    pub fn find_path<'a>(&'a self, path: &SymbolPath) -> Option<&'a SymbolTreeNode> {
+        let self_segments = self.path.as_slice();
+        let target_segments = path.as_slice();
+        if target_segments.len() < self_segments.len() || !target_segments.starts_with(self_segments) {
+            return None;
+        }
+        if target_segments.len() == self_segments.len() {
+            return Some(self);
+        }
+        let next = &target_segments[self_segments.len()];
+        self.find_child(next)?.find_path(path)
+    }
+}
+
+impl<'a> IntoIterator for &'a SymbolTreeNode {
+    type Item = &'a SymbolTreeNode;
+    type IntoIter = std::slice::Iter<'a, SymbolTreeNode>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.children.iter()
+    }
+}
+
+impl std::str::FromStr for SymbolPath {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(SymbolPath::from_delimited(s))
     }
 }
 
@@ -2855,7 +2980,566 @@ impl Symbol {
     pub fn is_primary(&self) -> bool {
         <Self as SymbolApi>::is_primary(self)
     }
+
+    /// Returns the symbol identifier.
+    pub fn id(&self) -> u64 {
+        <Self as SymbolApi>::get_id(self)
+    }
+
+    /// Returns the fully-qualified path for this symbol.
+    pub fn path(&self) -> SymbolPath {
+        SymbolPath::from_segments(<Self as SymbolApi>::get_path(self))
+    }
+
+    /// Returns the fully-qualified symbol name.
+    pub fn qualified_name(&self) -> String {
+        <Self as SymbolApi>::get_name_qualified(self, true)
+    }
+
+    /// Returns true if this symbol belongs to the global namespace.
+    pub fn is_global_namespace_member(&self) -> bool {
+        <Self as SymbolApi>::is_global(self)
+    }
+
+    /// Returns true if this symbol represents an external symbol.
+    pub fn is_external_symbol(&self) -> bool {
+        <Self as SymbolApi>::is_external(self)
+    }
+
+    /// Returns true if this symbol is dynamic.
+    pub fn is_dynamic_symbol(&self) -> bool {
+        <Self as SymbolApi>::is_dynamic(self)
+    }
+
+    /// Returns the symbol namespace identifier when available.
+    pub fn namespace_id(&self) -> Option<u64> {
+        match self {
+            Symbol::Label(s) => Some(s.namespace_id),
+            Symbol::Function(s) => Some(s.namespace_id),
+            Symbol::Global(_) => None,
+        }
+    }
+
+    /// Returns true if this symbol's namespace id matches the given value.
+    pub fn is_in_namespace(&self, namespace_id: u64) -> bool {
+        self.namespace_id() == Some(namespace_id)
+    }
+
+    /// Returns the label variant if this symbol is a label.
+    pub fn as_label(&self) -> Option<&LabelSymbol> {
+        match self {
+            Symbol::Label(label) => Some(label),
+            _ => None,
+        }
+    }
+
+    /// Returns the function variant if this symbol is a function.
+    pub fn as_function(&self) -> Option<&FunctionSymbol> {
+        match self {
+            Symbol::Function(function) => Some(function),
+            _ => None,
+        }
+    }
+
+    /// Returns the global variant if this symbol is the global symbol.
+    pub fn as_global(&self) -> Option<&GlobalSymbol> {
+        match self {
+            Symbol::Global(global) => Some(global),
+            _ => None,
+        }
+    }
+
+    /// Returns the symbol variant as a namespace when applicable.
+    pub fn as_namespace(&self) -> Option<&dyn Namespace> {
+        match self {
+            Symbol::Function(function) => Some(function),
+            Symbol::Global(global) => Some(global),
+            Symbol::Label(_) => None,
+        }
+    }
+
+    /// Returns true if this symbol can serve as a namespace.
+    pub fn is_namespace_symbol(&self) -> bool {
+        self.as_namespace().is_some()
+    }
+
+    /// Returns true if this symbol has been deleted.
+    pub fn is_deleted_symbol(&self) -> bool {
+        <Self as SymbolApi>::is_deleted(self)
+    }
+
+    /// Returns true if this symbol has references attached.
+    pub fn has_attached_references(&self) -> bool {
+        <Self as SymbolApi>::has_references(self)
+    }
+
+    /// Returns the attached reference slice.
+    pub fn references(&self) -> &[Reference] {
+        <Self as SymbolApi>::get_references(self)
+    }
+
+    /// Returns the symbol source.
+    pub fn source_type(&self) -> SourceType {
+        self.source()
+    }
+
+    /// Returns true if this symbol is a function symbol.
+    pub fn is_function_symbol(&self) -> bool {
+        matches!(self, Symbol::Function(_))
+    }
+
+    /// Returns true if this symbol is a label symbol.
+    pub fn is_label_symbol(&self) -> bool {
+        matches!(self, Symbol::Label(_))
+    }
 }
+
+impl From<LabelSymbol> for Symbol {
+    fn from(symbol: LabelSymbol) -> Self {
+        Symbol::Label(symbol)
+    }
+}
+
+impl From<FunctionSymbol> for Symbol {
+    fn from(symbol: FunctionSymbol) -> Self {
+        Symbol::Function(symbol)
+    }
+}
+
+impl From<GlobalSymbol> for Symbol {
+    fn from(symbol: GlobalSymbol) -> Self {
+        Symbol::Global(symbol)
+    }
+}
+
+impl AsRef<dyn SymbolApi> for Symbol {
+    fn as_ref(&self) -> &(dyn SymbolApi + 'static) {
+        self
+    }
+}
+
+impl LabelSymbol {
+    /// Returns the namespace id for this label.
+    pub fn namespace_id(&self) -> u64 {
+        self.namespace_id
+    }
+
+    /// Returns true if this label is dynamic.
+    pub fn is_dynamic_label(&self) -> bool {
+        self.dynamic
+    }
+
+    /// Returns the attached references for this label.
+    pub fn references(&self) -> &[Reference] {
+        &self.references
+    }
+}
+
+impl FunctionSymbol {
+    /// Returns the namespace id for this function symbol.
+    pub fn namespace_id(&self) -> u64 {
+        self.namespace_id
+    }
+}
+
+impl Namespace for GlobalSymbol {
+    fn get_symbol(&self) -> &dyn SymbolApi {
+        self
+    }
+
+    fn get_type(&self) -> SymbolType {
+        SymbolType::Global
+    }
+
+    fn is_external(&self) -> bool {
+        false
+    }
+
+    fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn get_name_full(&self, _include_namespace_path: bool) -> String {
+        self.name.clone()
+    }
+
+    fn get_id(&self) -> u64 {
+        0
+    }
+
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> {
+        None
+    }
+
+    fn get_body(&self) -> Vec<Address> {
+        Vec::new()
+    }
+
+    fn set_parent_namespace(
+        &mut self,
+        _parent: &dyn Namespace,
+    ) -> SymbolResult<()> {
+        Err(SymbolError::UnsupportedOperation(
+            "Cannot change parent of global namespace".to_string(),
+        ))
+    }
+}
+
+impl Namespace for FunctionSymbol {
+    fn get_symbol(&self) -> &dyn SymbolApi {
+        self
+    }
+
+    fn get_type(&self) -> SymbolType {
+        SymbolType::Function
+    }
+
+    fn is_external(&self) -> bool {
+        self.address.is_external_address()
+    }
+
+    fn get_name(&self) -> String {
+        self.name.clone()
+    }
+
+    fn get_name_full(&self, include_namespace_path: bool) -> String {
+        if include_namespace_path {
+            format!("Global::{}", self.name)
+        } else {
+            self.name.clone()
+        }
+    }
+
+    fn get_id(&self) -> u64 {
+        self.id
+    }
+
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> {
+        None
+    }
+
+    fn get_body(&self) -> Vec<Address> {
+        vec![self.address]
+    }
+
+    fn set_parent_namespace(
+        &mut self,
+        parent: &dyn Namespace,
+    ) -> SymbolResult<()> {
+        self.set_namespace(parent)
+    }
+}
+
+impl Reference {
+    /// Returns true if the reference is a call flow.
+    pub fn is_call(&self) -> bool {
+        self.ref_type.is_call()
+    }
+
+    /// Returns true if the reference is any jump/branch flow.
+    pub fn is_jump(&self) -> bool {
+        self.ref_type.is_jump()
+    }
+
+    /// Returns true if the reference is fallthrough.
+    pub fn is_fallthrough(&self) -> bool {
+        self.ref_type.is_fallthrough()
+    }
+
+    /// Returns true if the reference is data-only.
+    pub fn is_data(&self) -> bool {
+        self.ref_type.is_data()
+    }
+
+    /// Returns true if the reference is a flow reference.
+    pub fn is_flow(&self) -> bool {
+        self.ref_type.is_flow()
+    }
+}
+
+impl ReferenceManager {
+    /// Returns an iterator over all references.
+    pub fn iter(&self) -> impl Iterator<Item = &Reference> {
+        self.references.iter()
+    }
+
+    /// Returns all references as a slice.
+    pub fn as_slice(&self) -> &[Reference] {
+        &self.references
+    }
+
+    /// Returns true if there are no references.
+    pub fn is_empty(&self) -> bool {
+        self.references.is_empty()
+    }
+
+    /// Returns the total number of stored references.
+    pub fn len(&self) -> usize {
+        self.references.len()
+    }
+
+    /// Returns the next internal reference id value.
+    pub fn next_id(&self) -> u64 {
+        self.next_id
+    }
+}
+
+impl<'a> IntoIterator for &'a ReferenceManager {
+    type Item = &'a Reference;
+    type IntoIter = std::slice::Iter<'a, Reference>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.references.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a SymbolPath {
+    type Item = &'a String;
+    type IntoIter = std::slice::Iter<'a, String>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.segments.iter()
+    }
+}
+
+impl ExactSizeIterator for ReferenceIterator {}
+
+impl std::iter::FusedIterator for ReferenceIterator {}
+
+impl SymbolTable for Vec<Symbol> {
+    fn create_label(
+        &mut self,
+        addr: Address,
+        name: &str,
+        source: SourceType,
+    ) -> SymbolResult<&dyn SymbolApi> {
+        validate_symbol_name(name)?;
+        self.push(Symbol::Label(LabelSymbol::with_options(0, name, addr, 0, source)));
+        Ok(self.last().unwrap())
+    }
+
+    fn create_label_in_namespace(
+        &mut self,
+        addr: Address,
+        name: &str,
+        namespace: &dyn Namespace,
+        source: SourceType,
+    ) -> SymbolResult<&dyn SymbolApi> {
+        validate_symbol_name(name)?;
+        self.push(Symbol::Label(LabelSymbol::with_options(
+            0,
+            name,
+            addr,
+            namespace.get_id(),
+            source,
+        )));
+        Ok(self.last().unwrap())
+    }
+
+    fn remove_symbol_special(&mut self, sym: &dyn SymbolApi) -> bool {
+        if let Some(index) = self.iter().position(|candidate| candidate.get_id() == sym.get_id()) {
+            let mut removed = self.remove(index);
+            removed.delete()
+        } else {
+            false
+        }
+    }
+
+    fn get_symbol(&self, symbol_id: u64) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| symbol.get_id() == symbol_id)
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_symbol_by_name_addr_namespace(
+        &self,
+        name: &str,
+        addr: Address,
+        namespace: &dyn Namespace,
+    ) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| {
+                symbol.get_name() == name
+                    && *symbol.get_address() == addr
+                    && symbol
+                        .get_parent_namespace()
+                        .map(|parent| parent.get_id())
+                        .unwrap_or(0)
+                        == namespace.get_id()
+            })
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_global_symbol(&self, name: &str, addr: Address) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| symbol.get_name() == name && *symbol.get_address() == addr && symbol.is_global())
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_global_symbols(&self, name: &str) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| symbol.get_name() == name && symbol.is_global())
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn get_label_or_function_symbols(
+        &self,
+        name: &str,
+        namespace: &dyn Namespace,
+    ) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| {
+                symbol.get_name() == name
+                    && matches!(symbol.get_symbol_type(), SymbolType::Label | SymbolType::Function)
+                    && symbol.namespace_id() == Some(namespace.get_id())
+            })
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn get_namespace_symbol(
+        &self,
+        name: &str,
+        namespace: &dyn Namespace,
+    ) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| {
+                symbol.get_name() == name
+                    && symbol.kind().is_namespace()
+                    && symbol.namespace_id() == Some(namespace.get_id())
+            })
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_library_symbol(&self, name: &str) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| symbol.get_name() == name && symbol.get_symbol_type() == SymbolType::Library)
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_class_symbol(
+        &self,
+        name: &str,
+        namespace: &dyn Namespace,
+    ) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| {
+                symbol.get_name() == name
+                    && symbol.get_symbol_type() == SymbolType::Class
+                    && symbol.namespace_id() == Some(namespace.get_id())
+            })
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_symbols_by_name_and_namespace(
+        &self,
+        name: &str,
+        namespace: &dyn Namespace,
+    ) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| symbol.get_name() == name && symbol.namespace_id() == Some(namespace.get_id()))
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn get_symbols_by_name(&self, name: &str) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| symbol.get_name() == name)
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn get_all_symbols(&self, include_dynamic: bool) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| include_dynamic || !symbol.is_dynamic())
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn get_primary_symbol(&self, addr: Address) -> Option<&dyn SymbolApi> {
+        self.iter()
+            .find(|symbol| *symbol.get_address() == addr && symbol.is_primary())
+            .map(|symbol| symbol as &dyn SymbolApi)
+    }
+
+    fn get_symbols_at(&self, addr: Address) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| *symbol.get_address() == addr)
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn get_user_symbols(&self, addr: Address) -> Vec<&dyn SymbolApi> {
+        self.iter()
+            .filter(|symbol| *symbol.get_address() == addr && !symbol.is_dynamic())
+            .map(|symbol| symbol as &dyn SymbolApi)
+            .collect()
+    }
+
+    fn has_symbol(&self, addr: Address) -> bool {
+        self.iter().any(|symbol| *symbol.get_address() == addr)
+    }
+
+    fn get_namespace(
+        &self,
+        _name: &str,
+        _namespace: &dyn Namespace,
+    ) -> Option<&dyn Namespace> {
+        None
+    }
+
+    fn get_namespace_for_address(&self, _addr: Address) -> Option<&dyn Namespace> {
+        None
+    }
+
+    fn get_num_symbols(&self) -> usize {
+        self.len()
+    }
+
+    fn get_label_history(&self, _addr: Address) -> Vec<LabelHistory> {
+        Vec::new()
+    }
+
+    fn has_label_history(&self, _addr: Address) -> bool {
+        false
+    }
+
+    fn add_external_entry_point(&mut self, _addr: Address) {}
+
+    fn remove_external_entry_point(&mut self, _addr: Address) {}
+
+    fn is_external_entry_point(&self, _addr: Address) -> bool {
+        false
+    }
+
+    fn create_class(
+        &mut self,
+        _parent: &dyn Namespace,
+        _name: &str,
+        _source: SourceType,
+    ) -> SymbolResult<Box<dyn Namespace>> {
+        Err(SymbolError::UnsupportedOperation("class namespaces are not implemented".to_string()))
+    }
+
+    fn create_external_library(
+        &mut self,
+        _name: &str,
+        _source: SourceType,
+    ) -> SymbolResult<Box<dyn Namespace>> {
+        Err(SymbolError::UnsupportedOperation("library namespaces are not implemented".to_string()))
+    }
+
+    fn create_namespace(
+        &mut self,
+        _parent: &dyn Namespace,
+        _name: &str,
+        _source: SourceType,
+    ) -> SymbolResult<Box<dyn Namespace>> {
+        Err(SymbolError::UnsupportedOperation("generic namespaces are not implemented".to_string()))
+    }
+}
+
 
 impl fmt::Display for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -3360,6 +4044,34 @@ mod tests {
         assert!(mgr.is_external_entry_point(addr));
         mgr.remove_external_entry_point(addr);
         assert!(!mgr.is_external_entry_point(addr));
+    }
+
+    #[test]
+    fn test_symbol_path_helpers() {
+        let path = SymbolPath::from_delimited("Functions::main");
+        assert_eq!(path.name(), "main");
+        assert_eq!(path.leaf_name(), Some("main"));
+        assert_eq!(path.depth(), 2);
+        assert!(path.starts_with(&SymbolPath::root()));
+        assert_eq!(path.parent().map(|parent| parent.display_name()), Some("Global::Functions".to_string()));
+    }
+
+    #[test]
+    fn test_symbol_tree_node_helpers() {
+        let leaf = SymbolTreeNode::leaf(
+            "main",
+            SymbolPath::from_delimited("Global::Functions::main"),
+            Symbol::function("main", Address::new(0x401000)),
+        );
+        let root = SymbolTreeNode::category(
+            "Global",
+            SymbolPath::root(),
+            vec![leaf.clone()],
+        );
+        assert!(root.has_children());
+        assert_eq!(root.child_count(), 1);
+        assert_eq!(root.get_child(0).map(|child| child.name.as_str()), Some("main"));
+        assert!(leaf.has_symbol());
     }
 
     #[test]
