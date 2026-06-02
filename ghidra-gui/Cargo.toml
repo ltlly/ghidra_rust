@@ -1,0 +1,24 @@
+[package]
+name = "ghidra-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - GUI: egui-based graphical interface with listing view, decompiler view, symbol tree, and menus"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+ghidra-decompile = { path = "../ghidra-decompile" }
+ghidra-features = { path = "../ghidra-features" }
+egui = { workspace = true }
+eframe = { workspace = true }
+egui-winit = { workspace = true }
+egui-wgpu = { workspace = true }
+winit = { workspace = true }
+wgpu = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+chrono = { workspace = true }

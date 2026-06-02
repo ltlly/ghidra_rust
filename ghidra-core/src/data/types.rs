@@ -1,0 +1,2228 @@
+//! Concrete data type implementations for Ghidra Rust.
+//!
+//! This module contains the [`DataType`] trait, all concrete type structs
+//! ([`StructureDataType`], [`UnionDataType`], [`EnumDataType`],
+//! [`PointerDataType`], [`ArrayDataType`], [`TypedefDataType`],
+//! [`FunctionDefinitionDataType`]), the [`DataTypeManager`] trait and its
+//! implementations ([`StandaloneDataTypeManager`], [`BuiltInDataTypeManager`]),
+//! serialization support via [`SerializableDataType`], and the hierarchical
+//! type tree via [`DataTypeNode`].
+
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::fmt;
+use std::sync::Arc;
+
+// Import path types and utilities from the parent module.
+use super::{
+    align_up, CategoryPath,
+};
+
+// ============================================================================
+// DataType Trait
+// ============================================================================
+
+/// Core trait for all data type implementations.
+///
+/// Every type (built-in, structure, union, enum, pointer, array, typedef,
+/// function definition) implements this trait, providing a uniform interface
+/// for querying type metadata and operations.
+///
+/// This trait corresponds to Ghidra's `DataType` Java interface.
+pub trait DataType: fmt::Debug + fmt::Display + Send + Sync + 'static {
+    /// Return a reference to `self` as `&dyn Any` for downcasting to concrete types.
+    fn as_any(&self) -> &dyn std::any::Any;
+
+    /// The human-readable name of this type (e.g., `"int"`, `"my_struct"`).
+    fn name(&self) -> &str;
+
+    /// A description string for documentation or tooltips.
+    fn description(&self) -> &str {
+        ""
+    }
+
+    /// The size of this type in bytes.
+    ///
+    /// Returns 0 for unsized types (e.g., `void`), or the allocation size
+    /// for sized types.
+    fn get_size(&self) -> usize;
+
+    /// The length of this type in bytes (alias for `get_size`).
+    fn get_length(&self) -> usize {
+        self.get_size()
+    }
+
+    /// Returns `true` if this type is a pointer or pointer-like type.
+    fn is_pointer(&self) -> bool {
+        false
+    }
+
+    /// Returns `true` if this is a composite type (struct, union, or class).
+    fn is_composite(&self) -> bool {
+        false
+    }
+
+    /// Returns `true` if this type is defined (not an undefined placeholder).
+    fn is_defined(&self) -> bool {
+        true
+    }
+
+    /// Returns `true` if this type represents an undefined/uninitialized region.
+    fn is_undefined(&self) -> bool {
+        false
+    }
+
+    /// The alignment of this type in bytes.
+    fn get_alignment(&self) -> usize {
+        let sz = self.get_size();
+        if sz == 0 { 1 } else { sz.next_power_of_two().min(sz) }
+    }
+
+    /// Deep-clone this type, returning a boxed trait object.
+    fn clone_type(&self) -> Box<dyn DataType>;
+
+    /// Check whether this type is structurally equivalent to another.
+    ///
+    /// Two types are equivalent if they represent the same logical type,
+    /// even if they are different instances in memory.
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.name() == other.name() && self.get_size() == other.get_size()
+    }
+
+    /// The category path where this type is stored in a type manager.
+    fn get_category_path(&self) -> &CategoryPath;
+
+    /// Set the category path for this type.
+    fn set_category_path(&mut self, path: CategoryPath);
+
+    /// Returns a short mnemonic suitable for display in listings.
+    fn mnemonic(&self) -> String {
+        self.name().to_string()
+    }
+}
+
+// ============================================================================
+// Bitfield support types
+// ============================================================================
+
+/// Describes a bitfield within a base data type.
+///
+/// For example, `int:3` means a 3-bit signed field whose storage type is `int`.
+/// Bitfields are always contained within a [`DataTypeComponent`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct BitfieldInfo {
+    /// The offset in bits from the start of the containing field's storage.
+    pub bit_offset: u8,
+    /// The width of the bitfield in bits (1..64).
+    pub bit_size: u8,
+    /// Whether the bitfield is signed.
+    pub signed: bool,
+}
+
+impl BitfieldInfo {
+    /// Create a new bitfield descriptor.
+    pub fn new(bit_offset: u8, bit_size: u8, signed: bool) -> Self {
+        Self { bit_offset, bit_size, signed }
+    }
+
+    /// The mask covering the used bits within the containing integer.
+    pub fn mask(&self) -> u64 {
+        if self.bit_size >= 64 { u64::MAX } else { (1u64 << self.bit_size) - 1 }
+    }
+
+    /// Shifted mask at the correct bit offset.
+    pub fn shifted_mask(&self) -> u64 {
+        self.mask() << self.bit_offset
+    }
+}
+
+// ============================================================================
+// CallingConvention
+// ============================================================================
+
+/// Function calling conventions supported by Ghidra.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum CallingConvention {
+    /// Default / unknown convention.
+    Default,
+    /// C declaration (cdecl).
+    Cdecl,
+    /// Standard call (stdcall, Win32 API).
+    Stdcall,
+    /// Fast call (first args in registers).
+    Fastcall,
+    /// This call (C++ member functions, `this` pointer in ECX).
+    Thiscall,
+    /// Vector call (__vectorcall).
+    Vectorcall,
+    /// Register-based calling convention.
+    Regcall,
+    /// System V AMD64 ABI.
+    Sysv64,
+    /// Microsoft x64 calling convention.
+    Win64,
+    /// ARM Architecture Procedure Call Standard.
+    Aapcs,
+    /// Custom convention with a user-defined name.
+    Custom(String),
+}
+
+impl CallingConvention {
+    /// The display name of this calling convention.
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Default => "__default",
+            Self::Cdecl => "__cdecl",
+            Self::Stdcall => "__stdcall",
+            Self::Fastcall => "__fastcall",
+            Self::Thiscall => "__thiscall",
+            Self::Vectorcall => "__vectorcall",
+            Self::Regcall => "__regcall",
+            Self::Sysv64 => "__sysv64",
+            Self::Win64 => "__win64",
+            Self::Aapcs => "__aapcs",
+            Self::Custom(_) => "__custom",
+        }
+    }
+}
+
+impl fmt::Display for CallingConvention {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Custom(s) => write!(f, "{}", s),
+            _ => write!(f, "{}", self.name()),
+        }
+    }
+}
+
+impl Default for CallingConvention {
+    fn default() -> Self { Self::Default }
+}
+
+// ============================================================================
+// BuiltInDataType
+// ============================================================================
+
+/// All Ghidra built-in data types.
+///
+/// This enum covers every primitive type that Ghidra defines, including
+/// undefined placeholders (Undefined1..8), integers, floats, characters,
+/// strings, void, complex numbers, and image-base-offset types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BuiltInDataType {
+    Undefined1, Undefined2, Undefined3, Undefined4,
+    Undefined5, Undefined6, Undefined7, Undefined8,
+    Bool, Char, WideChar,
+    Short, UShort, Int, UInt, Long, ULong, LongLong, ULongLong,
+    Float, Double, LongDouble,
+    String, UnicodeString, WideString,
+    Void, WChar16, WChar32,
+    ComplexFloat, ComplexDouble,
+    ImageBaseOffset32,
+}
+
+impl BuiltInDataType {
+    /// The Ghidra display name for this built-in type.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Undefined1 => "undefined1", Self::Undefined2 => "undefined2",
+            Self::Undefined3 => "undefined3", Self::Undefined4 => "undefined4",
+            Self::Undefined5 => "undefined5", Self::Undefined6 => "undefined6",
+            Self::Undefined7 => "undefined7", Self::Undefined8 => "undefined8",
+            Self::Bool => "bool", Self::Char => "char", Self::WideChar => "wchar",
+            Self::Short => "short", Self::UShort => "ushort",
+            Self::Int => "int", Self::UInt => "uint",
+            Self::Long => "long", Self::ULong => "ulong",
+            Self::LongLong => "longlong", Self::ULongLong => "ulonglong",
+            Self::Float => "float", Self::Double => "double",
+            Self::LongDouble => "longdouble",
+            Self::String => "string", Self::UnicodeString => "unicodestring",
+            Self::WideString => "widestring", Self::Void => "void",
+            Self::WChar16 => "wchar16", Self::WChar32 => "wchar32",
+            Self::ComplexFloat => "complexfloat",
+            Self::ComplexDouble => "complexdouble",
+            Self::ImageBaseOffset32 => "imagebaseoffset32",
+        }
+    }
+
+    /// The size in bytes for this built-in type.
+    pub fn size(&self) -> usize {
+        match self {
+            Self::Undefined1 => 1, Self::Undefined2 => 2,
+            Self::Undefined3 => 3, Self::Undefined4 => 4,
+            Self::Undefined5 => 5, Self::Undefined6 => 6,
+            Self::Undefined7 => 7, Self::Undefined8 => 8,
+            Self::Bool => 1, Self::Char => 1, Self::WideChar => 2,
+            Self::Short => 2, Self::UShort => 2,
+            Self::Int => 4, Self::UInt => 4,
+            Self::Long => 8, Self::ULong => 8,
+            Self::LongLong => 8, Self::ULongLong => 8,
+            Self::Float => 4, Self::Double => 8, Self::LongDouble => 16,
+            Self::String => 1, Self::UnicodeString => 2, Self::WideString => 2,
+            Self::Void => 0, Self::WChar16 => 2, Self::WChar32 => 4,
+            Self::ComplexFloat => 8, Self::ComplexDouble => 16,
+            Self::ImageBaseOffset32 => 4,
+        }
+    }
+
+    /// The alignment in bytes for this built-in type.
+    pub fn alignment(&self) -> usize { let sz = self.size(); if sz == 0 { 1 } else { sz } }
+
+    /// Returns true if this is a signed integer type.
+    pub fn is_signed(&self) -> bool {
+        matches!(self, Self::Char | Self::Short | Self::Int | Self::Long | Self::LongLong)
+    }
+
+    /// Returns true if this is an unsigned integer type.
+    pub fn is_unsigned(&self) -> bool {
+        matches!(self, Self::Bool | Self::UShort | Self::UInt | Self::ULong | Self::ULongLong)
+    }
+
+    /// Returns true if this type is an integer of any signedness.
+    pub fn is_integer(&self) -> bool { self.is_signed() || self.is_unsigned() }
+
+    /// Returns true if this is a floating-point type.
+    pub fn is_floating(&self) -> bool {
+        matches!(self, Self::Float | Self::Double | Self::LongDouble
+            | Self::ComplexFloat | Self::ComplexDouble)
+    }
+
+    /// Returns true if this is a character type.
+    pub fn is_character(&self) -> bool {
+        matches!(self, Self::Char | Self::WideChar | Self::WChar16 | Self::WChar32)
+    }
+
+    /// Returns true if this is a string type.
+    pub fn is_string_type(&self) -> bool {
+        matches!(self, Self::String | Self::UnicodeString | Self::WideString)
+    }
+
+    /// Returns true if this is an undefined placeholder.
+    pub fn is_undefined(&self) -> bool {
+        matches!(self, Self::Undefined1 | Self::Undefined2 | Self::Undefined3
+            | Self::Undefined4 | Self::Undefined5 | Self::Undefined6
+            | Self::Undefined7 | Self::Undefined8)
+    }
+
+    /// The default category path where this built-in type lives.
+    pub fn default_category_path(&self) -> CategoryPath {
+        if self.is_undefined() {
+            CategoryPath::new("builtin/undefined")
+        } else if self.is_integer() || matches!(self, Self::Bool) {
+            CategoryPath::new("builtin/integer")
+        } else if self.is_floating() {
+            CategoryPath::new("builtin/float")
+        } else if self.is_character() {
+            CategoryPath::new("builtin/char")
+        } else if self.is_string_type() {
+            CategoryPath::new("builtin/string")
+        } else {
+            CategoryPath::new("builtin")
+        }
+    }
+
+    /// All built-in types in a canonical order.
+    pub fn all() -> &'static [BuiltInDataType] {
+        &[
+            Self::Undefined1, Self::Undefined2, Self::Undefined3, Self::Undefined4,
+            Self::Undefined5, Self::Undefined6, Self::Undefined7, Self::Undefined8,
+            Self::Bool, Self::Char, Self::WideChar,
+            Self::Short, Self::UShort, Self::Int, Self::UInt,
+            Self::Long, Self::ULong, Self::LongLong, Self::ULongLong,
+            Self::Float, Self::Double, Self::LongDouble,
+            Self::String, Self::UnicodeString, Self::WideString,
+            Self::Void, Self::WChar16, Self::WChar32,
+            Self::ComplexFloat, Self::ComplexDouble,
+            Self::ImageBaseOffset32,
+        ]
+    }
+}
+
+impl fmt::Display for BuiltInDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// ============================================================================
+// BuiltInDataTypeWrapper — adapts BuiltInDataType into the DataType trait
+// ============================================================================
+
+/// Wrapper that implements the [`DataType`] trait for [`BuiltInDataType`].
+///
+/// Since [`BuiltInDataType`] is a simple enum (Copy, no allocations),
+/// this wrapper provides the trait interface required by the type system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuiltInDataTypeWrapper {
+    /// The underlying built-in type.
+    pub inner: BuiltInDataType,
+    /// Category path for organization within a type manager.
+    pub category_path: CategoryPath,
+}
+
+impl BuiltInDataTypeWrapper {
+    /// Create a new wrapper for a built-in type.
+    pub fn new(inner: BuiltInDataType) -> Self {
+        let category_path = inner.default_category_path();
+        Self { inner, category_path }
+    }
+
+    /// Create with a custom category path.
+    pub fn with_category_path(inner: BuiltInDataType, path: CategoryPath) -> Self {
+        Self { inner, category_path: path }
+    }
+}
+
+impl DataType for BuiltInDataTypeWrapper {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { self.inner.display_name() }
+    fn get_size(&self) -> usize { self.inner.size() }
+    fn is_defined(&self) -> bool { !self.inner.is_undefined() }
+    fn is_undefined(&self) -> bool { self.inner.is_undefined() }
+    fn get_alignment(&self) -> usize { self.inner.alignment() }
+
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.name() == other.name() && self.get_size() == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for BuiltInDataTypeWrapper {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner.display_name())
+    }
+}
+
+impl From<BuiltInDataType> for BuiltInDataTypeWrapper {
+    fn from(dt: BuiltInDataType) -> Self { Self::new(dt) }
+}
+
+// ============================================================================
+// DataTypeComponent — member field in a composite type
+// ============================================================================
+
+/// A component (member field) within a composite data type (struct or union).
+///
+/// Each component records the field name, its data type, its offset within
+/// the parent, an optional comment, and optional bitfield information.
+#[derive(Debug, Clone)]
+pub struct DataTypeComponent {
+    /// The field name (may be empty for anonymous fields or padding).
+    pub field_name: String,
+    /// The data type of this component.
+    pub data_type: Arc<dyn DataType>,
+    /// Byte offset from the start of the parent composite.
+    pub offset: usize,
+    /// Ordinal index within the parent (0-based).
+    pub ordinal: usize,
+    /// Optional comment / annotation.
+    pub comment: Option<String>,
+    /// Bitfield information, if this field is a bitfield.
+    pub bitfield: Option<BitfieldInfo>,
+}
+
+impl DataTypeComponent {
+    /// Create a new data type component with default settings.
+    pub fn new(
+        field_name: impl Into<String>,
+        data_type: Arc<dyn DataType>,
+        offset: usize,
+        ordinal: usize,
+    ) -> Self {
+        Self {
+            field_name: field_name.into(),
+            data_type,
+            offset,
+            ordinal,
+            comment: None,
+            bitfield: None,
+        }
+    }
+
+    /// Create a padding component filling `size` bytes at `offset`.
+    pub fn padding(offset: usize, size: usize, ordinal: usize) -> Self {
+        Self {
+            field_name: format!("padding_{}", ordinal),
+            data_type: Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Undefined1)),
+            offset,
+            ordinal,
+            comment: Some(format!("{} byte(s) padding", size)),
+            bitfield: None,
+        }
+    }
+
+    /// The size of this component in bytes.
+    pub fn get_size(&self) -> usize { self.data_type.get_size() }
+
+    /// The alignment of this component.
+    pub fn get_alignment(&self) -> usize { self.data_type.get_alignment() }
+
+    /// Returns true if this component is a bitfield.
+    pub fn is_bitfield(&self) -> bool { self.bitfield.is_some() }
+
+    /// The end offset (exclusive) of this component within its parent.
+    pub fn end_offset(&self) -> usize { self.offset + self.get_size() }
+
+    /// Set a comment on this component (builder pattern).
+    pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
+        self.comment = Some(comment.into());
+        self
+    }
+
+    /// Set bitfield information on this component (builder pattern).
+    pub fn with_bitfield(mut self, bitfield: BitfieldInfo) -> Self {
+        self.bitfield = Some(bitfield);
+        self
+    }
+}
+
+impl fmt::Display for DataTypeComponent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f, "{} {} @ offset 0x{:x}",
+            self.data_type.name(), self.field_name, self.offset
+        )
+    }
+}
+
+impl PartialEq for DataTypeComponent {
+    fn eq(&self, other: &Self) -> bool {
+        self.field_name == other.field_name
+            && self.offset == other.offset
+            && self.ordinal == other.ordinal
+            && self.bitfield == other.bitfield
+            && self.data_type.is_equivalent(other.data_type.as_ref())
+    }
+}
+
+impl Eq for DataTypeComponent {}
+
+// ============================================================================
+// StructureDataType
+// ============================================================================
+
+/// A structure (composite) data type.
+///
+/// Models C `struct` types with support for named/unnamed fields, alignment
+/// control, packing (`#pragma pack`), flexible array members, bitfields,
+/// vtable pointer detection, and recursive structure definitions.
+#[derive(Debug, Clone)]
+pub struct StructureDataType {
+    /// The structure name (e.g., `"my_struct"`).
+    pub name: String,
+    /// Optional description / documentation.
+    pub description: String,
+    /// The total size of the structure in bytes (includes padding).
+    pub size: usize,
+    /// The alignment of the structure as a whole.
+    pub alignment: usize,
+    /// Packing value: 0 means default alignment, non-zero overrides.
+    pub packing: u8,
+    /// The component fields in ordinal order.
+    pub components: Vec<DataTypeComponent>,
+    /// Category path for this type in a type manager.
+    pub category_path: CategoryPath,
+    /// Whether this structure is defined or opaque/incomplete.
+    pub is_defined: bool,
+    /// Whether the last field is a flexible array member.
+    pub has_flexible_array: bool,
+    /// Whether this structure has a virtual function table pointer.
+    pub has_vtable: bool,
+    /// Whether this structure was defined recursively or from a forward decl.
+    pub is_recursive: bool,
+}
+
+impl StructureDataType {
+    /// Create a new, empty structure.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(), description: String::new(),
+            size: 0, alignment: 1, packing: 0,
+            components: Vec::new(),
+            category_path: CategoryPath::ROOT,
+            is_defined: false, has_flexible_array: false,
+            has_vtable: false, is_recursive: false,
+        }
+    }
+
+    /// Create an incomplete (opaque) structure with a known size placeholder.
+    pub fn opaque(name: impl Into<String>, size: usize) -> Self {
+        Self { size, ..Self::new(name) }
+    }
+
+    /// Add a field to the structure. Returns the ordinal of the added field.
+    pub fn add_field(
+        &mut self, field_name: impl Into<String>, data_type: Arc<dyn DataType>,
+    ) -> usize {
+        let ordinal = self.components.len();
+        let field_size = data_type.get_size();
+        let field_align = data_type.get_alignment();
+
+        let effective_align = if self.packing > 0 {
+            field_align.min(self.packing as usize)
+        } else {
+            field_align
+        };
+
+        let aligned_offset = align_up(self.size, effective_align);
+        let component = DataTypeComponent::new(field_name, data_type, aligned_offset, ordinal);
+        self.components.push(component);
+        self.size = aligned_offset + field_size;
+
+        let overall_align = if self.packing > 0 { effective_align }
+            else { self.alignment.max(effective_align) };
+        self.alignment = overall_align;
+        ordinal
+    }
+
+    /// Add a bitfield member to the structure.
+    pub fn add_bitfield(
+        &mut self, field_name: impl Into<String>, base_type: Arc<dyn DataType>,
+        bit_offset: u8, bit_size: u8, signed: bool,
+    ) -> usize {
+        let ordinal = self.components.len();
+        let base_size = base_type.get_size();
+        let base_align = base_type.get_alignment();
+        let effective_align = if self.packing > 0 {
+            base_align.min(self.packing as usize)
+        } else { base_align };
+
+        let aligned_offset = align_up(self.size, effective_align);
+        let bitfield_info = BitfieldInfo::new(bit_offset, bit_size, signed);
+        let component = DataTypeComponent::new(field_name, base_type, aligned_offset, ordinal)
+            .with_bitfield(bitfield_info);
+        self.components.push(component);
+        self.size = aligned_offset + base_size;
+        self.alignment = self.alignment.max(effective_align);
+        ordinal
+    }
+
+    /// Mark the last field as a flexible array member (C99 style).
+    pub fn with_flexible_array(mut self) -> Self { self.has_flexible_array = true; self }
+
+    /// Set the packing value.
+    pub fn with_packing(mut self, packing: u8) -> Self { self.packing = packing; self }
+
+    /// Set the alignment.
+    pub fn with_alignment(mut self, alignment: usize) -> Self { self.alignment = alignment; self }
+
+    /// Set a description (builder pattern).
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into(); self
+    }
+
+    /// Set the category path (builder pattern).
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+
+    /// Insert explicit padding bytes at the current end.
+    pub fn add_padding(&mut self, pad_size: usize) {
+        if pad_size == 0 { return; }
+        let ordinal = self.components.len();
+        let aligned = align_up(self.size, 1);
+        let component = DataTypeComponent::padding(aligned, pad_size, ordinal);
+        self.components.push(component);
+        self.size = aligned + pad_size;
+    }
+
+    /// Align the structure's total size to its own alignment.
+    pub fn align_to_self(&mut self) { self.size = align_up(self.size, self.alignment); }
+
+    /// Returns true if the structure has a flexible array member.
+    pub fn has_flexible_array_member(&self) -> bool { self.has_flexible_array }
+
+    /// Check if this structure likely has a vtable pointer.
+    pub fn detect_vtable(&mut self) -> bool {
+        if let Some(first) = self.components.first() {
+            if first.data_type.is_pointer() {
+                let name_lower = first.field_name.to_lowercase();
+                if name_lower.contains("vtable") || name_lower.contains("vftable")
+                    || name_lower.contains("vfptr") || name_lower.contains("__vfp")
+                {
+                    self.has_vtable = true; return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Set the vtable flag explicitly.
+    pub fn set_has_vtable(&mut self, has_vtable: bool) { self.has_vtable = has_vtable; }
+
+    /// Returns a reference to all component fields.
+    pub fn get_components(&self) -> &[DataTypeComponent] { &self.components }
+
+    /// Get a component by its field name.
+    pub fn get_component_by_name(&self, name: &str) -> Option<&DataTypeComponent> {
+        self.components.iter().find(|c| c.field_name == name)
+    }
+
+    /// Get a component at a given byte offset.
+    pub fn get_component_at(&self, offset: usize) -> Option<&DataTypeComponent> {
+        self.components.iter().find(|c| c.offset == offset)
+    }
+
+    /// Number of defined fields (excluding padding).
+    pub fn num_defined_fields(&self) -> usize {
+        self.components.iter().filter(|c| !c.field_name.starts_with("padding_")).count()
+    }
+
+    /// Delete a field by ordinal, recomputing layout.
+    pub fn delete_field(&mut self, ordinal: usize) -> bool {
+        if ordinal >= self.components.len() { return false; }
+        self.components.remove(ordinal);
+        self.recompute_layout();
+        true
+    }
+
+    /// Insert a field at a specific ordinal position.
+    pub fn insert_field(
+        &mut self, ordinal: usize, field_name: impl Into<String>,
+        data_type: Arc<dyn DataType>,
+    ) -> bool {
+        if ordinal > self.components.len() { return false; }
+        let component = DataTypeComponent::new(field_name, data_type, 0, ordinal);
+        self.components.insert(ordinal, component);
+        self.recompute_layout();
+        true
+    }
+
+    /// Recompute all offsets, ordinals, and total size.
+    fn recompute_layout(&mut self) {
+        let mut current_offset: usize = 0;
+        let mut max_align: usize = 1;
+        for (i, comp) in self.components.iter_mut().enumerate() {
+            let field_align = comp.get_alignment();
+            let effective_align = if self.packing > 0 {
+                field_align.min(self.packing as usize)
+            } else { field_align };
+            current_offset = align_up(current_offset, effective_align);
+            comp.offset = current_offset;
+            comp.ordinal = i;
+            current_offset += comp.get_size();
+            max_align = max_align.max(effective_align);
+        }
+        self.alignment = max_align;
+        self.size = align_up(current_offset, self.alignment);
+    }
+
+    /// Clear all fields and reset the structure.
+    pub fn clear(&mut self) {
+        self.components.clear();
+        self.size = 0; self.alignment = 1; self.is_defined = false;
+    }
+}
+
+impl DataType for StructureDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { self.size }
+    fn is_composite(&self) -> bool { true }
+    fn is_defined(&self) -> bool { self.is_defined }
+
+    fn get_alignment(&self) -> usize {
+        if self.alignment == 0 { 1 } else { self.alignment }
+    }
+
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.name == other.name() && self.size == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for StructureDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "struct {} ({} bytes)", self.name, self.size)
+    }
+}
+
+// ============================================================================
+// UnionDataType
+// ============================================================================
+
+/// A union data type.
+///
+/// Models C `union` types where all members share the same storage.
+/// The size is the maximum of all member sizes, and alignment is the
+/// maximum of all member alignments.
+#[derive(Debug, Clone)]
+pub struct UnionDataType {
+    pub name: String,
+    pub description: String,
+    pub size: usize,
+    pub alignment: usize,
+    pub members: Vec<DataTypeComponent>,
+    pub category_path: CategoryPath,
+    pub is_defined: bool,
+}
+
+impl UnionDataType {
+    /// Create a new, empty union.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(), description: String::new(),
+            size: 0, alignment: 1, members: Vec::new(),
+            category_path: CategoryPath::ROOT, is_defined: false,
+        }
+    }
+
+    /// Add a member to the union. Returns the ordinal.
+    pub fn add_member(
+        &mut self, field_name: impl Into<String>, data_type: Arc<dyn DataType>,
+    ) -> usize {
+        let ordinal = self.members.len();
+        let member_size = data_type.get_size();
+        let member_align = data_type.get_alignment();
+        let component = DataTypeComponent::new(field_name, data_type, 0, ordinal);
+        self.members.push(component);
+        if member_size > self.size { self.size = member_size; }
+        if member_align > self.alignment { self.alignment = member_align; }
+        self.size = align_up(self.size, self.alignment);
+        ordinal
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into(); self
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+
+    pub fn get_members(&self) -> &[DataTypeComponent] { &self.members }
+
+    pub fn get_member_by_name(&self, name: &str) -> Option<&DataTypeComponent> {
+        self.members.iter().find(|m| m.field_name == name)
+    }
+}
+
+impl DataType for UnionDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { self.size }
+    fn is_composite(&self) -> bool { true }
+    fn is_defined(&self) -> bool { self.is_defined }
+
+    fn get_alignment(&self) -> usize {
+        if self.alignment == 0 { 1 } else { self.alignment }
+    }
+
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.name == other.name() && self.size == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for UnionDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "union {} ({} bytes)", self.name, self.size)
+    }
+}
+
+// ============================================================================
+// EnumDataType
+// ============================================================================
+
+/// An enumeration data type.
+///
+/// Models C `enum` types with named values. Supports configurable storage
+/// size (1, 2, 4, or 8 bytes) and bitmask/bitset mode.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnumDataType {
+    pub name: String,
+    pub description: String,
+    pub size: usize,
+    pub values: BTreeMap<String, i64>,
+    pub is_bitmask: bool,
+    pub category_path: CategoryPath,
+}
+
+impl EnumDataType {
+    /// Create a new enum with a given storage size.
+    pub fn new(name: impl Into<String>, size: usize) -> Self {
+        let size = match size { 1 | 2 | 4 | 8 => size, _ => 4 };
+        Self {
+            name: name.into(), description: String::new(),
+            size, values: BTreeMap::new(), is_bitmask: false,
+            category_path: CategoryPath::ROOT,
+        }
+    }
+
+    /// Add a named value to the enum.
+    pub fn add_value(&mut self, name: impl Into<String>, value: i64) {
+        self.values.insert(name.into(), value);
+    }
+
+    /// Remove a named value.
+    pub fn remove_value(&mut self, name: &str) -> bool { self.values.remove(name).is_some() }
+
+    /// Get the value for a given name.
+    pub fn get_value(&self, name: &str) -> Option<i64> { self.values.get(name).copied() }
+
+    /// Find a name by value (returns the first match).
+    pub fn get_name(&self, value: i64) -> Option<&str> {
+        self.values.iter().find(|(_, &v)| v == value).map(|(k, _)| k.as_str())
+    }
+
+    /// All value names in sorted order.
+    pub fn get_names(&self) -> Vec<&String> { self.values.keys().collect() }
+
+    /// All values in sorted order.
+    pub fn get_values(&self) -> Vec<i64> { self.values.values().copied().collect() }
+
+    /// Number of defined values.
+    pub fn value_count(&self) -> usize { self.values.len() }
+
+    pub fn with_bitmask(mut self) -> Self { self.is_bitmask = true; self }
+    pub fn set_bitmask(&mut self, is_bitmask: bool) { self.is_bitmask = is_bitmask; }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into(); self
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+}
+
+impl DataType for EnumDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { self.size }
+    fn get_alignment(&self) -> usize { self.size }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.name == other.name() && self.size == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for EnumDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "enum {} ({} bytes, {} values)", self.name, self.size, self.values.len())
+    }
+}
+
+// ============================================================================
+// PointerDataType
+// ============================================================================
+
+/// A pointer data type.
+///
+/// Represents a pointer to another data type. The pointer size is typically
+/// determined by the target architecture (4 bytes for 32-bit, 8 bytes for
+/// 64-bit), but can be explicitly set (e.g., for near/far pointers).
+#[derive(Debug, Clone)]
+pub struct PointerDataType {
+    /// The pointed-to type.
+    pub pointed_to: Arc<dyn DataType>,
+    /// The size of the pointer itself (4 for 32-bit, 8 for 64-bit).
+    pub pointer_size: usize,
+    /// Category path.
+    pub category_path: CategoryPath,
+}
+
+impl PointerDataType {
+    /// Create a new pointer with default 8-byte pointer size.
+    pub fn new(pointed_to: Arc<dyn DataType>) -> Self {
+        Self { pointed_to, pointer_size: 8, category_path: CategoryPath::ROOT }
+    }
+
+    /// Create a pointer with a specific pointer size.
+    pub fn with_size(pointed_to: Arc<dyn DataType>, pointer_size: usize) -> Self {
+        Self { pointed_to, pointer_size, category_path: CategoryPath::ROOT }
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+
+    /// The display name (e.g., `"int *"`).
+    pub fn pointer_display_name(&self) -> String {
+        format!("{} *", self.pointed_to.name())
+    }
+}
+
+impl DataType for PointerDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { "pointer" }
+    fn get_size(&self) -> usize { self.pointer_size }
+    fn is_pointer(&self) -> bool { true }
+    fn get_alignment(&self) -> usize { self.pointer_size }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.pointer_size == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for PointerDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} * ({} bytes)", self.pointed_to.name(), self.pointer_size)
+    }
+}
+
+// ============================================================================
+// ArrayDataType
+// ============================================================================
+
+/// An array data type.
+///
+/// Represents a fixed-size array of elements of a single type.
+/// Supports a configurable stride for alignment-padded layouts.
+#[derive(Debug, Clone)]
+pub struct ArrayDataType {
+    /// The element type of the array.
+    pub element_type: Arc<dyn DataType>,
+    /// The number of elements.
+    pub element_count: usize,
+    /// The stride between elements in bytes. If 0, defaults to element size.
+    pub stride: usize,
+    /// Category path.
+    pub category_path: CategoryPath,
+}
+
+impl ArrayDataType {
+    /// Create a new array with a given element type and count.
+    pub fn new(element_type: Arc<dyn DataType>, element_count: usize) -> Self {
+        let element_size = element_type.get_size();
+        Self {
+            element_type, element_count, stride: element_size,
+            category_path: CategoryPath::ROOT,
+        }
+    }
+
+    /// Create an array with an explicit stride.
+    pub fn with_stride(
+        element_type: Arc<dyn DataType>, element_count: usize, stride: usize,
+    ) -> Self {
+        Self { element_type, element_count, stride, category_path: CategoryPath::ROOT }
+    }
+
+    /// The total size of the array (stride * count).
+    pub fn total_size(&self) -> usize { self.stride * self.element_count }
+
+    /// The display name (e.g., `"int[10]"`).
+    pub fn display_name(&self) -> String {
+        format!("{}[{}]", self.element_type.name(), self.element_count)
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+}
+
+impl DataType for ArrayDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { "array" }
+    fn get_size(&self) -> usize { self.total_size() }
+    fn get_alignment(&self) -> usize { self.element_type.get_alignment() }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.total_size() == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for ArrayDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f, "{}[{}] ({} bytes)",
+            self.element_type.name(), self.element_count, self.total_size()
+        )
+    }
+}
+
+// ============================================================================
+// TypedefDataType
+// ============================================================================
+
+/// A typedef (type alias) data type.
+///
+/// Represents a named alias for another data type. The typedef inherits
+/// the size, alignment, and all other properties of its base type.
+#[derive(Debug, Clone)]
+pub struct TypedefDataType {
+    pub name: String,
+    pub base_type: Arc<dyn DataType>,
+    pub description: String,
+    pub category_path: CategoryPath,
+}
+
+impl TypedefDataType {
+    /// Create a new typedef.
+    pub fn new(name: impl Into<String>, base_type: Arc<dyn DataType>) -> Self {
+        Self {
+            name: name.into(), base_type, description: String::new(),
+            category_path: CategoryPath::ROOT,
+        }
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into(); self
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+}
+
+impl DataType for TypedefDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { self.base_type.get_size() }
+    fn is_pointer(&self) -> bool { self.base_type.is_pointer() }
+    fn is_composite(&self) -> bool { self.base_type.is_composite() }
+    fn is_defined(&self) -> bool { self.base_type.is_defined() }
+    fn get_alignment(&self) -> usize { self.base_type.get_alignment() }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        if self.name != other.name() { return false; }
+        self.base_type.is_equivalent(other)
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for TypedefDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "typedef {} = {}", self.name, self.base_type.name())
+    }
+}
+
+// ============================================================================
+// FunctionParameter & FunctionDefinitionDataType
+// ============================================================================
+
+/// A function parameter definition.
+#[derive(Debug, Clone)]
+pub struct FunctionParameter {
+    pub name: String,
+    pub data_type: Arc<dyn DataType>,
+    pub ordinal: usize,
+    pub comment: Option<String>,
+}
+
+impl FunctionParameter {
+    pub fn new(name: impl Into<String>, data_type: Arc<dyn DataType>, ordinal: usize) -> Self {
+        Self { name: name.into(), data_type, ordinal, comment: None }
+    }
+
+    pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
+        self.comment = Some(comment.into()); self
+    }
+}
+
+impl fmt::Display for FunctionParameter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.name.is_empty() {
+            write!(f, "{}", self.data_type.name())
+        } else {
+            write!(f, "{} {}", self.data_type.name(), self.name)
+        }
+    }
+}
+
+impl PartialEq for FunctionParameter {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.ordinal == other.ordinal
+            && self.data_type.is_equivalent(other.data_type.as_ref())
+    }
+}
+
+impl Eq for FunctionParameter {}
+
+/// A function definition (signature) data type.
+///
+/// Models a function's type signature including return type, parameters,
+/// calling convention, and varargs support.
+#[derive(Debug, Clone)]
+pub struct FunctionDefinitionDataType {
+    pub name: String,
+    pub return_type: Arc<dyn DataType>,
+    pub parameters: Vec<FunctionParameter>,
+    pub calling_convention: CallingConvention,
+    pub has_varargs: bool,
+    pub description: String,
+    pub category_path: CategoryPath,
+}
+
+impl FunctionDefinitionDataType {
+    /// Create a new function definition with no parameters.
+    pub fn new(name: impl Into<String>, return_type: Arc<dyn DataType>) -> Self {
+        Self {
+            name: name.into(), return_type, parameters: Vec::new(),
+            calling_convention: CallingConvention::default(),
+            has_varargs: false, description: String::new(),
+            category_path: CategoryPath::ROOT,
+        }
+    }
+
+    /// Add a parameter.
+    pub fn add_parameter(&mut self, param_name: impl Into<String>, data_type: Arc<dyn DataType>) {
+        let ordinal = self.parameters.len();
+        self.parameters.push(FunctionParameter::new(param_name, data_type, ordinal));
+    }
+
+    pub fn with_return_type(mut self, return_type: Arc<dyn DataType>) -> Self {
+        self.return_type = return_type; self
+    }
+
+    pub fn with_calling_convention(mut self, cc: CallingConvention) -> Self {
+        self.calling_convention = cc; self
+    }
+
+    pub fn with_varargs(mut self) -> Self { self.has_varargs = true; self }
+    pub fn set_varargs(&mut self, has_varargs: bool) { self.has_varargs = has_varargs; }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into(); self
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path; self
+    }
+
+    /// A human-readable signature string.
+    pub fn signature_string(&self) -> String {
+        let params: Vec<String> = self.parameters.iter().map(|p| format!("{}", p)).collect();
+        let mut sig = format!("{} {}(", self.return_type.name(), self.name);
+        sig.push_str(&params.join(", "));
+        if self.has_varargs {
+            if !params.is_empty() { sig.push_str(", ..."); }
+            else { sig.push_str("..."); }
+        }
+        sig.push(')');
+        sig
+    }
+
+    /// Returns the number of parameters.
+    pub fn parameter_count(&self) -> usize { self.parameters.len() }
+
+    /// Returns an iterator over parameters.
+    pub fn iter_parameters(&self) -> impl Iterator<Item = &FunctionParameter> {
+        self.parameters.iter()
+    }
+}
+
+impl DataType for FunctionDefinitionDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { 8 } // pointer-sized placeholder
+    fn get_alignment(&self) -> usize { 8 }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.name == other.name()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for FunctionDefinitionDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.signature_string())
+    }
+}
+
+// ============================================================================
+// UndefinedDataType
+// ============================================================================
+
+/// An undefined/placeholder data type of a given size.
+///
+/// Used during disassembly before a real type has been determined.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UndefinedDataType {
+    pub size: usize,
+    pub category_path: CategoryPath,
+}
+
+impl UndefinedDataType {
+    pub fn new(size: usize) -> Self {
+        Self { size, category_path: CategoryPath::new("builtin/undefined") }
+    }
+}
+
+impl DataType for UndefinedDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { "undefined" }
+    fn get_size(&self) -> usize { self.size }
+    fn is_defined(&self) -> bool { false }
+    fn is_undefined(&self) -> bool { true }
+    fn get_alignment(&self) -> usize { 1 }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        self.size == other.get_size()
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for UndefinedDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "undefined{}", self.size)
+    }
+}
+
+// ============================================================================
+// DataTypeManager Trait
+// ============================================================================
+
+/// Trait for managing a collection of named data types.
+///
+/// Provides operations to resolve, add, find, and enumerate types within
+/// a hierarchical category structure. Equivalent to Ghidra's `DataTypeManager`
+/// Java interface.
+pub trait DataTypeManager: fmt::Debug + Send + Sync {
+    /// Resolve a data type by its fully-qualified path.
+    fn resolve(&self, path: &str) -> Option<Arc<dyn DataType>>;
+
+    /// Find a data type by name within a specific category.
+    fn find_type(&self, category: &CategoryPath, name: &str) -> Option<Arc<dyn DataType>>;
+
+    /// Add a new data type to the manager.
+    fn add_type(&mut self, data_type: Arc<dyn DataType>, category: CategoryPath) -> bool;
+
+    /// Get all types within a category.
+    fn get_category(&self, category: &CategoryPath) -> Vec<Arc<dyn DataType>>;
+
+    /// Get all types managed by this instance.
+    fn get_all_types(&self) -> Vec<Arc<dyn DataType>>;
+
+    /// Get all category paths that contain types.
+    fn get_all_categories(&self) -> Vec<CategoryPath>;
+
+    /// Remove a type by its fully-qualified path.
+    fn remove_type(&mut self, path: &str) -> bool;
+
+    /// Check if a type with the given path exists.
+    fn contains(&self, path: &str) -> bool;
+
+    /// The total number of managed types.
+    fn type_count(&self) -> usize;
+
+    /// Get the root category path for this manager.
+    fn root_category(&self) -> &CategoryPath;
+}
+
+// ============================================================================
+// StandaloneDataTypeManager
+// ============================================================================
+
+/// An in-memory, standalone data type manager.
+///
+/// Stores all types in a `HashMap` keyed by their full category path.
+#[derive(Debug, Clone, Default)]
+pub struct StandaloneDataTypeManager {
+    types: HashMap<String, Arc<dyn DataType>>,
+    categories: HashMap<CategoryPath, Vec<String>>,
+    root: CategoryPath,
+}
+
+impl StandaloneDataTypeManager {
+    pub fn new() -> Self {
+        Self {
+            types: HashMap::new(),
+            categories: HashMap::new(),
+            root: CategoryPath::ROOT,
+        }
+    }
+
+    fn make_path(&self, category: &CategoryPath, name: &str) -> String {
+        if category.is_root() {
+            format!("/{}", name)
+        } else {
+            format!("{}/{}", category.display_name(), name)
+        }
+    }
+
+    fn register_category(&mut self, category: &CategoryPath, name: &str) {
+        let entry = self.categories.entry(category.clone()).or_default();
+        if !entry.contains(&name.to_string()) {
+            entry.push(name.to_string());
+        }
+    }
+
+    fn deregister_category(&mut self, category: &CategoryPath, name: &str) {
+        if let Some(entry) = self.categories.get_mut(category) {
+            entry.retain(|n| n != name);
+            if entry.is_empty() {
+                self.categories.remove(category);
+            }
+        }
+    }
+}
+
+impl DataTypeManager for StandaloneDataTypeManager {
+    fn resolve(&self, path: &str) -> Option<Arc<dyn DataType>> {
+        self.types.get(path).cloned()
+    }
+
+    fn find_type(&self, category: &CategoryPath, name: &str) -> Option<Arc<dyn DataType>> {
+        let path = self.make_path(category, name);
+        self.types.get(&path).cloned()
+    }
+
+    fn add_type(&mut self, data_type: Arc<dyn DataType>, category: CategoryPath) -> bool {
+        let name = data_type.name().to_string();
+        let path = self.make_path(&category, &name);
+        if self.types.contains_key(&path) { return false; }
+        self.types.insert(path, data_type);
+        self.register_category(&category, &name);
+        true
+    }
+
+    fn get_category(&self, category: &CategoryPath) -> Vec<Arc<dyn DataType>> {
+        if let Some(names) = self.categories.get(category) {
+            names.iter()
+                .filter_map(|name| {
+                    let path = self.make_path(category, name);
+                    self.types.get(&path).cloned()
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn get_all_types(&self) -> Vec<Arc<dyn DataType>> {
+        self.types.values().cloned().collect()
+    }
+
+    fn get_all_categories(&self) -> Vec<CategoryPath> {
+        self.categories.keys().cloned().collect()
+    }
+
+    fn remove_type(&mut self, path: &str) -> bool {
+        if let Some(dt) = self.types.remove(path) {
+            let cat = dt.get_category_path().clone();
+            let name = dt.name().to_string();
+            self.deregister_category(&cat, &name);
+            true
+        } else {
+            false
+        }
+    }
+
+    fn contains(&self, path: &str) -> bool { self.types.contains_key(path) }
+    fn type_count(&self) -> usize { self.types.len() }
+    fn root_category(&self) -> &CategoryPath { &self.root }
+}
+
+impl fmt::Display for StandaloneDataTypeManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "StandaloneDataTypeManager ({} types)", self.types.len())
+    }
+}
+
+// ============================================================================
+// BuiltInDataTypeManager
+// ============================================================================
+
+/// A data type manager pre-populated with all Ghidra built-in types.
+#[derive(Debug, Clone)]
+pub struct BuiltInDataTypeManager {
+    inner: StandaloneDataTypeManager,
+}
+
+impl BuiltInDataTypeManager {
+    pub fn new() -> Self {
+        let mut inner = StandaloneDataTypeManager::new();
+        for builtin in BuiltInDataType::all() {
+            let wrapper = BuiltInDataTypeWrapper::new(*builtin);
+            let cat = wrapper.category_path.clone();
+            inner.add_type(Arc::new(wrapper), cat);
+        }
+        Self { inner }
+    }
+
+    pub fn get_builtin(&self, builtin: BuiltInDataType) -> Option<Arc<dyn DataType>> {
+        let path = format!(
+            "/{}/{}",
+            builtin.default_category_path().display_name().trim_start_matches('/'),
+            builtin.display_name()
+        );
+        self.inner.resolve(&path)
+    }
+
+    pub fn get_void(&self) -> Option<Arc<dyn DataType>> {
+        self.inner.resolve("/builtin/void")
+    }
+
+    pub fn get_bool(&self) -> Option<Arc<dyn DataType>> {
+        self.inner.resolve("/builtin/integer/bool")
+    }
+
+    pub fn get_integer(&self, name: &str) -> Option<Arc<dyn DataType>> {
+        let path = format!("/builtin/integer/{}", name);
+        self.inner.resolve(&path)
+    }
+
+    pub fn get_float(&self, name: &str) -> Option<Arc<dyn DataType>> {
+        let path = format!("/builtin/float/{}", name);
+        self.inner.resolve(&path)
+    }
+
+    pub fn get_undefined(&self, size: usize) -> Option<Arc<dyn DataType>> {
+        let name = format!("undefined{}", size);
+        let path = format!("/builtin/undefined/{}", name);
+        self.inner.resolve(&path)
+    }
+}
+
+impl DataTypeManager for BuiltInDataTypeManager {
+    fn resolve(&self, path: &str) -> Option<Arc<dyn DataType>> { self.inner.resolve(path) }
+    fn find_type(&self, category: &CategoryPath, name: &str) -> Option<Arc<dyn DataType>> {
+        self.inner.find_type(category, name)
+    }
+    fn add_type(&mut self, data_type: Arc<dyn DataType>, category: CategoryPath) -> bool {
+        self.inner.add_type(data_type, category)
+    }
+    fn get_category(&self, category: &CategoryPath) -> Vec<Arc<dyn DataType>> {
+        self.inner.get_category(category)
+    }
+    fn get_all_types(&self) -> Vec<Arc<dyn DataType>> { self.inner.get_all_types() }
+    fn get_all_categories(&self) -> Vec<CategoryPath> { self.inner.get_all_categories() }
+    fn remove_type(&mut self, path: &str) -> bool { self.inner.remove_type(path) }
+    fn contains(&self, path: &str) -> bool { self.inner.contains(path) }
+    fn type_count(&self) -> usize { self.inner.type_count() }
+    fn root_category(&self) -> &CategoryPath { self.inner.root_category() }
+}
+
+impl fmt::Display for BuiltInDataTypeManager {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BuiltInDataTypeManager ({} types)", self.inner.type_count())
+    }
+}
+
+impl Default for BuiltInDataTypeManager {
+    fn default() -> Self { Self::new() }
+}
+
+// ============================================================================
+// DataTypeNode — hierarchical tree node for browsing types
+// ============================================================================
+
+/// A node in the data type manager tree.
+#[derive(Debug, Clone)]
+pub struct DataTypeNode {
+    pub name: String,
+    pub data_type: Option<Arc<dyn DataType>>,
+    pub children: Vec<DataTypeNode>,
+}
+
+impl DataTypeNode {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into(), data_type: None, children: Vec::new() }
+    }
+
+    pub fn is_leaf(&self) -> bool { self.children.is_empty() }
+    pub fn has_type(&self) -> bool { self.data_type.is_some() }
+
+    pub fn category(name: impl Into<String>, children: Vec<DataTypeNode>) -> Self {
+        Self { name: name.into(), data_type: None, children }
+    }
+
+    pub fn leaf(name: impl Into<String>, data_type: Arc<dyn DataType>) -> Self {
+        Self { name: name.into(), data_type: Some(data_type), children: Vec::new() }
+    }
+
+    pub fn add_child(&mut self, child: DataTypeNode) { self.children.push(child); }
+
+    pub fn find_child(&self, name: &str) -> Option<&DataTypeNode> {
+        self.children.iter().find(|c| c.name == name)
+    }
+
+    pub fn leaf_count(&self) -> usize {
+        if self.children.is_empty() {
+            if self.data_type.is_some() { 1 } else { 0 }
+        } else {
+            self.children.iter().map(|c| c.leaf_count()).sum()
+        }
+    }
+
+    pub fn flatten(&self) -> Vec<&DataTypeNode> {
+        let mut result = vec![self];
+        for child in &self.children { result.extend(child.flatten()); }
+        result
+    }
+}
+
+impl fmt::Display for DataTypeNode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(ref dt) = self.data_type {
+            write!(f, "{}: {}", self.name, dt)
+        } else {
+            write!(f, "{}/", self.name)
+        }
+    }
+}
+
+/// Backward-compatible alias: Ghidra's `DataTypeTreeNode`.
+pub type DataTypeTreeNode = DataTypeNode;
+
+/// Build a hierarchical tree representation of all built-in types.
+pub fn builtin_data_type_tree() -> DataTypeNode {
+    let manager = BuiltInDataTypeManager::new();
+
+    let undefined_children: Vec<DataTypeNode> = (1..=8)
+        .filter_map(|n| {
+            manager.get_undefined(n)
+                .map(|dt| DataTypeNode::leaf(format!("undefined{}", n), dt))
+        })
+        .collect();
+
+    let integer_types = [
+        BuiltInDataType::Bool, BuiltInDataType::Char, BuiltInDataType::WideChar,
+        BuiltInDataType::Short, BuiltInDataType::UShort,
+        BuiltInDataType::Int, BuiltInDataType::UInt,
+        BuiltInDataType::Long, BuiltInDataType::ULong,
+        BuiltInDataType::LongLong, BuiltInDataType::ULongLong,
+    ];
+    let integer_children: Vec<DataTypeNode> = integer_types.iter()
+        .filter_map(|&bt| {
+            let w = Arc::new(BuiltInDataTypeWrapper::new(bt));
+            Some(DataTypeNode::leaf(bt.display_name().to_string(), w))
+        })
+        .collect();
+
+    let float_types = [
+        BuiltInDataType::Float, BuiltInDataType::Double, BuiltInDataType::LongDouble,
+        BuiltInDataType::ComplexFloat, BuiltInDataType::ComplexDouble,
+    ];
+    let float_children: Vec<DataTypeNode> = float_types.iter()
+        .filter_map(|&bt| {
+            let w = Arc::new(BuiltInDataTypeWrapper::new(bt));
+            Some(DataTypeNode::leaf(bt.display_name().to_string(), w))
+        })
+        .collect();
+
+    let string_types = [
+        BuiltInDataType::String, BuiltInDataType::UnicodeString, BuiltInDataType::WideString,
+    ];
+    let string_children: Vec<DataTypeNode> = string_types.iter()
+        .filter_map(|&bt| {
+            let w = Arc::new(BuiltInDataTypeWrapper::new(bt));
+            Some(DataTypeNode::leaf(bt.display_name().to_string(), w))
+        })
+        .collect();
+
+    let misc_types = [
+        BuiltInDataType::Void, BuiltInDataType::WChar16, BuiltInDataType::WChar32,
+        BuiltInDataType::ImageBaseOffset32,
+    ];
+    let misc_children: Vec<DataTypeNode> = misc_types.iter()
+        .filter_map(|&bt| {
+            let w = Arc::new(BuiltInDataTypeWrapper::new(bt));
+            Some(DataTypeNode::leaf(bt.display_name().to_string(), w))
+        })
+        .collect();
+
+    DataTypeNode::category("/", vec![
+        DataTypeNode::category("undefined", undefined_children),
+        DataTypeNode::category("integer", integer_children),
+        DataTypeNode::category("float", float_children),
+        DataTypeNode::category("string", string_children),
+        DataTypeNode::category("misc", misc_children),
+    ])
+}
+
+// ============================================================================
+// Serialization / Deserialization support
+// ============================================================================
+
+/// Tags for serializing different concrete data types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataTypeTag {
+    BuiltIn, Structure, Union, Enum, Pointer, Array, Typedef, FunctionDef, Undefined,
+}
+
+/// A serializable representation of any data type.
+#[derive(Debug, Clone)]
+pub enum SerializableDataType {
+    BuiltIn(BuiltInDataType),
+    Structure(StructureDataType),
+    Union(UnionDataType),
+    Enum(EnumDataType),
+    Pointer {
+        pointed_to: Box<SerializableDataType>,
+        pointer_size: usize,
+    },
+    Array {
+        element_type: Box<SerializableDataType>,
+        element_count: usize,
+        stride: usize,
+    },
+    Typedef {
+        name: String,
+        base_type: Box<SerializableDataType>,
+        description: String,
+    },
+    FunctionDef(FunctionDefinitionDataType),
+    Undefined(usize),
+}
+
+impl SerializableDataType {
+    /// Convert from a concrete `DataType` trait object via downcasting.
+    pub fn from_data_type(dt: &(dyn DataType + 'static)) -> Option<Self> {
+        if let Some(wrapper) = dt.as_any().downcast_ref::<BuiltInDataTypeWrapper>() {
+            return Some(Self::BuiltIn(wrapper.inner));
+        }
+        if let Some(s) = dt.as_any().downcast_ref::<StructureDataType>() {
+            return Some(Self::Structure(s.clone()));
+        }
+        if let Some(u) = dt.as_any().downcast_ref::<UnionDataType>() {
+            return Some(Self::Union(u.clone()));
+        }
+        if let Some(e) = dt.as_any().downcast_ref::<EnumDataType>() {
+            return Some(Self::Enum(e.clone()));
+        }
+        if let Some(p) = dt.as_any().downcast_ref::<PointerDataType>() {
+            let inner = Self::from_data_type(p.pointed_to.as_ref())?;
+            return Some(Self::Pointer { pointed_to: Box::new(inner), pointer_size: p.pointer_size });
+        }
+        if let Some(a) = dt.as_any().downcast_ref::<ArrayDataType>() {
+            let inner = Self::from_data_type(a.element_type.as_ref())?;
+            return Some(Self::Array {
+                element_type: Box::new(inner),
+                element_count: a.element_count, stride: a.stride,
+            });
+        }
+        if let Some(t) = dt.as_any().downcast_ref::<TypedefDataType>() {
+            let inner = Self::from_data_type(t.base_type.as_ref())?;
+            return Some(Self::Typedef {
+                name: t.name.clone(), base_type: Box::new(inner),
+                description: t.description.clone(),
+            });
+        }
+        if let Some(f) = dt.as_any().downcast_ref::<FunctionDefinitionDataType>() {
+            return Some(Self::FunctionDef(f.clone()));
+        }
+        if let Some(u) = dt.as_any().downcast_ref::<UndefinedDataType>() {
+            return Some(Self::Undefined(u.size));
+        }
+        None
+    }
+}
+
+impl fmt::Display for SerializableDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BuiltIn(b) => write!(f, "{}", b),
+            Self::Structure(s) => write!(f, "{}", s),
+            Self::Union(u) => write!(f, "{}", u),
+            Self::Enum(e) => write!(f, "{}", e),
+            Self::Pointer { pointed_to, pointer_size } => {
+                write!(f, "{} * ({} bytes)", pointed_to, pointer_size)
+            }
+            Self::Array { element_type, element_count, stride } => {
+                write!(f, "{}[{}] (stride={})", element_type, element_count, stride)
+            }
+            Self::Typedef { name, base_type, .. } => {
+                write!(f, "typedef {} = {}", name, base_type)
+            }
+            Self::FunctionDef(fd) => write!(f, "{}", fd.signature_string()),
+            Self::Undefined(n) => write!(f, "undefined{}", n),
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builtin_sizes() {
+        assert_eq!(BuiltInDataType::Void.size(), 0);
+        assert_eq!(BuiltInDataType::Bool.size(), 1);
+        assert_eq!(BuiltInDataType::Char.size(), 1);
+        assert_eq!(BuiltInDataType::Short.size(), 2);
+        assert_eq!(BuiltInDataType::Int.size(), 4);
+        assert_eq!(BuiltInDataType::Long.size(), 8);
+        assert_eq!(BuiltInDataType::Float.size(), 4);
+        assert_eq!(BuiltInDataType::Double.size(), 8);
+        assert_eq!(BuiltInDataType::Undefined1.size(), 1);
+        assert_eq!(BuiltInDataType::Undefined8.size(), 8);
+        assert_eq!(BuiltInDataType::ComplexFloat.size(), 8);
+        assert_eq!(BuiltInDataType::ComplexDouble.size(), 16);
+        assert_eq!(BuiltInDataType::LongDouble.size(), 16);
+        assert_eq!(BuiltInDataType::ImageBaseOffset32.size(), 4);
+    }
+
+    #[test]
+    fn test_builtin_is_methods() {
+        assert!(BuiltInDataType::Int.is_signed());
+        assert!(BuiltInDataType::UInt.is_unsigned());
+        assert!(!BuiltInDataType::Float.is_signed());
+        assert!(BuiltInDataType::Int.is_integer());
+        assert!(BuiltInDataType::Float.is_floating());
+        assert!(BuiltInDataType::Char.is_character());
+        assert!(BuiltInDataType::String.is_string_type());
+        assert!(BuiltInDataType::Undefined4.is_undefined());
+        assert!(!BuiltInDataType::Int.is_undefined());
+    }
+
+    #[test]
+    fn test_builtin_all_count() { assert_eq!(BuiltInDataType::all().len(), 30); }
+
+    #[test]
+    fn test_empty_structure() {
+        let s = StructureDataType::new("empty");
+        assert_eq!(s.get_size(), 0);
+        assert_eq!(s.alignment, 1);
+        assert_eq!(s.components.len(), 0);
+        assert!(s.is_composite());
+    }
+
+    #[test]
+    fn test_structure_add_fields() {
+        let mut s = StructureDataType::new("test");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        s.add_field("a", int_type.clone());
+        s.add_field("b", char_type.clone());
+        assert_eq!(s.components.len(), 2);
+        assert_eq!(s.components[0].field_name, "a");
+        assert_eq!(s.components[0].offset, 0);
+        assert_eq!(s.components[1].field_name, "b");
+        assert_eq!(s.components[1].offset, 4);
+        assert_eq!(s.get_size(), 5);
+    }
+
+    #[test]
+    fn test_structure_alignment() {
+        let mut s = StructureDataType::new("test");
+        let short_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Short));
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        s.add_field("a", short_type.clone());
+        s.add_field("b", int_type.clone());
+        s.align_to_self();
+        assert_eq!(s.components[0].offset, 0);
+        assert_eq!(s.components[1].offset, 4);
+        assert_eq!(s.get_size(), 8);
+    }
+
+    #[test]
+    fn test_structure_with_packing() {
+        let mut s = StructureDataType::new("packed").with_packing(1);
+        let short_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Short));
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        s.add_field("a", short_type.clone());
+        s.add_field("b", int_type.clone());
+        assert_eq!(s.components[0].offset, 0);
+        assert_eq!(s.components[1].offset, 2);
+        assert_eq!(s.get_size(), 6);
+    }
+
+    #[test]
+    fn test_structure_delete_field() {
+        let mut s = StructureDataType::new("test");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        s.add_field("a", int_type.clone());
+        s.add_field("b", char_type.clone());
+        assert_eq!(s.components.len(), 2);
+        assert!(s.delete_field(0));
+        assert_eq!(s.components.len(), 1);
+        assert_eq!(s.components[0].field_name, "b");
+    }
+
+    #[test]
+    fn test_structure_vtable_detection() {
+        let mut s = StructureDataType::new("has_vtable");
+        let ptr_type: Arc<dyn DataType> = Arc::new(PointerDataType::new(
+            Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Void)),
+        ));
+        s.add_field("__vtable", ptr_type);
+        assert!(s.detect_vtable());
+        assert!(s.has_vtable);
+    }
+
+    #[test]
+    fn test_structure_no_vtable() {
+        let mut s = StructureDataType::new("no_vtable");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        s.add_field("value", int_type);
+        assert!(!s.detect_vtable());
+        assert!(!s.has_vtable);
+    }
+
+    #[test]
+    fn test_structure_bitfield() {
+        let mut s = StructureDataType::new("bitfields");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        s.add_bitfield("flags", int_type, 0, 4, false);
+        assert_eq!(s.components.len(), 1);
+        assert!(s.components[0].is_bitfield());
+        assert_eq!(s.components[0].bitfield.as_ref().unwrap().bit_size, 4);
+    }
+
+    #[test]
+    fn test_empty_union() {
+        let u = UnionDataType::new("empty");
+        assert_eq!(u.get_size(), 0);
+        assert_eq!(u.members.len(), 0);
+    }
+
+    #[test]
+    fn test_union_add_members() {
+        let mut u = UnionDataType::new("test");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let double_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Double));
+        u.add_member("as_int", int_type.clone());
+        u.add_member("as_double", double_type.clone());
+        assert_eq!(u.get_size(), 8);
+        assert_eq!(u.members.len(), 2);
+        assert_eq!(u.members[0].offset, 0);
+        assert_eq!(u.members[1].offset, 0);
+    }
+
+    #[test]
+    fn test_enum_add_values() {
+        let mut e = EnumDataType::new("colors", 4);
+        e.add_value("RED", 0);
+        e.add_value("GREEN", 1);
+        e.add_value("BLUE", 2);
+        assert_eq!(e.value_count(), 3);
+        assert_eq!(e.get_value("RED"), Some(0));
+        assert_eq!(e.get_name(0), Some("RED"));
+        assert_eq!(e.get_name(99), None);
+    }
+
+    #[test]
+    fn test_enum_bitmask() {
+        let mut e = EnumDataType::new("flags", 4).with_bitmask();
+        e.add_value("READ", 1);
+        e.add_value("WRITE", 2);
+        e.add_value("EXEC", 4);
+        assert!(e.is_bitmask);
+    }
+
+    #[test]
+    fn test_enum_sizes() {
+        assert_eq!(EnumDataType::new("e1", 1).size, 1);
+        assert_eq!(EnumDataType::new("e2", 2).size, 2);
+        assert_eq!(EnumDataType::new("e4", 4).size, 4);
+        assert_eq!(EnumDataType::new("e8", 8).size, 8);
+        assert_eq!(EnumDataType::new("bad", 3).size, 4); // defaults to 4
+    }
+
+    #[test]
+    fn test_pointer_type() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let ptr = PointerDataType::new(int_type);
+        assert!(ptr.is_pointer());
+        assert_eq!(ptr.get_size(), 8);
+    }
+
+    #[test]
+    fn test_pointer_32bit() {
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        let ptr = PointerDataType::with_size(char_type, 4);
+        assert_eq!(ptr.pointer_size, 4);
+    }
+
+    #[test]
+    fn test_array_type() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let arr = ArrayDataType::new(int_type, 10);
+        assert_eq!(arr.element_count, 10);
+        assert_eq!(arr.get_size(), 40);
+    }
+
+    #[test]
+    fn test_array_with_stride() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let arr = ArrayDataType::with_stride(int_type, 5, 8);
+        assert_eq!(arr.stride, 8);
+        assert_eq!(arr.get_size(), 40);
+    }
+
+    #[test]
+    fn test_typedef() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let td = TypedefDataType::new("my_int", int_type);
+        assert_eq!(td.name(), "my_int");
+        assert_eq!(td.get_size(), 4);
+        assert!(!td.is_composite());
+    }
+
+    #[test]
+    fn test_function_definition_simple() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        let mut func = FunctionDefinitionDataType::new("main", int_type.clone());
+        func.add_parameter("argc", int_type.clone());
+        func.add_parameter("argv", Arc::new(PointerDataType::new(
+            Arc::new(PointerDataType::new(char_type)),
+        )));
+        assert_eq!(func.parameter_count(), 2);
+        assert!(!func.has_varargs);
+        assert_eq!(func.return_type.name(), "int");
+    }
+
+    #[test]
+    fn test_function_definition_varargs() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        let mut func = FunctionDefinitionDataType::new("printf", int_type.clone()).with_varargs();
+        func.add_parameter("fmt", Arc::new(PointerDataType::new(char_type)));
+        assert!(func.has_varargs);
+        assert_eq!(func.parameter_count(), 1);
+    }
+
+    #[test]
+    fn test_signature_string() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let float_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float));
+        let mut func = FunctionDefinitionDataType::new("add", int_type.clone());
+        func.add_parameter("x", int_type.clone());
+        func.add_parameter("y", float_type.clone());
+        let sig = func.signature_string();
+        assert!(sig.starts_with("int add("));
+        assert!(sig.contains("int x"));
+        assert!(sig.contains("float y"));
+        assert!(sig.ends_with(")"));
+    }
+
+    #[test]
+    fn test_standalone_manager_add_resolve() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let cat = CategoryPath::new("test");
+        assert!(mgr.add_type(int_type.clone(), cat.clone()));
+        let resolved = mgr.resolve("/test/int").expect("should resolve type");
+        assert_eq!(resolved.name(), "int");
+        assert_eq!(resolved.get_size(), 4);
+    }
+
+    #[test]
+    fn test_standalone_manager_duplicate() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        assert!(mgr.add_type(int_type.clone(), CategoryPath::new("a")));
+        assert!(!mgr.add_type(int_type.clone(), CategoryPath::new("a")));
+        assert_eq!(mgr.type_count(), 1);
+    }
+
+    #[test]
+    fn test_standalone_manager_remove() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        mgr.add_type(int_type.clone(), CategoryPath::new("test"));
+        assert_eq!(mgr.type_count(), 1);
+        assert!(mgr.remove_type("/test/int"));
+        assert_eq!(mgr.type_count(), 0);
+        assert!(!mgr.contains("/test/int"));
+    }
+
+    #[test]
+    fn test_standalone_manager_get_all_types() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        mgr.add_type(
+            Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int)),
+            CategoryPath::new("a"),
+        );
+        mgr.add_type(
+            Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float)),
+            CategoryPath::new("a"),
+        );
+        mgr.add_type(
+            Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Double)),
+            CategoryPath::new("b"),
+        );
+        assert_eq!(mgr.get_all_types().len(), 3);
+        assert_eq!(mgr.get_category(&CategoryPath::new("a")).len(), 2);
+        assert_eq!(mgr.get_category(&CategoryPath::new("b")).len(), 1);
+        assert_eq!(mgr.get_all_categories().len(), 2);
+    }
+
+    #[test]
+    fn test_builtin_manager_has_all_types() {
+        let mgr = BuiltInDataTypeManager::new();
+        assert_eq!(mgr.type_count(), 30);
+        let void = mgr.resolve("/builtin/void");
+        assert!(void.is_some());
+        assert_eq!(void.unwrap().get_size(), 0);
+    }
+
+    #[test]
+    fn test_component_creation() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let comp = DataTypeComponent::new("field1", int_type, 0, 0);
+        assert_eq!(comp.field_name, "field1");
+        assert_eq!(comp.offset, 0);
+        assert_eq!(comp.ordinal, 0);
+        assert!(!comp.is_bitfield());
+        assert_eq!(comp.get_size(), 4);
+    }
+
+    #[test]
+    fn test_component_with_comment() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let comp = DataTypeComponent::new("field", int_type, 0, 0)
+            .with_comment("This is a comment");
+        assert_eq!(comp.comment, Some("This is a comment".to_string()));
+    }
+
+    #[test]
+    fn test_component_with_bitfield() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitfieldInfo::new(0, 3, false);
+        let comp = DataTypeComponent::new("bits", int_type, 0, 0).with_bitfield(bf);
+        assert!(comp.is_bitfield());
+        assert_eq!(comp.bitfield.as_ref().unwrap().bit_size, 3);
+    }
+
+    #[test]
+    fn test_bitfield_mask() {
+        let bf = BitfieldInfo::new(0, 4, false);
+        assert_eq!(bf.mask(), 0xF);
+        assert_eq!(bf.shifted_mask(), 0xF);
+        let bf2 = BitfieldInfo::new(4, 4, false);
+        assert_eq!(bf2.mask(), 0xF);
+        assert_eq!(bf2.shifted_mask(), 0xF0);
+    }
+
+    #[test]
+    fn test_data_type_equivalence() {
+        let s1 = StructureDataType::new("same");
+        let s2 = StructureDataType::new("same");
+        let s3 = StructureDataType::new("different");
+        assert!(s1.is_equivalent(&s2));
+        assert!(!s1.is_equivalent(&s3));
+    }
+
+    #[test]
+    fn test_builtin_wrapper_equivalence() {
+        let w1 = BuiltInDataTypeWrapper::new(BuiltInDataType::Int);
+        let w2 = BuiltInDataTypeWrapper::new(BuiltInDataType::Int);
+        let w3 = BuiltInDataTypeWrapper::new(BuiltInDataType::Float);
+        assert!(w1.is_equivalent(&w2));
+        assert!(!w1.is_equivalent(&w3));
+    }
+
+    #[test]
+    fn test_data_type_node_tree() {
+        let tree = builtin_data_type_tree();
+        assert_eq!(tree.name, "/");
+        assert!(!tree.is_leaf());
+        assert_eq!(tree.children.len(), 5);
+        let total_leaves: usize = tree.children.iter().map(|c| c.leaf_count()).sum();
+        assert_eq!(total_leaves, 30);
+    }
+
+    #[test]
+    fn test_calling_convention_names() {
+        assert_eq!(CallingConvention::Cdecl.name(), "__cdecl");
+        assert_eq!(CallingConvention::Stdcall.name(), "__stdcall");
+        assert_eq!(CallingConvention::Fastcall.name(), "__fastcall");
+        assert_eq!(CallingConvention::Thiscall.name(), "__thiscall");
+        assert_eq!(CallingConvention::Custom("mycc".into()).name(), "__custom");
+    }
+
+    #[test]
+    fn test_undefined_type() {
+        let u = UndefinedDataType::new(4);
+        assert_eq!(u.name(), "undefined");
+        assert_eq!(u.get_size(), 4);
+        assert!(!u.is_defined());
+        assert!(u.is_undefined());
+    }
+
+    #[test]
+    fn test_clone_type() {
+        let s = StructureDataType::new("original");
+        let cloned = s.clone_type();
+        assert_eq!(cloned.name(), "original");
+        assert_eq!(cloned.get_size(), s.get_size());
+    }
+
+    #[test]
+    fn test_structure_many_fields() {
+        let mut s = StructureDataType::new("big");
+        let byte_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Undefined1));
+        for i in 0..100 {
+            s.add_field(format!("field_{}", i), byte_type.clone());
+        }
+        assert_eq!(s.components.len(), 100);
+        assert_eq!(s.get_size(), 100);
+        assert_eq!(s.num_defined_fields(), 100);
+    }
+
+    #[test]
+    fn test_recursive_structure_support() {
+        let mut node = StructureDataType::new("Node");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        node.add_field("data", int_type.clone());
+        node.is_recursive = true;
+        assert!(node.is_recursive);
+        assert_eq!(node.components.len(), 1);
+    }
+
+    #[test]
+    fn test_standalone_manager_multiple_categories() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let float_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float));
+        let double_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Double));
+        let cat_ints = CategoryPath::new("ints");
+        let cat_floats = CategoryPath::new("floats");
+        mgr.add_type(int_type, cat_ints.clone());
+        mgr.add_type(float_type, cat_floats.clone());
+        mgr.add_type(double_type, cat_floats.clone());
+        assert_eq!(mgr.type_count(), 3);
+        assert_eq!(mgr.get_category(&cat_ints).len(), 1);
+        assert_eq!(mgr.get_category(&cat_floats).len(), 2);
+        assert_eq!(mgr.get_all_categories().len(), 2);
+    }
+
+    #[test]
+    fn test_builtin_manager_get_builtin() {
+        let mgr = BuiltInDataTypeManager::new();
+        let void = mgr.resolve("/builtin/void");
+        assert!(void.is_some());
+        assert_eq!(void.unwrap().name(), "void");
+        let int = mgr.resolve("/builtin/integer/int");
+        assert!(int.is_some());
+        assert_eq!(int.unwrap().name(), "int");
+    }
+}

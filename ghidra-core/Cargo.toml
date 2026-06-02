@@ -1,0 +1,35 @@
+[package]
+name = "ghidra-core"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Core framework: program model, database, addressing, data types, symbols"
+
+[dependencies]
+nom = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bincode = { workspace = true }
+sha2 = { workspace = true }
+md-5 = { workspace = true }
+flate2 = { workspace = true }
+bzip2 = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+indexmap = { workspace = true }
+smallvec = { workspace = true }
+bitvec = { workspace = true }
+num = { workspace = true }
+num-traits = { workspace = true }
+num-derive = { workspace = true }
+regex = { workspace = true }
+lazy_static = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true, features = ["backup"] }
+petgraph = { workspace = true }
+num-bigint = "0.4"
+libc = "0.2"
+whoami = "1"
+rand = "0.8"

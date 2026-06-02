@@ -1,0 +1,11 @@
+//! General-purpose data type representations (re-exports from parent).
+
+pub use super::{
+    align_down, align_up, builtin_data_type_tree, is_aligned, ArrayDataType,
+    BitfieldInfo, BuiltInDataType, BuiltInDataTypeManager, BuiltInDataTypeWrapper,
+    CallingConvention, CategoryPath, DataType, DataTypeComponent, DataTypeKind,
+    DataTypeManager, DataTypeNode, DataTypePath, DataTypeTag, DataTypeTreeNode,
+    EnumDataType, FunctionDefinitionDataType, FunctionParameter, PointerDataType,
+    SerializableDataType, StandaloneDataTypeManager, StructureDataType,
+    TypedefDataType, UndefinedDataType, UnionDataType,
+};

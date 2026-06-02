@@ -1,0 +1,28 @@
+[package]
+name = "ghidra-features"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Features: binary format parsers, PDB, DWARF, ELF, PE, Mach-O, version tracking, function graph"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+ghidra-decompile = { path = "../ghidra-decompile" }
+petgraph = { workspace = true }
+nom = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+sha2 = { workspace = true }
+md-5 = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+indexmap = { workspace = true }
+smallvec = { workspace = true }
+regex = { workspace = true }
+lazy_static = { workspace = true }
+bincode = { workspace = true }
+bitflags = { workspace = true }
+rusqlite = { workspace = true }

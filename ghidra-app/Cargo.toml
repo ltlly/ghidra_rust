@@ -1,0 +1,32 @@
+[package]
+name = "ghidra-app"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Application entry point (GUI and headless server)"
+
+[[bin]]
+name = "ghidra-server"
+path = "src/main.rs"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+ghidra-decompile = { path = "../ghidra-decompile" }
+ghidra-emulation = { path = "../ghidra-emulation" }
+ghidra-processors = { path = "../ghidra-processors" }
+ghidra-features = { path = "../ghidra-features" }
+ghidra-gui = { path = "../ghidra-gui" }
+eframe = { workspace = true }
+log = { workspace = true }
+env_logger = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+tower-http = { workspace = true }
+tower = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+rusqlite = { workspace = true }
+csv = "1"

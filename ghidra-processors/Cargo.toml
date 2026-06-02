@@ -1,0 +1,14 @@
+[package]
+name = "ghidra-processors"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Processor modules: SLEIGH specifications and loader/analyzer implementations for all architectures"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+serde = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+byteorder = { workspace = true }
+bytes = { workspace = true }

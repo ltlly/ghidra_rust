@@ -1,0 +1,8 @@
+/target/
+*.rs.bk
+*.swp
+.ghidra_projects/
+*.ghidra
+.env
+*.log
+ghidra_src/

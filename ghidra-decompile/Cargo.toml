@@ -1,0 +1,23 @@
+[package]
+name = "ghidra-decompile"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Decompiler: SLEIGH processor specification, P-code, analysis transforms, C output"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+nom = { workspace = true }
+pest = { workspace = true }
+pest_derive = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+indexmap = { workspace = true }
+smallvec = { workspace = true }
+bitvec = { workspace = true }
+regex = { workspace = true }
+lazy_static = { workspace = true }
+once_cell = { workspace = true }
+petgraph = { workspace = true }

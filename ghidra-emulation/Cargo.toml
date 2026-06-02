@@ -1,0 +1,14 @@
+[package]
+name = "ghidra-emulation"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Emulation: P-code emulator, memory simulation, state tracking"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+ghidra-decompile = { path = "../ghidra-decompile" }
+serde = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+smallvec = { workspace = true }
