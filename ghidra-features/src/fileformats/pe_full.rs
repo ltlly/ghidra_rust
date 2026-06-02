@@ -1630,7 +1630,7 @@ fn nom_parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
     };
 
     // Read section raw data
-    pe.sections = read_section_data_all(data, &pe.section_headers);
+    pe.sections = read_section_data_all(input, &pe.section_headers);
 
     // --- Parse data directories ---
     let dd = &pe.nt_headers.optional_header.data_directories;
@@ -1638,14 +1638,14 @@ fn nom_parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
     // Export
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_EXPORT) {
         if d.is_present() {
-            pe.export_directory = parse_export(data, d.virtual_address, d.size).ok();
+            pe.export_directory = parse_export(input, d.virtual_address, d.size).ok();
         }
     }
 
     // Import
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_IMPORT) {
         if d.is_present() {
-            let imports = parse_import(data, d.virtual_address, d.size).ok();
+            let imports = parse_import(input, d.virtual_address, d.size).ok();
             pe.import_directory = imports.filter(|v| !v.is_empty());
         }
     }
@@ -1653,7 +1653,7 @@ fn nom_parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
     // Resource
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_RESOURCE) {
         if d.is_present() {
-            let res = parse_resource(data, d.virtual_address).ok();
+            let res = parse_resource(input, d.virtual_address).ok();
             pe.resource_directory = res.filter(|r| !r.entries.is_empty());
         }
     }
@@ -1661,63 +1661,63 @@ fn nom_parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
     // Exception
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_EXCEPTION) {
         if d.is_present() {
-            pe.exception_directory = parse_exception_directory(data, &pe, d, is_64bit);
+            pe.exception_directory = parse_exception_directory(input, &pe, d, is_64bit);
         }
     }
 
     // Security
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_SECURITY) {
         if d.is_present() {
-            pe.security_directory = parse_security_directory(data, d);
+            pe.security_directory = parse_security_directory(input, d);
         }
     }
 
     // Relocation
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_BASERELOC) {
         if d.is_present() {
-            pe.relocation_directory = parse_relocation_directory(data, &pe, d);
+            pe.relocation_directory = parse_relocation_directory(input, &pe, d);
         }
     }
 
     // Debug
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_DEBUG) {
         if d.is_present() {
-            pe.debug_directory = parse_debug_directory(data, &pe, d);
+            pe.debug_directory = parse_debug_directory(input, &pe, d);
         }
     }
 
     // TLS
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_TLS) {
         if d.is_present() {
-            pe.tls_directory = parse_tls_directory(data, &pe, d, is_64bit);
+            pe.tls_directory = parse_tls_directory(input, &pe, d, is_64bit);
         }
     }
 
     // Load Config
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG) {
         if d.is_present() {
-            pe.load_config = parse_load_config_directory(data, &pe, d, is_64bit);
+            pe.load_config = parse_load_config_directory(input, &pe, d, is_64bit);
         }
     }
 
     // Bound Import
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_BOUND_IMPORT) {
         if d.is_present() {
-            pe.bound_import = parse_bound_import_directory(data, &pe, d);
+            pe.bound_import = parse_bound_import_directory(input, &pe, d);
         }
     }
 
     // Delay Import
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT) {
         if d.is_present() {
-            pe.delay_import = parse_delay_import_directory(data, &pe, d);
+            pe.delay_import = parse_delay_import_directory(input, &pe, d);
         }
     }
 
     // COM Descriptor
     if let Some(d) = dd.get(IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR) {
         if d.is_present() {
-            pe.com_descriptor = parse_com_descriptor(data, &pe, d);
+            pe.com_descriptor = parse_com_descriptor(input, &pe, d);
         }
     }
 

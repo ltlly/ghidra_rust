@@ -2561,17 +2561,17 @@ pub fn parse_debug_macro(data: &[u8]) -> DwarfResult<Vec<MacroEntry>> {
             0x00 => break,
             0x01 => {
                 let (line, c) = read_uleb128(&data[pos..])?; pos += c;
-                let end1 = pos; while end1 < data.len() && data[end1] != 0 { end1 += 1; }
+                let mut end1 = pos; while end1 < data.len() && data[end1] != 0 { end1 += 1; }
                 let name = std::str::from_utf8(&data[pos..end1]).unwrap_or("").to_string();
                 pos = end1 + 1;
-                let end2 = pos; while end2 < data.len() && data[end2] != 0 { end2 += 1; }
+                let mut end2 = pos; while end2 < data.len() && data[end2] != 0 { end2 += 1; }
                 let value = std::str::from_utf8(&data[pos..end2]).unwrap_or("").to_string();
                 pos = end2 + 1;
                 entries.push(MacroEntry::Define { line, name, value });
             }
             0x02 => {
                 let (line, c) = read_uleb128(&data[pos..])?; pos += c;
-                let end1 = pos; while end1 < data.len() && data[end1] != 0 { end1 += 1; }
+                let mut end1 = pos; while end1 < data.len() && data[end1] != 0 { end1 += 1; }
                 let name = std::str::from_utf8(&data[pos..end1]).unwrap_or("").to_string();
                 pos = end1 + 1;
                 entries.push(MacroEntry::Undef { line, name });

@@ -531,13 +531,13 @@ pub struct TypeServerEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DbiStream {
     pub version_signature: i32, pub version_header: u32, pub age: u32,
-    pub global_stream_index: u16, pub build_number: u16,
-    pub public_stream_index: u16, pub pdb_dll_build_number: u16,
-    pub sym_record_stream_index: u16, pub pdb_dll_rbuild_number: u16,
-    pub module_info_size: u32, pub section_contrib_size: u32,
-    pub section_map_size: u32, pub file_info_size: u32,
-    pub type_server_map_size: u32, pub mfc_type_server_index: u32,
-    pub optional_debug_header_size: u32, pub ec_substream_size: u32,
+    pub gsi: u16, pub bn: u16,
+    pub psi: u16, pub pdbn: u16,
+    pub sri: u16, pub pdb_rbn: u16,
+    pub mis: u32, pub scs: u32,
+    pub sms: u32, pub fis: u32,
+    pub tsms: u32, pub mtsi: u32,
+    pub odhs: u32, pub ecss: u32,
     pub flags: u16, pub machine: u16, pub reserved: u32,
     pub modules: Vec<ModuleInfo>, pub sections: Vec<SectionContrib>,
     pub section_map: Vec<SectionMapEntry>, pub type_servers: Vec<TypeServerEntry>,
@@ -1864,8 +1864,8 @@ impl PdbFile {
         let dbi_raw = msf.read_stream(3);
         let (dbi, global_stream, public_stream) = if let Some(ref db) = dbi_raw {
             let d = parse_dbi_stream(db).ok();
-            let gs = d.as_ref().and_then(|dbi| msf.read_stream(dbi.global_stream_index as u32));
-            let ps = d.as_ref().and_then(|dbi| msf.read_stream(dbi.public_stream_index as u32));
+            let gs = d.as_ref().and_then(|dbi| msf.read_stream(dbi.gsi as u32));
+            let ps = d.as_ref().and_then(|dbi| msf.read_stream(dbi.psi as u32));
             (d, gs, ps)
         } else {
             (None, None, None)

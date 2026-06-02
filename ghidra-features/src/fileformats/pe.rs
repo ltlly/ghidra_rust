@@ -1606,7 +1606,7 @@ fn parse_export_directory(data: &[u8], pe: &PeFile) -> Option<ExportDirectory> {
             .rva_to_offset(address_of_functions)
             .and_then(|fo| data.get(fo + i * 4..fo + i * 4 + 4))
             .map(read_le_u32_at)
-            .flatten()
+
             .unwrap_or(0);
         if rva == 0 {
             continue;
@@ -1635,12 +1635,12 @@ fn parse_export_directory(data: &[u8], pe: &PeFile) -> Option<ExportDirectory> {
         let name_rva_val = name_base
             .and_then(|nb| data.get(nb + i * 4..nb + i * 4 + 4))
             .map(read_le_u32_at)
-            .flatten()
+
             .unwrap_or(0);
         let ordinal_idx = ord_base
             .and_then(|ob| data.get(ob + i * 2..ob + i * 2 + 2))
             .map(read_le_u16_at)
-            .flatten()
+
             .unwrap_or(0) as usize;
         if let Some(entry) = export_entries.get_mut(ordinal_idx) {
             entry.name = pe.read_rva_string(data, name_rva_val);
