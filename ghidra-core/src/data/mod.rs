@@ -241,12 +241,27 @@ impl CategoryPath {
         }
     }
 
+    /// Returns the canonical path string for this category.
+    pub fn get_path(&self) -> String {
+        self.display_name()
+    }
+
+    /// Returns the path elements from root downward.
+    pub fn get_path_elements(&self) -> &[String] {
+        &self.segments
+    }
+
     /// The leaf name (last segment), or `"/"` if root.
     pub fn name(&self) -> String {
         self.segments
             .last()
             .cloned()
             .unwrap_or_else(|| "/".to_string())
+    }
+
+    /// Returns the leaf category name.
+    pub fn get_name(&self) -> String {
+        self.name()
     }
 
     /// Append a sub-category to this path, returning a new path.
@@ -256,6 +271,11 @@ impl CategoryPath {
         Self {
             segments: new_segments,
         }
+    }
+
+    /// Alias for [`CategoryPath::append`] matching Ghidra-style naming.
+    pub fn extend(&self, segment: impl Into<String>) -> Self {
+        self.append(segment)
     }
 
     /// Get the parent category path, or `None` if already at root.
@@ -269,6 +289,16 @@ impl CategoryPath {
                 segments: parent_segments,
             })
         }
+    }
+
+    /// Returns true if this category is an ancestor of another category.
+    pub fn is_ancestor_of(&self, other: &CategoryPath) -> bool {
+        self.segments.len() < other.segments.len() && other.segments.starts_with(&self.segments)
+    }
+
+    /// Returns true if this category is a descendant of another category.
+    pub fn is_descendant_of(&self, other: &CategoryPath) -> bool {
+        other.is_ancestor_of(self)
     }
 
     /// Number of path segments (depth below root).
@@ -305,12 +335,168 @@ impl From<String> for CategoryPath {
 // DataTypePath  (compatibility type)
 // ============================================================================
 
-/// Alias: Ghidra's `DataTypePath` has the same role as `CategoryPath` in
-/// the Rust port.  Prefer `CategoryPath` for new code.
+/// A fully qualified data type path consisting of a category path and type name.
 ///
-/// This alias exists so that existing code referencing `DataTypePath`
-/// continues to compile.
-pub type DataTypePath = CategoryPath;
+/// This matches Ghidra's `DataTypePath` concept more closely than a bare
+/// category path while remaining lightweight and additive.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DataTypePath {
+    /// The category path containing the data type.
+    pub category_path: CategoryPath,
+    /// The terminal data type name.
+    pub data_type_name: String,
+}
+
+impl DataTypePath {
+    /// Create a new fully-qualified data type path.
+    pub fn new(category_path: CategoryPath, data_type_name: impl Into<String>) -> Self {
+        Self {
+            category_path,
+            data_type_name: data_type_name.into(),
+        }
+    }
+
+    /// Create a path from slash-delimited text like `/ns1/ns2/MyType`.
+    pub fn from_path(path: &str) -> Self {
+        let mut segments: Vec<String> = path
+            .split('/')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(ToOwned::to_owned)
+            .collect();
+        let data_type_name = segments.pop().unwrap_or_default();
+        Self {
+            category_path: CategoryPath::from_segments(segments),
+            data_type_name,
+        }
+    }
+
+    /// Returns the category path.
+    pub fn get_category_path(&self) -> &CategoryPath {
+        &self.category_path
+    }
+
+    /// Returns the data type name.
+    pub fn get_data_type_name(&self) -> &str {
+        &self.data_type_name
+    }
+
+    /// Returns the full path name as a string.
+    pub fn get_path(&self) -> String {
+        self.as_path_string()
+    }
+
+    /// Returns the path elements including the terminal data type name.
+    pub fn get_path_elements(&self) -> Vec<String> {
+        let mut elements = self.category_path.segments.clone();
+        elements.push(self.data_type_name.clone());
+        elements
+    }
+
+    /// Returns the parent category path.
+    pub fn parent(&self) -> &CategoryPath {
+        &self.category_path
+    }
+
+    /// Returns the fully-qualified slash-delimited path.
+    pub fn as_path_string(&self) -> String {
+        if self.category_path.is_root() {
+            format!("/{}", self.data_type_name)
+        } else {
+            format!("{}/{}", self.category_path.display_name(), self.data_type_name)
+        }
+    }
+
+    /// Returns true if the path points into the root category.
+    pub fn is_root_category_path(&self) -> bool {
+        self.category_path.is_root()
+    }
+}
+
+impl fmt::Display for DataTypePath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_path_string())
+    }
+}
+
+impl From<&str> for DataTypePath {
+    fn from(path: &str) -> Self {
+        Self::from_path(path)
+    }
+}
+
+impl From<String> for DataTypePath {
+    fn from(path: String) -> Self {
+        Self::from_path(&path)
+    }
+}
+
+impl From<(&CategoryPath, &str)> for DataTypePath {
+    fn from((category_path, data_type_name): (&CategoryPath, &str)) -> Self {
+        Self::new(category_path.clone(), data_type_name)
+    }
+}
+
+impl From<(CategoryPath, String)> for DataTypePath {
+    fn from((category_path, data_type_name): (CategoryPath, String)) -> Self {
+        Self::new(category_path, data_type_name)
+    }
+}
+
+impl From<DataTypePath> for CategoryPath {
+    fn from(path: DataTypePath) -> Self {
+        path.category_path
+    }
+}
+
+impl AsRef<CategoryPath> for DataTypePath {
+    fn as_ref(&self) -> &CategoryPath {
+        &self.category_path
+    }
+}
+
+impl std::str::FromStr for DataTypePath {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_path(s))
+    }
+}
+
+impl CategoryPath {
+    /// Create a fully-qualified data type path beneath this category.
+    pub fn datatype(&self, data_type_name: impl Into<String>) -> DataTypePath {
+        DataTypePath::new(self.clone(), data_type_name)
+    }
+}
+
+impl DataTypePath {
+    /// Returns the category portion as a borrowed category path.
+    pub fn category(&self) -> &CategoryPath {
+        &self.category_path
+    }
+}
+
+impl From<DataTypePath> for String {
+    fn from(path: DataTypePath) -> Self {
+        path.as_path_string()
+    }
+}
+
+/// Additive helper methods for any `DataTypeManager` implementor.
+pub trait DataTypeManagerExt: types::DataTypeManager {
+    /// Resolve a data type using a `DataTypePath` value.
+    fn resolve_path(&self, path: &DataTypePath) -> Option<std::sync::Arc<dyn types::DataType>> {
+        self.resolve(&path.as_path_string())
+    }
+
+    /// Returns true if a fully-qualified `DataTypePath` exists.
+    fn contains_path(&self, path: &DataTypePath) -> bool {
+        self.contains(&path.as_path_string())
+    }
+}
+
+impl<T> DataTypeManagerExt for T where T: types::DataTypeManager + ?Sized {}
 
 // ============================================================================
 // DataOrganization  (minimal)

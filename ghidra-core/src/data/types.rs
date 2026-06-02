@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 // Import path types and utilities from the parent module.
 use super::{
-    align_up, CategoryPath,
+    align_up, CategoryPath, DataTypePath,
 };
 
 // ============================================================================
@@ -94,6 +94,16 @@ pub trait DataType: fmt::Debug + fmt::Display + Send + Sync + 'static {
 
     /// Set the category path for this type.
     fn set_category_path(&mut self, path: CategoryPath);
+
+    /// Returns the fully-qualified data type path.
+    fn get_data_type_path(&self) -> DataTypePath {
+        DataTypePath::new(self.get_category_path().clone(), self.name())
+    }
+
+    /// Returns the fully-qualified path name as a string.
+    fn get_path_name(&self) -> String {
+        self.get_data_type_path().as_path_string()
+    }
 
     /// Returns a short mnemonic suitable for display in listings.
     fn mnemonic(&self) -> String {
@@ -447,13 +457,31 @@ impl DataTypeComponent {
     pub fn padding(offset: usize, size: usize, ordinal: usize) -> Self {
         Self {
             field_name: format!("padding_{}", ordinal),
-            data_type: Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Undefined1)),
+            data_type: Arc::new(UndefinedDataType::new(size)),
             offset,
             ordinal,
             comment: Some(format!("{} byte(s) padding", size)),
             bitfield: None,
         }
     }
+
+    /// The field name of this component.
+    pub fn get_field_name(&self) -> &str { &self.field_name }
+
+    /// The component data type.
+    pub fn get_data_type(&self) -> &Arc<dyn DataType> { &self.data_type }
+
+    /// The ordinal index within the parent composite.
+    pub fn get_ordinal(&self) -> usize { self.ordinal }
+
+    /// The starting offset of this component.
+    pub fn get_offset(&self) -> usize { self.offset }
+
+    /// Optional comment attached to this component.
+    pub fn get_comment(&self) -> Option<&str> { self.comment.as_deref() }
+
+    /// Optional bitfield metadata.
+    pub fn get_bitfield_info(&self) -> Option<&BitfieldInfo> { self.bitfield.as_ref() }
 
     /// The size of this component in bytes.
     pub fn get_size(&self) -> usize { self.data_type.get_size() }
@@ -466,6 +494,14 @@ impl DataTypeComponent {
 
     /// The end offset (exclusive) of this component within its parent.
     pub fn end_offset(&self) -> usize { self.offset + self.get_size() }
+
+    /// Returns true if this component is compiler-inserted padding.
+    pub fn is_padding(&self) -> bool { self.field_name.starts_with("padding_") }
+
+    /// Returns true if the given parent-relative offset falls within this component.
+    pub fn contains_offset(&self, offset: usize) -> bool {
+        offset >= self.offset && offset < self.end_offset()
+    }
 
     /// Set a comment on this component (builder pattern).
     pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
@@ -657,6 +693,19 @@ impl StructureDataType {
     /// Returns a reference to all component fields.
     pub fn get_components(&self) -> &[DataTypeComponent] { &self.components }
 
+    /// Returns a component by ordinal.
+    pub fn get_component(&self, ordinal: usize) -> Option<&DataTypeComponent> {
+        self.components.get(ordinal)
+    }
+
+    /// Returns the number of components, including padding.
+    pub fn get_num_components(&self) -> usize { self.components.len() }
+
+    /// Returns the number of defined components, excluding padding.
+    pub fn get_num_defined_components(&self) -> usize {
+        self.components.iter().filter(|c| !c.is_padding()).count()
+    }
+
     /// Get a component by its field name.
     pub fn get_component_by_name(&self, name: &str) -> Option<&DataTypeComponent> {
         self.components.iter().find(|c| c.field_name == name)
@@ -667,10 +716,31 @@ impl StructureDataType {
         self.components.iter().find(|c| c.offset == offset)
     }
 
+    /// Get the component containing a given byte offset.
+    pub fn get_component_containing(&self, offset: usize) -> Option<&DataTypeComponent> {
+        self.components.iter().find(|c| c.contains_offset(offset))
+    }
+
+    /// Returns true if a component starts at the given byte offset.
+    pub fn has_component_at(&self, offset: usize) -> bool {
+        self.get_component_at(offset).is_some()
+    }
+
+    /// Returns true if any component covers the given byte offset.
+    pub fn has_component_containing(&self, offset: usize) -> bool {
+        self.get_component_containing(offset).is_some()
+    }
+
     /// Number of defined fields (excluding padding).
     pub fn num_defined_fields(&self) -> usize {
-        self.components.iter().filter(|c| !c.field_name.starts_with("padding_")).count()
+        self.components.iter().filter(|c| !c.is_padding()).count()
     }
+
+    /// Number of total components, including padding.
+    pub fn num_components(&self) -> usize { self.components.len() }
+
+    /// Returns true if the structure currently has no components.
+    pub fn is_empty(&self) -> bool { self.components.is_empty() }
 
     /// Delete a field by ordinal, recomputing layout.
     pub fn delete_field(&mut self, ordinal: usize) -> bool {
@@ -804,6 +874,17 @@ impl UnionDataType {
     pub fn get_member_by_name(&self, name: &str) -> Option<&DataTypeComponent> {
         self.members.iter().find(|m| m.field_name == name)
     }
+
+    /// Get a member by ordinal.
+    pub fn get_member(&self, ordinal: usize) -> Option<&DataTypeComponent> {
+        self.members.get(ordinal)
+    }
+
+    /// Returns true if the union contains no members.
+    pub fn is_empty(&self) -> bool { self.members.is_empty() }
+
+    /// Number of union members.
+    pub fn member_count(&self) -> usize { self.members.len() }
 }
 
 impl DataType for UnionDataType {
@@ -887,6 +968,17 @@ impl EnumDataType {
 
     /// Number of defined values.
     pub fn value_count(&self) -> usize { self.values.len() }
+
+    /// Returns true if the enum defines no named values.
+    pub fn is_empty(&self) -> bool { self.values.is_empty() }
+
+    /// Returns true if a named value exists.
+    pub fn contains_name(&self, name: &str) -> bool { self.values.contains_key(name) }
+
+    /// Returns true if any enum member maps to the given numeric value.
+    pub fn contains_value(&self, value: i64) -> bool {
+        self.values.values().any(|&candidate| candidate == value)
+    }
 
     pub fn with_bitmask(mut self) -> Self { self.is_bitmask = true; self }
     pub fn set_bitmask(&mut self, is_bitmask: bool) { self.is_bitmask = is_bitmask; }
@@ -1232,6 +1324,16 @@ impl FunctionDefinitionDataType {
     pub fn iter_parameters(&self) -> impl Iterator<Item = &FunctionParameter> {
         self.parameters.iter()
     }
+
+    /// Get a parameter by ordinal.
+    pub fn get_parameter(&self, ordinal: usize) -> Option<&FunctionParameter> {
+        self.parameters.get(ordinal)
+    }
+
+    /// Find a parameter by name.
+    pub fn get_parameter_by_name(&self, name: &str) -> Option<&FunctionParameter> {
+        self.parameters.iter().find(|param| param.name == name)
+    }
 }
 
 impl DataType for FunctionDefinitionDataType {
@@ -1563,9 +1665,17 @@ impl DataTypeNode {
 
     pub fn add_child(&mut self, child: DataTypeNode) { self.children.push(child); }
 
+    pub fn child_count(&self) -> usize { self.children.len() }
+
     pub fn find_child(&self, name: &str) -> Option<&DataTypeNode> {
         self.children.iter().find(|c| c.name == name)
     }
+
+    pub fn get_child(&self, index: usize) -> Option<&DataTypeNode> {
+        self.children.get(index)
+    }
+
+    pub fn has_children(&self) -> bool { !self.children.is_empty() }
 
     pub fn leaf_count(&self) -> usize {
         if self.children.is_empty() {
@@ -2146,8 +2256,65 @@ mod tests {
         assert_eq!(tree.name, "/");
         assert!(!tree.is_leaf());
         assert_eq!(tree.children.len(), 5);
+        assert_eq!(tree.child_count(), 5);
+        assert!(tree.has_children());
+        assert!(tree.get_child(0).is_some());
         let total_leaves: usize = tree.children.iter().map(|c| c.leaf_count()).sum();
         assert_eq!(total_leaves, 30);
+    }
+
+    #[test]
+    fn test_component_contains_offset_and_padding() {
+        let padding = DataTypeComponent::padding(4, 2, 0);
+        assert!(padding.is_padding());
+        assert!(padding.contains_offset(4));
+        assert!(padding.contains_offset(5));
+        assert!(!padding.contains_offset(6));
+        assert_eq!(padding.end_offset(), 6);
+    }
+
+    #[test]
+    fn test_structure_component_queries() {
+        let mut s = StructureDataType::new("query");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        s.add_field("a", int_type);
+        s.add_field("b", char_type);
+        assert_eq!(s.num_components(), 2);
+        assert!(!s.is_empty());
+        assert!(s.has_component_at(0));
+        assert!(s.has_component_containing(4));
+        assert_eq!(s.get_component_containing(4).map(|c| c.field_name.as_str()), Some("b"));
+    }
+
+    #[test]
+    fn test_union_member_queries() {
+        let mut u = UnionDataType::new("u");
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        assert!(u.is_empty());
+        u.add_member("value", int_type);
+        assert_eq!(u.member_count(), 1);
+        assert_eq!(u.get_member(0).map(|m| m.field_name.as_str()), Some("value"));
+    }
+
+    #[test]
+    fn test_enum_contains_helpers() {
+        let mut e = EnumDataType::new("flags", 4);
+        assert!(e.is_empty());
+        e.add_value("READ", 1);
+        assert!(e.contains_name("READ"));
+        assert!(e.contains_value(1));
+        assert!(!e.contains_value(2));
+    }
+
+    #[test]
+    fn test_function_definition_parameter_lookup() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let mut func = FunctionDefinitionDataType::new("sum", int_type.clone());
+        func.add_parameter("lhs", int_type.clone());
+        func.add_parameter("rhs", int_type);
+        assert_eq!(func.get_parameter(1).map(|p| p.name.as_str()), Some("rhs"));
+        assert_eq!(func.get_parameter_by_name("lhs").map(|p| p.ordinal), Some(0));
     }
 
     #[test]

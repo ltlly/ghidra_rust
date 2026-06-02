@@ -32,6 +32,21 @@ impl AddressSpace {
     pub fn ram() -> Self {
         Self::new("ram", 8, false)
     }
+
+    /// Returns the address space name.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the pointer size for this space in bytes.
+    pub fn get_pointer_size(&self) -> usize {
+        self.pointer_size
+    }
+
+    /// Returns true if this space is big-endian.
+    pub fn is_big_endian(&self) -> bool {
+        self.big_endian
+    }
 }
 
 impl fmt::Display for AddressSpace {
@@ -124,7 +139,164 @@ impl Address {
     pub fn prev(&self) -> Self {
         self.sub(1)
     }
+
+    /// Returns the unsigned offset of this address.
+    pub fn get_offset(&self) -> u64 {
+        self.offset
+    }
+
+    /// Returns the word offset using the given addressable unit size.
+    pub fn get_addressable_word_offset(&self, unit_size: u64) -> u64 {
+        if unit_size == 0 {
+            self.offset
+        } else {
+            self.offset / unit_size
+        }
+    }
+
+    /// Returns true if `other` is the next address after this one.
+    pub fn is_successor(&self, other: &Address) -> bool {
+        self.offset.wrapping_add(1) == other.offset
+    }
+
+    /// Returns true if `other` is the previous address before this one.
+    pub fn is_predecessor(&self, other: &Address) -> bool {
+        self.offset.wrapping_sub(1) == other.offset
+    }
 }
+
+impl std::ops::Add<u64> for Address {
+    type Output = Address;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Address::new(self.offset.wrapping_add(rhs))
+    }
+}
+
+impl std::ops::Sub<u64> for Address {
+    type Output = Address;
+
+    fn sub(self, rhs: u64) -> Self::Output {
+        Address::new(self.offset.wrapping_sub(rhs))
+    }
+}
+
+impl std::ops::Sub<Address> for Address {
+    type Output = i64;
+
+    fn sub(self, rhs: Address) -> Self::Output {
+        self.subtract(&rhs)
+    }
+}
+
+impl std::ops::AddAssign<u64> for Address {
+    fn add_assign(&mut self, rhs: u64) {
+        self.offset = self.offset.wrapping_add(rhs);
+    }
+}
+
+impl std::ops::SubAssign<u64> for Address {
+    fn sub_assign(&mut self, rhs: u64) {
+        self.offset = self.offset.wrapping_sub(rhs);
+    }
+}
+
+impl std::str::FromStr for Address {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        let trimmed = trimmed
+            .strip_prefix("0x")
+            .or_else(|| trimmed.strip_prefix("0X"))
+            .unwrap_or(trimmed);
+        u64::from_str_radix(trimmed, 16).map(Address::new)
+    }
+}
+
+impl From<usize> for Address {
+    fn from(offset: usize) -> Self {
+        Address::new(offset as u64)
+    }
+}
+
+impl From<Address> for usize {
+    fn from(addr: Address) -> Self {
+        addr.offset as usize
+    }
+}
+
+impl From<i64> for Address {
+    fn from(offset: i64) -> Self {
+        Address::new(offset as u64)
+    }
+}
+
+impl From<Address> for i64 {
+    fn from(addr: Address) -> Self {
+        addr.offset as i64
+    }
+}
+
+impl PartialEq<u64> for Address {
+    fn eq(&self, other: &u64) -> bool {
+        self.offset == *other
+    }
+}
+
+impl PartialEq<Address> for u64 {
+    fn eq(&self, other: &Address) -> bool {
+        *self == other.offset
+    }
+}
+
+impl PartialOrd<u64> for Address {
+    fn partial_cmp(&self, other: &u64) -> Option<std::cmp::Ordering> {
+        self.offset.partial_cmp(other)
+    }
+}
+
+impl PartialOrd<Address> for u64 {
+    fn partial_cmp(&self, other: &Address) -> Option<std::cmp::Ordering> {
+        self.partial_cmp(&other.offset)
+    }
+}
+
+impl From<std::ops::RangeInclusive<u64>> for AddressRange {
+    fn from(range: std::ops::RangeInclusive<u64>) -> Self {
+        AddressRange::new(Address::new(*range.start()), Address::new(*range.end()))
+    }
+}
+
+impl IntoIterator for AddressRange {
+    type Item = Address;
+    type IntoIter = AddressRangeIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a AddressRange {
+    type Item = Address;
+    type IntoIter = AddressRangeIterator;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl ExactSizeIterator for AddressRangeIterator {
+    fn len(&self) -> usize {
+        if self.current > self.end {
+            0
+        } else {
+            (self.end - self.current + 1) as usize
+        }
+    }
+}
+
+impl std::iter::FusedIterator for AddressRangeIterator {}
 
 impl fmt::Display for Address {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -185,9 +357,51 @@ impl AddressRange {
         self.end.offset < self.start.offset
     }
 
+    /// Returns the minimum (inclusive) address of the range.
+    pub fn get_min_address(&self) -> Address {
+        self.start
+    }
+
+    /// Returns the maximum (inclusive) address of the range.
+    pub fn get_max_address(&self) -> Address {
+        self.end
+    }
+
+    /// Returns true if the range consists of exactly one address.
+    pub fn is_singleton(&self) -> bool {
+        !self.is_empty() && self.start == self.end
+    }
+
     /// Check if an address is within this range.
     pub fn contains(&self, addr: &Address) -> bool {
         addr.offset >= self.start.offset && addr.offset <= self.end.offset
+    }
+
+    /// Returns true if this range fully contains another range.
+    pub fn contains_range(&self, other: &AddressRange) -> bool {
+        !other.is_empty()
+            && !self.is_empty()
+            && self.start.offset <= other.start.offset
+            && self.end.offset >= other.end.offset
+    }
+
+    /// Returns true if this range overlaps another range.
+    pub fn intersects(&self, other: &AddressRange) -> bool {
+        !self.is_empty()
+            && !other.is_empty()
+            && self.start.offset <= other.end.offset
+            && other.start.offset <= self.end.offset
+    }
+
+    /// Returns the overlapping portion of two ranges, if any.
+    pub fn intersection(&self, other: &AddressRange) -> Option<AddressRange> {
+        if !self.intersects(other) {
+            return None;
+        }
+        Some(AddressRange::new(
+            Address::new(self.start.offset.max(other.start.offset)),
+            Address::new(self.end.offset.min(other.end.offset)),
+        ))
     }
 
     /// Iterate over all addresses in the range.

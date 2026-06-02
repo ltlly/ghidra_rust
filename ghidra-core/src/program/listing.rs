@@ -1035,6 +1035,11 @@ impl BookmarkManager {
     pub fn num_bookmarks(&self) -> usize {
         self.bookmarks.values().map(|v| v.len()).sum()
     }
+
+    /// Returns all addresses that currently have one or more bookmarks.
+    pub fn get_bookmark_addresses(&self) -> Vec<Address> {
+        self.bookmarks.keys().copied().collect()
+    }
 }
 
 // ============================================================================
@@ -1922,6 +1927,16 @@ impl Data {
         self.component_path.len()
     }
 
+    /// Returns true if this data item has any child components.
+    pub fn has_components(&self) -> bool {
+        !self.components.is_empty()
+    }
+
+    /// Returns true if this data item is the top-level/root data object.
+    pub fn is_root(&self) -> bool {
+        self.parent.is_none() && self.component_path.is_empty()
+    }
+
     /// Returns true if this has a string value (the data type produces a String).
     pub fn has_string_value(&self) -> bool {
         self.data_type_name.contains("string")
@@ -2173,6 +2188,27 @@ impl InMemoryListing {
             })
             .collect()
     }
+
+    /// Number of stored code units.
+    pub fn code_unit_count(&self) -> usize { self.code_units.len() }
+
+    /// Number of stored instructions.
+    pub fn instruction_count(&self) -> usize { self.instructions.len() }
+
+    /// Number of stored data items.
+    pub fn data_count(&self) -> usize { self.data_items.len() }
+
+    /// Returns true if a code unit starts at the given address.
+    pub fn has_code_unit_at(&self, addr: &Address) -> bool { self.code_units.contains_key(addr) }
+
+    /// Returns true if an instruction starts at the given address.
+    pub fn has_instruction_at(&self, addr: &Address) -> bool { self.instructions.contains_key(addr) }
+
+    /// Returns true if a data item starts at the given address.
+    pub fn has_data_at(&self, addr: &Address) -> bool { self.data_items.contains_key(addr) }
+
+    /// Number of addresses with at least one stored comment.
+    pub fn comment_address_count(&self) -> usize { self.comments.len() }
 }
 
 impl Listing for InMemoryListing {
@@ -2632,6 +2668,31 @@ impl Function {
             .count()
     }
 
+    /// Find a parameter by name.
+    pub fn get_parameter_by_name(&self, name: &str) -> Option<&Parameter> {
+        self.parameters.iter().find(|param| param.name() == name)
+    }
+
+    /// Find a local variable by name.
+    pub fn get_local_variable_by_name(&self, name: &str) -> Option<&LocalVariable> {
+        self.local_variables.iter().find(|local| local.name() == name)
+    }
+
+    /// Number of local variables.
+    pub fn get_local_variable_count(&self) -> usize {
+        self.local_variables.len()
+    }
+
+    /// Returns true if the given tag name is applied to the function.
+    pub fn has_tag_named(&self, tag_name: &str) -> bool {
+        self.tags.iter().any(|tag| tag.name == tag_name)
+    }
+
+    /// End address of the function body.
+    pub fn get_body_end(&self) -> Address {
+        self.body.end
+    }
+
     /// Returns true if the given address is contained in this function's body.
     pub fn contains_address(&self, addr: &Address) -> bool {
         self.body.contains(addr)
@@ -2967,6 +3028,28 @@ impl FunctionManager {
     /// Get all functions.
     pub fn get_functions(&self) -> Vec<&Function> {
         self.functions.values().collect()
+    }
+
+    /// Returns true if the manager currently contains no functions.
+    pub fn is_empty(&self) -> bool {
+        self.functions.is_empty()
+    }
+
+    /// Get the first function by entry-point order.
+    pub fn get_first_function(&self) -> Option<&Function> {
+        self.functions
+            .keys()
+            .min()
+            .and_then(|entry| self.functions.get(entry))
+    }
+
+    /// Get the next function after the given entry point.
+    pub fn get_function_after(&self, entry_point: &Address) -> Option<&Function> {
+        self.functions
+            .iter()
+            .filter(|(entry, _)| *entry > entry_point)
+            .min_by_key(|(entry, _)| *entry)
+            .map(|(_, func)| func)
     }
 
     /// Get all function entry points.
@@ -3504,6 +3587,67 @@ mod tests {
         let func = mgr.get_function_containing(&Address::new(0x1010));
         assert!(func.is_some());
         assert_eq!(func.unwrap().name, "main");
+    }
+
+    #[test]
+    fn test_function_convenience_helpers() {
+        let body = AddressRange::new(Address::new(0x1000), Address::new(0x1021));
+        let int_type = make_int_type();
+        let local = LocalVariable::new("tmp", Some(int_type.clone()), SourceType::Analysis);
+        let func = Function::new("main", Address::new(0x1000), body)
+            .with_parameter(Parameter::new("argc", Some(int_type.clone()), 0, SourceType::UserDefined))
+            .with_local(local)
+            .with_tag(FunctionTag::new("entry"));
+
+        assert_eq!(func.get_parameter_by_name("argc").map(|p| p.ordinal), Some(0));
+        assert_eq!(func.get_local_variable_by_name("tmp").map(|v| v.name()), Some("tmp"));
+        assert_eq!(func.get_local_variable_count(), 1);
+        assert!(func.has_tag_named("entry"));
+        assert_eq!(func.get_body_end(), Address::new(0x1021));
+    }
+
+    #[test]
+    fn test_listing_collection_helpers() {
+        let addr = Address::new(0x1000);
+        let mut listing = InMemoryListing::new();
+        listing.create_code_unit(addr, 1, vec![0x90]).unwrap();
+        listing.instructions.insert(addr, Instruction::new(addr, 1, vec![0x90], "nop"));
+        listing.data_items.insert(addr, Data::new(addr, 1, None));
+        listing.set_comment(addr, CommentType::Eol, Some("note".to_string()));
+
+        assert_eq!(listing.code_unit_count(), 1);
+        assert_eq!(listing.instruction_count(), 1);
+        assert_eq!(listing.data_count(), 1);
+        assert!(listing.has_code_unit_at(&addr));
+        assert!(listing.has_instruction_at(&addr));
+        assert!(listing.has_data_at(&addr));
+        assert_eq!(listing.comment_address_count(), 1);
+    }
+
+    #[test]
+    fn test_data_convenience_helpers() {
+        let child = Data::new(Address::new(0x1001), 1, Some(make_char_type()));
+        let mut root = Data::new(Address::new(0x1000), 2, Some(make_int_type()));
+        root.components.push(child);
+
+        assert!(root.has_components());
+        assert!(root.is_root());
+        assert!(!root.get_component(0).unwrap().has_components());
+    }
+
+    #[test]
+    fn test_function_manager_navigation_helpers() {
+        let mut mgr = FunctionManager::new();
+        let body1 = AddressRange::new(Address::new(0x1000), Address::new(0x1005));
+        let body2 = AddressRange::new(Address::new(0x2000), Address::new(0x2005));
+        assert!(mgr.is_empty());
+        mgr.create_function(Some("first"), Address::new(0x1000), body1, SourceType::UserDefined)
+            .unwrap();
+        mgr.create_function(Some("second"), Address::new(0x2000), body2, SourceType::UserDefined)
+            .unwrap();
+
+        assert_eq!(mgr.get_first_function().map(|f| f.name.as_str()), Some("first"));
+        assert_eq!(mgr.get_function_after(&Address::new(0x1000)).map(|f| f.name.as_str()), Some("second"));
     }
 
     // ---- StackFrame tests ----

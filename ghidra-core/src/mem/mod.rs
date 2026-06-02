@@ -13,7 +13,7 @@
 //! * **Bit-Mapped** — bytes correspond to individual bits in another memory region.
 //! * **Overlay** — alternate content for a physical memory region in a different execution context.
 
-use crate::addr::{Address, AddressRange};
+use crate::addr::{Address, AddressRange, AddressRangeIterator};
 use crate::error::GhidraError;
 use std::collections::HashMap;
 use std::fmt;
@@ -568,6 +568,76 @@ impl MemoryBlockSourceInfo {
         }
     }
 
+    /// Returns the minimum mapped address for this source.
+    pub fn get_min_address(&self) -> Address {
+        self.min_address
+    }
+
+    /// Returns the maximum mapped address for this source.
+    pub fn get_max_address(&self) -> Address {
+        self.max_address
+    }
+
+    /// Returns the mapped length in bytes.
+    pub fn get_length(&self) -> u64 {
+        self.length
+    }
+
+    /// Returns the backing file bytes identifier, if present.
+    pub fn get_file_bytes_id(&self) -> Option<u64> {
+        self.file_bytes_id
+    }
+
+    /// Returns the starting offset into the underlying file bytes, if any.
+    pub fn get_file_bytes_offset(&self) -> Option<u64> {
+        (self.file_bytes_offset >= 0).then_some(self.file_bytes_offset as u64)
+    }
+
+    /// Returns the mapped source address range, if this source is mapped.
+    pub fn get_mapped_range(&self) -> Option<AddressRange> {
+        self.mapped_range
+    }
+
+    /// Returns the byte mapping scheme, if this source is byte-mapped.
+    pub fn get_byte_mapping_scheme(&self) -> Option<&ByteMappingScheme> {
+        self.byte_mapping_scheme.as_ref()
+    }
+
+    /// Returns true if this source is byte-mapped.
+    pub fn is_byte_mapped(&self) -> bool {
+        self.byte_mapping_scheme.is_some()
+    }
+
+    /// Returns true if this source is bit-mapped.
+    pub fn is_bit_mapped(&self) -> bool {
+        self.mapped_range.is_some() && self.byte_mapping_scheme.is_none()
+    }
+
+    /// Returns true if this source is any mapped source (bit or byte mapped).
+    pub fn is_mapped(&self) -> bool {
+        self.mapped_range.is_some()
+    }
+
+    /// Returns true if this source has file bytes backing.
+    pub fn has_file_bytes(&self) -> bool {
+        self.file_bytes_id.is_some() && self.file_bytes_offset >= 0
+    }
+
+    /// Returns true if the source describes a single contiguous file-backed range.
+    pub fn is_file_bytes_range(&self) -> bool {
+        self.has_file_bytes() && !self.is_mapped()
+    }
+
+    /// Returns the source description string.
+    pub fn get_description(&self) -> &str {
+        &self.description
+    }
+
+    /// Returns the address range covered by this source.
+    pub fn get_address_range(&self) -> AddressRange {
+        AddressRange::new(self.min_address, self.max_address)
+    }
+
     /// Create a source info for a byte-mapped block.
     pub fn new_byte_mapped(
         length: u64,
@@ -845,6 +915,438 @@ impl MemoryBlock {
     /// Whether this is the reserved EXTERNAL block.
     pub fn is_external_block(&self) -> bool {
         self.name == EXTERNAL_BLOCK_NAME
+    }
+
+    /// Returns the block name.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the block comment.
+    pub fn get_comment(&self) -> &str {
+        &self.comment
+    }
+
+    /// Returns the block source name.
+    pub fn get_source_name(&self) -> &str {
+        &self.source_name
+    }
+
+    /// Returns the underlying block type.
+    pub fn get_type(&self) -> MemoryBlockType {
+        self.block_type
+    }
+
+    /// Returns the minimum address of the block.
+    pub fn get_start(&self) -> Address {
+        self.start()
+    }
+
+    /// Returns the maximum address of the block.
+    pub fn get_end(&self) -> Address {
+        self.end()
+    }
+
+    /// Returns the address range occupied by the block.
+    pub fn get_address_range(&self) -> AddressRange {
+        self.range
+    }
+
+    /// Returns the start offset within the address space.
+    pub fn get_start_offset(&self) -> u64 {
+        self.start().offset
+    }
+
+    /// Returns the end offset within the address space.
+    pub fn get_end_offset(&self) -> u64 {
+        self.end().offset
+    }
+
+    /// Returns the block size in bytes.
+    pub fn get_size(&self) -> u64 {
+        self.size()
+    }
+
+    /// Returns true if this block has initialized contents.
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
+    /// Returns true if this block belongs to an overlay space.
+    pub fn is_overlay(&self) -> bool {
+        self.is_overlay
+    }
+
+    /// Returns true if this block is loaded into memory.
+    pub fn is_loaded(&self) -> bool {
+        self.is_loaded
+    }
+
+    /// Returns true if this is a default memory block.
+    pub fn is_default(&self) -> bool {
+        matches!(self.block_type, MemoryBlockType::Default)
+    }
+
+    /// Returns true if this is a byte-mapped block.
+    pub fn is_byte_mapped(&self) -> bool {
+        matches!(self.block_type, MemoryBlockType::ByteMapped)
+    }
+
+    /// Returns true if this is a bit-mapped block.
+    pub fn is_bit_mapped(&self) -> bool {
+        matches!(self.block_type, MemoryBlockType::BitMapped)
+    }
+
+    /// Returns the mapped source base address for mapped blocks.
+    pub fn get_mapped_source_base(&self) -> Option<Address> {
+        self.mapped_source_base
+    }
+
+    /// Returns the byte mapping scheme for mapped blocks.
+    pub fn get_byte_mapping_scheme(&self) -> Option<&ByteMappingScheme> {
+        self.mapping_scheme.as_ref()
+    }
+
+    /// Returns all block source descriptors.
+    pub fn get_source_infos(&self) -> &[MemoryBlockSourceInfo] {
+        &self.source_infos
+    }
+
+    /// Returns the first block source descriptor, if any.
+    pub fn get_source_info(&self) -> Option<&MemoryBlockSourceInfo> {
+        self.source_infos.first()
+    }
+
+    /// Returns true if the block has one or more source descriptors.
+    pub fn has_source_infos(&self) -> bool {
+        !self.source_infos.is_empty()
+    }
+
+    /// Returns the permission and attribute flags bitmask.
+    pub fn get_flags(&self) -> u8 {
+        self.flags
+    }
+
+    /// Returns true if the block has any of the given flags set.
+    pub fn has_any_flags(&self, flags: u8) -> bool {
+        (self.flags & flags) != 0
+    }
+
+    /// Returns true if the block has all of the given flags set.
+    pub fn has_all_flags(&self, flags: u8) -> bool {
+        (self.flags & flags) == flags
+    }
+
+    /// Returns the initialized byte slice when available.
+    pub fn get_data(&self) -> Option<&[u8]> {
+        self.initialized.then_some(self.data.as_slice())
+    }
+
+    /// Returns the initialized byte at the given block-relative offset.
+    pub fn get_byte_at_offset(&self, offset: u64) -> Option<u8> {
+        let index = usize::try_from(offset).ok()?;
+        self.data.get(index).copied()
+    }
+
+    /// Returns true if the given block-relative offset falls within this block.
+    pub fn contains_offset(&self, offset: u64) -> bool {
+        offset < self.size()
+    }
+
+    /// Returns the block-relative offset for a given address.
+    pub fn get_offset(&self, addr: &Address) -> Option<u64> {
+        self.contains(addr)
+            .then_some(addr.offset.saturating_sub(self.range.start.offset))
+    }
+
+    /// Returns the address corresponding to a block-relative offset.
+    pub fn get_address(&self, offset: u64) -> Option<Address> {
+        self.contains_offset(offset)
+            .then_some(self.range.start.add(offset))
+    }
+
+    /// Returns true if the given address lies on a block boundary.
+    pub fn is_block_start(&self, addr: &Address) -> bool {
+        *addr == self.range.start
+    }
+
+    /// Returns true if the given address is the last byte in the block.
+    pub fn is_block_end(&self, addr: &Address) -> bool {
+        *addr == self.range.end
+    }
+
+    /// Returns true if this block is contiguous with another block.
+    pub fn is_adjacent_to(&self, other: &MemoryBlock) -> bool {
+        self.end().next() == other.start() || other.end().next() == self.start()
+    }
+
+    /// Returns true if this block overlaps another block.
+    pub fn intersects(&self, other: &MemoryBlock) -> bool {
+        self.range.intersects(&other.range)
+    }
+
+    /// Returns the intersecting address range with another block, if any.
+    pub fn intersection(&self, other: &MemoryBlock) -> Option<AddressRange> {
+        self.range.intersection(&other.range)
+    }
+
+    /// Returns a compact permission string like `rwx`.
+    pub fn permissions_string(&self) -> String {
+        [
+            if self.is_read() { 'r' } else { '-' },
+            if self.is_write() { 'w' } else { '-' },
+            if self.is_execute() { 'x' } else { '-' },
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    /// Returns true if the block is any mapped form.
+    pub fn has_mapped_source(&self) -> bool {
+        self.mapped_source_base.is_some()
+    }
+
+    /// Returns true if the block maps a particular source address.
+    pub fn maps_source_address(&self, addr: &Address) -> bool {
+        self.source_infos.iter().any(|info| {
+            info.get_mapped_range()
+                .map(|range| range.contains(addr))
+                .unwrap_or(false)
+        })
+    }
+
+    /// Returns true if the block is backed by file bytes.
+    pub fn has_file_bytes(&self) -> bool {
+        self.source_infos.iter().any(MemoryBlockSourceInfo::has_file_bytes)
+    }
+
+    /// Returns the first source info containing the given file offset, if any.
+    pub fn get_source_info_for_file_offset(&self, file_offset: u64) -> Option<&MemoryBlockSourceInfo> {
+        self.source_infos
+            .iter()
+            .find(|info| info.contains_file_offset(file_offset))
+    }
+
+    /// Returns the first source info containing the given address, if any.
+    pub fn get_source_info_for_address(&self, addr: &Address) -> Option<&MemoryBlockSourceInfo> {
+        self.source_infos.iter().find(|info| info.contains(addr))
+    }
+
+    /// Returns the address corresponding to a file offset inside this block.
+    pub fn locate_address_for_file_offset(&self, file_offset: u64) -> Option<Address> {
+        self.get_source_info_for_file_offset(file_offset)
+            .and_then(|info| info.locate_address_for_file_offset(file_offset))
+    }
+
+    /// Returns true if this block covers the given file offset.
+    pub fn contains_file_offset(&self, file_offset: u64) -> bool {
+        self.get_source_info_for_file_offset(file_offset).is_some()
+    }
+
+    /// Returns the raw source descriptor count.
+    pub fn get_source_info_count(&self) -> usize {
+        self.source_infos.len()
+    }
+
+    /// Returns true if a given address lies within a source info entry.
+    pub fn contains_source_address(&self, addr: &Address) -> bool {
+        self.get_source_info_for_address(addr).is_some()
+    }
+
+    /// Returns a clone of the block with updated comment text.
+    pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
+        self.comment = comment.into();
+        self
+    }
+
+    /// Returns a clone of the block with updated source name text.
+    pub fn with_source_name(mut self, source_name: impl Into<String>) -> Self {
+        self.source_name = source_name.into();
+        self
+    }
+
+    /// Returns a clone of the block with updated loaded state.
+    pub fn with_loaded(mut self, is_loaded: bool) -> Self {
+        self.is_loaded = is_loaded;
+        self
+    }
+
+    /// Returns a clone of the block with updated overlay state.
+    pub fn with_overlay(mut self, is_overlay: bool) -> Self {
+        self.is_overlay = is_overlay;
+        self
+    }
+
+    /// Returns a clone of the block with updated flags.
+    pub fn with_flags(mut self, flags: u8) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Returns a clone of the block with appended source info.
+    pub fn with_source_info(mut self, info: MemoryBlockSourceInfo) -> Self {
+        self.source_infos.push(info);
+        self
+    }
+
+    /// Returns a clone of the block with replacement bytes, updating initialized state.
+    pub fn with_data(mut self, data: Vec<u8>) -> Self {
+        self.initialized = true;
+        self.data = data;
+        self
+    }
+
+    /// Returns the slice of initialized bytes for the requested offset range.
+    pub fn get_bytes_at_offset(&self, offset: u64, size: usize) -> Option<&[u8]> {
+        let start = usize::try_from(offset).ok()?;
+        let end = start.checked_add(size)?;
+        self.data.get(start..end)
+    }
+
+    /// Returns the block-relative range for a given source info entry.
+    pub fn get_source_info_address_ranges(&self) -> Vec<AddressRange> {
+        self.source_infos.iter().map(MemoryBlockSourceInfo::get_address_range).collect()
+    }
+
+    /// Returns true if the block has no address span.
+    pub fn is_empty(&self) -> bool {
+        self.range.is_empty()
+    }
+
+    /// Returns the source info descriptions associated with the block.
+    pub fn source_descriptions(&self) -> Vec<&str> {
+        self.source_infos.iter().map(|info| info.get_description()).collect()
+    }
+
+    /// Returns the first file-bytes identifier associated with the block, if any.
+    pub fn get_file_bytes_id(&self) -> Option<u64> {
+        self.source_infos.iter().find_map(MemoryBlockSourceInfo::get_file_bytes_id)
+    }
+
+    /// Returns the first file offset associated with the block, if any.
+    pub fn get_file_offset(&self) -> Option<u64> {
+        self.source_infos.iter().find_map(MemoryBlockSourceInfo::get_file_bytes_offset)
+    }
+
+    /// Returns true if the block has an associated comment.
+    pub fn has_comment(&self) -> bool {
+        !self.comment.is_empty()
+    }
+
+    /// Returns true if the block has an associated source name.
+    pub fn has_source_name(&self) -> bool {
+        !self.source_name.is_empty()
+    }
+
+    /// Returns true if the block contains initialized bytes at the given address.
+    pub fn is_initialized_address(&self, addr: &Address) -> bool {
+        self.get_offset(addr)
+            .and_then(|offset| usize::try_from(offset).ok())
+            .map(|offset| offset < self.data.len())
+            .unwrap_or(false)
+    }
+
+    /// Returns the number of initialized bytes currently materialized in the block.
+    pub fn initialized_length(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Returns true if the block is fully materialized for its declared size.
+    pub fn is_fully_initialized(&self) -> bool {
+        self.initialized && self.data.len() as u64 >= self.size()
+    }
+
+    /// Returns true if the block can satisfy read access.
+    pub fn is_readable(&self) -> bool {
+        self.is_read()
+    }
+
+    /// Returns true if the block can satisfy write access.
+    pub fn is_writable(&self) -> bool {
+        self.is_write()
+    }
+
+    /// Returns true if the block can satisfy execute access.
+    pub fn is_executable(&self) -> bool {
+        self.is_execute()
+    }
+
+    /// Returns true if this block shares any address with a range.
+    pub fn intersects_range(&self, range: &AddressRange) -> bool {
+        self.range.intersects(range)
+    }
+
+    /// Returns true if this block fully contains a range.
+    pub fn contains_range(&self, range: &AddressRange) -> bool {
+        self.range.contains_range(range)
+    }
+
+    /// Returns a subrange of this block starting at the given offset for the given size.
+    pub fn sub_range(&self, offset: u64, size: u64) -> Option<AddressRange> {
+        if size == 0 || !self.contains_offset(offset) {
+            return None;
+        }
+        let end_offset = offset.checked_add(size - 1)?;
+        if !self.contains_offset(end_offset) {
+            return None;
+        }
+        Some(AddressRange::new(self.start().add(offset), self.start().add(end_offset)))
+    }
+
+    /// Returns all addresses in the block as an iterator.
+    pub fn iter_addresses(&self) -> AddressRangeIterator {
+        self.range.iter()
+    }
+
+    /// Returns a clone of the source infos vector.
+    pub fn source_infos(&self) -> &[MemoryBlockSourceInfo] {
+        &self.source_infos
+    }
+
+    /// Returns true if the given absolute address falls within the block and is readable.
+    pub fn can_read(&self, addr: &Address) -> bool {
+        self.is_read() && self.contains(addr)
+    }
+
+    /// Returns true if the given absolute address falls within the block and is writable.
+    pub fn can_write(&self, addr: &Address) -> bool {
+        self.is_write() && self.contains(addr)
+    }
+
+    /// Returns true if the given absolute address falls within the block and is executable.
+    pub fn can_execute(&self, addr: &Address) -> bool {
+        self.is_execute() && self.contains(addr)
+    }
+
+    /// Returns the block name and address range as a compact label.
+    pub fn display_label(&self) -> String {
+        format!("{} [{}-{}]", self.name, self.start(), self.end())
+    }
+
+    /// Returns true if the block contains any bytes.
+    pub fn has_data(&self) -> bool {
+        !self.data.is_empty()
+    }
+
+    /// Returns a clone of the block with replacement source infos.
+    pub fn with_source_infos(mut self, source_infos: Vec<MemoryBlockSourceInfo>) -> Self {
+        self.source_infos = source_infos;
+        self
+    }
+
+    /// Returns the first mapped address range if available.
+    pub fn get_mapped_address_range(&self) -> Option<AddressRange> {
+        self.source_infos.iter().find_map(MemoryBlockSourceInfo::get_mapped_range)
+    }
+
+    /// Returns true if any source info maps a file offset.
+    pub fn has_file_offset_mapping(&self) -> bool {
+        self.source_infos.iter().any(MemoryBlockSourceInfo::has_file_bytes)
+    }
+
+    /// Returns true if this block is synthetic analysis-only memory.
+    pub fn is_analysis_only(&self) -> bool {
+        self.is_artificial() && !self.is_loaded
     }
 
     // ---- byte-level access (used by Memory) ----
@@ -2253,6 +2755,44 @@ impl MemoryMap {
     /// Get the set of blocks as an ordered vector.
     pub fn ordered_blocks(&self) -> Vec<&MemoryBlock> {
         self.get_blocks()
+    }
+
+    /// Returns the number of memory blocks.
+    pub fn num_blocks(&self) -> usize {
+        self.blocks.len()
+    }
+
+    /// Returns true if memory contains no blocks.
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
+
+    /// Returns the minimum block start address, if any.
+    pub fn min_address(&self) -> Option<Address> {
+        self.blocks_by_addr
+            .first()
+            .and_then(|name| self.blocks.get(name))
+            .map(MemoryBlock::start)
+    }
+
+    /// Returns the maximum block end address, if any.
+    pub fn max_address(&self) -> Option<Address> {
+        self.blocks_by_addr
+            .last()
+            .and_then(|name| self.blocks.get(name))
+            .map(MemoryBlock::end)
+    }
+
+    /// Returns an iterator over blocks in address order.
+    pub fn iter_blocks(&self) -> impl Iterator<Item = &MemoryBlock> {
+        self.blocks_by_addr
+            .iter()
+            .filter_map(|name| self.blocks.get(name))
+    }
+
+    /// Returns true if the address falls within any memory block.
+    pub fn contains(&self, addr: &Address) -> bool {
+        self.get_block(addr).is_some()
     }
 }
 
