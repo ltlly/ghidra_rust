@@ -2666,7 +2666,7 @@ impl DwarfInfo {
         self.compilation_units.iter().find(|cu| cu.offset == offset)
     }
 
-    pub fn find_entry_in_cu(&self, cu: &CompilationUnit, offset: u64) -> Option<&DieEntry> {
+    pub fn find_entry_in_cu<'a>(&self, cu: &'a CompilationUnit, offset: u64) -> Option<&'a DieEntry> {
         find_entry_in_entries(&cu.entries, offset)
     }
 

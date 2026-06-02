@@ -526,7 +526,6 @@ fn render_hex_bytes_column(
                 egui::TextEdit::singleline(&mut view.edit_buffer)
                     .font(view.font.clone())
                     .text_color(Color32::WHITE)
-                    .background_color(BG_EDIT)
                     .desired_width(cell_w),
             );
 
@@ -695,7 +694,8 @@ fn render_ascii_column(
 
         // Type an ASCII character to overwrite the byte
         if is_cursor && !view.edit_mode {
-            if let Some(events) = ui.ctx().input(|i| i.events.clone()) {
+            let events = ui.ctx().input(|i| i.events.clone());
+            if !events.is_empty() {
                 for event in &events {
                     if let egui::Event::Text(t) = event {
                         if t.len() == 1 {
@@ -931,6 +931,5 @@ fn used_hex_width(m: usize, group_size: usize, glyph_w: f32) -> f32 {
 /// Approximate monospace character width for a given font.
 fn char_width(ui: &Ui, font: &egui::FontId) -> f32 {
     ui.fonts(|f| f.glyph_width(font, '0'))
-        .unwrap_or(8.0)
         .max(6.0)
 }

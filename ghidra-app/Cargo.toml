@@ -16,6 +16,7 @@ ghidra-processors = { path = "../ghidra-processors" }
 ghidra-features = { path = "../ghidra-features" }
 ghidra-gui = { path = "../ghidra-gui" }
 eframe = { workspace = true }
+egui = { workspace = true }
 log = { workspace = true }
 env_logger = { workspace = true }
 anyhow = { workspace = true }

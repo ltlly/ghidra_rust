@@ -19,6 +19,7 @@ pub mod bsim;
 pub mod dex;
 pub mod dwarf;
 pub mod fileformats;
+pub mod functiongraph;
 pub mod objc;
 pub mod pdb;
 pub mod rust;

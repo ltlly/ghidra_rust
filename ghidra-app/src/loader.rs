@@ -157,7 +157,7 @@ pub fn analyze_program(program: &Program, timeout_secs: u64) -> anyhow::Result<(
     let fn_count = program
         .symbol_table
         .iter()
-        .filter(|s| s.kind == SymbolKind::Function)
+        .filter(|s| s.kind() == SymbolKind::Function)
         .count();
 
     log::info!(
@@ -297,7 +297,7 @@ fn load_elf(name: &str, data: &[u8], base: u64) -> anyhow::Result<Program> {
                 range: AddressRange::new(Address::new(start), Address::new(start + size - 1)),
                 permissions: perms,
                 initialized: p_filesz > 0,
-            },
+                data: Vec::new(),            },
         );
 
         // Populate listing rows from segment data
@@ -523,7 +523,7 @@ fn load_pe(name: &str, data: &[u8], base: u64) -> anyhow::Result<Program> {
                 range: AddressRange::new(Address::new(start), Address::new(start + size - 1)),
                 permissions: perms,
                 initialized: raw_size > 0,
-            },
+                data: Vec::new(),            },
         );
 
         // Populate listing from section data
@@ -679,7 +679,7 @@ fn parse_macho_segment(
             range: AddressRange::new(Address::new(start), Address::new(start + size - 1)),
             permissions: perms,
             initialized: filesize > 0,
-        },
+                data: Vec::new(),        },
     );
 
     // Populate listing from file data
@@ -716,7 +716,7 @@ fn load_raw(name: &str, data: &[u8], base: u64, arch: Option<&str>) -> anyhow::R
             range: AddressRange::new(Address::new(base), Address::new(base + size - 1)),
             permissions: MemoryPermissions::RX,
             initialized: true,
-        },
+                data: Vec::new(),        },
     );
 
     // Populate listing from bytes

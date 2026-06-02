@@ -36,10 +36,43 @@
 //! ```
 
 use anyhow::{anyhow, Context, Result};
+use ghidra_core::addr::{Address, AddressRange};
 use ghidra_core::database::Database;
 use ghidra_core::program::listing::{Function, FunctionData};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+// ---------------------------------------------------------------------------
+// FunctionFunction trait
+// ---------------------------------------------------------------------------
+
+/// Trait abstracting the minimal function interface needed by BSim signature
+/// computation.  Both [`Function`] and custom wrappers can implement this.
+pub trait FunctionFunction {
+    /// The function name.
+    fn get_name(&self) -> &str;
+    /// The entry-point address.
+    fn get_entry_point(&self) -> Address;
+    /// The body address range (start..=end).
+    fn get_body(&self) -> AddressRange;
+    /// A human-readable signature string (e.g., `"void foo(int x, int y)"`).
+    fn signature_string(&self) -> String;
+}
+
+impl FunctionFunction for Function {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+    fn get_entry_point(&self) -> Address {
+        self.entry_point
+    }
+    fn get_body(&self) -> AddressRange {
+        self.body
+    }
+    fn signature_string(&self) -> String {
+        self.signature_string()
+    }
+}
 use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------------------
@@ -382,7 +415,7 @@ impl BSimDatabase {
     pub fn open(path: &str) -> Result<Self> {
         let db = Database::open(path).map_err(|e| anyhow!("BSim: open db: {}", e))?;
         Self::init_tables(&db)?;
-        let signature_index = Self::load_index(db.conn())?;
+        let signature_index = Self::load_index(&*db.conn())?;
         Ok(Self {
             db,
             signature_index,

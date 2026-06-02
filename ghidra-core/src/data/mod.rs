@@ -38,6 +38,7 @@ pub use types::{
 
 // Re-export the bitfield info type.
 pub use types::BitfieldInfo;
+pub use types::builtin_data_type_tree;
 
 // ============================================================================
 // DataTypeKind

@@ -2128,12 +2128,50 @@ pub struct InMemoryListing {
     comments: HashMap<Address, CodeUnitComments>,
     /// Raw bytes storage.
     raw_bytes: HashMap<Address, Vec<u8>>,
+    /// Compatibility: listing rows indexed by address (used by ghidra-app).
+    pub rows: HashMap<Address, crate::listing::ListingRow>,
 }
 
 impl InMemoryListing {
     /// Create a new empty listing.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Add a listing row at the given address (compatibility).
+    pub fn add(&mut self, addr: Address, row: crate::listing::ListingRow) {
+        self.rows.insert(addr, row);
+    }
+
+    /// Get a listing row at the given address (compatibility).
+    pub fn get(&self, addr: &Address) -> Option<&crate::listing::ListingRow> {
+        self.rows.get(addr)
+    }
+
+    /// Get all code unit addresses in order as listing rows.
+    pub fn get_all_rows(&self) -> Vec<crate::listing::ListingRow> {
+        self.code_units
+            .iter()
+            .map(|(addr, cu)| {
+                let bytes = self.raw_bytes.get(addr).cloned().unwrap_or_else(|| cu.bytes.clone());
+                crate::listing::ListingRow {
+                    address: *addr,
+                    bytes,
+                    label: None,
+                    mnemonic: crate::listing::InstructionMnemonic::new(
+                        self.instructions.get(addr).map(|i| i.mnemonic.as_str()).unwrap_or("db")
+                    ),
+                    operands: self.instructions.get(addr).map(|i| {
+                        i.operands.iter().map(|o| format!("{}", o)).collect::<Vec<_>>().join(", ")
+                    }).unwrap_or_default(),
+                    full_instruction: self.instructions.get(addr).map(|i| {
+                        let ops = i.operands.iter().map(|o| format!("{}", o)).collect::<Vec<_>>().join(", ");
+                        if ops.is_empty() { i.mnemonic.clone() } else { format!("{} {}", i.mnemonic, ops) }
+                    }).unwrap_or_else(|| "db".to_string()),
+                    comment: self.comments.get(addr).and_then(|c| c.eol_comment.clone()),
+                }
+            })
+            .collect()
     }
 }
 

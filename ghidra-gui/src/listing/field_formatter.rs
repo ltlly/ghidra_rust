@@ -409,7 +409,7 @@ impl FieldFormatter {
     ///
     /// Applies a prefix based on symbol type (e.g. "FUN_", "DAT_", "LAB_")
     /// when the symbol has its auto-generated name.
-    pub fn format_label(&self, symbol: &dyn Symbol) -> String {
+    pub fn format_label(&self, symbol: &Symbol) -> String {
         let name = symbol.name();
 
         // Check if the name is auto-generated (starts with known prefixes)
@@ -424,7 +424,7 @@ impl FieldFormatter {
     }
 
     /// Format a label for the label column, with optional address.
-    pub fn format_label_with_addr(&self, symbol: &dyn Symbol, program: Option<&Program>) -> String {
+    pub fn format_label_with_addr(&self, symbol: &Symbol, program: Option<&Program>) -> String {
         let name = self.format_label(symbol);
         let addr = symbol.address();
         if self.show_block_names {
@@ -435,7 +435,7 @@ impl FieldFormatter {
     }
 
     /// Format a label for display as an operand reference.
-    pub fn format_label_ref(&self, symbol: &dyn Symbol, program: Option<&Program>) -> String {
+    pub fn format_label_ref(&self, symbol: &Symbol, program: Option<&Program>) -> String {
         let name = self.format_label(symbol);
         let addr = symbol.address();
         if self.show_block_names {

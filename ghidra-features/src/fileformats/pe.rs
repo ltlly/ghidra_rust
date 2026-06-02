@@ -81,7 +81,7 @@ impl fmt::Display for PeError {
 
 impl std::error::Error for PeError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for PeError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for PeError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }
@@ -1505,14 +1505,14 @@ fn parse_optional_header(
 
 fn parse_data_directories(
     input: &[u8],
-    count: usize,
+    num_entries: usize,
 ) -> IResult<&[u8], Vec<DataDirectory>> {
     let (i, dirs) = count(
         map(tuple((le_u32, le_u32)), |(va, sz)| DataDirectory {
             virtual_address: va,
             size: sz,
         }),
-        count,
+        num_entries,
     )(input)?;
     Ok((i, dirs))
 }
@@ -1523,9 +1523,9 @@ fn parse_data_directories(
 
 fn parse_section_headers(
     input: &[u8],
-    count: usize,
+    num_entries: usize,
 ) -> IResult<&[u8], Vec<SectionHeader>> {
-    count(parse_one_section_header, count)(input)
+    count(parse_one_section_header, num_entries)(input)
 }
 
 fn parse_one_section_header(input: &[u8]) -> IResult<&[u8], SectionHeader> {
@@ -1606,7 +1606,6 @@ fn parse_export_directory(data: &[u8], pe: &PeFile) -> Option<ExportDirectory> {
             .rva_to_offset(address_of_functions)
             .and_then(|fo| data.get(fo + i * 4..fo + i * 4 + 4))
             .map(read_le_u32_at)
-
             .unwrap_or(0);
         if rva == 0 {
             continue;
@@ -1635,12 +1634,10 @@ fn parse_export_directory(data: &[u8], pe: &PeFile) -> Option<ExportDirectory> {
         let name_rva_val = name_base
             .and_then(|nb| data.get(nb + i * 4..nb + i * 4 + 4))
             .map(read_le_u32_at)
-
             .unwrap_or(0);
         let ordinal_idx = ord_base
             .and_then(|ob| data.get(ob + i * 2..ob + i * 2 + 2))
             .map(read_le_u16_at)
-
             .unwrap_or(0) as usize;
         if let Some(entry) = export_entries.get_mut(ordinal_idx) {
             entry.name = pe.read_rva_string(data, name_rva_val);
@@ -2172,10 +2169,10 @@ fn parse_tls_directory(data: &[u8], pe: &PeFile, is_64bit: bool) -> Option<TlsDi
     let buf = data.get(off..)?;
 
     if is_64bit {
-        let start_va = read_le_u64_at(&buf[0..])?;
-        let end_va = read_le_u64_at(&buf[8..])?;
-        let address_of_index = read_le_u64_at(&buf[16..])?;
-        let address_of_call_backs = read_le_u64_at(&buf[24..])?;
+        let start_va = read_le_u64_at(&buf[0..]);
+        let end_va = read_le_u64_at(&buf[8..]);
+        let address_of_index = read_le_u64_at(&buf[16..]);
+        let address_of_call_backs = read_le_u64_at(&buf[24..]);
         let size_of_zero_fill = read_le_u32_at(&buf[32..]);
         let characteristics = read_le_u32_at(&buf[36..]);
 

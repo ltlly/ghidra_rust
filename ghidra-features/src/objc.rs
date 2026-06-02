@@ -839,7 +839,7 @@ pub fn parse_property_attributes(raw: &str) -> Vec<PropertyAttribute> {
                 i += 1;
                 let enc_chars = &chars[i..];
                 let mut pos = 0;
-                if let Ok((ty, consumed)) = parse_type_encoding_at(enc_chars, &mut pos) {
+                if let Ok(ty) = parse_type_encoding_at(enc_chars, &mut pos) {
                     attrs.push(PropertyAttribute::Type(ty));
                     i += pos;
                 } else {

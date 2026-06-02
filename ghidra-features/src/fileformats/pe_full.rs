@@ -78,7 +78,7 @@ impl fmt::Display for PeFullError {
 
 impl std::error::Error for PeFullError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for PeFullError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for PeFullError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }
@@ -989,6 +989,15 @@ fn nom_data_directories(input: &[u8]) -> IResult<&[u8], [DataDirectory; 16]> {
     Ok((i, arr))
 }
 
+/// Read a size field that is u64 in PE32+ or u32 (promoted to u64) in PE32.
+fn read_size(input: &[u8], is_plus: bool) -> IResult<&[u8], u64> {
+    if is_plus {
+        le_u64(input)
+    } else {
+        map(le_u32, |v| v as u64)(input)
+    }
+}
+
 /// Parse the Optional Header (PE32 or PE32+).
 fn nom_optional_header(
     input: &[u8],
@@ -1034,17 +1043,10 @@ fn nom_optional_header(
     let (i, dll_characteristics) = le_u16(i)?;
 
     // Stack / heap sizes: u64 in PE32+, u32 in PE32 (promoted)
-    let read_size = |i: &[u8]| -> IResult<&[u8], u64> {
-        if is_plus {
-            map(le_u64, |v| v).parse(i)
-        } else {
-            map(le_u32, |v| v as u64).parse(i)
-        }
-    };
-    let (i, stack_reserve_size) = read_size(i)?;
-    let (i, stack_commit_size) = read_size(i)?;
-    let (i, heap_reserve_size) = read_size(i)?;
-    let (i, heap_commit_size) = read_size(i)?;
+    let (i, stack_reserve_size) = read_size(i, is_plus)?;
+    let (i, stack_commit_size) = read_size(i, is_plus)?;
+    let (i, heap_reserve_size) = read_size(i, is_plus)?;
+    let (i, heap_commit_size) = read_size(i, is_plus)?;
 
     // loader_flags
     let (i, _loader_flags) = le_u32(i)?;
@@ -1127,8 +1129,8 @@ fn nom_section_header(input: &[u8]) -> IResult<&[u8], SectionHeader> {
 }
 
 /// Parse all section headers.
-fn nom_section_headers(input: &[u8], count: usize) -> IResult<&[u8], Vec<SectionHeader>> {
-    count(nom_section_header, count)(input)
+fn nom_section_headers(input: &[u8], num_sections: usize) -> IResult<&[u8], Vec<SectionHeader>> {
+    count(nom_section_header, num_sections)(input)
 }
 
 // ===========================================================================
@@ -1583,6 +1585,7 @@ pub fn parse_pe(data: &[u8]) -> PeFullResult<PeFile> {
 
 /// Top-level nom parser that produces a fully populated PeFile.
 fn nom_parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
+    let data = input;
     // --- DOS Header ---
     let (input, dos_header) = nom_dos_header(input)?;
     let stub_len = dos_header.e_lfanew as usize - 64;
@@ -1976,7 +1979,7 @@ fn parse_codeview_info(data: &[u8], off: usize, size: usize) -> Option<CodeViewI
     let mut sig = [0u8; 4];
     sig.copy_from_slice(&buf[..4]);
 
-    match &sig {
+    match sig {
         CODEVIEW_RSDS_SIGNATURE => {
             if buf.len() < 24 {
                 return None;

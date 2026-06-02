@@ -20,7 +20,7 @@ use egui::{
     Response, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
 };
 use ghidra_core::addr::{Address, AddressRange};
-use ghidra_core::program::listing::{FlowType, Instruction, Listing, Operand};
+use ghidra_core::program::listing::{Data, FlowType, InMemoryListing, Instruction, Listing, Operand};
 use std::collections::HashSet;
 
 // ============================================================================
@@ -559,7 +559,7 @@ impl DisassemblyRenderer {
     ///
     /// `listing` is the data source providing instructions and data.
     /// `range` defines the address range to display.
-    pub fn render(&mut self, ui: &mut egui::Ui, listing: &dyn Listing, range: AddressRange) {
+    pub fn render(&mut self, ui: &mut egui::Ui, listing: &InMemoryListing, range: AddressRange) {
         // Recalculate column widths
         self.calculate_columns(ui);
 
@@ -604,7 +604,7 @@ impl DisassemblyRenderer {
 
         // Build the list of instructions and data in the range
         let instructions = listing.get_instructions(&range);
-        let data_items = listing.get_data_items(&range);
+        let data_items = listing.get_data(&range);
 
         // Collect all addresses in order
         let mut addresses: Vec<Address> = range.iter().collect();

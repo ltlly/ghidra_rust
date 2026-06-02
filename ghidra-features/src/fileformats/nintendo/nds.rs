@@ -88,7 +88,7 @@ impl fmt::Display for NdsError {
 
 impl std::error::Error for NdsError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for NdsError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for NdsError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }

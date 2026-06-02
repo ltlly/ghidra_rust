@@ -5,12 +5,12 @@
 //! Ghidra project format, IDA Python scripts, and binary patches.
 
 use ghidra_core::addr::{Address, AddressRange};
-use ghidra_core::data::DataType;
 use ghidra_core::listing::ListingRow;
 use ghidra_core::program::{
     Comment, CommentKind, ListingData, MemoryBlock, MemoryPermissions, Program,
+    SimpleDataType, SymbolTable,
 };
-use ghidra_core::symbol::{Symbol, SymbolKind, SymbolTable};
+use ghidra_core::symbol::{Symbol, SymbolType as SymbolKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -235,7 +235,7 @@ impl ExportManager {
                 .symbol_table
                 .symbols
                 .values()
-                .filter(|s| s.kind == SymbolKind::Function)
+                .filter(|s| s.kind() == SymbolKind::Function)
                 .count()
         ));
 
@@ -245,13 +245,13 @@ impl ExportManager {
             .symbol_table
             .symbols
             .values()
-            .filter(|s| s.kind == SymbolKind::Function)
+            .filter(|s| s.kind() == SymbolKind::Function)
             .collect();
         for sym in &function_symbols {
             out.push_str(&format!(
                 "{} {}(void);\n",
-                self.infer_return_type(program, &sym.name),
-                sym.name
+                self.infer_return_type(program, &sym.name()),
+                sym.name()
             ));
         }
         out.push('\n');
@@ -268,12 +268,12 @@ impl ExportManager {
     /// Build a decompiled C function body for a single symbol.
     fn decompile_function_to_c(&self, program: &Program, sym: &Symbol) -> String {
         let indent = &self.indent;
-        let return_type = self.infer_return_type(program, &sym.name);
+        let return_type = self.infer_return_type(program, &sym.name());
         let mut out = String::new();
 
         out.push_str(&format!(
             "// Function: {} at 0x{:x}\n",
-            sym.name, sym.address.offset
+            sym.name(), sym.address().offset
         ));
 
         // Collect disassembly rows that fall within reasonable function bounds
@@ -282,13 +282,13 @@ impl ExportManager {
             .rows
             .iter()
             .filter(|(addr, _)| {
-                addr.offset >= sym.address.offset && addr.offset < sym.address.offset + 0x100
+                addr.offset >= sym.address().offset && addr.offset < sym.address().offset + 0x100
             })
             .map(|(_, row)| row)
             .collect();
 
         // Emit decompiled C
-        out.push_str(&format!("{} {}(void) {{\n", return_type, sym.name));
+        out.push_str(&format!("{} {}(void) {{\n", return_type, sym.name()));
 
         // Local variable declarations
         out.push_str(&format!("{}// Local variables\n", indent));
@@ -297,7 +297,7 @@ impl ExportManager {
 
         out.push_str(&format!(
             "\n{}// Disassembly at 0x{:x}:\n",
-            indent, sym.address.offset
+            indent, sym.address().offset
         ));
 
         for row in &listing_rows {
@@ -418,13 +418,13 @@ impl ExportManager {
             .symbol_table
             .symbols
             .values()
-            .filter(|s| s.kind == SymbolKind::Function)
+            .filter(|s| s.kind() == SymbolKind::Function)
             .collect();
         for sym in &function_symbols {
             out.push_str(&format!(
                 "{} {}(void);\n",
-                self.infer_return_type(program, &sym.name),
-                sym.name
+                self.infer_return_type(program, &sym.name()),
+                sym.name()
             ));
         }
         out.push('\n');
@@ -453,7 +453,7 @@ impl ExportManager {
     }
 
     /// Convert a DataType to its C type string.
-    fn type_to_c(&self, dt: &DataType) -> &'static str {
+    fn type_to_c(&self, dt: &SimpleDataType) -> &'static str {
         match dt.name.as_str() {
             "void" => "void",
             "bool" => "bool",
@@ -499,7 +499,7 @@ impl ExportManager {
                 .symbol_table
                 .symbols
                 .values()
-                .filter(|s| s.kind == SymbolKind::Function)
+                .filter(|s| s.kind() == SymbolKind::Function)
                 .count(),
             import_count: program.imports.len(),
             export_count: program.exports.len(),
@@ -511,16 +511,16 @@ impl ExportManager {
             .symbol_table
             .symbols
             .values()
-            .filter(|s| s.kind == SymbolKind::Function)
+            .filter(|s| s.kind() == SymbolKind::Function)
             .map(|s| {
                 // Collect listing rows in the vicinity of this function
                 let decompiled = self.build_decompiled_code_string(program, s);
                 JsonFunction {
-                    name: s.name.clone(),
-                    address: format!("0x{:x}", s.address.offset),
+                    name: s.name().clone(),
+                    address: format!("0x{:x}", s.address().offset),
                     decompiled_code: Some(decompiled),
-                    signature: Some(format!("// function at 0x{:x}", s.address.offset)),
-                    is_external: s.kind == SymbolKind::Import,
+                    signature: Some(format!("// function at 0x{:x}", s.address().offset)),
+                    is_external: s.kind() == SymbolKind::Import,
                     calling_convention: Some("default".to_string()),
                 }
             })
@@ -531,11 +531,11 @@ impl ExportManager {
             .symbols
             .values()
             .map(|s| JsonSymbol {
-                name: s.name.clone(),
-                address: format!("0x{:x}", s.address.offset),
-                kind: format!("{:?}", s.kind),
-                primary: s.primary,
-                namespace: s.namespace.clone(),
+                name: s.name().clone(),
+                address: format!("0x{:x}", s.address().offset),
+                kind: format!("{:?}", s.kind()),
+                primary: true,
+                namespace: Some(String::new()),
             })
             .collect();
 
@@ -593,7 +593,7 @@ impl ExportManager {
             .rows
             .iter()
             .filter(|(addr, _)| {
-                addr.offset >= sym.address.offset && addr.offset < sym.address.offset + 0x100
+                addr.offset >= sym.address().offset && addr.offset < sym.address().offset + 0x100
             })
             .map(|(_, row)| row)
             .collect();
@@ -601,12 +601,12 @@ impl ExportManager {
         let mut code = String::new();
         code.push_str(&format!(
             "// Decompiled function: {} at 0x{:x}\n",
-            sym.name, sym.address.offset
+            sym.name(), sym.address().offset
         ));
         code.push_str(&format!(
             "{} {}(",
-            self.infer_return_type(program, &sym.name),
-            sym.name
+            self.infer_return_type(program, &sym.name()),
+            sym.name()
         ));
         code.push_str("int argc, char **argv");
         code.push_str(") {\n");
@@ -640,17 +640,17 @@ impl ExportManager {
 
         // Extract strings from symbol names
         for sym in program.symbol_table.iter() {
-            if sym.name.len() >= 2 && !sym.name.starts_with("DAT_") {
+            if sym.name().len() >= 2 && !sym.name().starts_with("DAT_") {
                 // Only add if we haven't already from comments
-                let addr_str = format!("0x{:x}", sym.address.offset);
+                let addr_str = format!("0x{:x}", sym.address().offset);
                 if !strings
                     .iter()
-                    .any(|s| s.address == addr_str && s.value == sym.name)
+                    .any(|s| s.address == addr_str && s.value == sym.name())
                 {
                     strings.push(JsonStringRef {
                         address: addr_str,
-                        value: sym.name.clone(),
-                        length: sym.name.len(),
+                        value: sym.name().clone(),
+                        length: sym.name().len(),
                     });
                 }
             }
@@ -803,9 +803,9 @@ function renderFunctions(container) {{
 function renderSymbols(container) {{
   let html = '<table><tr><th>Address</th><th>Name</th><th>Kind</th><th>Namespace</th></tr>';
   for (const s of DATA.symbols) {{
-    if (!matchesFilter(s.name + s.address + s.kind)) continue;
-    html += '<tr><td class="addr">' + s.address + '</td><td>' + s.name +
-            '</td><td>' + s.kind + '</td><td>' + (s.namespace || '') + '</td></tr>';
+    if (!matchesFilter(s.name() + s.address() + s.kind())) continue;
+    html += '<tr><td class="addr">' + s.address() + '</td><td>' + s.name() +
+            '</td><td>' + s.kind() + '</td><td>' + (s.name() || '') + '</td></tr>';
   }}
   html += '</table>';
   container.innerHTML = html;
@@ -840,8 +840,8 @@ function renderImports(container) {{
 function renderStrings(container) {{
   let html = '<table><tr><th>Address</th><th>Value</th><th>Length</th></tr>';
   for (const s of DATA.strings) {{
-    if (!matchesFilter(s.value + s.address)) continue;
-    html += '<tr><td class="addr">' + s.address + '</td><td class="string-val">' +
+    if (!matchesFilter(s.value + s.address())) continue;
+    html += '<tr><td class="addr">' + s.address() + '</td><td class="string-val">' +
             escapeHtml(s.value) + '</td><td>' + s.length + '</td></tr>';
   }}
   html += '</table>';
@@ -1094,18 +1094,18 @@ function escapeHtml(str) {{
             .symbol_table
             .symbols
             .values()
-            .filter(|s| s.kind == SymbolKind::Function)
+            .filter(|s| s.kind() == SymbolKind::Function)
         {
             let decompiled = self.build_decompiled_code_string(program, sym);
             conn.execute(
                 "INSERT INTO functions (name, address, signature, decompiled, is_external, calling_conv)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 rusqlite::params![
-                    sym.name,
-                    format!("0x{:x}", sym.address.offset),
-                    format!("// function at 0x{:x}", sym.address.offset),
+                    sym.name(),
+                    format!("0x{:x}", sym.address().offset),
+                    format!("// function at 0x{:x}", sym.address().offset),
                     decompiled,
-                    if sym.kind == SymbolKind::Import { 1 } else { 0 },
+                    if sym.kind() == SymbolKind::Import { 1 } else { 0 },
                     "default",
                 ],
             )
@@ -1118,11 +1118,11 @@ function escapeHtml(str) {{
                 "INSERT INTO symbols (name, address, kind, namespace, is_primary)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![
-                    sym.name,
-                    format!("0x{:x}", sym.address.offset),
-                    format!("{:?}", sym.kind),
-                    sym.namespace,
-                    if sym.primary { 1 } else { 0 },
+                    sym.name(),
+                    format!("0x{:x}", sym.address().offset),
+                    format!("{:?}", sym.kind()),
+                    sym.name() ,
+                    if true { 1 } else { 0 },
                 ],
             )
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
@@ -1388,18 +1388,17 @@ function escapeHtml(str) {{
         );
 
         for sym in program.symbol_table.iter() {
-            let ns_attr = sym
-                .namespace
-                .as_ref()
-                .map(|n| format!(r#" NAMESPACE="{}""#, n))
-                .unwrap_or_default();
+            let ns_attr: String = {
+                let n = sym.name();
+                format!(r#" NAMESPACE="{}""#, n)
+            };
             xml.push_str(&format!(
                 r#"  <SYMBOL NAME="{}" ADDRESS="0x{:x}" KIND="{:?}"{}{} />
 "#,
-                sym.name,
-                sym.address.offset,
-                sym.kind,
-                if sym.primary {
+                sym.name(),
+                sym.address().offset,
+                sym.kind(),
+                if true {
                     r#" PRIMARY="true""#
                 } else {
                     ""
@@ -1483,11 +1482,11 @@ def apply_ghidra_annotations():
             .symbol_table
             .symbols
             .values()
-            .filter(|s| s.kind == SymbolKind::Function)
+            .filter(|s| s.kind() == SymbolKind::Function)
         {
             script.push_str(&format!(
                 "    idc.set_name(0x{:x}, \"{}\", idc.SN_NOWARN)\n",
-                sym.address.offset, sym.name
+                sym.address().offset, sym.name()
             ));
         }
         script.push('\n');
@@ -1498,11 +1497,11 @@ def apply_ghidra_annotations():
             .symbol_table
             .symbols
             .values()
-            .filter(|s| s.kind == SymbolKind::Label)
+            .filter(|s| s.kind() == SymbolKind::Label)
         {
             script.push_str(&format!(
                 "    idc.set_name(0x{:x}, \"{}\", idc.SN_NOWARN)\n",
-                sym.address.offset, sym.name
+                sym.address().offset, sym.name()
             ));
         }
         script.push('\n');

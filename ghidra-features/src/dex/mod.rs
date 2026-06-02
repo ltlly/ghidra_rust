@@ -260,7 +260,7 @@ impl From<std::io::Error> for DexError {
 // =============================================================================
 
 /// Encoded value types used in annotations and static field initialisers.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EncodedValue {
     Byte(i8),
     Short(i16),
@@ -281,7 +281,7 @@ pub enum EncodedValue {
 }
 
 /// Annotation element (name-value pair).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AnnotationElement {
     pub name: String,
     pub value: EncodedValue,
@@ -296,7 +296,7 @@ pub enum AnnotationVisibility {
 }
 
 /// A single annotation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DexAnnotation {
     pub visibility: AnnotationVisibility,
     pub type_idx: u32,
@@ -581,7 +581,7 @@ fn parse_header(input: &[u8]) -> IResult<&[u8], DexHeader> {
                   link_off, map_off, string_ids_size, string_ids_off, type_ids_size,
                   type_ids_off, proto_ids_size, proto_ids_off, field_ids_size,
                   field_ids_off, method_ids_size, method_ids_off, class_defs_size,
-                  class_defs_off, data_size, data_off)) = tuple((
+                  class_defs_off)) = tuple((
         parse_magic,
         le_u32,
         take(20usize),
@@ -603,6 +603,8 @@ fn parse_header(input: &[u8]) -> IResult<&[u8], DexHeader> {
         le_u32,
         le_u32,
         le_u32,
+    ))(input)?;
+    let (input, (data_size, data_off)) = tuple((
         le_u32,
         le_u32,
     ))(input)?;
@@ -803,14 +805,14 @@ fn parse_encoded_value(input: &[u8]) -> IResult<&[u8], EncodedValue> {
     let value_arg = (header >> 5) as usize;
 
     // Helper to read the value argument bytes
-    let read_value_arg = |input: &[u8], arg: usize| -> IResult<&[u8], u64> {
+    fn read_value_arg(input: &[u8], arg: usize) -> IResult<&[u8], u64> {
         let (input, bytes) = take(arg + 1)(input)?;
         let mut val: u64 = 0;
         for &b in bytes.iter() {
             val = (val << 8) | (b as u64);
         }
         Ok((input, val))
-    };
+    }
 
     match value_type {
         0x00 => {
@@ -875,8 +877,8 @@ fn parse_encoded_value(input: &[u8]) -> IResult<&[u8], EncodedValue> {
         }
         0x1C => {
             // VALUE_ARRAY
-            let (input, count) = read_uleb128(input)?;
-            let (input, elements) = count(parse_encoded_value, count as usize)(input)?;
+            let (input, elem_count) = read_uleb128(input)?;
+            let (input, elements) = nom::multi::count(parse_encoded_value, elem_count as usize)(input)?;
             Ok((input, EncodedValue::Array(elements)))
         }
         0x1D => {
@@ -987,7 +989,7 @@ pub fn parse_dex(data: &[u8]) -> Result<DexFile, DexError> {
     let _ = remaining; // we index from `data` throughout
 
     // Parse strings
-    let strings = parse_strings(data, &header)?;
+    let strings = parse_strings(data, &header, &[])?;
 
     // Parse types
     let types = parse_types(data, &header, &strings)?;

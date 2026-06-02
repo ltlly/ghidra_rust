@@ -107,13 +107,13 @@ pub fn render_status_bar(status_message: &str, ui: &mut Ui) {
         ui.label(
             RichText::new(status_message)
                 .color(Color32::from_rgb(180, 180, 180))
-                .font_size(11.0),
+                .size(11.0),
         );
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             ui.label(
                 RichText::new("Ghidra Rust")
                     .color(Color32::from_rgb(140, 140, 140))
-                    .font_size(11.0),
+                    .size(11.0),
             );
         });
     });

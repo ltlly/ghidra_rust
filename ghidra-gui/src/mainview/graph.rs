@@ -419,6 +419,7 @@ pub fn layout_hierarchical(graph: &FunctionGraph) -> Vec<Vec2> {
 
     // ---- Barycentre heuristic for crossing minimisation ----
     for l in 1..=max_layer {
+        let prev_layer = layers[l - 1].clone();
         layers[l].sort_by(|&a, &b| {
             let avg_pos = |v: usize| -> f32 {
                 let preds: Vec<usize> = rev_adj[v]
@@ -427,11 +428,11 @@ pub fn layout_hierarchical(graph: &FunctionGraph) -> Vec<Vec2> {
                     .copied()
                     .collect();
                 if preds.is_empty() {
-                    return layers[l - 1].len() as f32 / 2.0;
+                    return prev_layer.len() as f32 / 2.0;
                 }
                 preds
                     .iter()
-                    .map(|p| layers[l - 1].iter().position(|&x| x == *p).unwrap_or(0) as f32)
+                    .map(|p| prev_layer.iter().position(|&x| x == *p).unwrap_or(0) as f32)
                     .sum::<f32>()
                     / preds.len() as f32
             };
@@ -653,13 +654,12 @@ pub fn render_block(
 
     // Rounded rect.
     let rect = Rect::from_min_size(screen_pos, Vec2::new(w, h));
-    painter.add(Shape::Rect(RectShape {
+    painter.add(Shape::Rect(RectShape::new(
         rect,
         rounding,
         fill,
-        stroke: Stroke::new(stroke_width, stroke_color),
-        ..Default::default()
-    }));
+        Stroke::new(stroke_width, stroke_color),
+    )));
 
     // Text: we lay out galleys using the context Fonts.
     let label = if vertex.label.is_empty() {
@@ -965,13 +965,12 @@ pub fn render_graph_view(
     }
 
     // ---- Draw background ----
-    painter.add(Shape::Rect(RectShape {
-        rect: canvas_rect,
-        rounding: Rounding::ZERO,
-        fill: theme.bg_color,
-        stroke: Stroke::NONE,
-        ..Default::default()
-    }));
+    painter.add(Shape::Rect(RectShape::new(
+        canvas_rect,
+        Rounding::ZERO,
+        theme.bg_color,
+        Stroke::NONE,
+    )));
 
     // ---- Grid dots (subtle dots every N world-space units) ----
     let grid_spacing = 40.0;
@@ -1203,13 +1202,12 @@ fn render_minimap(
     let painter = ui.painter_at(map_rect);
 
     // Background.
-    painter.add(Shape::Rect(RectShape {
-        rect: map_rect,
-        rounding: Rounding::same(4.0),
-        fill: theme.minimap_bg,
-        stroke: Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 40)),
-        ..Default::default()
-    }));
+    painter.add(Shape::Rect(RectShape::new(
+        map_rect,
+        Rounding::same(4.0),
+        theme.minimap_bg,
+        Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 40)),
+    )));
 
     let bounds = graph_bounds(graph, &state.positions);
     if bounds.width() <= 0.0 || bounds.height() <= 0.0 {
@@ -1237,13 +1235,12 @@ fn render_minimap(
         let sh = (v.height * scale).max(2.0);
         let node_rect = Rect::from_min_size(Pos2::new(sx, sy), Vec2::new(sw, sh));
         if map_rect.intersects(node_rect) {
-            painter.add(Shape::Rect(RectShape {
-                rect: node_rect,
-                rounding: Rounding::same(1.0),
-                fill: theme.minimap_node,
-                stroke: Stroke::NONE,
-                ..Default::default()
-            }));
+            painter.add(Shape::Rect(RectShape::new(
+                node_rect,
+                Rounding::same(1.0),
+                theme.minimap_node,
+                Stroke::NONE,
+            )));
         }
     }
 
@@ -1255,13 +1252,12 @@ fn render_minimap(
     let vh = (world_visible.height() * scale).max(4.0);
     let view_rect = Rect::from_min_size(Pos2::new(vx, vy), Vec2::new(vw, vh));
 
-    painter.add(Shape::Rect(RectShape {
-        rect: view_rect,
-        rounding: Rounding::ZERO,
-        fill: Color32::TRANSPARENT,
-        stroke: Stroke::new(1.5, theme.minimap_viewport),
-        ..Default::normal()
-    }));
+    painter.add(Shape::Rect(RectShape::new(
+        view_rect,
+        Rounding::ZERO,
+        Color32::TRANSPARENT,
+        Stroke::new(1.5, theme.minimap_viewport),
+    )));
 }
 
 // ============================================================================
@@ -1309,12 +1305,11 @@ pub fn demo_function_graph() -> FunctionGraph {
         PcodeOperation::new_unannotated(opcode, None, vec![])
     }
 
-    let f = Function {
-        name: "demo_function".to_string(),
-        entry_point: Address::new(0x401000),
-        body: AddressRange::new(Address::new(0x401000), Address::new(0x401200)),
-        signature: "void demo_function(int)".to_string(),
-    };
+    let f = Function::new(
+        "demo_function",
+        Address::new(0x401000),
+        AddressRange::new(Address::new(0x401000), Address::new(0x401200)),
+    );
 
     let vertices = vec![
         FGVertex::new(
@@ -1798,6 +1793,7 @@ impl FunctionGraphWidget {
         // Two-pass barycentre heuristic for crossing minimisation.
         // Forward pass: sort each layer based on predecessor positions.
         for l in 1..=max_layer {
+            let prev_layer = layers[l - 1].clone();
             layers[l].sort_by(|&a, &b| {
                 let avg = |v: usize| -> f32 {
                     let preds: Vec<usize> = rev_adj[v]
@@ -1806,11 +1802,11 @@ impl FunctionGraphWidget {
                         .copied()
                         .collect();
                     if preds.is_empty() {
-                        return layers[l - 1].len() as f32 / 2.0;
+                        return prev_layer.len() as f32 / 2.0;
                     }
                     preds
                         .iter()
-                        .map(|p| layers[l - 1].iter().position(|&x| x == *p).unwrap_or(0) as f32)
+                        .map(|p| prev_layer.iter().position(|&x| x == *p).unwrap_or(0) as f32)
                         .sum::<f32>()
                         / preds.len() as f32
                 };
@@ -1824,7 +1820,7 @@ impl FunctionGraphWidget {
             if l == 0 {
                 break;
             }
-            let layer_l_minus_1 = layers[l - 1].clone();
+            let next_layer = layers[l].clone();
             layers[l - 1].sort_by(|&a, &b| {
                 let avg = |v: usize| -> f32 {
                     let succs: Vec<usize> = adj[v]
@@ -1833,11 +1829,11 @@ impl FunctionGraphWidget {
                         .copied()
                         .collect();
                     if succs.is_empty() {
-                        return layers[l].len() as f32 / 2.0;
+                        return next_layer.len() as f32 / 2.0;
                     }
                     succs
                         .iter()
-                        .map(|s| layers[l].iter().position(|&x| x == *s).unwrap_or(0) as f32)
+                        .map(|s| next_layer.iter().position(|&x| x == *s).unwrap_or(0) as f32)
                         .sum::<f32>()
                         / succs.len() as f32
                 };
@@ -1897,13 +1893,12 @@ impl FunctionGraphWidget {
         }
 
         // ---- Background fill ----
-        painter.add(Shape::Rect(RectShape {
-            rect: canvas_rect,
-            rounding: Rounding::ZERO,
-            fill: self.theme.bg_color,
-            stroke: Stroke::NONE,
-            ..Default::default()
-        }));
+        painter.add(Shape::Rect(RectShape::new(
+            canvas_rect,
+            Rounding::ZERO,
+            self.theme.bg_color,
+            Stroke::NONE,
+        )));
 
         // ---- Grid dots ----
         let grid_spacing = 40.0;
@@ -2148,7 +2143,7 @@ impl FunctionGraphWidget {
                 .collect::<Vec<_>>()
                 .join("\n");
 
-        egui::show_tooltip_at_pointer(ui.ctx(), egui::Id::new("graph_tooltip"), |ui| {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), egui::Id::new("graph_tooltip"), |ui: &mut egui::Ui| {
             ui.label(
                 egui::RichText::new(tooltip_text)
                     .font(egui::FontId::monospace(10.0))
@@ -2343,13 +2338,12 @@ fn render_block_widget(
 
     // Rounded rect.
     let rect = Rect::from_min_size(screen_pos, Vec2::new(w, h));
-    painter.add(Shape::Rect(RectShape {
+    painter.add(Shape::Rect(RectShape::new(
         rect,
         rounding,
         fill,
-        stroke: Stroke::new(stroke_width, stroke_color),
-        ..Default::default()
-    }));
+        Stroke::new(stroke_width, stroke_color),
+    )));
 
     // Label.
     let label = if vertex.label.is_empty() {
@@ -2444,13 +2438,12 @@ fn render_minimap_widget(ui: &egui::Ui, widget: &FunctionGraphWidget, canvas_rec
     let theme = &widget.theme;
 
     // Background.
-    painter.add(Shape::Rect(RectShape {
-        rect: map_rect,
-        rounding: Rounding::same(4.0),
-        fill: theme.minimap_bg,
-        stroke: Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 40)),
-        ..Default::default()
-    }));
+    painter.add(Shape::Rect(RectShape::new(
+        map_rect,
+        Rounding::same(4.0),
+        theme.minimap_bg,
+        Stroke::new(1.0, Color32::from_rgba_premultiplied(255, 255, 255, 40)),
+    )));
 
     let bounds = match widget.cached_bounds {
         Some(b) => b,
@@ -2481,13 +2474,12 @@ fn render_minimap_widget(ui: &egui::Ui, widget: &FunctionGraphWidget, canvas_rec
         let sh = (v.height * scale).max(2.0);
         let node_rect = Rect::from_min_size(Pos2::new(sx, sy), Vec2::new(sw, sh));
         if map_rect.intersects(node_rect) {
-            painter.add(Shape::Rect(RectShape {
-                rect: node_rect,
-                rounding: Rounding::same(1.0),
-                fill: theme.minimap_node,
-                stroke: Stroke::NONE,
-                ..Default::default()
-            }));
+            painter.add(Shape::Rect(RectShape::new(
+                node_rect,
+                Rounding::same(1.0),
+                theme.minimap_node,
+                Stroke::NONE,
+            )));
         }
     }
 
@@ -2499,13 +2491,12 @@ fn render_minimap_widget(ui: &egui::Ui, widget: &FunctionGraphWidget, canvas_rec
     let vh = (world_visible.height() * scale).max(4.0);
     let view_rect = Rect::from_min_size(Pos2::new(vx, vy), Vec2::new(vw, vh));
 
-    painter.add(Shape::Rect(RectShape {
-        rect: view_rect,
-        rounding: Rounding::ZERO,
-        fill: Color32::TRANSPARENT,
-        stroke: Stroke::new(1.5, theme.minimap_viewport),
-        ..Default::default()
-    }));
+    painter.add(Shape::Rect(RectShape::new(
+        view_rect,
+        Rounding::ZERO,
+        Color32::TRANSPARENT,
+        Stroke::new(1.5, theme.minimap_viewport),
+    )));
 }
 
 // ----- Helper: compute bounding box -----

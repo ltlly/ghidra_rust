@@ -1154,6 +1154,12 @@ impl Database {
             .map_err(|e| DbError::Lock(format!("Failed to acquire write lock: {}", e)))
     }
 
+    /// Get a write-locked reference to the underlying connection.
+    /// This is a convenience shorthand used by downstream crates.
+    pub fn conn(&self) -> RwLockWriteGuard<SqliteConnection> {
+        self.conn.write().expect("Database: failed to acquire write lock")
+    }
+
     /// Clone the inner `Arc` so callers can hold their own reference.
     pub fn shared_conn(&self) -> SharedConnection {
         Arc::clone(&self.conn)

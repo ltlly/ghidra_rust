@@ -417,10 +417,10 @@ impl<'a> Parser<'a> {
         Some(c)
     }
 
-    fn take_while<F: Fn(char) -> bool>(&mut self, predicate: F) -> String {
+    fn take_while<F: Fn(char) -> bool>(&mut self, f: F) -> String {
         let mut s = String::new();
         while let Some(c) = self.peek() {
-            if !predicate(c) {
+            if !f(c) {
                 break;
             }
             s.push(c);

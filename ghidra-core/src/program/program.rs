@@ -186,6 +186,35 @@ impl ProgramChangeSet {
 // Program — the central type
 // ============================================================================
 
+/// A simple concrete data type descriptor for backward compatibility with
+/// ghidra-app exporters and loaders.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SimpleDataType {
+    /// Type name.
+    pub name: String,
+    /// Size in bytes.
+    pub size: usize,
+    /// Type kind.
+    pub kind: crate::data::DataTypeKind,
+    /// Optional description.
+    pub description: String,
+}
+
+impl SimpleDataType {
+    /// Create an i32 data type.
+    pub fn i32() -> Self {
+        Self { name: "i32".into(), size: 4, kind: crate::data::DataTypeKind::Primitive, description: String::new() }
+    }
+    /// Create a u32 data type.
+    pub fn u32() -> Self {
+        Self { name: "u32".into(), size: 4, kind: crate::data::DataTypeKind::Primitive, description: String::new() }
+    }
+    /// Create a generic data type with the given name and size.
+    pub fn new(name: impl Into<String>, size: usize, kind: crate::data::DataTypeKind) -> Self {
+        Self { name: name.into(), size, kind, description: String::new() }
+    }
+}
+
 /// The central representation of a loaded binary program in Ghidra.
 ///
 /// `Program` composes all analysis data: memory, listing, symbols, references,
@@ -194,9 +223,9 @@ impl ProgramChangeSet {
 /// A change-set layered on top supports undo/redo.
 pub struct Program {
     // ---------- identity ----------
-    name: String,
-    domain_file_path: Option<String>,
-    image_base: Address,
+    pub name: String,
+    pub domain_file_path: Option<String>,
+    pub image_base: Address,
     unique_id: u64,
 
     // ---------- timestamps ----------
@@ -207,29 +236,29 @@ pub struct Program {
     address_factory: AddressFactory,
 
     // ---------- memory ----------
-    memory: Box<dyn Memory>,
+    pub memory: Box<dyn Memory>,
 
     // ---------- listing ----------
-    listing: InMemoryListing,
+    pub listing: InMemoryListing,
 
     // ---------- data types ----------
-    data_type_manager: Arc<dyn DataTypeManager>,
+    pub data_type_manager: Arc<dyn DataTypeManager>,
     applied_data_types: HashMap<Address, Arc<dyn DataType>>,
 
     // ---------- symbols ----------
-    symbols: ProgramSymbolTable,
+    pub symbols: ProgramSymbolTable,
 
     // ---------- references ----------
-    references: ReferenceManager,
+    pub references: ReferenceManager,
 
     // ---------- functions ----------
-    functions: FunctionManager,
+    pub functions: FunctionManager,
 
     // ---------- externals ----------
-    externals: ProgramExternalManager,
+    pub externals: ProgramExternalManager,
 
     // ---------- bookmarks ----------
-    bookmarks: BookmarkManager,
+    pub bookmarks: BookmarkManager,
 
     // ---------- properties ----------
     global_properties: HashMap<String, String>,
@@ -239,8 +268,8 @@ pub struct Program {
     tree_manager: Option<Arc<RwLock<SymbolTreeNode>>>,
 
     // ---------- language and compiler ----------
-    language: Option<Arc<Language>>,
-    compiler_spec: Option<Arc<CompilerSpec>>,
+    pub language: Option<Arc<Language>>,
+    pub compiler_spec: Option<Arc<CompilerSpec>>,
 
     // ---------- program context ----------
     program_context: ProgramContextData,
@@ -249,11 +278,11 @@ pub struct Program {
     relocations: ProgramRelocationTable,
 
     // ---------- metadata ----------
-    metadata: BTreeMap<String, String>,
+    pub metadata: BTreeMap<String, String>,
 
     // ---------- executable metadata ----------
-    executable_path: Option<String>,
-    executable_format: Option<String>,
+    pub executable_path: Option<String>,
+    pub executable_format: Option<String>,
     executable_md5: Option<String>,
     executable_sha256: Option<String>,
     compiler_name: Option<String>,
@@ -268,6 +297,26 @@ pub struct Program {
 
     // ---------- lock state ----------
     lock_state: Mutex<LockState>,
+
+    // ---------- compatibility fields (used by ghidra-app) ----------
+    /// File path for backward compatibility with ghidra-app.
+    pub file_path: Option<String>,
+    /// Memory blocks indexed by name (compatibility layer).
+    pub memory_blocks: HashMap<String, MemoryBlock>,
+    /// Symbol table (compatibility layer).
+    pub symbol_table: SymbolTable,
+    /// Cross-references: target address -> list of source addresses.
+    pub xrefs: HashMap<Address, Vec<Address>>,
+    /// Import names (compatibility layer).
+    pub imports: Vec<String>,
+    /// Export names (compatibility layer).
+    pub exports: Vec<String>,
+    /// Comments indexed by address (compatibility layer).
+    pub comments: HashMap<Address, Vec<Comment>>,
+    /// Data types applied at addresses (compatibility layer).
+    pub data_types: HashMap<Address, SimpleDataType>,
+    /// Legacy listing data (compatibility layer for ghidra-app).
+    pub listing_data: ListingData,
 }
 
 // ============================================================================
@@ -275,10 +324,10 @@ pub struct Program {
 // ============================================================================
 
 #[derive(Debug, Clone, Default)]
-struct ProgramSymbolTable {
-    symbols: HashMap<Address, Symbol>,
-    by_name: HashMap<String, Vec<Address>>,
-    tree: SymbolTreeNode,
+pub struct ProgramSymbolTable {
+    pub symbols: HashMap<Address, Symbol>,
+    pub by_name: HashMap<String, Vec<Address>>,
+    pub tree: SymbolTreeNode,
 }
 
 impl ProgramSymbolTable {
@@ -304,7 +353,7 @@ struct ProgramExternalManager {
 
 #[derive(Debug, Clone)]
 struct ProgramExternal {
-    name: String,
+    pub name: String,
     path: Option<String>,
     external_address: Option<Address>,
     external_data_type: Option<Arc<dyn DataType>>,
@@ -396,6 +445,16 @@ impl Program {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             lock_state: Mutex::new(LockState::default()),
+            // compatibility fields
+            file_path: None,
+            memory_blocks: HashMap::new(),
+            symbol_table: SymbolTable::default(),
+            xrefs: HashMap::new(),
+            imports: Vec::new(),
+            exports: Vec::new(),
+            comments: HashMap::new(),
+            data_types: HashMap::new(),
+            listing_data: ListingData::default(),
         }
     }
 
@@ -775,6 +834,25 @@ impl Program {
     pub fn is_changed(&self) -> bool { self.change_set.as_ref().map(|cs| !cs.is_empty()).unwrap_or(false) }
     pub fn mark_saved(&mut self) { self.change_set = Some(ProgramChangeSet::new()); }
 
+    // ---------- Compatibility helpers (used by ghidra-app) ----------
+
+    /// Look up a symbol at the given address in the compatibility symbol_table.
+    pub fn symbol_at(&self, addr: &Address) -> Option<&Symbol> {
+        self.symbol_table.get(addr)
+    }
+
+    /// Get cross-references to a target address from the compatibility xrefs map.
+    pub fn xrefs_to(&self, addr: &Address) -> Vec<&Address> {
+        self.xrefs.get(addr).map(|v| v.iter().collect()).unwrap_or_default()
+    }
+
+    /// Get the memory block containing the given address (compatibility).
+    pub fn memory_block_at(&self, addr: &Address) -> Option<&MemoryBlock> {
+        self.memory_blocks.values().find(|b| {
+            addr.offset >= b.range.start.offset && addr.offset <= b.range.end.offset
+        })
+    }
+
     // ---------- Demo program ----------
     pub fn demo() -> Self {
         let mut prog = Self::with_memory("demo.bin", Address::new(0x1000), Box::new({
@@ -949,7 +1027,7 @@ impl ListingData {
 
 pub struct DomainFile {
     path: String,
-    name: String,
+    pub name: String,
     parent_path: String,
     domain_type: String,
     file_id: u64,

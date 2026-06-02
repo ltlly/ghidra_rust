@@ -1157,7 +1157,7 @@ fn parse_debug_info(data: &[u8], offset: usize) -> DexResult<DebugInfo> {
         if r.is_empty() {
             break;
         }
-        let (r2, opcode_byte) = le_u8(r).map_err(|_| DexError::InvalidLeb128)?;
+        let (r2, opcode_byte) = le_u8(r).map_err(|_: nom::Err<nom::error::Error<&[u8]>>| DexError::InvalidLeb128)?;
         let opcode = opcode_byte;
         r = r2;
 

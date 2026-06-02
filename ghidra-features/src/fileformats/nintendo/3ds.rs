@@ -110,7 +110,7 @@ impl fmt::Display for N3dsError {
 
 impl std::error::Error for N3dsError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for N3dsError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for N3dsError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }

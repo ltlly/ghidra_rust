@@ -2823,6 +2823,14 @@ impl Symbol {
         Symbol::Label(ls)
     }
 
+    /// Create an export symbol (backward-compatible).
+    pub fn export(name: impl Into<String>, address: Address) -> Self {
+        let mut ls =
+            LabelSymbol::with_options(0, name, address, 0, SourceType::UserDefined);
+        ls.primary = true;
+        Symbol::Label(ls)
+    }
+
     /// Returns the symbol name. Delegates to the inner type's `SymbolApi::get_name`.
     pub fn name(&self) -> String {
         <Self as SymbolApi>::get_name(self)

@@ -20,7 +20,7 @@ use super::{
     TokenNavigation,
 };
 use egui::{
-    Align, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response, RichText,
+    Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response, RichText,
     ScrollArea, Sense, Stroke, TextStyle, Ui, Vec2,
 };
 use ghidra_core::addr::Address;
@@ -118,7 +118,7 @@ fn render_header(state: &mut DecompilerViewState, ui: &mut Ui) {
             );
         }
 
-        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             // Font size
             ui.label(RichText::new("Font:").color(theme.header_text).size(11.0));
             if ui
@@ -262,11 +262,11 @@ fn render_code_area(state: &mut DecompilerViewState, ui: &mut Ui) {
         }
 
         // Handle mouse wheel for scroll detection
-        state.user_scrolled = ui.input(|i| i.scroll_delta.y != 0.0);
+        state.user_scrolled = ui.input(|i| i.smooth_scroll_delta.y != 0.0);
     });
 
     // Track whether the user is actively scrolling vs programmatic
-    if scroll_output.state.velocity.y.abs() > 0.1 {
+    if scroll_output.state.velocity().y.abs() > 0.1 {
         state.user_scrolled = true;
     }
 }
@@ -284,8 +284,8 @@ fn render_code_line(
     y_pos: f32,
     ui: &mut Ui,
 ) {
-    let theme = &state.syntax_theme;
-    let tokens = &state.tokens[line_idx];
+    let theme = state.syntax_theme.clone();
+    let tokens = state.tokens[line_idx].clone();
     let is_cursor_line = line_idx == state.cursor_line;
 
     // Line rect for background and interaction
@@ -307,7 +307,7 @@ fn render_code_line(
     paint_selection_background(state, line_idx, line_rect, ui);
 
     // Highlighted variable background
-    paint_variable_highlights(state, tokens, line_rect, ui);
+    paint_variable_highlights(state, &tokens, line_rect, ui);
 
     // --- Gutter (line numbers + fold indicators) ---
     let gutter_rect = Rect::from_min_size(
@@ -334,7 +334,7 @@ fn render_code_line(
         );
         ui.painter().text(
             ln_pos,
-            Align::LEFT,
+            Align2::LEFT_TOP,
             ln_text,
             FontId::monospace(state.font_size),
             theme.line_number_color,
@@ -359,7 +359,7 @@ fn render_code_line(
     // Render tokens with syntax coloring
     render_tokens(
         state,
-        tokens,
+        &tokens,
         line_idx,
         code_x,
         line_rect.top(),
@@ -377,7 +377,7 @@ fn render_code_line(
             );
             ui.painter().text(
                 addr_pos,
-                Align::LEFT,
+                Align2::LEFT_TOP,
                 addr_text,
                 FontId::monospace(state.font_size * 0.85),
                 theme.comment_color,
@@ -399,7 +399,7 @@ fn render_code_line(
     if line_response.clicked() {
         let click_pos = line_response.interact_pointer_pos();
         if let Some(pos) = click_pos {
-            let col = col_from_x(pos.x - code_x, tokens, state.font_size);
+            let col = col_from_x(pos.x - code_x, &tokens, state.font_size);
             state.set_cursor(line_idx, col);
         } else {
             state.set_cursor(line_idx, 0);
@@ -445,7 +445,7 @@ fn render_fold_indicator(
             let pos = Pos2::new(fold_x, y_top + (ROW_HEIGHT - state.font_size) / 2.0);
             ui.painter().text(
                 pos,
-                Align::LEFT,
+                Align2::LEFT_TOP,
                 indicator,
                 FontId::monospace(state.font_size * 0.7),
                 theme.line_number_color,
@@ -471,7 +471,7 @@ fn render_fold_indicator(
     let pos = Pos2::new(fold_x, y_top + (ROW_HEIGHT - state.font_size) / 2.0);
     ui.painter().text(
         pos,
-        Align::LEFT,
+        Align2::LEFT_TOP,
         fold_text,
         FontId::monospace(state.font_size * 0.75),
         fold_color,
@@ -505,7 +505,7 @@ fn render_tokens(
     max_width: f32,
     ui: &mut Ui,
 ) {
-    let theme = &state.syntax_theme;
+    let theme = state.syntax_theme.clone();
     let font_size = state.font_size;
     let font_id = FontId::monospace(font_size);
     let char_width = estimate_char_width(font_size);
@@ -536,7 +536,7 @@ fn render_tokens(
         }
 
         // Get display color
-        let color = token_color(token.kind, theme);
+        let color = token_color(token.kind, &theme);
         let is_bold = token_is_bold(token.kind);
         let is_italic = token_is_italic(token.kind);
         let is_underline = token_is_underline(token.kind);
@@ -567,7 +567,7 @@ fn render_tokens(
         };
 
         ui.painter()
-            .text(pos, Align::LEFT, text, token_font.clone(), display_color);
+            .text(pos, Align2::LEFT_TOP, text, token_font.clone(), display_color);
 
         // Draw underline for clickable tokens
         if draw_underline {
@@ -661,7 +661,7 @@ fn paint_selection_background(
     let font_size = state.font_size;
     let char_width = estimate_char_width(font_size);
 
-    let tokens = &state.tokens[line_idx];
+    let tokens = state.tokens[line_idx].clone();
     let code_x = line_rect.left() + GUTTER_WIDTH + CODE_PADDING_X;
 
     for token in tokens {
@@ -902,8 +902,9 @@ fn show_token_tooltip(state: &DecompilerViewState, token: &super::CToken, ui: &m
 
     egui::show_tooltip_at_pointer(
         ui.ctx(),
+        ui.layer_id(),
         Id::new(("token_tooltip", token.line, token.col)),
-        |ui| {
+        |ui: &mut Ui| {
             ui.label(
                 RichText::new(&full_tooltip)
                     .monospace()

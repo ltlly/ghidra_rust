@@ -265,7 +265,8 @@ impl SymbolTreePanel {
     /// Select all visible symbols.
     pub fn select_all(&mut self) {
         self.selected.clear();
-        self.select_all_recursive(&self.tree);
+        let tree = self.tree.clone();
+        self.select_all_recursive(&tree);
     }
 
     fn select_all_recursive(&mut self, node: &SymbolTreeNode) {
@@ -284,7 +285,8 @@ impl SymbolTreePanel {
 
     /// Expand all categories.
     pub fn expand_all(&mut self) {
-        self.expand_all_recursive(&self.tree);
+        let tree = self.tree.clone();
+        self.expand_all_recursive(&tree);
     }
 
     fn expand_all_recursive(&mut self, node: &SymbolTreeNode) {
@@ -411,7 +413,7 @@ impl SymbolTreePanel {
             ui.label(
                 egui::RichText::new(badge)
                     .monospace()
-                    .font_size(11.0)
+                    .size(11.0)
                     .color(egui::Color32::from_rgb(150, 150, 150)),
             );
         });
@@ -445,7 +447,7 @@ impl SymbolTreePanel {
         ui: &mut egui::Ui,
         node: &SymbolTreeNode,
         depth: usize,
-        _flat_index: usize,
+        flat_index: usize,
     ) {
         let has_children = !node.children.is_empty();
         let is_expanded = self.expanded.contains(&node.path);
@@ -522,7 +524,7 @@ impl SymbolTreePanel {
             let tri_response = tri_ui.add(
                 egui::Button::new(
                     egui::RichText::new(triangle_text)
-                        .font_size(10.0)
+                        .size(10.0)
                         .color(egui::Color32::from_rgb(180, 180, 180)),
                 )
                 .fill(egui::Color32::TRANSPARENT)
@@ -541,7 +543,7 @@ impl SymbolTreePanel {
         let icon_text = self.icon_for_node(node);
         child_ui.label(
             egui::RichText::new(icon_text)
-                .font_size(12.0)
+                .size(12.0)
                 .monospace()
                 .color(self.color_for_node(node)),
         );
@@ -565,7 +567,7 @@ impl SymbolTreePanel {
         };
 
         let label = egui::RichText::new(&name_text)
-            .font_size(12.0)
+            .size(12.0)
             .color(label_color);
 
         child_ui.label(label);
@@ -807,7 +809,7 @@ impl SymbolTreePanel {
             if has_sym {
                 ui.separator();
 
-                if ui.menu_button("References", |ui| {
+                ui.menu_button("References", |ui| {
                     if ui.button("Show References To").clicked() {
                         self.navigate_to = sym_addr;
                         ui.close_menu();
@@ -821,7 +823,7 @@ impl SymbolTreePanel {
                         self.navigate_to = sym_addr;
                         ui.close_menu();
                     }
-                }) { /* opened menu */ }
+                });
 
                 if is_function {
                     if ui.button("Edit Function Signature...").clicked() {
@@ -836,7 +838,7 @@ impl SymbolTreePanel {
             // --- Data Type ---
             if has_sym {
                 ui.separator();
-                if ui.menu_button("Data Type", |ui| {
+                ui.menu_button("Data Type", |ui| {
                     for dt in &[
                         "byte", "word", "dword", "qword", "float", "double", "string", "pointer",
                         "unicode",
@@ -845,13 +847,13 @@ impl SymbolTreePanel {
                             ui.close_menu();
                         }
                     }
-                }) { /* opened menu */ }
+                });
             }
 
             // --- Colors ---
             if has_sym {
                 ui.separator();
-                if ui.menu_button("Colors", |ui| {
+                ui.menu_button("Colors", |ui| {
                     if ui.button("Set Background Color...").clicked() {
                         ui.close_menu();
                     }
@@ -862,7 +864,7 @@ impl SymbolTreePanel {
                     if ui.button("Clear Colors").clicked() {
                         ui.close_menu();
                     }
-                }) { /* opened menu */ }
+                });
             }
 
             // --- Bookmarks ---
@@ -892,14 +894,14 @@ impl SymbolTreePanel {
 
             // --- Global Tree Actions ---
             ui.separator();
-            if ui.menu_button("Export", |ui| {
+            ui.menu_button("Export", |ui| {
                 if ui.button("Export Symbols As Text...").clicked() {
                     ui.close_menu();
                 }
                 if ui.button("Export Symbols As CSV...").clicked() {
                     ui.close_menu();
                 }
-            }) { /* opened menu */ }
+            });
             if ui.button("Import Symbols...").clicked() {
                 ui.close_menu();
             }
@@ -1098,14 +1100,16 @@ impl SymbolTreePanel {
 
         // Left arrow: collapse
         if input.key_pressed(egui::Key::ArrowLeft) {
-            for path in self.selected.iter() {
+            let paths: Vec<_> = self.selected.iter().cloned().collect();
+            for path in &paths {
                 self.collapse(path);
             }
         }
 
         // Right arrow: expand
         if input.key_pressed(egui::Key::ArrowRight) {
-            for path in self.selected.iter() {
+            let paths: Vec<_> = self.selected.iter().cloned().collect();
+            for path in &paths {
                 self.expand(path);
             }
         }

@@ -21,9 +21,10 @@ use ghidra_core::addr::Address;
 ///
 /// This is a superset of the listing-level [`super::listing::ListingAction`]
 /// and covers every context menu item across all views.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ContextMenuAction {
     // --- Separator ---
+    #[default]
     Separator,
 
     // --- Label Operations ---

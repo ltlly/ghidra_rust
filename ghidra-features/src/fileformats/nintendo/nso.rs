@@ -109,7 +109,7 @@ impl fmt::Display for NsoError {
 
 impl std::error::Error for NsoError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for NsoError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for NsoError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }

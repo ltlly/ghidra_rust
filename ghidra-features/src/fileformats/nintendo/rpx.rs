@@ -35,6 +35,7 @@ use nom::{
     number::complete::{be_u16, be_u32},
     sequence::tuple,
     IResult,
+    Parser,
 };
 
 // ===========================================================================
@@ -76,7 +77,7 @@ impl fmt::Display for RpxError {
 
 impl std::error::Error for RpxError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for RpxError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for RpxError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }
@@ -695,13 +696,14 @@ fn populate_segment_data(rpx: &mut RpxFile, data: &[u8]) -> Result<(), RpxError>
 
 /// Parse RPL-specific info (exports, imports) from Cafe OS segments.
 fn parse_rpl_info(rpx: &mut RpxFile, data: &[u8]) {
-    for segment in &rpx.segments {
-        match segment.p_type {
-            PT_RPL_INFO => {
-                parse_rpl_exports_and_imports(rpx, &segment.data);
-            }
-            _ => {}
-        }
+    let rpl_info_segments: Vec<Vec<u8>> = rpx
+        .segments
+        .iter()
+        .filter(|seg| seg.p_type == PT_RPL_INFO)
+        .map(|seg| seg.data.clone())
+        .collect();
+    for seg_data in &rpl_info_segments {
+        parse_rpl_exports_and_imports(rpx, seg_data);
     }
 }
 

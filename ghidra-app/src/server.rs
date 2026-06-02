@@ -13,8 +13,8 @@ use axum::{
 use chrono::{DateTime, Utc};
 use ghidra_core::addr::Address;
 use ghidra_core::listing::ListingRow;
-use ghidra_core::program::{ListingData, MemoryBlock, MemoryPermissions, Program};
-use ghidra_core::symbol::{Symbol, SymbolKind, SymbolTable};
+use ghidra_core::program::{ListingData, MemoryBlock, MemoryPermissions, Program, SymbolTable};
+use ghidra_core::symbol::{Symbol, SymbolType as SymbolKind};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -52,7 +52,7 @@ impl std::fmt::Display for SessionStatus {
 }
 
 /// An active analysis session holding a loaded program.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct AnalysisSession {
     /// Unique session identifier.
     pub id: String,
@@ -235,8 +235,8 @@ impl From<&AnalysisSession> for SessionResponse {
                 (
                     Some(prog.name.clone()),
                     Some(format!("0x{:x}", prog.image_base.offset)),
-                    Some(prog.memory_blocks.len()),
-                    Some(prog.symbol_table.len()),
+                    Some(prog.get_memory_blocks().len()),
+                    Some(prog.get_all_symbols().len()),
                 )
             } else {
                 (None, None, None, None)
@@ -324,10 +324,10 @@ pub struct SymbolResponse {
 impl From<&Symbol> for SymbolResponse {
     fn from(sym: &Symbol) -> Self {
         Self {
-            name: sym.name.clone(),
-            address: format!("{:08x}", sym.address.offset),
-            kind: format!("{:?}", sym.kind).to_lowercase(),
-            namespace: sym.namespace.clone(),
+            name: sym.name().clone(),
+            address: format!("{:08x}", sym.address().offset),
+            kind: format!("{:?}", sym.kind()).to_lowercase(),
+            namespace: None,
         }
     }
 }
@@ -485,7 +485,7 @@ fn build_demo_program(name: &str, image_base: u64) -> Program {
             ),
             permissions: MemoryPermissions::RX,
             initialized: true,
-        },
+                data: Vec::new(),        },
     );
     prog.memory_blocks.insert(
         ".rodata".to_string(),
@@ -497,7 +497,7 @@ fn build_demo_program(name: &str, image_base: u64) -> Program {
             ),
             permissions: MemoryPermissions::R,
             initialized: true,
-        },
+                data: Vec::new(),        },
     );
     prog.memory_blocks.insert(
         ".data".to_string(),
@@ -509,7 +509,7 @@ fn build_demo_program(name: &str, image_base: u64) -> Program {
             ),
             permissions: MemoryPermissions::RW,
             initialized: true,
-        },
+                data: Vec::new(),        },
     );
 
     // Build synthetic disassembly with direct ListingRow construction.
@@ -613,7 +613,7 @@ fn build_demo_program(name: &str, image_base: u64) -> Program {
     add_row!(image_base + 0x40, "xor", "eax, eax", "xor eax, eax", "");
     add_row!(image_base + 0x42, "leave", "", "leave", "");
 
-    prog.listing = listing;
+    prog.listing_data = listing;
 
     // Symbols
     let mut sym_table = SymbolTable::default();
@@ -715,7 +715,7 @@ async fn create_session(
     }
 
     let session = manager.get_session(&id).unwrap();
-    let response = SessionResponse::from(session);
+    let response = SessionResponse::from(&*session);
     log::info!("Session {} created: {}", id, session.name);
     (StatusCode::CREATED, Json(response))
 }
@@ -725,7 +725,7 @@ async fn get_session(State(state): State<AppState>, Path(id): Path<String>) -> i
     let manager = state.manager.lock().await;
     match manager.get_session(&id) {
         Some(session) => {
-            let response = SessionResponse::from(session);
+            let response = SessionResponse::from(&*session);
             (StatusCode::OK, Json(response)).into_response()
         }
         None => (
@@ -827,7 +827,7 @@ async fn load_binary(
     session.status = SessionStatus::Ready;
     session.touch();
 
-    let response = SessionResponse::from(session);
+    let response = SessionResponse::from(&*session);
     (StatusCode::OK, Json(response)).into_response()
 }
 
@@ -885,7 +885,7 @@ async fn run_analysis(
     session.status = SessionStatus::Ready;
     session.touch();
 
-    let response = SessionResponse::from(session);
+    let response = SessionResponse::from(&*session);
     (StatusCode::OK, Json(response)).into_response()
 }
 
@@ -1010,7 +1010,7 @@ async fn decompile_function(
     let addr = Address::new(addr);
 
     // Find the function name at this address
-    let function_name = prog.symbol_table.get(&addr).map(|s| s.name.clone());
+    let function_name = prog.symbol_table.get(&addr).map(|s| s.name().clone());
 
     // Build synthetic decompiled C code
     let source_code = build_decompiled_code(&addr, &function_name, &req.style);
@@ -1139,11 +1139,11 @@ async fn list_functions(
     let functions: Vec<FunctionResponse> = prog
         .symbol_table
         .iter()
-        .filter(|s| matches!(s.kind, SymbolKind::Function))
+        .filter(|s| matches!(s.kind(), SymbolKind::Function))
         .map(|s| FunctionResponse {
-            name: s.name.clone(),
-            address: format!("0x{:x}", s.address.offset),
-            signature: Some(format!("// function at 0x{:x}", s.address.offset)),
+            name: s.name().clone(),
+            address: format!("0x{:x}", s.address().offset),
+            signature: Some(format!("// function at 0x{:x}", s.address().offset)),
         })
         .collect();
 
@@ -1224,7 +1224,7 @@ async fn get_xrefs(
 /// Heuristic to determine the type of a cross-reference.
 fn determine_ref_type(from: &Address, to: &Address, prog: &Program) -> String {
     // Check if the referring instruction is a call
-    if let Some(row) = prog.listing.get(from) {
+    if let Some(row) = prog.listing_data.get(from) {
         if row.mnemonic.text == "call" {
             return "call".to_string();
         }
@@ -1241,8 +1241,8 @@ fn determine_ref_type(from: &Address, to: &Address, prog: &Program) -> String {
     }
 
     // Check if target is in a different memory block (data reference)
-    let from_block = prog.memory_block_at(from);
-    let to_block = prog.memory_block_at(to);
+    let from_block = prog.memory_blocks.values().find(|b| b.range.contains(from));
+    let to_block = prog.memory_blocks.values().find(|b| b.range.contains(to));
     if let (Some(fb), Some(tb)) = (from_block, to_block) {
         if fb.name != tb.name {
             return "data".to_string();
@@ -1286,17 +1286,17 @@ async fn search(
         "string" => {
             // Search symbol names
             for sym in prog.symbol_table.iter() {
-                if sym.name.to_lowercase().contains(&query_lower) && results.len() < params.limit {
+                if sym.name().to_lowercase().contains(&query_lower) && results.len() < params.limit {
                     results.push(SearchResult {
-                        address: format!("0x{:x}", sym.address.offset),
-                        context: format!("symbol: {}", sym.name),
-                        label: Some(sym.name.clone()),
+                        address: format!("0x{:x}", sym.address().offset),
+                        context: format!("symbol: {}", sym.name()),
+                        label: Some(sym.name().clone()),
                     });
                 }
             }
 
             // Search disassembly instructions
-            for row in prog.listing.rows.values() {
+            for row in prog.listing_data.rows.values() {
                 if results.len() >= params.limit {
                     break;
                 }
@@ -1328,7 +1328,7 @@ async fn search(
                     })
                     .collect();
 
-                for row in prog.listing.rows.values() {
+                for row in prog.listing_data.rows.values() {
                     if results.len() >= params.limit {
                         break;
                     }
@@ -1348,7 +1348,7 @@ async fn search(
         }
         "instruction" | "pattern" => {
             // Search instruction mnemonics / patterns
-            for row in prog.listing.rows.values() {
+            for row in prog.listing_data.rows.values() {
                 if results.len() >= params.limit {
                     break;
                 }

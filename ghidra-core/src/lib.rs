@@ -32,7 +32,7 @@ pub use program::program::{
     Comment, CommentKind, DomainFile, DomainObject, DomainObjectChangeEvent,
     DomainObjectChangeType, DomainObjectListener, InMemoryDBHandle,
     ListingData, MemoryBlock, MemoryPermissions, Program, ProgramChangeRecord,
-    ProgramChangeRecordSet, ProgramChangeSet, ProgramDB, SymbolTable,
+    ProgramChangeRecordSet, ProgramChangeSet, ProgramDB, SimpleDataType, SymbolTable,
 };
 pub use program::listing::{
     Bookmark, BookmarkManager, BookmarkType, CodeUnitComments, CodeUnitData,

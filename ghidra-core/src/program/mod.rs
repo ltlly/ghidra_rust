@@ -31,9 +31,9 @@ pub mod lang;
 pub use program::{
     Comment, CommentKind, DomainFile, DomainObject, DomainObjectChangeEvent,
     DomainObjectChangeType, DomainObjectListener,
-    InMemoryDBHandle, MemoryBlock, MemoryPermissions,
+    InMemoryDBHandle, ListingData, MemoryBlock, MemoryPermissions,
     Program, ProgramChangeRecord, ProgramChangeRecordSet, ProgramChangeSet,
-    ProgramDB, SymbolTable,
+    ProgramDB, SimpleDataType, SymbolTable,
 };
 
 // ============================================================================

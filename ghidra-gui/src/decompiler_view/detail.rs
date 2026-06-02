@@ -709,7 +709,7 @@ impl CDecompilerRenderer {
                 break;
             }
 
-            let abs_y = available.top() + visible_y;
+            let mut abs_y = available.top() + visible_y;
             let line = layout.line_index;
 
             let tokens_line = if line < tokens.len() {
@@ -883,7 +883,7 @@ impl CDecompilerRenderer {
                     }
                     if token_resp.hovered() {
                         self.hovered_token_info =
-                            Some(format!("{}: {}", token.kind_name(), token.text));
+                            Some(format!("{:?}: {}", token.kind, token.text));
                     }
 
                     x += token_width;

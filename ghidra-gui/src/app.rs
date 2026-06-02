@@ -191,7 +191,7 @@ impl ConsolePanel {
                             egui::RichText::new(format!("[{}] {}", msg.timestamp, msg.text))
                                 .color(color)
                                 .monospace()
-                                .font_size(11.0),
+                                .size(11.0),
                         );
                     }
                 }
@@ -346,7 +346,7 @@ impl DataTypePanel {
             }
 
             if let Some(ref dt) = node.data_type {
-                ui.label(format!("{} ({}) [{} bytes]", node.name, dt.kind, dt.size));
+                ui.label(format!("{} ({}) [{} bytes]", node.name, dt.name(), dt.get_size()));
             } else {
                 ui.label(egui::RichText::new(&node.name).strong());
             }
@@ -1095,45 +1095,57 @@ impl GhidraApp {
 
     /// Load a program into the application.
     fn load_program_internal(&mut self, program: Program) {
-        self.program_name = program.name.clone();
+        self.program_name = program.get_name().to_string();
         self.state = AppState::Editing;
 
         // Load labels
         let labels: std::collections::HashMap<Address, String> = program
-            .symbol_table
-            .symbols
+            .get_all_symbols()
             .iter()
-            .filter(|(_, s)| {
-                s.kind == ghidra_core::symbol::SymbolKind::Label
-                    || s.kind == ghidra_core::symbol::SymbolKind::Function
+            .filter(|s| {
+                s.kind() == ghidra_core::symbol::SymbolType::Label
+                    || s.kind() == ghidra_core::symbol::SymbolType::Function
             })
-            .map(|(addr, s)| (*addr, s.name.clone()))
+            .map(|s| (*s.address(), s.name().clone()))
             .collect();
         self.listing.set_labels(labels.clone());
 
-        // Load xrefs
-        self.listing.set_xrefs(program.xrefs.clone());
+        // Load xrefs (build from reference manager)
+        let xrefs: std::collections::HashMap<Address, Vec<Address>> = {
+            let mut map: std::collections::HashMap<Address, Vec<Address>> = std::collections::HashMap::new();
+            for sym in program.get_all_symbols() {
+                let refs_to = program.get_references_to(sym.address());
+                if !refs_to.is_empty() {
+                    map.insert(*sym.address(), refs_to);
+                }
+            }
+            map
+        };
+        self.listing.set_xrefs(xrefs.clone());
 
         // Load comments
-        let comments: std::collections::HashMap<Address, String> = program
-            .comments
-            .iter()
-            .filter_map(|(addr, cs)| cs.first().map(|c| (*addr, c.text.clone())))
-            .collect();
+        let comments: std::collections::HashMap<Address, String> = {
+            let mut map = std::collections::HashMap::new();
+            for sym in program.get_all_symbols() {
+                if let Some(c) = program.get_comment(ghidra_core::program::listing::CommentType::Eol, sym.address()) {
+                    map.insert(*sym.address(), c);
+                }
+            }
+            map
+        };
         self.listing.set_comments(comments.clone());
 
         // Convert core listing rows to rich GUI format
         let core_rows: Vec<ghidra_core::listing::ListingRow> =
-            program.listing.rows.values().cloned().collect();
-        self.cached_rows = convert_core_rows(&core_rows, &labels, &comments, &program.xrefs);
+            program.get_listing().get_all_rows();
+        self.cached_rows = convert_core_rows(&core_rows, &labels, &comments, &xrefs);
 
         // Load symbol tree
-        let mut symbol_table = program.symbol_table.clone();
-        symbol_table.rebuild_tree();
-        self.symbol_tree.load_symbols(symbol_table.tree);
+        let symbol_tree_node = program.get_symbol_tree().clone();
+        self.symbol_tree.load_symbols(symbol_tree_node);
 
         // Set address
-        self.current_address = program.image_base;
+        self.current_address = program.get_image_base();
         self.listing.goto(self.current_address);
 
         // Store program
@@ -1171,7 +1183,7 @@ impl GhidraApp {
     fn handle_menu_action(
         &mut self,
         action: MenuAction,
-        _ctx: &egui::Context,
+        ctx: &egui::Context,
         frame: &mut eframe::Frame,
     ) {
         match action {
@@ -1239,13 +1251,13 @@ impl GhidraApp {
             MenuAction::Quit => {
                 self.console.log(ConsoleSeverity::Info, "Quit requested");
                 self.state = AppState::Exiting;
-                frame.close();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             MenuAction::Exit => {
                 self.console
                     .log(ConsoleSeverity::Info, "Exiting application");
                 self.state = AppState::Exiting;
-                frame.close();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
 
             // ---- Edit ----
@@ -1400,10 +1412,10 @@ impl GhidraApp {
             MenuAction::NavigateEntryPoint => {
                 if let Some(ref prog) = self.program {
                     if let Ok(prog) = prog.read() {
-                        self.listing.goto(prog.image_base);
-                        self.current_address = prog.image_base;
+                        self.listing.goto(prog.get_image_base());
+                        self.current_address = prog.get_image_base();
                         self.status
-                            .post(format!("Entry Point: {:08X}", prog.image_base.offset));
+                            .post(format!("Entry Point: {:08X}", prog.get_image_base().offset));
                     }
                 }
             }
@@ -1726,8 +1738,8 @@ impl GhidraApp {
             ToolbarAction::GoHome => {
                 if let Some(ref prog) = self.program {
                     if let Ok(prog) = prog.read() {
-                        self.listing.goto(prog.image_base);
-                        self.current_address = prog.image_base;
+                        self.listing.goto(prog.get_image_base());
+                        self.current_address = prog.get_image_base();
                     }
                 }
             }
@@ -1958,7 +1970,7 @@ impl GhidraApp {
                         egui::RichText::new(format!("{:08X}", self.current_address.offset))
                             .color(egui::Color32::from_rgb(100, 180, 255))
                             .monospace()
-                            .font_size(11.0),
+                            .size(11.0),
                     );
                     ui.separator();
 
@@ -1967,7 +1979,7 @@ impl GhidraApp {
                         ui.label(
                             egui::RichText::new(&self.selection_info)
                                 .color(egui::Color32::from_rgb(180, 200, 180))
-                                .font_size(11.0),
+                                .size(11.0),
                         );
                         ui.separator();
                     }
@@ -1978,7 +1990,7 @@ impl GhidraApp {
                         ui.label(
                             egui::RichText::new(&status_text)
                                 .color(egui::Color32::from_rgb(200, 200, 200))
-                                .font_size(11.0),
+                                .size(11.0),
                         );
                         ui.separator();
                     }
@@ -2004,7 +2016,7 @@ impl GhidraApp {
                                 self.undo_manager.undo_count()
                             ))
                             .color(egui::Color32::from_rgb(160, 160, 160))
-                            .font_size(10.0),
+                            .size(10.0),
                         );
                     }
 
@@ -2017,7 +2029,7 @@ impl GhidraApp {
                                 ui.label(
                                     egui::RichText::new(format!("{} MB", mb))
                                         .color(egui::Color32::from_rgb(140, 140, 140))
-                                        .font_size(10.0),
+                                        .size(10.0),
                                 );
                                 ui.separator();
                             }
@@ -2026,7 +2038,7 @@ impl GhidraApp {
                             ui.label(
                                 egui::RichText::new(&self.program_name)
                                     .color(egui::Color32::from_rgb(140, 140, 140))
-                                    .font_size(10.0),
+                                    .size(10.0),
                             );
                             ui.separator();
 
@@ -2034,7 +2046,7 @@ impl GhidraApp {
                             ui.label(
                                 egui::RichText::new(self.theme.name())
                                     .color(egui::Color32::from_rgb(120, 120, 120))
-                                    .font_size(10.0),
+                                    .size(10.0),
                             );
                         },
                     );
@@ -2295,7 +2307,7 @@ impl GhidraApp {
                             ui.label(
                                 egui::RichText::new(*category)
                                     .strong()
-                                    .font_size(14.0),
+                                    .size(14.0),
                             );
                             ui.separator();
                             for (key, action) in *bindings {
@@ -2421,7 +2433,8 @@ impl GhidraApp {
                 ui.horizontal(|ui| {
                     if ui.button("Find Next").clicked() {
                         if !self.find_replace.find_text.is_empty() {
-                            self.do_search(&self.find_replace.find_text);
+                            let text = self.find_replace.find_text.clone();
+                            self.do_search(&text);
                         }
                     }
                     if ui.button("Replace").clicked() {
@@ -2480,7 +2493,7 @@ impl GhidraApp {
                         "Note: Native file dialog requires the rfd crate.",
                     )
                     .italics()
-                    .font_size(11.0),
+                    .size(11.0),
                 );
                 ui.label("Use the text field to enter a file path:");
 
@@ -2671,11 +2684,12 @@ impl GhidraApp {
             self.current_address = self.listing.cursor_position;
         }
         if input.key_pressed(egui::Key::Home) {
-            self.listing.goto_top();
+            self.listing.scroll_offset = 0;
             self.current_address = self.listing.cursor_position;
         }
         if input.key_pressed(egui::Key::End) {
-            self.listing.goto_bottom();
+            // Scroll to the end (approximate)
+            self.listing.scroll_offset = self.listing.scroll_offset.saturating_add(100000);
             self.current_address = self.listing.cursor_position;
         }
 
@@ -2769,10 +2783,11 @@ impl GhidraApp {
                     });
                     if let Some(ref prog) = self.program {
                         if let Ok(mut prog) = prog.write() {
-                            if let Some(sym) =
-                                prog.symbol_table.symbols.get_mut(&addr)
-                            {
-                                sym.name = self.listing.rename_text.clone();
+                            // Remove old symbol and add renamed one
+                            if let Some(mut old_sym) = prog.remove_symbol(&addr) {
+                                use ghidra_core::symbol::{SymbolApi, SourceType as SymSourceType};
+                                let _ = old_sym.set_name(&self.listing.rename_text, SymSourceType::UserDefined);
+                                prog.add_symbol(old_sym);
                             }
                         }
                     }
@@ -2813,14 +2828,10 @@ impl GhidraApp {
                     });
                     if let Some(ref prog) = self.program {
                         if let Ok(mut prog) = prog.write() {
-                            prog.add_comment(
+                            prog.set_comment(
                                 addr,
-                                ghidra_core::program::Comment {
-                                    kind:
-                                        ghidra_core::program::CommentKind::EndOfLine,
-                                    text: comment,
-                                    author: "user".to_string(),
-                                },
+                                ghidra_core::program::listing::CommentType::Eol,
+                                Some(comment),
                             );
                         }
                     }
@@ -2853,10 +2864,12 @@ impl GhidraApp {
                         if let Ok(mut prog) = prog.write() {
                             let body =
                                 ghidra_core::addr::AddressRange::new(addr, addr);
-                            prog.add_function(
+                            let name = format!("FUN_{:08X}", addr.offset);
+                            let _ = prog.add_function(
                                 addr,
                                 body,
-                                format!("FUN_{:08X}", addr.offset),
+                                Some(name.as_str()),
+                                ghidra_core::program::listing::SourceType::UserDefined,
                             );
                         }
                     }
@@ -3152,7 +3165,7 @@ impl GhidraApp {
     // -----------------------------------------------------------------------
 
     /// Save the current layout to disk.
-    fn save_layout(&self) {
+    fn save_layout(&mut self) {
         let json = self.views.save_layout();
         if let Err(e) = std::fs::write(&self.layout_file_path, json) {
             self.console.log(

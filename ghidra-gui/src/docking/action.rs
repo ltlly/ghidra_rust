@@ -421,7 +421,6 @@ pub struct DockingAction {
     /// Global / contextual / toggle / sub-menu.
     pub action_type: ActionType,
     /// Optional callback invoked when the action is triggered.
-    #[debug("ActionCallback")]
     pub callback: Option<ActionCallback>,
 }
 

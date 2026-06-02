@@ -81,7 +81,7 @@ impl fmt::Display for GbaError {
 
 impl std::error::Error for GbaError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for GbaError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for GbaError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }

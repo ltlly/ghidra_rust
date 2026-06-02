@@ -160,7 +160,7 @@ fn render_column_headers(view: &mut ListingView, ui: &mut Ui, is_empty: bool) {
                     let label = RichText::new(&col.label)
                         .color(theme.header_text)
                         .monospace()
-                        .font_size(11.0)
+                        .size(11.0)
                         .strong();
                     ui.label(label);
                 },
@@ -399,7 +399,7 @@ fn render_address_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
                 RichText::new("\u{2500}".repeat(10))
                     .color(theme.separator)
                     .monospace()
-                    .font_size(10.0),
+                    .size(10.0),
             );
         }
         RowType::Empty => {
@@ -410,7 +410,7 @@ fn render_address_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
                 RichText::new(&addr_text)
                     .color(theme.address)
                     .monospace()
-                    .font_size(12.0),
+                    .size(12.0),
             );
         }
     }
@@ -432,7 +432,7 @@ fn render_bytes_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
         RichText::new(&bytes_text)
             .color(theme.bytes)
             .monospace()
-            .font_size(11.0),
+            .size(11.0),
     );
 }
 
@@ -447,7 +447,7 @@ fn render_label_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
         } else {
             (label.as_str(), theme.address_ref)
         };
-        ui.label(RichText::new(text).color(color).monospace().font_size(12.0));
+        ui.label(RichText::new(text).color(color).monospace().size(12.0));
     }
 }
 
@@ -460,7 +460,7 @@ fn render_mnemonic_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
                     RichText::new("db")
                         .color(theme.mnemonic)
                         .monospace()
-                        .font_size(12.0),
+                        .size(12.0),
                 );
             }
             RowType::Label => {
@@ -468,7 +468,7 @@ fn render_mnemonic_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
                     RichText::new("lab")
                         .color(theme.mnemonic)
                         .monospace()
-                        .font_size(12.0),
+                        .size(12.0),
                 );
             }
             _ => {}
@@ -507,7 +507,7 @@ fn render_mnemonic_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
         RichText::new(&row.mnemonic)
             .color(color)
             .monospace()
-            .font_size(12.0)
+            .size(12.0)
             .strong(),
     );
 }
@@ -530,7 +530,7 @@ fn render_operands_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
                 let link_text = RichText::new(&operand.text)
                     .color(color)
                     .monospace()
-                    .font_size(12.0)
+                    .size(12.0)
                     .underline();
                 let response = ui.selectable_label(false, link_text);
                 if response.clicked() {
@@ -547,7 +547,7 @@ fn render_operands_cell(row: &ListingRow, theme: &SyntaxTheme, ui: &mut Ui) {
                     RichText::new(&operand.text)
                         .color(color)
                         .monospace()
-                        .font_size(12.0),
+                        .size(12.0),
                 );
             }
 
@@ -584,7 +584,7 @@ fn render_xrefs_cell(view: &ListingView, row: &ListingRow, theme: &SyntaxTheme, 
                 RichText::new(text)
                     .color(theme.xref)
                     .monospace()
-                    .font_size(10.0),
+                    .size(10.0),
             );
         } else if !xrefs.is_empty() {
             let text: String = xrefs
@@ -596,7 +596,7 @@ fn render_xrefs_cell(view: &ListingView, row: &ListingRow, theme: &SyntaxTheme, 
                 RichText::new(text)
                     .color(theme.xref)
                     .monospace()
-                    .font_size(10.0),
+                    .size(10.0),
             );
         }
     });
@@ -613,7 +613,7 @@ fn render_comment_cell(view: &ListingView, row: &ListingRow, theme: &SyntaxTheme
             RichText::new(format!("; {}", comment))
                 .color(theme.comment)
                 .monospace()
-                .font_size(11.0)
+                .size(11.0)
                 .italics(),
         );
     }

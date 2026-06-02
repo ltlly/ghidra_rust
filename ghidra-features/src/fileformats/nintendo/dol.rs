@@ -71,7 +71,7 @@ impl fmt::Display for DolError {
 
 impl std::error::Error for DolError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for DolError {
+impl<T: std::fmt::Debug> From<nom::Err<nom::error::Error<T>>> for DolError {
     fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }

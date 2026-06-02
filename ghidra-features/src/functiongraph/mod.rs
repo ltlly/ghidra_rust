@@ -316,6 +316,7 @@ impl FunctionGraph {
 
         // One barycentre pass
         for l in 1..=max_layer {
+            let prev_layer = layers[l - 1].clone();
             layers[l].sort_by(|&a, &b| {
                 let avg_pos = |v: usize| -> f32 {
                     let preds: Vec<usize> = rev_adj[v]
@@ -329,7 +330,7 @@ impl FunctionGraph {
                     preds
                         .iter()
                         .map(|p| {
-                            layers[l - 1]
+                            prev_layer
                                 .iter()
                                 .position(|&x| x == *p)
                                 .unwrap_or(0) as f32
@@ -507,7 +508,7 @@ impl FunctionGraph {
 
         for i in 0..n {
             if !visited[i] {
-                dfs(i, &adj, visited, &mut order);
+                dfs(i, &adj, &mut visited, &mut order);
             }
         }
 
