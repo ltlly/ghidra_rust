@@ -67,10 +67,8 @@ use std::fmt;
 
 use nom::{
     bytes::complete::take,
-    combinator::{map, verify},
-    number::complete::{le_u16, le_u32, le_u64, le_u8},
-    sequence::tuple,
-    IResult, Parser,
+    number::complete::le_u32,
+    IResult,
 };
 
 // ===========================================================================

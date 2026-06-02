@@ -39,79 +39,79 @@ impl PcodeExecutor {
     ) -> Result<(), EmulatorError> {
         match op.opcode {
             // -- data movement ---------------------------------------------------
-            OpCode::Copy => self.exec_copy(op, state, memory),
-            OpCode::Load => self.exec_load(op, state, memory),
-            OpCode::Store => self.exec_store(op, state, memory),
+            OpCode::COPY => self.exec_copy(op, state, memory),
+            OpCode::LOAD => self.exec_load(op, state, memory),
+            OpCode::STORE => self.exec_store(op, state, memory),
 
             // -- integer arithmetic ----------------------------------------------
-            OpCode::IntAdd => self.exec_binary_arith(op, state, |a, b| a.wrapping_add(b)),
-            OpCode::IntSub => self.exec_binary_arith(op, state, |a, b| a.wrapping_sub(b)),
-            OpCode::IntMul => self.exec_binary_arith(op, state, |a, b| a.wrapping_mul(b)),
-            OpCode::IntDiv => self.exec_binary_div(op, state, false),
-            OpCode::IntSdiv => self.exec_binary_div(op, state, true),
-            OpCode::IntRem => self.exec_binary_rem(op, state, false),
-            OpCode::IntSrem => self.exec_binary_rem(op, state, true),
-            OpCode::IntNegate => self.exec_unary_arith(op, state, |a| (!a).wrapping_add(1)),
-            OpCode::IntCarry => self.exec_int_carry(op, state),
-            OpCode::IntScarry => self.exec_int_scarry(op, state),
-            OpCode::IntSborrow => self.exec_int_sborrow(op, state),
+            OpCode::INT_ADD => self.exec_binary_arith(op, state, memory, |a, b| a.wrapping_add(b)),
+            OpCode::INT_SUB => self.exec_binary_arith(op, state, memory, |a, b| a.wrapping_sub(b)),
+            OpCode::INT_MUL => self.exec_binary_arith(op, state, memory, |a, b| a.wrapping_mul(b)),
+            OpCode::INT_DIV => self.exec_binary_div(op, state, memory, false),
+            OpCode::INT_SDIV => self.exec_binary_div(op, state, memory, true),
+            OpCode::INT_REM => self.exec_binary_rem(op, state, memory, false),
+            OpCode::INT_SREM => self.exec_binary_rem(op, state, memory, true),
+            OpCode::INT_NEGATE => self.exec_unary_arith(op, state, memory, |a| (!a).wrapping_add(1)),
+            OpCode::INT_CARRY => self.exec_int_carry(op, state, memory),
+            OpCode::INT_SCARRY => self.exec_int_scarry(op, state, memory),
+            OpCode::INT_SBORROW => self.exec_int_sborrow(op, state, memory),
 
             // -- extension -------------------------------------------------------
-            OpCode::IntSext => self.exec_int_sext(op, state),
-            OpCode::IntZext => self.exec_int_zext(op, state),
+            OpCode::INT_SEXT => self.exec_int_sext(op, state, memory),
+            OpCode::INT_ZEXT => self.exec_int_zext(op, state, memory),
 
             // -- integer bitwise / shifts ----------------------------------------
-            OpCode::IntAnd => self.exec_binary_arith(op, state, |a, b| a & b),
-            OpCode::IntOr => self.exec_binary_arith(op, state, |a, b| a | b),
-            OpCode::IntXor => self.exec_binary_arith(op, state, |a, b| a ^ b),
-            OpCode::IntLeft => self.exec_shift(op, state, |a, b| a.wrapping_shl(b)),
-            OpCode::IntRight => self.exec_shift(op, state, |a, b| a.wrapping_shr(b)),
-            OpCode::IntSright => self.exec_signed_shift_right(op, state),
+            OpCode::INT_AND => self.exec_binary_arith(op, state, memory, |a, b| a & b),
+            OpCode::INT_OR => self.exec_binary_arith(op, state, memory, |a, b| a | b),
+            OpCode::INT_XOR => self.exec_binary_arith(op, state, memory, |a, b| a ^ b),
+            OpCode::INT_LEFT => self.exec_shift(op, state, memory, |a, b| a.wrapping_shl(b)),
+            OpCode::INT_RIGHT => self.exec_shift(op, state, memory, |a, b| a.wrapping_shr(b)),
+            OpCode::INT_SRIGHT => self.exec_signed_shift_right(op, state, memory),
 
             // -- integer comparisons ---------------------------------------------
-            OpCode::IntEqual => self.exec_comparison(op, state, |a, b| a == b),
-            OpCode::IntNotEqual => self.exec_comparison(op, state, |a, b| a != b),
-            OpCode::IntSless => self.exec_comparison_signed(op, state, |a, b| a < b),
-            OpCode::IntSlessEqual => self.exec_comparison_signed(op, state, |a, b| a <= b),
-            OpCode::IntLess => self.exec_comparison(op, state, |a, b| a < b),
-            OpCode::IntLessEqual => self.exec_comparison(op, state, |a, b| a <= b),
+            OpCode::INT_EQUAL => self.exec_comparison(op, state, memory, |a, b| a == b),
+            OpCode::INT_NOTEQUAL => self.exec_comparison(op, state, memory, |a, b| a != b),
+            OpCode::INT_SLESS => self.exec_comparison_signed(op, state, memory, |a, b| a < b),
+            OpCode::INT_SLESSEQUAL => self.exec_comparison_signed(op, state, memory, |a, b| a <= b),
+            OpCode::INT_LESS => self.exec_comparison(op, state, memory, |a, b| a < b),
+            OpCode::INT_LESSEQUAL => self.exec_comparison(op, state, memory, |a, b| a <= b),
 
             // -- boolean operations ----------------------------------------------
-            OpCode::BoolNeg => self.exec_bool_negate(op, state),
-            OpCode::BoolAnd => self.exec_bool_binary(op, state, |a, b| a && b),
-            OpCode::BoolOr => self.exec_bool_binary(op, state, |a, b| a || b),
-            OpCode::BoolXor => self.exec_bool_binary(op, state, |a, b| a ^ b),
+            OpCode::BOOL_NEGATE => self.exec_bool_negate(op, state, memory),
+            OpCode::BOOL_AND => self.exec_bool_binary(op, state, memory, |a, b| a && b),
+            OpCode::BOOL_OR => self.exec_bool_binary(op, state, memory, |a, b| a || b),
+            OpCode::BOOL_XOR => self.exec_bool_binary(op, state, memory, |a, b| a ^ b),
 
             // -- floating-point arithmetic ---------------------------------------
-            OpCode::FloatAdd => self.exec_float_binary(op, state, |a, b| a + b),
-            OpCode::FloatSub => self.exec_float_binary(op, state, |a, b| a - b),
-            OpCode::FloatMult => self.exec_float_binary(op, state, |a, b| a * b),
-            OpCode::FloatDiv => self.exec_float_binary(op, state, |a, b| a / b),
-            OpCode::FloatNeg => self.exec_float_unary(op, state, |a| -a),
-            OpCode::FloatAbs => self.exec_float_unary(op, state, |a| a.abs()),
-            OpCode::FloatSqrt => self.exec_float_unary(op, state, |a| a.sqrt()),
-            OpCode::Int2Float => self.exec_float_int_to_float(op, state),
-            OpCode::Float2Int => self.exec_float_float_to_float(op, state),
-            OpCode::FloatTrunc => self.exec_float_unary(op, state, |a| a.trunc()),
-            OpCode::FloatCeil => self.exec_float_unary(op, state, |a| a.ceil()),
-            OpCode::FloatFloor => self.exec_float_unary(op, state, |a| a.floor()),
-            OpCode::FloatRound => self.exec_float_unary(op, state, |a| a.round()),
-            OpCode::FloatNan => self.exec_float_nan(op, state),
+            OpCode::FLOAT_ADD => self.exec_float_binary(op, state, memory, |a, b| a + b),
+            OpCode::FLOAT_SUB => self.exec_float_binary(op, state, memory, |a, b| a - b),
+            OpCode::FLOAT_MUL => self.exec_float_binary(op, state, memory, |a, b| a * b),
+            OpCode::FLOAT_DIV => self.exec_float_binary(op, state, memory, |a, b| a / b),
+            OpCode::FLOAT_NEG => self.exec_float_unary(op, state, memory, |a| -a),
+            OpCode::FLOAT_ABS => self.exec_float_unary(op, state, memory, |a| a.abs()),
+            OpCode::FLOAT_SQRT => self.exec_float_unary(op, state, memory, |a| a.sqrt()),
+            OpCode::FLOAT_INT2FLOAT => self.exec_float_int_to_float(op, state, memory),
+            OpCode::FLOAT_FLOAT2INT => self.exec_float_float_to_float(op, state, memory),
+            OpCode::FLOAT_TRUNC => self.exec_float_unary(op, state, memory, |a| a.trunc()),
+            OpCode::FLOAT_CEIL => self.exec_float_unary(op, state, memory, |a| a.ceil()),
+            OpCode::FLOAT_FLOOR => self.exec_float_unary(op, state, memory, |a| a.floor()),
+            OpCode::FLOAT_ROUND => self.exec_float_unary(op, state, memory, |a| a.round()),
+            OpCode::FLOAT_NAN => self.exec_float_nan(op, state, memory),
 
             // -- floating-point comparisons --------------------------------------
-            OpCode::FloatEqual => self.exec_float_cmp(op, state, |a, b| a == b),
-            OpCode::FloatNotEqual => self.exec_float_cmp(op, state, |a, b| a != b),
-            OpCode::FloatLess => self.exec_float_cmp(op, state, |a, b| a < b),
-            OpCode::FloatLessEqual => self.exec_float_cmp(op, state, |a, b| a <= b),
+            OpCode::FLOAT_EQUAL => self.exec_float_cmp(op, state, memory, |a, b| a == b),
+            OpCode::FLOAT_NOTEQUAL => self.exec_float_cmp(op, state, memory, |a, b| a != b),
+            OpCode::FLOAT_LESS => self.exec_float_cmp(op, state, memory, |a, b| a < b),
+            OpCode::FLOAT_LESSEQUAL => self.exec_float_cmp(op, state, memory, |a, b| a <= b),
 
             // -- control flow ----------------------------------------------------
-            OpCode::Branch
-            | OpCode::Cbranch
-            | OpCode::BranchInd
-            | OpCode::Call
-            | OpCode::CallInd
-            | OpCode::Callother
-            | OpCode::Return => {
+            OpCode::BRANCH
+            | OpCode::CBRANCH
+            | OpCode::BRANCHIND
+            | OpCode::CALL
+            | OpCode::CALLIND
+            | OpCode::CALLOTHER
+            | OpCode::RETURN => {
                 // Control-flow operations are handled by the emulator, not
                 // the executor. The executor records the side effects
                 // (register/memory changes) but the PC update is done at
@@ -120,33 +120,33 @@ impl PcodeExecutor {
             }
 
             // -- extension / composition -----------------------------------------
-            OpCode::Piece => self.exec_piece(op, state),
-            OpCode::Subpiece => self.exec_subpiece(op, state),
-            OpCode::Popcount => self.exec_popcount(op, state),
-            OpCode::Lzcount => self.exec_lzcount(op, state),
-            OpCode::CpoolRef => Err(EmulatorError::UnimplementedOperation(
+            OpCode::PIECE => self.exec_piece(op, state, memory),
+            OpCode::SUBPIECE => self.exec_subpiece(op, state, memory),
+            OpCode::POPCOUNT => self.exec_popcount(op, state, memory),
+            OpCode::LZCOUNT => self.exec_lzcount(op, state, memory),
+            OpCode::CPOOLREF => Err(EmulatorError::UnimplementedOperation(
                 "CPOOLREF".to_string(),
             )),
-            OpCode::New => Err(EmulatorError::UnimplementedOperation("NEW".to_string())),
-            OpCode::Insert => Err(EmulatorError::UnimplementedOperation("INSERT".to_string())),
-            OpCode::Extract => Err(EmulatorError::UnimplementedOperation("EXTRACT".to_string())),
-            OpCode::SegmentOp => Err(EmulatorError::UnimplementedOperation(
+            OpCode::NEW => Err(EmulatorError::UnimplementedOperation("NEW".to_string())),
+            OpCode::INSERT => Err(EmulatorError::UnimplementedOperation("INSERT".to_string())),
+            OpCode::EXTRACT => Err(EmulatorError::UnimplementedOperation("EXTRACT".to_string())),
+            OpCode::SEGMENTOP => Err(EmulatorError::UnimplementedOperation(
                 "SEGMENTOP".to_string(),
             )),
-            OpCode::Cast => self.exec_cast(op, state),
+            OpCode::CAST => self.exec_cast(op, state, memory),
 
             // -- SSA / data-flow -------------------------------------------------
-            OpCode::MultiEqual => self.exec_multiequal(op, state),
-            OpCode::Indirect => Err(EmulatorError::UnimplementedOperation(
+            OpCode::MULTIEQUAL => self.exec_multiequal(op, state, memory),
+            OpCode::INDIRECT => Err(EmulatorError::UnimplementedOperation(
                 "INDIRECT".to_string(),
             )),
 
             // -- pointer arithmetic ----------------------------------------------
-            OpCode::PtrAdd => self.exec_ptradd(op, state),
-            OpCode::PtrSub => self.exec_ptrsub(op, state),
+            OpCode::PTRADD => self.exec_ptradd(op, state, memory),
+            OpCode::PTRSUB => self.exec_ptrsub(op, state, memory),
 
             // -- sentinel --------------------------------------------------------
-            OpCode::Unimplemented => Err(EmulatorError::UnimplementedOperation(
+            OpCode::UNIMPLEMENTED => Err(EmulatorError::UnimplementedOperation(
                 "UNIMPLEMENTED".to_string(),
             )),
         }
@@ -1260,7 +1260,7 @@ mod tests {
         let executor = PcodeExecutor::new();
 
         let op = make_op(
-            OpCode::Copy,
+            OpCode::COPY,
             Some(make_reg_vn(0, 8)),
             vec![make_const_vn(42, 8)],
         );
@@ -1278,7 +1278,7 @@ mod tests {
         let executor = PcodeExecutor::new();
 
         let op = make_op(
-            OpCode::IntAdd,
+            OpCode::INT_ADD,
             Some(make_reg_vn(0, 8)),
             vec![make_reg_vn(0, 8), make_reg_vn(0x18, 8)],
         );
@@ -1294,7 +1294,7 @@ mod tests {
         let executor = PcodeExecutor::new();
 
         let op = make_op(
-            OpCode::IntSub,
+            OpCode::INT_SUB,
             Some(make_reg_vn(0, 8)),
             vec![make_reg_vn(0x18, 8), make_reg_vn(0, 8)],
         );
@@ -1320,7 +1320,7 @@ mod tests {
 
         let executor = PcodeExecutor::new();
         let op = make_op(
-            OpCode::IntAdd,
+            OpCode::INT_ADD,
             Some(make_reg_vn(0, 8)),
             vec![make_reg_vn(0, 8), make_const_vn(1, 8)],
         );
@@ -1347,7 +1347,7 @@ mod tests {
 
         // STORE *0x1000, RAX
         let store_op = make_op(
-            OpCode::Store,
+            OpCode::STORE,
             None,
             vec![
                 make_const_vn(0, 4),  // space-id
@@ -1361,7 +1361,7 @@ mod tests {
 
         // LOAD RAX = *0x1000 (into reg 0x18)
         let load_op = make_op(
-            OpCode::Load,
+            OpCode::LOAD,
             Some(make_reg_vn(0x18, 8)),
             vec![
                 make_const_vn(0, 4),  // space-id
@@ -1389,7 +1389,7 @@ mod tests {
 
         // INT_LESS: 5 < 10 = 1
         let op = make_op(
-            OpCode::IntLess,
+            OpCode::INT_LESS,
             Some(make_reg_vn(0x10, 4)),
             vec![make_reg_vn(0x8, 8), make_reg_vn(0x0, 8)],
         );
@@ -1401,7 +1401,7 @@ mod tests {
 
         // INT_EQUAL: 10 == 10 = 1
         let op = make_op(
-            OpCode::IntEqual,
+            OpCode::INT_EQUAL,
             Some(make_reg_vn(0x18, 4)),
             vec![make_reg_vn(0x0, 8), make_reg_vn(0x0, 8)],
         );
@@ -1427,7 +1427,7 @@ mod tests {
 
         // AND: 0x0FFF & 0xF0F0 = 0x00F0
         let op = make_op(
-            OpCode::IntAnd,
+            OpCode::INT_AND,
             Some(make_reg_vn(0x10, 8)),
             vec![make_reg_vn(0x0, 8), make_reg_vn(0x8, 8)],
         );
@@ -1451,7 +1451,7 @@ mod tests {
 
         // PIECE: out = hi || lo = 0x56781234
         let op = make_op(
-            OpCode::Piece,
+            OpCode::PIECE,
             Some(make_reg_vn(0x10, 8)),
             vec![make_reg_vn(0x8, 4), make_reg_vn(0x0, 4)],
         );
@@ -1462,7 +1462,7 @@ mod tests {
 
         // SUBPIECE: extract low 2 bytes from result
         let op = make_op(
-            OpCode::Subpiece,
+            OpCode::SUBPIECE,
             Some(make_reg_vn(0x18, 2)),
             vec![make_reg_vn(0x10, 8), make_const_vn(0, 1)], // start at byte 0
         );
@@ -1486,7 +1486,7 @@ mod tests {
 
         // PTRADD: out = base + index * scale = 0x1000 + 2*4 = 0x1008
         let op = make_op(
-            OpCode::PtrAdd,
+            OpCode::PTRADD,
             Some(make_reg_vn(0x10, 8)),
             vec![
                 make_reg_vn(0x0, 8),
@@ -1512,7 +1512,7 @@ mod tests {
         let executor = PcodeExecutor::new();
 
         let op = make_op(
-            OpCode::IntDiv,
+            OpCode::INT_DIV,
             Some(make_reg_vn(0, 8)),
             vec![make_reg_vn(0, 8), make_const_vn(0, 8)],
         );
@@ -1536,7 +1536,7 @@ mod tests {
         ));
         let executor = PcodeExecutor::new();
 
-        let op = make_op(OpCode::Unimplemented, None, vec![]);
+        let op = make_op(OpCode::UNIMPLEMENTED, None, vec![]);
         let result = executor.execute(&op, &mut state.clone(), &mut memory);
         assert!(result.is_err());
     }

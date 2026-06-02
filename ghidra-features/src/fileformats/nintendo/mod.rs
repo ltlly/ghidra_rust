@@ -26,12 +26,3 @@ pub mod gba;
 pub mod nds;
 pub mod nso;
 pub mod rpx;
-
-/// Re-export the most common types so callers can do
-/// `use ghidra_features::fileformats::nintendo::*;`.
-pub use dol::*;
-pub use gba::*;
-pub use n3ds::*;
-pub use nds::*;
-pub use nso::*;
-pub use rpx::*;

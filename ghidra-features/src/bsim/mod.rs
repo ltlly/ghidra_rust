@@ -173,7 +173,7 @@ pub struct BSimMetadata {
 
 impl BSimMetadata {
     /// Build metadata from a [`Function`] and an architecture hint.
-    pub fn from_function(func: &dyn Function, arch: &str) -> Self {
+    pub fn from_function(func: &dyn FunctionFunction, arch: &str) -> Self {
         // Rough instruction estimate: ~4 bytes per instruction on average.
         let body_size = func.get_body().len();
         let est_instructions = if body_size < 4 { 0 } else { body_size / 4 } as u32;
@@ -637,7 +637,7 @@ impl BSimDatabase {
     ///    signature.
     /// 3. **Structural features** — body-size bucket, token-count bucket,
     ///    name-length bucket.
-    pub fn compute_signature(func: &dyn Function) -> Result<BSimSignature> {
+    pub fn compute_signature(func: &dyn FunctionFunction) -> Result<BSimSignature> {
         let mut hasher = Sha256::new();
 
         // Stable identity hash from function properties.
@@ -674,7 +674,7 @@ impl BSimDatabase {
     // -----------------------------------------------------------------------
 
     /// Extract 4-gram features from the function's decompiled signature.
-    fn extract_ngram_features(func: &dyn Function) -> FeatureVector {
+    fn extract_ngram_features(func: &dyn FunctionFunction) -> FeatureVector {
         let sig_bytes: Vec<u8> = func.signature_string().bytes().collect();
         if sig_bytes.len() < 4 {
             return FeatureVector::new();
@@ -696,7 +696,7 @@ impl BSimDatabase {
     }
 
     /// Extract token unigram + bigram features from the signature string.
-    fn extract_token_features(func: &dyn Function) -> FeatureVector {
+    fn extract_token_features(func: &dyn FunctionFunction) -> FeatureVector {
         let sig = func.signature_string();
         let tokens: Vec<&str> = sig
             .split(|c: char| c.is_whitespace() || c == '(' || c == ')' || c == ',' || c == ';')
@@ -724,7 +724,7 @@ impl BSimDatabase {
     }
 
     /// Extract structural features (size buckets, complexity buckets).
-    fn extract_structural_features(func: &dyn Function) -> FeatureVector {
+    fn extract_structural_features(func: &dyn FunctionFunction) -> FeatureVector {
         let body_size = func.get_body().len();
         let mut hashes = Vec::with_capacity(3);
         let mut weights = Vec::with_capacity(3);

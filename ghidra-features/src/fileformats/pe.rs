@@ -1248,20 +1248,20 @@ fn parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
     };
 
     // Read section raw data
-    pe.section_data = read_all_section_data(data, &pe.sections);
+    pe.section_data = read_all_section_data(input, &pe.sections);
 
     // Parse secondary structures
-    pe.exports = parse_export_directory(data, &pe);
-    pe.imports = parse_import_directories(data, &pe);
-    pe.bound_imports = parse_bound_imports(data, &pe);
-    pe.delay_imports = parse_delay_imports(data, &pe);
-    pe.resources = parse_resource_tree(data, &pe);
-    pe.exception_entries = parse_exception_directory(data, &pe, is_64bit);
-    pe.relocations = parse_relocation_directory(data, &pe);
-    pe.tls = parse_tls_directory(data, &pe, is_64bit);
-    pe.load_config = parse_load_config_directory(data, &pe, is_64bit);
-    pe.debug_info = parse_debug_directory(data, &pe);
-    pe.clr_header = parse_clr_header(data, &pe);
+    pe.exports = parse_export_directory(input, &pe);
+    pe.imports = parse_import_directories(input, &pe);
+    pe.bound_imports = parse_bound_imports(input, &pe);
+    pe.delay_imports = parse_delay_imports(input, &pe);
+    pe.resources = parse_resource_tree(input, &pe);
+    pe.exception_entries = parse_exception_directory(input, &pe, is_64bit);
+    pe.relocations = parse_relocation_directory(input, &pe);
+    pe.tls = parse_tls_directory(input, &pe, is_64bit);
+    pe.load_config = parse_load_config_directory(input, &pe, is_64bit);
+    pe.debug_info = parse_debug_directory(input, &pe);
+    pe.clr_header = parse_clr_header(input, &pe);
 
     Ok((input, pe))
 }

@@ -36,7 +36,7 @@ use std::fmt;
 use nom::{
     bytes::complete::take,
     multi::count,
-    number::complete::{be_u32, be_u8},
+    number::complete::be_u32,
     sequence::tuple,
     IResult, Parser,
 };

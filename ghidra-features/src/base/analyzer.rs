@@ -2050,7 +2050,7 @@ impl Analyzer for DataReferenceAnalyzer {
         monitor.set_message("Analyzing operand references for data...");
         monitor.initialize(set.num_addresses());
 
-        let _count = 0u64;
+        let count = 0u64;
         log.append_msg(format!(
             "DataReferenceAnalyzer: scanning {} addresses for references",
             set.num_addresses()
@@ -2121,7 +2121,7 @@ impl Analyzer for StackVariableAnalyzer {
     fn added(
         &self,
         _program: &mut Program,
-        _set: &AddressSet,
+        set: &AddressSet,
         monitor: &dyn TaskMonitor,
         _log: &mut MessageLog,
     ) -> Result<bool, CancelledError> {

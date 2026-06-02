@@ -30,12 +30,11 @@
 use std::fmt;
 
 use nom::{
-    bytes::complete::{take, take_while},
-    combinator::{map, verify},
-    multi::count,
-    number::complete::{be_u16, be_u32, be_u8},
+    bytes::complete::take,
+    combinator::verify,
+    number::complete::{be_u16, be_u32},
     sequence::tuple,
-    IResult, Parser,
+    IResult,
 };
 
 // ===========================================================================
