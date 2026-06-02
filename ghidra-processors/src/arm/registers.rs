@@ -56,7 +56,8 @@ pub enum CpsrFlagBit {
     /// Greater-than-or-equal flags for SIMD (bits 16-19)
     GE = 16,
     /// IT execution state bits (bits 10-15, 25-26 in ARMv7)
-    IT = 10,
+    /// Same bit range as IT_GE — IT is used for execution control, GE for SIMD.
+    IT,
     /// Java state bit (bit 24) - deprecated in ARMv7
     J = 24,
     /// DSP saturation (Q) flag (bit 27)

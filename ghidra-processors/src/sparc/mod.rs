@@ -1479,7 +1479,7 @@ pub fn all_sparc_mnemonics() -> Vec<InstructionMnemonic> {
         Fqtoi,
         // FPU Misc
         Fsmuld, Fdtox, Fxtos, Fxtod, Fxtoq,
-        Fdix, Fqtox, Fitoq, Fqtod,
+        Fdix, Fqtox, Fitoq,
         Fmovrse, Fmovrde,
         Fmovrlez, Fmovrnez, Fmovrgz, Fmovrlz, Fmovrgez,
         // VIS 1

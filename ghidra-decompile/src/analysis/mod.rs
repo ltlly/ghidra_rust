@@ -194,7 +194,7 @@ impl AnalysisPipeline {
             // Merge discovered copies back into constants.
             for (dst, src_vn) in propagator.copies() {
                 if let Some(&val) = self.constants.get(&src_vn) {
-                    self.constants.insert(dst, val);
+                    self.constants.insert(dst.clone(), val);
                 }
             }
         }
@@ -206,7 +206,7 @@ impl AnalysisPipeline {
             // Augment constants with range-derived values.
             for (vn, vs) in ra.ranges() {
                 if let Some(val) = vs.as_constant() {
-                    self.constants.entry(vn).or_insert(val as u64);
+                    self.constants.entry(vn.clone()).or_insert(val as u64);
                 }
             }
         }

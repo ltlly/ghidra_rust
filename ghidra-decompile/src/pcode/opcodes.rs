@@ -49,6 +49,8 @@ pub enum OpCode {
     INT_CARRY,
     /// Signed carry flag: `out = scarry(in0 + in1)`
     INT_SCARRY,
+    /// Signed borrow: `out = (in0 -s in1) borrow out`  (did subtraction underflow?)
+    INT_SBORROW,
     /// Signed borrow flag: `out = sborrow(in0 - in1)`
     /// Sign extension: `out = sext(in0)`
     INT_SEXT,
@@ -133,6 +135,8 @@ pub enum OpCode {
     /// Call to an external pseudo-operation (e.g., `syscall`)
     /// Indirect call through register: `call *in0`
     CALLIND,
+    /// Call to a user-defined / external operation (extension point)
+    CALLOTHER,
     /// Return from subroutine: `return [in0]`
     RETURN,
 
@@ -209,6 +213,7 @@ impl OpCode {
             OpCode::INT_NEGATE => "INT_NEGATE",
             OpCode::INT_CARRY => "INT_CARRY",
             OpCode::INT_SCARRY => "INT_SCARRY",
+            OpCode::INT_SBORROW => "INT_SBORROW",
             OpCode::INT_SEXT => "INT_SEXT",
             OpCode::INT_ZEXT => "INT_ZEXT",
             OpCode::INT_AND => "INT_AND",
@@ -244,6 +249,7 @@ impl OpCode {
             OpCode::BRANCHIND => "BRANCHIND",
             OpCode::CALL => "CALL",
             OpCode::CALLIND => "CALLIND",
+            OpCode::CALLOTHER => "CALLOTHER",
             OpCode::RETURN => "RETURN",
             OpCode::INT_EQUAL => "INT_EQUAL",
             OpCode::INT_NOTEQUAL => "INT_NOTEQUAL",
@@ -486,12 +492,12 @@ impl OpCode {
             OpCode::INT_CARRY | OpCode::INT_SCARRY => Some(2),
             OpCode::FLOAT_NAN => Some(0),
             OpCode::RETURN => None,                              // optional return value
-            OpCode::CALL | OpCode::CALLIND => None,              // variable args
+            OpCode::CALL | OpCode::CALLIND | OpCode::CALLOTHER => None, // variable args
             OpCode::INSERT | OpCode::EXTRACT => None,            // variable operands
             OpCode::SEGMENTOP | OpCode::CPOOLREF | OpCode::NEW => None,
             OpCode::MULTIEQUAL => None,                          // phi nodes have variable inputs
             OpCode::INDIRECT => Some(1),
-            OpCode::UNIMPLEMENTED => Some(0),
+            OpCode::INT_SBORROW | OpCode::UNIMPLEMENTED => Some(0),
         }
     }
 
@@ -707,6 +713,8 @@ impl TryFrom<u8> for OpCode {
             68 => Ok(OpCode::POPCOUNT),
             69 => Ok(OpCode::LZCOUNT),
             70 => Ok(OpCode::UNIMPLEMENTED),
+            71 => Ok(OpCode::CALLOTHER),
+            72 => Ok(OpCode::INT_SBORROW),
             _ => Err("unknown P-code opcode number"),
         }
     }
@@ -784,6 +792,8 @@ impl From<OpCode> for u8 {
             OpCode::EXTRACT => 67,
             OpCode::POPCOUNT => 68,
             OpCode::LZCOUNT => 69,
+            OpCode::CALLOTHER => 72,
+            OpCode::INT_SBORROW => 71,
             OpCode::UNIMPLEMENTED => 70,
         }
     }

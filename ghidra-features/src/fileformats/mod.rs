@@ -10,6 +10,7 @@ pub mod classfile;
 pub mod dex;
 pub mod elf;
 pub mod macho;
+pub mod nintendo;
 pub mod pe;
 pub mod pe_full;
 pub mod raw;

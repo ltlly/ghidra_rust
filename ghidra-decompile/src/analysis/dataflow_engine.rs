@@ -20,6 +20,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 
 use ghidra_core::addr::Address;

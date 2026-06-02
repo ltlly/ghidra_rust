@@ -539,69 +539,77 @@ impl TypePropagator {
                 continue;
             }
 
-            let current_node = &self.type_graph[current_idx];
-            let current_type = match &current_node.resolved_type {
+            let current_type = match &self.type_graph[current_idx].resolved_type {
                 Some(t) => t.clone(),
                 None => continue,
             };
+            let current_varnode = self.type_graph[current_idx].varnode.clone();
 
             // Propagate forward: current -> neighbors.
-            for edge in self
-                .type_graph
-                .edges_directed(current_idx, Direction::Outgoing)
             {
-                let target = edge.target();
-                if visited.contains(&target) {
-                    continue;
-                }
-                visited.insert(target);
+                let outgoing: Vec<petgraph::graph::NodeIndex> = self
+                    .type_graph
+                    .edges_directed(current_idx, Direction::Outgoing)
+                    .map(|e| e.target())
+                    .collect();
 
-                let decay = 0.85_f64;
-                let new_conf = confidence * decay;
-                let propagated =
-                    RecoveredType::propagated(current_type.data_type.clone(), current_node.varnode.clone())
-                        .with_confidence(new_conf);
+                for target in outgoing {
+                    if visited.contains(&target) {
+                        continue;
+                    }
+                    visited.insert(target);
 
-                let target_node = &mut self.type_graph[target];
-                let should_update = match &target_node.resolved_type {
-                    None => true,
-                    Some(existing) => new_conf > existing.confidence,
-                };
+                    let decay = 0.85_f64;
+                    let new_conf = confidence * decay;
+                    let propagated =
+                        RecoveredType::propagated(current_type.data_type.clone(), current_varnode.clone())
+                            .with_confidence(new_conf);
 
-                if should_update {
-                    target_node.resolved_type = Some(propagated.clone());
-                    results.push((target_node.varnode.clone(), propagated));
-                    queue.push_back((target, new_conf));
+                    let target_node = &mut self.type_graph[target];
+                    let should_update = match &target_node.resolved_type {
+                        None => true,
+                        Some(existing) => new_conf > existing.confidence,
+                    };
+
+                    if should_update {
+                        target_node.resolved_type = Some(propagated.clone());
+                        results.push((target_node.varnode.clone(), propagated));
+                        queue.push_back((target, new_conf));
+                    }
                 }
             }
 
             // Propagate backward: neighbors -> current.
-            for edge in self
-                .type_graph
-                .edges_directed(current_idx, Direction::Incoming)
             {
-                let source = edge.source();
-                if visited.contains(&source) {
-                    continue;
-                }
-                visited.insert(source);
+                let incoming: Vec<petgraph::graph::NodeIndex> = self
+                    .type_graph
+                    .edges_directed(current_idx, Direction::Incoming)
+                    .map(|e| e.source())
+                    .collect();
 
-                let decay = 0.7_f64;
-                let new_conf = confidence * decay;
-                let propagated =
-                    RecoveredType::propagated(current_type.data_type.clone(), current_node.varnode.clone())
-                        .with_confidence(new_conf);
+                for source in incoming {
+                    if visited.contains(&source) {
+                        continue;
+                    }
+                    visited.insert(source);
 
-                let source_node = &mut self.type_graph[source];
-                let should_update = match &source_node.resolved_type {
-                    None => true,
-                    Some(existing) => new_conf > existing.confidence,
-                };
+                    let decay = 0.7_f64;
+                    let new_conf = confidence * decay;
+                    let propagated =
+                        RecoveredType::propagated(current_type.data_type.clone(), current_varnode.clone())
+                            .with_confidence(new_conf);
 
-                if should_update {
-                    source_node.resolved_type = Some(propagated.clone());
-                    results.push((source_node.varnode.clone(), propagated));
-                    queue.push_back((source, new_conf));
+                    let source_node = &mut self.type_graph[source];
+                    let should_update = match &source_node.resolved_type {
+                        None => true,
+                        Some(existing) => new_conf > existing.confidence,
+                    };
+
+                    if should_update {
+                        source_node.resolved_type = Some(propagated.clone());
+                        results.push((source_node.varnode.clone(), propagated));
+                        queue.push_back((source, new_conf));
+                    }
                 }
             }
         }
@@ -708,7 +716,7 @@ impl TypeRecoveryEngine {
                 if let (Some(ref dest), Some(ptr)) = (op.output.as_ref(), op.inputs.first()) {
                     let size = dest.size as u32;
                     self.constraints.push(TypeConstraint::LoadOf {
-                        dest: dest.clone(),
+                        dest: (*dest).clone(),
                         ptr: ptr.clone(),
                         size,
                     });
@@ -746,7 +754,7 @@ impl TypeRecoveryEngine {
                 ) {
                     self.constraints.push(TypeConstraint::ArithOp {
                         op: op.opcode,
-                        dest: dest.clone(),
+                        dest: (*dest).clone(),
                         a: a.clone(),
                         b: b.clone(),
                     });
@@ -757,7 +765,7 @@ impl TypeRecoveryEngine {
                 if let (Some(ref dest), Some(src)) = (op.output.as_ref(), op.inputs.first()) {
                     let opc = op.opcode;
                     self.constraints.push(TypeConstraint::Size {
-                        varnode: dest.clone(),
+                        varnode: (*dest).clone(),
                         size: dest.size as u32,
                     });
                     self.type_propagator.add_flow(src, dest);
@@ -902,7 +910,7 @@ impl TypeRecoveryEngine {
                 // Return value (if any) constrains the function's return type.
                 if let Some(ref ret_val) = op.inputs.first() {
                     self.constraints.push(TypeConstraint::Size {
-                        varnode: ret_val.clone(),
+                        varnode: (*ret_val).clone(),
                         size: ret_val.size as u32,
                     });
                 }
@@ -1103,6 +1111,7 @@ impl TypeRecoveryEngine {
 
             // Drain the unification stack for one round.
             let pairs: Vec<_> = std::mem::take(&mut self.type_propagator.unification_stack);
+            let pairs_len = pairs.len();
 
             for (a, b) in pairs {
                 let type_a = self.type_propagator.get_type(&a).cloned();
@@ -1133,7 +1142,7 @@ impl TypeRecoveryEngine {
             }
 
             // If we made no progress this round, stop.
-            if self.type_propagator.unification_stack.len() == pairs.len() {
+            if self.type_propagator.unification_stack.len() == pairs_len {
                 // The stack is identical to what we just processed — no progress.
                 break;
             }
@@ -1423,7 +1432,7 @@ impl InferredStruct {
             s.push_str(&format!(
                 "    /* 0x{:04x} */ {} {};\n",
                 field.offset,
-                field.data_type.data_type.name,
+                field.data_type.data_type.name(),
                 field.name.as_deref().unwrap_or("field"),
             ));
         }
@@ -1470,12 +1479,12 @@ pub struct FunctionSignature {
 impl FunctionSignature {
     /// Return a formatted C-like prototype string.
     pub fn to_c_prototype(&self, func_name: &str) -> String {
-        let mut s = format!("{} {}(", self.return_type.data_type.name, func_name);
+        let mut s = format!("{} {}(", self.return_type.data_type.name(), func_name);
         for (i, param) in self.parameters.iter().enumerate() {
             if i > 0 {
                 s.push_str(", ");
             }
-            s.push_str(&param.data_type.data_type.name);
+            s.push_str(&param.data_type.data_type.name());
             if let Some(ref name) = param.name {
                 s.push(' ');
                 s.push_str(name);
@@ -1663,7 +1672,7 @@ impl HeapStructAnalyzer {
                                         }
                                         if op2.opcode == OpCode::Store
                                             && op2.inputs.len() >= 2
-                                            && &op2.inputs[0] == derived
+                                            && op2.inputs[0] == **derived
                                         {
                                             let src = &op2.inputs[1];
                                             fields_accessed.push((
@@ -1743,7 +1752,7 @@ fn is_derived_from(a: &Varnode, base: &Varnode, sequences: &[PcodeSequence]) -> 
         for op in &seq.ops {
             if op.opcode == OpCode::PtrAdd {
                 if let (Some(ref out), Some(b)) = (op.output.as_ref(), op.inputs.first()) {
-                    if out == a && b == base {
+                    if *out == a && b == base {
                         return true;
                     }
                 }
@@ -1821,7 +1830,7 @@ impl HeapStruct {
         for (offset, size, ty) in &self.fields {
             s.push_str(&format!(
                 "    /* 0x{:04x} */ {};\n",
-                offset, ty.data_type.name
+                offset, ty.data_type.name()
             ));
         }
         s.push_str("};\n");
@@ -2091,7 +2100,7 @@ mod tests {
                 },
                 ParameterType {
                     name: Some("b".into()),
-                    data_type: RecoveredType::known(DataTypeRef::pointer(&DataTypeRef::u8()), "test"),
+                    data_type: RecoveredType::known(make_pointer_type(&make_uint_type(1)), "test"),
                     location: ParamLocation::Register("r1".into()),
                 },
             ],
@@ -2137,7 +2146,7 @@ mod tests {
         let t1 = RecoveredType::inferred(make_uint_type(4), "rule-a");
         let t2 = t1.with_confidence(0.9);
         assert_eq!(t2.confidence, 0.9);
-        assert_eq!(t2.data_type, make_uint_type(4));
+        assert_eq!(t2.data_type.name(), make_uint_type(4).name());
     }
 
     #[test]

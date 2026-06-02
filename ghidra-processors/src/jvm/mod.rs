@@ -1019,20 +1019,53 @@ impl JvmMnemonic {
             | JvmMnemonic::Caload | JvmMnemonic::Saload => "Loads",
             JvmMnemonic::Istore | JvmMnemonic::Lstore | JvmMnemonic::Fstore
             | JvmMnemonic::Dstore | JvmMnemonic::Astore
-            | JvmMnemonic::Istore0..=JvmMnemonic::Astore3
+            | JvmMnemonic::Istore0 | JvmMnemonic::Istore1 | JvmMnemonic::Istore2 | JvmMnemonic::Istore3
+            | JvmMnemonic::Lstore0 | JvmMnemonic::Lstore1 | JvmMnemonic::Lstore2 | JvmMnemonic::Lstore3
+            | JvmMnemonic::Fstore0 | JvmMnemonic::Fstore1 | JvmMnemonic::Fstore2 | JvmMnemonic::Fstore3
+            | JvmMnemonic::Dstore0 | JvmMnemonic::Dstore1 | JvmMnemonic::Dstore2 | JvmMnemonic::Dstore3
+            | JvmMnemonic::Astore0 | JvmMnemonic::Astore1 | JvmMnemonic::Astore2 | JvmMnemonic::Astore3
             | JvmMnemonic::Iastore | JvmMnemonic::Lastore | JvmMnemonic::Fastore
             | JvmMnemonic::Dastore | JvmMnemonic::Aastore | JvmMnemonic::Bastore
             | JvmMnemonic::Castore | JvmMnemonic::Sastore => "Stores",
             JvmMnemonic::Pop | JvmMnemonic::Pop2 | JvmMnemonic::Dup
             | JvmMnemonic::DupX1 | JvmMnemonic::DupX2 | JvmMnemonic::Dup2
             | JvmMnemonic::Dup2X1 | JvmMnemonic::Dup2X2 | JvmMnemonic::Swap => "Stack",
-            JvmMnemonic::Iadd..=JvmMnemonic::Dneg
-            | JvmMnemonic::Ishl..=JvmMnemonic::Iinc => "Math",
-            JvmMnemonic::I2l..=JvmMnemonic::I2s => "Conversions",
-            JvmMnemonic::Lcmp..=JvmMnemonic::IfAcmpne => "Comparisons",
-            JvmMnemonic::Goto..=JvmMnemonic::Return => "Control",
-            JvmMnemonic::Getstatic..=JvmMnemonic::Monitorexit => "References",
-            JvmMnemonic::Wide..=JvmMnemonic::JsrW => "Extended",
+            JvmMnemonic::Iadd | JvmMnemonic::Ladd | JvmMnemonic::Fadd | JvmMnemonic::Dadd
+            | JvmMnemonic::Isub | JvmMnemonic::Lsub | JvmMnemonic::Fsub | JvmMnemonic::Dsub
+            | JvmMnemonic::Imul | JvmMnemonic::Lmul | JvmMnemonic::Fmul | JvmMnemonic::Dmul
+            | JvmMnemonic::Idiv | JvmMnemonic::Ldiv | JvmMnemonic::Fdiv | JvmMnemonic::Ddiv
+            | JvmMnemonic::Irem | JvmMnemonic::Lrem | JvmMnemonic::Frem | JvmMnemonic::Drem
+            | JvmMnemonic::Ineg | JvmMnemonic::Lneg | JvmMnemonic::Fneg | JvmMnemonic::Dneg
+            | JvmMnemonic::Ishl | JvmMnemonic::Lshl | JvmMnemonic::Ishr | JvmMnemonic::Lshr
+            | JvmMnemonic::Iushr | JvmMnemonic::Lushr | JvmMnemonic::Iand | JvmMnemonic::Land
+            | JvmMnemonic::Ior | JvmMnemonic::Lor | JvmMnemonic::Ixor | JvmMnemonic::Lxor
+            | JvmMnemonic::Iinc => "Math",
+            JvmMnemonic::I2l | JvmMnemonic::I2f | JvmMnemonic::I2d
+            | JvmMnemonic::L2i | JvmMnemonic::L2f | JvmMnemonic::L2d
+            | JvmMnemonic::F2i | JvmMnemonic::F2l | JvmMnemonic::F2d
+            | JvmMnemonic::D2i | JvmMnemonic::D2l | JvmMnemonic::D2f
+            | JvmMnemonic::I2b | JvmMnemonic::I2c | JvmMnemonic::I2s => "Conversions",
+            JvmMnemonic::Lcmp | JvmMnemonic::Fcmpl | JvmMnemonic::Fcmpg
+            | JvmMnemonic::Dcmpl | JvmMnemonic::Dcmpg
+            | JvmMnemonic::Ifeq | JvmMnemonic::Ifne | JvmMnemonic::Iflt
+            | JvmMnemonic::Ifge | JvmMnemonic::Ifgt | JvmMnemonic::Ifle
+            | JvmMnemonic::IfIcmpeq | JvmMnemonic::IfIcmpne
+            | JvmMnemonic::IfIcmplt | JvmMnemonic::IfIcmpge
+            | JvmMnemonic::IfIcmpgt | JvmMnemonic::IfIcmple
+            | JvmMnemonic::IfAcmpeq | JvmMnemonic::IfAcmpne => "Comparisons",
+            JvmMnemonic::Goto | JvmMnemonic::Jsr | JvmMnemonic::Ret
+            | JvmMnemonic::Tableswitch | JvmMnemonic::Lookupswitch
+            | JvmMnemonic::Ireturn | JvmMnemonic::Lreturn | JvmMnemonic::Freturn
+            | JvmMnemonic::Dreturn | JvmMnemonic::Areturn | JvmMnemonic::Return => "Control",
+            JvmMnemonic::Getstatic | JvmMnemonic::Putstatic | JvmMnemonic::Getfield
+            | JvmMnemonic::Putfield | JvmMnemonic::Invokevirtual | JvmMnemonic::Invokespecial
+            | JvmMnemonic::Invokestatic | JvmMnemonic::Invokeinterface
+            | JvmMnemonic::Invokedynamic | JvmMnemonic::New | JvmMnemonic::Newarray
+            | JvmMnemonic::Anewarray | JvmMnemonic::Arraylength | JvmMnemonic::Athrow
+            | JvmMnemonic::Checkcast | JvmMnemonic::Instanceof
+            | JvmMnemonic::Monitorenter | JvmMnemonic::Monitorexit => "References",
+            JvmMnemonic::Wide | JvmMnemonic::Multianewarray | JvmMnemonic::Ifnull
+            | JvmMnemonic::Ifnonnull | JvmMnemonic::GotoW | JvmMnemonic::JsrW => "Extended",
             JvmMnemonic::Breakpoint | JvmMnemonic::Impdep1 | JvmMnemonic::Impdep2 => "Reserved",
             _ => "Quick",
         }

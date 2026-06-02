@@ -82,7 +82,7 @@ impl DominatorTree {
     pub fn strictly_dominated_by(&self, node: NodeIndex) -> Vec<NodeIndex> {
         self.idom
             .iter()
-            .filter(|(child, &dom)| *child != node && self.dominates(node, **child))
+            .filter(|(child, &dom)| **child != node && self.dominates(node, **child))
             .map(|(child, _)| *child)
             .collect()
     }
@@ -538,14 +538,15 @@ impl SsaBuilder {
 
                 // Rename output: create a new SSA version.
                 if let Some(ref out) = new_op.output {
-                    let version = next_version(out, &mut version_counters);
-                    let new_out = make_ssa_varnode(out, version);
-                    stacks.entry(out.clone()).or_default().push(new_out.clone());
-                    pushed_vars.push(out.clone());
+                    let out_clone = out.clone();
+                    let version = next_version(&out_clone, &mut version_counters);
+                    let new_out = make_ssa_varnode(&out_clone, version);
+                    stacks.entry(out_clone.clone()).or_default().push(new_out.clone());
+                    pushed_vars.push(out_clone.clone());
                     new_op.output = Some(new_out.clone());
 
                     all_versions.push(VarNode::new(
-                        out.clone(),
+                        out_clone,
                         version,
                         new_out,
                         Some(node),

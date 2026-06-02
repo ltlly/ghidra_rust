@@ -652,6 +652,13 @@ fn convert_sleigh_opcode(op: sleigh::pcode::OpCode) -> pcode_mod::OpCode {
         sleigh::pcode::OpCode::Extract => pcode_mod::OpCode::EXTRACT,
         sleigh::pcode::OpCode::Popcount => pcode_mod::OpCode::POPCOUNT,
         sleigh::pcode::OpCode::Lzcount => pcode_mod::OpCode::LZCOUNT,
+        sleigh::pcode::OpCode::Piece => pcode_mod::OpCode::PIECE,
+        sleigh::pcode::OpCode::Subpiece => pcode_mod::OpCode::SUBPIECE,
+        sleigh::pcode::OpCode::Cast => pcode_mod::OpCode::CAST,
+        sleigh::pcode::OpCode::PtrAdd => pcode_mod::OpCode::PTRADD,
+        sleigh::pcode::OpCode::PtrSub => pcode_mod::OpCode::PTRSUB,
+        sleigh::pcode::OpCode::MultiEqual => pcode_mod::OpCode::MULTIEQUAL,
+        sleigh::pcode::OpCode::Indirect => pcode_mod::OpCode::INDIRECT,
         sleigh::pcode::OpCode::UserDefined(_) => pcode_mod::OpCode::UNIMPLEMENTED,
     }
 }

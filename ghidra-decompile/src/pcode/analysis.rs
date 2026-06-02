@@ -1786,20 +1786,22 @@ impl ExpressionSimplifier {
             // x * 0 => 0
             OpCode::INT_MUL if consts.len() >= 2 && consts[0] == 0 || consts.len() >= 2 && consts.get(1) == Some(&0) => {
                 let out = op.output.clone()?;
+                let out_size = out.size;
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
-                    vec![Varnode::constant(0, out.size)],
+                    vec![Varnode::constant(0, out_size)],
                 ))
             }
 
             // x & 0 => 0
             OpCode::INT_AND if consts.len() >= 2 && (consts[0] == 0 || consts.get(1) == Some(&0)) => {
                 let out = op.output.clone()?;
+                let out_size = out.size;
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
-                    vec![Varnode::constant(0, out.size)],
+                    vec![Varnode::constant(0, out_size)],
                 ))
             }
 
@@ -1826,10 +1828,11 @@ impl ExpressionSimplifier {
             // x | -1 => -1
             OpCode::INT_OR if consts.len() >= 2 && consts[1] == u64::MAX => {
                 let out = op.output.clone()?;
+                let out_size = out.size;
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
-                    vec![Varnode::constant(u64::MAX, out.size)],
+                    vec![Varnode::constant(u64::MAX, out_size)],
                 ))
             }
 
@@ -1846,10 +1849,11 @@ impl ExpressionSimplifier {
             // x ^ x => 0
             OpCode::INT_XOR if op.inputs.len() >= 2 && op.inputs[0] == op.inputs[1] => {
                 let out = op.output.clone()?;
+                let out_size = out.size;
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
-                    vec![Varnode::constant(0, out.size)],
+                    vec![Varnode::constant(0, out_size)],
                 ))
             }
 

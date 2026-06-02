@@ -1008,13 +1008,16 @@ impl ControlFlowStructurer {
     }
 
     /// Emit a generic operation for unrecognized opcodes.
-    fn emit_generic_op(&self, op: &PcodeOperation) -> String {
-        let out_str = op
-            .output
-            .as_ref()
-            .map(|o| format!("{} = ", self.varnode_name(o)))
-            .unwrap_or_default();
-        let inputs: Vec<String> = op.inputs.iter().map(|v| self.varnode_to_expr(v)).collect();
+    fn emit_generic_op(&mut self, op: &PcodeOperation) -> String {
+        let out_str = if let Some(o) = &op.output {
+            format!("{} = ", self.varnode_name(o))
+        } else {
+            String::new()
+        };
+        let mut inputs: Vec<String> = Vec::new();
+        for v in &op.inputs {
+            inputs.push(self.varnode_to_expr(v));
+        }
         format!("{}{}({});", out_str, op.opcode, inputs.join(", "))
     }
 

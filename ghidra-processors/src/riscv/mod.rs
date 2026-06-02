@@ -353,14 +353,16 @@ pub enum ExceptionCode {
     LoadGuestPageFault = 21,
     VirtualInstruction = 22,
     StoreGuestPageFault = 23,
-    SupervisorSoftwareInterrupt = 1,
-    MachineSoftwareInterrupt = 3,
-    SupervisorTimerInterrupt = 5,
-    MachineTimerInterrupt = 7,
-    SupervisorExternalInterrupt = 9,
-    MachineExternalInterrupt = 11,
-    CounterOverflowInterrupt = 13,
-    GuestExternalInterrupt = 12,
+    // Interrupt codes share the same numeric values as exceptions;
+    // they're distinguished by the top bit of mcause.
+    SupervisorSoftwareInterrupt,
+    MachineSoftwareInterrupt,
+    SupervisorTimerInterrupt,
+    MachineTimerInterrupt,
+    SupervisorExternalInterrupt,
+    MachineExternalInterrupt,
+    CounterOverflowInterrupt,
+    GuestExternalInterrupt,
 }
 
 impl ExceptionCode {
@@ -707,7 +709,7 @@ impl RiscVRegisterBank {
             Register::new(&format!("x{}", i), 64, GPR_OFFSET_BASE + (i as u64) * 8)
         });
 
-        let abi_names: [(&str, u64); 32] = [
+        let abi_names: [(&str, u64); 33] = [
             ("zero", 0x00),
             ("ra", 0x08),
             ("sp", 0x10),
@@ -863,7 +865,7 @@ impl RiscVRegisterBank {
         register_by_name.insert("pc".to_string(), pc.clone());
 
         // Machine CSRs
-        let machine_csrs: [(&str, &Register); 24] = [
+        let machine_csrs: [(&str, &Register); 23] = [
             ("mstatus", &mstatus),
             ("misa", &misa),
             ("medeleg", &medeleg),
@@ -928,7 +930,7 @@ impl RiscVRegisterBank {
         register_by_name.insert("instret".to_string(), instret.clone());
 
         // Supervisor CSRs
-        let supervisor_csrs: [(&str, &Register); 13] = [
+        let supervisor_csrs: [(&str, &Register); 12] = [
             ("sstatus", &sstatus),
             ("sedeleg", &sedeleg),
             ("sideleg", &sideleg),

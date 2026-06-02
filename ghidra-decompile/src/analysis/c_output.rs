@@ -26,6 +26,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Write;
+use std::sync::Arc;
 
 use ghidra_core::addr::Address;
 use ghidra_core::data::DataType;
@@ -155,7 +156,7 @@ pub struct Variable {
     /// Human-readable name assigned to this variable.
     pub name: String,
     /// The data type of this variable.
-    pub data_type: Option<DataType>,
+    pub data_type: Option<Arc<dyn DataType>>,
     /// Size in bytes.
     pub size: u32,
     /// The address where this variable lives (for globals and stack locals).
@@ -166,7 +167,7 @@ pub struct Variable {
 
 impl Variable {
     /// Create a new stack local variable.
-    pub fn local(name: impl Into<String>, data_type: Option<DataType>, size: u32) -> Self {
+    pub fn local(name: impl Into<String>, data_type: Option<Arc<dyn DataType>>, size: u32) -> Self {
         Self {
             name: name.into(),
             data_type,
@@ -179,7 +180,7 @@ impl Variable {
     /// Create a new function parameter variable.
     pub fn parameter(
         name: impl Into<String>,
-        data_type: Option<DataType>,
+        data_type: Option<Arc<dyn DataType>>,
         size: u32,
     ) -> Self {
         Self {
@@ -194,7 +195,7 @@ impl Variable {
     /// Create a new global variable.
     pub fn global(
         name: impl Into<String>,
-        data_type: Option<DataType>,
+        data_type: Option<Arc<dyn DataType>>,
         size: u32,
         address: Address,
     ) -> Self {
@@ -315,7 +316,7 @@ pub struct Function {
     /// Function name.
     pub name: String,
     /// Return type, if known.
-    pub return_type: Option<DataType>,
+    pub return_type: Option<Arc<dyn DataType>>,
     /// Function parameters.
     pub parameters: Vec<Variable>,
     /// Local variables.
@@ -580,7 +581,7 @@ impl COutputFormatter {
     }
 
     /// Format a data type as a C type string.
-    pub fn format_type(&self, data_type: &DataType) -> String {
+    pub fn format_type(&self, data_type: &dyn DataType) -> String {
         data_type.name().to_string()
     }
 
