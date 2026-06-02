@@ -26,7 +26,7 @@ use std::fmt;
 use std::io::Read;
 
 use nom::bytes::complete::take;
-use nom::number::complete::{le_u16, le_u32, le_u64};
+use nom::number::complete::{le_u16, le_u32};
 use nom::IResult;
 
 // ===========================================================================
@@ -93,8 +93,8 @@ impl fmt::Display for ZipError {
 
 impl std::error::Error for ZipError {}
 
-impl<T> From<nom::Err<nom::error::Error<T>>> for ZipError {
-    fn from(e: nom::Err<nom::error::Error<T>>) -> Self {
+impl From<nom::Err<nom::error::Error<&[u8]>>> for ZipError {
+    fn from(e: nom::Err<nom::error::Error<&[u8]>>) -> Self {
         Self::ParseError(format!("{e:?}"))
     }
 }
@@ -379,7 +379,6 @@ fn parse_central_dir_sig(input: &[u8]) -> IResult<&[u8], u32> {
 
 /// Parse a full local file header and extract the data area.
 fn parse_local_header(input: &[u8]) -> IResult<&[u8], (LocalFileHeaderRaw, usize)> {
-    let start = input.as_ptr() as usize;
     let (input, _sig) = parse_local_header_sig(input)?;
     let (input, version_needed) = le_u16(input)?;
     let (input, flags) = le_u16(input)?;
@@ -536,7 +535,7 @@ fn parse_zip64_eocd(data: &[u8], eocd_offset: usize) -> Option<(u64, u64, u64)> 
     let _version_needed = read_u16_le(data, zip64_eocd_offset + 14)?;
     let _disk_number = read_u32_le(data, zip64_eocd_offset + 16)?;
     let _cd_start_disk = read_u32_le(data, zip64_eocd_offset + 20)?;
-    let cd_entries_on_disk = read_u64_le(data, zip64_eocd_offset + 24)?;
+    let _cd_entries_on_disk = read_u64_le(data, zip64_eocd_offset + 24)?;
     let cd_total_entries = read_u64_le(data, zip64_eocd_offset + 32)?;
     let cd_size = read_u64_le(data, zip64_eocd_offset + 40)?;
     let cd_offset = read_u64_le(data, zip64_eocd_offset + 48)?;
@@ -796,7 +795,7 @@ fn extract_local_entry(data: &[u8], cd_entry: &CentralDirEntry) -> ZipResult<Zip
     }
 
     // Verify CRC-32 if the entry is not encrypted
-    let actual_crc = if !entry_data.is_empty() && !is_encrypted && eff_compressed_size > 0 {
+    let _actual_crc = if !entry_data.is_empty() && !is_encrypted && eff_compressed_size > 0 {
         Some(crc32_calc(&entry_data))
     } else {
         None

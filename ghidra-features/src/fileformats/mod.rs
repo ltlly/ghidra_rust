@@ -1,4 +1,5 @@
-//! File format parsers - ELF, PE/COFF, Mach-O, DEX, APK, Java class, and raw binary.
+//! File format parsers - ELF, PE/COFF, Mach-O, DEX, APK, Java class,
+//! ZIP, ISO 9660, XBE, and raw binary.
 //!
 //! Ported from Ghidra's `ghidra.app.util.bin.format` package.
 //!
@@ -9,8 +10,11 @@ pub mod apk;
 pub mod classfile;
 pub mod dex;
 pub mod elf;
+pub mod iso;
 pub mod macho;
 pub mod nintendo;
 pub mod pe;
 pub mod pe_full;
 pub mod raw;
+pub mod xbe;
+pub mod zip;
