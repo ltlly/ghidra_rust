@@ -13,6 +13,7 @@
 //! - Type manager interfaces: [`DataTypeManager`] trait,
 //!   [`StandaloneDataTypeManager`], [`BuiltInDataTypeManager`]
 //! - [`DataOrganization`] with full primitive type size/alignment settings
+//! - All 246 Java data type classes ported (concrete types, settings, errors, etc.)
 //!
 //! All concrete types implement the [`DataType`] trait.
 //!
@@ -21,10 +22,32 @@
 //! - `mod.rs` (this file): Core path types (`CategoryPath`, `DataTypePath`),
 //!   the `DataTypeKind` enum, `DataOrganization`, alignment utilities,
 //!   and re-exports.
-//! - `types.rs`: The `DataType` trait, all concrete data type structs,
-//!   the `DataTypeManager` trait, type managers, and serialization support.
+//! - `types.rs`: The `DataType` trait, core composite type structs (Structure, Union,
+//!   Enum, Pointer, Array, Typedef, FunctionDef), the `DataTypeManager` trait,
+//!   type managers, and serialization support.
+//! - `builtin_types.rs`: All concrete primitive/built-in data type structs
+//!   (Boolean, Byte, Word, DWord, QWord, Float, Double, etc.) ported from
+//!   Ghidra's 40+ built-in type Java classes.
+//! - `settings_defs.rs`: All SettingsDefinition types (Endian, Mutability,
+//!   Terminated, Charset, PointerType, AddressSpace, RGB16/32, etc.).
+//! - `string_types.rs`: String data type variants (TerminatedString, Pascal,
+//!   UTF-8, Unicode, Repeated, etc.) and StringLayoutEnum.
+//! - `resource_types.rs`: Resource and media data types (Bitmap, Icon, GIF,
+//!   PNG, JPEG, AIFF, WAVE, MIDI, Color types, timestamp types, etc.).
+//! - `pointer_sizes.rs`: Fixed-size pointer types (Pointer8..Pointer64)
+//!   and PointerTypedef/PointerTypedefBuilder.
+//! - `dynamic_types.rs`: Dynamic data types (Dynamic, Factory, Indexed,
+//!   Repeated, Counted, LEB128, SegmentedCodePointer, ShiftedAddress, etc.).
+//! - `errors.rs`: Error types for data type operations.
 
 pub mod types;
+pub mod builtin_types;
+pub mod settings_defs;
+pub mod string_types;
+pub mod resource_types;
+pub mod pointer_sizes;
+pub mod dynamic_types;
+pub mod errors;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -43,6 +66,86 @@ pub use types::{
 // Re-export the bitfield info type.
 pub use types::BitfieldInfo;
 pub use types::builtin_data_type_tree;
+
+// Re-export built-in type structs from builtin_types.
+pub use builtin_types::{
+    AlignmentDataType, BadDataType, BooleanDataType, ByteDataType,
+    CharDataType, Complex8DataType, Complex16DataType, Complex32DataType,
+    DefaultDataType, DoubleComplexDataType, DoubleDataType, DWordDataType,
+    Float2DataType, Float4DataType, Float8DataType, Float10DataType,
+    Float16DataType, FloatComplexDataType, FloatDataType, GenericDataType,
+    IBO32DataType, IBO64DataType, Integer3DataType, Integer5DataType,
+    Integer6DataType, Integer7DataType, Integer16DataType, IntegerDataType,
+    LongDataType, LongDoubleComplexDataType, LongDoubleDataType,
+    LongLongDataType, MetaDataType, QWordDataType, ShortDataType,
+    SignedByteDataType, SignedCharDataType, SignedDWordDataType,
+    SignedInteger3DataType, SignedInteger5DataType, SignedInteger6DataType,
+    SignedInteger7DataType, SignedQWordDataType, SignedWordDataType,
+    Undefined1DataType, Undefined2DataType, Undefined3DataType,
+    Undefined4DataType, Undefined5DataType, Undefined6DataType,
+    Undefined7DataType, Undefined8DataType, UnsignedCharDataType,
+    UnsignedInteger3DataType, UnsignedInteger5DataType,
+    UnsignedInteger6DataType, UnsignedInteger7DataType,
+    UnsignedIntegerDataType, UnsignedLongDataType, UnsignedLongLongDataType,
+    UnsignedShortDataType, VoidDataType, WideChar16DataType,
+    WideChar32DataType, WideCharDataType, WordDataType,
+};
+
+// Re-export settings definitions.
+pub use settings_defs::{
+    AddressSpaceSettingsDefinition, CharsetSettingsDefinition,
+    ComponentOffsetSettingsDefinition, EndianSetting, EndianSettingsDefinition,
+    MutabilitySetting, MutabilitySettingsDefinition, OffsetMaskSettingsDefinition,
+    OffsetShiftSettingsDefinition, PaddingSettingsDefinition,
+    PointerType, PointerTypeSettingsDefinition, RGB16Encoding,
+    RGB16EncodingSettingsDefinition, RGB32Encoding,
+    RGB32EncodingSettingsDefinition, RenderUnicodeSettingsDefinition,
+    TerminatedSettingsDefinition, TranslationSettingsDefinition,
+    UnicodeRenderMode,
+};
+
+// Re-export string types.
+pub use string_types::{
+    DataTypeWithCharset, PascalString255DataType, PascalStringDataType,
+    PascalUnicodeDataType, RepeatedStringDataType, StringLayoutEnum,
+    StringUTF8DataType, TerminatedStringDataType, TerminatedUnicode32DataType,
+    TerminatedUnicodeDataType,
+};
+
+// Re-export resource/media types.
+pub use resource_types::{
+    AbstractColorDataType, AIFFDataType, AUDataType, AudioPlayer,
+    BitmapResource, BitmapResourceDataType, DataImage, DialogResourceDataType,
+    FileTimeDataType, GifDataType, GIFResource, IconMaskResourceDataType,
+    IconResource, IconResourceDataType, JPEGDataType,
+    MacintoshTimeStampDataType, MenuResourceDataType, MIDIDataType,
+    Playable, PngDataType, PngResource, Resource, RGB16ColorDataType,
+    RGB32ColorDataType, ScorePlayer, WAVEDataType,
+};
+
+// Re-export pointer size types.
+pub use pointer_sizes::{
+    Pointer16DataType, Pointer24DataType, Pointer32DataType,
+    Pointer40DataType, Pointer48DataType, Pointer56DataType,
+    Pointer64DataType, Pointer8DataType, PointerTypedef,
+    PointerTypedefBuilder,
+};
+
+// Re-export dynamic types.
+pub use dynamic_types::{
+    CountedDynamicDataType, DynamicDataTypeBase, DynamicDataType as DynamicDataTypeTrait,
+    FactoryDataType as FactoryDataTypeTrait, FactoryStructureDataType,
+    IndexedDynamicDataType, MissingBuiltInDataType, RepeatCountDataType,
+    RepeatedDynamicDataType, SegmentedCodePointerDataType,
+    ShiftedAddressDataType, SignedLeb128DataType, StructuredDynamicDataType,
+    UnsignedLeb128DataType,
+};
+
+// Re-export error types.
+pub use errors::{
+    DataTypeDependencyError, DataTypeEncodeError, IllegalRenameError,
+    InvalidDataTypeError, InvalidNameError,
+};
 
 // ============================================================================
 // DataTypeKind
@@ -612,10 +715,12 @@ impl DataOrganization {
     pub const NO_MAXIMUM_ALIGNMENT: usize = 0;
 
     // Default constants matching Ghidra's DataOrganizationImpl.
+    #[allow(dead_code)]
     const DEFAULT_MACHINE_ALIGNMENT: usize = 8;
     const DEFAULT_DEFAULT_ALIGNMENT: usize = 1;
     const DEFAULT_DEFAULT_POINTER_ALIGNMENT: usize = 4;
     const DEFAULT_POINTER_SHIFT: usize = 0;
+    #[allow(dead_code)]
     const DEFAULT_POINTER_SIZE: usize = 4;
     const DEFAULT_CHAR_SIZE: usize = 1;
     const DEFAULT_WIDE_CHAR_SIZE: usize = 2;

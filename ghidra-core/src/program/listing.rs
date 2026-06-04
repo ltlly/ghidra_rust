@@ -222,7 +222,7 @@ impl Default for FlowOverride {
 
 /// Describes where a variable or parameter is stored.
 /// Mirrors ghidra.program.model.listing.VariableStorage.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum VariableStorage {
     /// Stored in a register.
     Register { name: String, size: usize },
@@ -318,6 +318,23 @@ pub enum AutoParameterType {
     This,
     /// The `__return_storage_ptr__` for large return values.
     ReturnStoragePtr,
+}
+
+impl AutoParameterType {
+    /// Returns the display name for this auto-parameter type.
+    /// Mirrors Java `AutoParameterType.getDisplayName()`.
+    pub fn display_name(self) -> &'static str {
+        match self {
+            AutoParameterType::This => "this",
+            AutoParameterType::ReturnStoragePtr => "__return_storage_ptr__",
+        }
+    }
+}
+
+impl std::fmt::Display for AutoParameterType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
 }
 
 // ============================================================================
@@ -587,11 +604,11 @@ impl Variable {
     /// Get the first storage varnode as an address.
     pub fn get_min_address(&self) -> Option<Address> {
         match &self.storage {
-            VariableStorage::Register { name, .. } => {
+            VariableStorage::Register { .. } => {
                 // Register name is used; address is synthetic
                 None
             }
-            VariableStorage::Stack { offset, size } => {
+            VariableStorage::Stack { .. } => {
                 // Stack offset is relative to frame pointer
                 None // Callers need frame base from function
             }
@@ -2967,7 +2984,7 @@ impl FunctionManager {
         name: Option<&str>,
         entry_point: Address,
         body: AddressRange,
-        source: SourceType,
+        _source: SourceType,
     ) -> Result<&Function, String> {
         let func_name = name.unwrap_or("").to_string();
         if self.functions.contains_key(&entry_point) {
@@ -3394,7 +3411,7 @@ impl Default for FlowType {
 mod tests {
     use super::*;
     use crate::data::types::{
-        BuiltInDataType, BuiltInDataTypeWrapper, PointerDataType, StructureDataType,
+        BuiltInDataType, BuiltInDataTypeWrapper, PointerDataType,
     };
 
     fn make_int_type() -> Arc<dyn DataType> {
@@ -3906,4 +3923,2397 @@ impl ProgramContext {
     pub fn get_flow_override_addresses(&self) -> Vec<Address> { self.flow_overrides.keys().copied().collect() }
     pub fn has_defaults(&self) -> bool { !self.defaults.is_empty() }
     pub fn has_values(&self) -> bool { !self.values.is_empty() }
+}
+
+// ============================================================================
+// Exception types — mirrors ghidra.program.model.listing.*Exception
+// ============================================================================
+
+/// Thrown when an action would cause the program module structure to have a cycle.
+/// Mirrors `CircularDependencyException`.
+#[derive(Debug, Clone)]
+pub struct CircularDependencyException(pub String);
+
+impl std::fmt::Display for CircularDependencyException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "CircularDependencyException: {}", self.0)
+    }
+}
+
+impl std::error::Error for CircularDependencyException {}
+
+impl CircularDependencyException {
+    pub fn new() -> Self {
+        Self("Reference is invalid.".to_string())
+    }
+
+    pub fn with_message(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
+
+impl Default for CircularDependencyException {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Thrown when an illegal change to program context has been attempted.
+/// Mirrors `ContextChangeException`.
+#[derive(Debug, Clone)]
+pub struct ContextChangeException(pub String);
+
+impl std::fmt::Display for ContextChangeException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ContextChangeException: {}", self.0)
+    }
+}
+
+impl std::error::Error for ContextChangeException {}
+
+impl ContextChangeException {
+    pub fn new() -> Self {
+        Self("Illegal context change.".to_string())
+    }
+
+    pub fn with_message(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
+
+impl Default for ContextChangeException {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Thrown when a fragment or module is added to a module and it is already a child.
+/// Mirrors `DuplicateGroupException`.
+#[derive(Debug, Clone)]
+pub struct DuplicateGroupException(pub String);
+
+impl std::fmt::Display for DuplicateGroupException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DuplicateGroupException: {}", self.0)
+    }
+}
+
+impl std::error::Error for DuplicateGroupException {}
+
+impl DuplicateGroupException {
+    pub fn new() -> Self {
+        Self("The fragment or module you are adding is already there.".to_string())
+    }
+
+    pub fn with_message(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
+
+impl Default for DuplicateGroupException {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Thrown when a function creation or change would result in overlapping functions.
+/// Mirrors `FunctionOverlapException`.
+#[derive(Debug, Clone)]
+pub struct FunctionOverlapException(pub String);
+
+impl std::fmt::Display for FunctionOverlapException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FunctionOverlapException: {}", self.0)
+    }
+}
+
+impl std::error::Error for FunctionOverlapException {}
+
+impl FunctionOverlapException {
+    pub fn new() -> Self {
+        Self("Function overlaps another.".to_string())
+    }
+
+    pub fn with_message(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
+
+impl Default for FunctionOverlapException {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Thrown when attempting to replace one language in a program with another that is
+/// not address-space compatible.
+/// Mirrors `IncompatibleLanguageException`.
+#[derive(Debug, Clone)]
+pub struct IncompatibleLanguageException(pub String);
+
+impl std::fmt::Display for IncompatibleLanguageException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "IncompatibleLanguageException: {}", self.0)
+    }
+}
+
+impl std::error::Error for IncompatibleLanguageException {}
+
+impl IncompatibleLanguageException {
+    pub fn with_message(msg: impl Into<String>) -> Self {
+        Self(msg.into())
+    }
+}
+
+/// Thrown when a variable data-type exceeds storage constraints.
+/// Mirrors `VariableSizeException`.
+#[derive(Debug, Clone)]
+pub struct VariableSizeException {
+    pub message: String,
+    pub can_force: bool,
+}
+
+impl std::fmt::Display for VariableSizeException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VariableSizeException: {}", self.message)
+    }
+}
+
+impl std::error::Error for VariableSizeException {}
+
+impl VariableSizeException {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self {
+            message: msg.into(),
+            can_force: false,
+        }
+    }
+
+    pub fn with_force(msg: impl Into<String>, can_force: bool) -> Self {
+        Self {
+            message: msg.into(),
+            can_force,
+        }
+    }
+
+    /// Returns true if the operation could succeed if forced.
+    pub fn can_force(&self) -> bool {
+        self.can_force
+    }
+}
+
+// ============================================================================
+// CommentHistory — mirrors ghidra.program.model.listing.CommentHistory
+// ============================================================================
+
+/// Container class for information about changes to a comment.
+/// Mirrors `CommentHistory`.
+#[derive(Debug, Clone)]
+pub struct CommentHistory {
+    /// The address of the comment.
+    pub address: Address,
+    /// The type of comment.
+    pub comment_type: CommentType,
+    /// The name of the user that changed the comment.
+    pub user_name: String,
+    /// The comment text.
+    pub comments: String,
+    /// The modification date (stored as Unix timestamp milliseconds).
+    pub modification_date_ms: i64,
+}
+
+impl CommentHistory {
+    pub fn new(
+        address: Address,
+        comment_type: CommentType,
+        user_name: impl Into<String>,
+        comments: impl Into<String>,
+        modification_date_ms: i64,
+    ) -> Self {
+        Self {
+            address,
+            comment_type,
+            user_name: user_name.into(),
+            comments: comments.into(),
+            modification_date_ms,
+        }
+    }
+}
+
+impl std::fmt::Display for CommentHistory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let truncated = if self.comments.len() > 10 {
+            format!("{}...", &self.comments[..10])
+        } else {
+            self.comments.clone()
+        };
+        write!(
+            f,
+            "{{\n\tuser: {},\n\tdate: {},\n\taddress: {},\n\tcomment: {}\n}}",
+            self.user_name, self.modification_date_ms, self.address, truncated
+        )
+    }
+}
+
+// ============================================================================
+// RepeatableComment — mirrors ghidra.program.model.listing.RepeatableComment
+// ============================================================================
+
+/// Interface to define a comment that can be shared by more than one code unit.
+/// Mirrors `RepeatableComment`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepeatableComment {
+    /// The address this repeatable comment is associated with.
+    pub address: Address,
+    /// The comment text.
+    comment: String,
+}
+
+impl RepeatableComment {
+    pub fn new(address: Address, comment: impl Into<String>) -> Self {
+        Self {
+            address,
+            comment: comment.into(),
+        }
+    }
+
+    /// Get the text of the repeatable comment.
+    pub fn get_comment(&self) -> &str {
+        &self.comment
+    }
+
+    /// Set the text of this repeatable comment.
+    pub fn set_comment(&mut self, comment: impl Into<String>) {
+        self.comment = comment.into();
+    }
+}
+
+// ============================================================================
+// LabelString — mirrors ghidra.program.model.listing.LabelString
+// ============================================================================
+
+/// A label string used in operand representation.
+/// Mirrors `LabelString`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LabelString {
+    /// The label text.
+    pub label: String,
+    /// The type of label.
+    pub label_type: LabelType,
+}
+
+/// The type of a label string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LabelType {
+    /// A code label (function name, jump target).
+    CodeLabel,
+    /// A variable reference.
+    Variable,
+    /// An external reference.
+    External,
+}
+
+impl LabelString {
+    pub fn new(label: impl Into<String>, label_type: LabelType) -> Self {
+        Self {
+            label: label.into(),
+            label_type,
+        }
+    }
+}
+
+impl std::fmt::Display for LabelString {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.label)
+    }
+}
+
+// ============================================================================
+// VariableOffset — mirrors ghidra.program.model.listing.VariableOffset
+// ============================================================================
+
+/// Used as an operand or sub-operand representation object that corresponds
+/// to a register/stack variable reference with an optional offset.
+/// Mirrors `VariableOffset`.
+#[derive(Debug, Clone)]
+pub struct VariableOffset {
+    /// The variable being referenced.
+    pub variable_name: String,
+    /// Offset into the variable.
+    pub offset: i64,
+    /// If true and variable data-type is a pointer, the offset is relative to the
+    /// underlying data-type of the pointer-type.
+    pub indirect: bool,
+    /// True if content of variable is being read and/or written.
+    pub data_access: bool,
+    /// The replaced sub-operand element (as a display string).
+    pub replaced_element: Option<String>,
+    /// Whether to include scalar adjustment in representation.
+    pub include_scalar_adjustment: bool,
+    /// Type name of the variable's data type for display.
+    pub data_type_name: String,
+    /// Whether this is a stack variable.
+    pub is_stack: bool,
+    /// Whether this is a register variable.
+    pub is_register: bool,
+    /// Whether this is a memory variable.
+    pub is_memory: bool,
+}
+
+impl VariableOffset {
+    /// Create an implied variable reference.
+    pub fn new(
+        variable_name: impl Into<String>,
+        data_type_name: impl Into<String>,
+        offset: i64,
+        indirect: bool,
+        data_access: bool,
+    ) -> Self {
+        Self {
+            variable_name: variable_name.into(),
+            offset,
+            indirect,
+            data_access,
+            replaced_element: None,
+            include_scalar_adjustment: false,
+            data_type_name: data_type_name.into(),
+            is_stack: false,
+            is_register: false,
+            is_memory: false,
+        }
+    }
+
+    /// Set the original replaced sub-operand as a scalar.
+    pub fn set_replaced_scalar(&mut self, scalar_str: impl Into<String>, include_adjustment: bool) {
+        self.replaced_element = Some(scalar_str.into());
+        self.include_scalar_adjustment = include_adjustment;
+    }
+
+    /// Set the original replaced sub-operand as a register.
+    pub fn set_replaced_register(&mut self, reg_name: impl Into<String>) {
+        self.replaced_element = Some(reg_name.into());
+    }
+
+    /// Returns the replaced element as a display string.
+    pub fn get_replaced_element(&self) -> Option<&str> {
+        self.replaced_element.as_deref()
+    }
+
+    /// Returns the data type access portion of this variable offset as a string.
+    pub fn get_data_type_display_text(&self) -> String {
+        self.variable_name.clone()
+    }
+
+    /// Get list of markup objects as strings.
+    pub fn get_objects(&self) -> Vec<String> {
+        let mut list = Vec::new();
+        let mut name = self.variable_name.clone();
+
+        // Build field access path
+        if self.offset != 0 {
+            let abs_offset = self.offset.unsigned_abs();
+            if abs_offset > 0 {
+                // Simplified: just show offset adjustment
+                name = format!("{}{}", name, "");
+            }
+            list.push(name);
+            if self.offset < 0 {
+                list.push("-".to_string());
+                list.push(format!("0x{:x}", abs_offset));
+            } else {
+                list.push("+".to_string());
+                list.push(format!("0x{:x}", abs_offset));
+            }
+        } else {
+            list.push(name);
+        }
+        list
+    }
+
+    /// The variable name.
+    pub fn variable_name(&self) -> &str {
+        &self.variable_name
+    }
+
+    /// Whether this is indirect access.
+    pub fn is_indirect(&self) -> bool {
+        self.indirect
+    }
+
+    /// Whether this is a data access.
+    pub fn is_data_access(&self) -> bool {
+        self.data_access
+    }
+
+    /// The offset into the variable.
+    pub fn get_offset(&self) -> i64 {
+        self.offset
+    }
+}
+
+impl std::fmt::Display for VariableOffset {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let parts = self.get_objects();
+        let s = parts.join("");
+        write!(f, "{}", s)
+    }
+}
+
+impl PartialEq for VariableOffset {
+    fn eq(&self, other: &Self) -> bool {
+        self.variable_name == other.variable_name
+            && self.offset == other.offset
+            && self.indirect == other.indirect
+            && self.data_access == other.data_access
+    }
+}
+
+impl Eq for VariableOffset {}
+
+impl std::hash::Hash for VariableOffset {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.variable_name.hash(state);
+        self.offset.hash(state);
+        self.indirect.hash(state);
+        self.data_access.hash(state);
+    }
+}
+
+// ============================================================================
+// OperandRepresentationList — mirrors OperandRepresentationList.java
+// ============================================================================
+
+/// Provides a list for operand sub-elements. The list may contain various objects
+/// including String, VariableOffset, Address, Scalar, LabelString, and nesting of
+/// other OperandRepresentationList objects.
+/// Mirrors `OperandRepresentationList`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OperandRepresentationList {
+    /// The elements in this operand representation.
+    pub elements: Vec<OperandElement>,
+    /// Whether the primary reference is hidden in the representation.
+    pub primary_reference_is_hidden: bool,
+    /// Whether the representation has an error.
+    pub has_error: bool,
+}
+
+/// An element within an operand representation list.
+#[derive(Debug, Clone)]
+pub enum OperandElement {
+    /// A plain string element.
+    String(String),
+    /// A label string.
+    Label(LabelString),
+    /// A variable offset reference.
+    VariableRef(VariableOffset),
+    /// An address reference.
+    Address(Address),
+    /// A scalar (integer) value.
+    Scalar(i64),
+    /// A character element.
+    Char(char),
+    /// A nested operand representation list.
+    Nested(OperandRepresentationList),
+}
+
+impl PartialEq for OperandElement {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (OperandElement::String(a), OperandElement::String(b)) => a == b,
+            (OperandElement::Label(a), OperandElement::Label(b)) => a == b,
+            (OperandElement::VariableRef(a), OperandElement::VariableRef(b)) => a == b,
+            (OperandElement::Address(a), OperandElement::Address(b)) => a == b,
+            (OperandElement::Scalar(a), OperandElement::Scalar(b)) => a == b,
+            (OperandElement::Char(a), OperandElement::Char(b)) => a == b,
+            (OperandElement::Nested(a), OperandElement::Nested(b)) => a == b,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for OperandElement {}
+
+impl OperandRepresentationList {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_error(error: impl Into<String>) -> Self {
+        Self {
+            elements: vec![OperandElement::String(error.into())],
+            primary_reference_is_hidden: false,
+            has_error: true,
+        }
+    }
+
+    /// Set flag indicating that representation does not include primary reference.
+    pub fn set_primary_reference_hidden(&mut self, hidden: bool) {
+        self.primary_reference_is_hidden = hidden;
+    }
+
+    /// Returns true if the primary reference is hidden.
+    pub fn is_primary_reference_hidden(&self) -> bool {
+        self.primary_reference_is_hidden
+    }
+
+    /// Returns true if the representation has an error.
+    pub fn has_error(&self) -> bool {
+        self.has_error
+    }
+
+    /// Add a string element.
+    pub fn add_string(&mut self, s: impl Into<String>) {
+        self.elements.push(OperandElement::String(s.into()));
+    }
+
+    /// Add a label element.
+    pub fn add_label(&mut self, label: LabelString) {
+        self.elements.push(OperandElement::Label(label));
+    }
+
+    /// Add a variable reference element.
+    pub fn add_variable_ref(&mut self, var_offset: VariableOffset) {
+        self.elements.push(OperandElement::VariableRef(var_offset));
+    }
+
+    /// Add an address element.
+    pub fn add_address(&mut self, addr: Address) {
+        self.elements.push(OperandElement::Address(addr));
+    }
+
+    /// Add a scalar element.
+    pub fn add_scalar(&mut self, value: i64) {
+        self.elements.push(OperandElement::Scalar(value));
+    }
+
+    /// Add a char element.
+    pub fn add_char(&mut self, c: char) {
+        self.elements.push(OperandElement::Char(c));
+    }
+
+    /// Add a nested list.
+    pub fn add_nested(&mut self, list: OperandRepresentationList) {
+        self.elements.push(OperandElement::Nested(list));
+    }
+
+    /// Number of elements.
+    pub fn len(&self) -> usize {
+        self.elements.len()
+    }
+
+    /// Returns true if empty.
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
+    }
+
+    /// Get element at index.
+    pub fn get(&self, index: usize) -> Option<&OperandElement> {
+        self.elements.get(index)
+    }
+}
+
+impl std::fmt::Display for OperandRepresentationList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for elem in &self.elements {
+            match elem {
+                OperandElement::String(s) => write!(f, "{}", s)?,
+                OperandElement::Label(l) => write!(f, "{}", l)?,
+                OperandElement::VariableRef(v) => write!(f, "{}", v)?,
+                OperandElement::Address(a) => write!(f, "{}", a)?,
+                OperandElement::Scalar(v) => write!(f, "0x{:x}", v)?,
+                OperandElement::Char(c) => write!(f, "{}", c)?,
+                OperandElement::Nested(n) => write!(f, "{}", n)?,
+            }
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Iterator types — mirrors CodeUnitIterator, DataIterator, etc.
+// ============================================================================
+
+/// Iterator over code units.
+/// Mirrors `CodeUnitIterator`.
+#[derive(Debug)]
+pub struct CodeUnitIteratorImpl {
+    items: Vec<CodeUnitData>,
+    index: usize,
+}
+
+impl CodeUnitIteratorImpl {
+    pub fn new(items: Vec<CodeUnitData>) -> Self {
+        Self { items, index: 0 }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            items: Vec::new(),
+            index: 0,
+        }
+    }
+}
+
+impl Iterator for CodeUnitIteratorImpl {
+    type Item = CodeUnitData;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.items.len() {
+            let item = self.items[self.index].clone();
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for CodeUnitIteratorImpl {}
+
+/// Iterator over data items.
+/// Mirrors `DataIterator`.
+#[derive(Debug)]
+pub struct DataIteratorImpl {
+    items: Vec<Data>,
+    index: usize,
+}
+
+impl DataIteratorImpl {
+    pub fn new(items: Vec<Data>) -> Self {
+        Self { items, index: 0 }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            items: Vec::new(),
+            index: 0,
+        }
+    }
+
+    pub fn of(items: Vec<Data>) -> Self {
+        Self { items, index: 0 }
+    }
+}
+
+impl Iterator for DataIteratorImpl {
+    type Item = Data;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.items.len() {
+            let item = self.items[self.index].clone();
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for DataIteratorImpl {}
+
+/// Iterator over functions.
+/// Mirrors `FunctionIterator`.
+#[derive(Debug)]
+pub struct FunctionIteratorImpl {
+    items: Vec<Function>,
+    index: usize,
+}
+
+impl FunctionIteratorImpl {
+    pub fn new(items: Vec<Function>) -> Self {
+        Self { items, index: 0 }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            items: Vec::new(),
+            index: 0,
+        }
+    }
+}
+
+impl Iterator for FunctionIteratorImpl {
+    type Item = Function;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.items.len() {
+            let item = self.items[self.index].clone();
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for FunctionIteratorImpl {}
+
+/// Iterator over instructions.
+/// Mirrors `InstructionIterator`.
+#[derive(Debug)]
+pub struct InstructionIteratorImpl {
+    items: Vec<Instruction>,
+    index: usize,
+}
+
+impl InstructionIteratorImpl {
+    pub fn new(items: Vec<Instruction>) -> Self {
+        Self { items, index: 0 }
+    }
+
+    pub fn empty() -> Self {
+        Self {
+            items: Vec::new(),
+            index: 0,
+        }
+    }
+}
+
+impl Iterator for InstructionIteratorImpl {
+    type Item = Instruction;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.items.len() {
+            let item = self.items[self.index].clone();
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.items.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for InstructionIteratorImpl {}
+
+// ============================================================================
+// Comparators — BookmarkComparator, BookmarkTypeComparator, StackVariableComparator
+// ============================================================================
+
+/// Provides an ordering for bookmarks by type then category.
+/// Mirrors `BookmarkComparator`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BookmarkComparator;
+
+impl BookmarkComparator {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Compare two bookmarks: first by type, then by category.
+    pub fn compare(&self, bm1: &Bookmark, bm2: &Bookmark) -> std::cmp::Ordering {
+        bm1.bookmark_type
+            .cmp(&bm2.bookmark_type)
+            .then(bm1.category.cmp(&bm2.category))
+    }
+
+    /// Sort a slice of bookmarks.
+    pub fn sort(&self, bookmarks: &mut [Bookmark]) {
+        bookmarks.sort_by(|a, b| self.compare(a, b));
+    }
+}
+
+/// Provides an ordering for bookmark types by type string.
+/// Mirrors `BookmarkTypeComparator`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BookmarkTypeComparator;
+
+impl BookmarkTypeComparator {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Compare two bookmark types by their type name.
+    pub fn compare(&self, bt1: &BookmarkType, bt2: &BookmarkType) -> std::cmp::Ordering {
+        bt1.type_name.cmp(&bt2.type_name)
+    }
+
+    /// Sort a slice of bookmark types.
+    pub fn sort(&self, types: &mut [BookmarkType]) {
+        types.sort_by(|a, b| self.compare(a, b));
+    }
+}
+
+/// Compares stack variable offsets.
+/// Mirrors `StackVariableComparator`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StackVariableComparator;
+
+impl StackVariableComparator {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Compare two variables by their stack offset.
+    pub fn compare(&self, v1: &Variable, v2: &Variable) -> std::cmp::Ordering {
+        let off1 = v1.get_stack_offset();
+        let off2 = v2.get_stack_offset();
+        match (off1, off2) {
+            (Some(a), Some(b)) => a.cmp(&b),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    }
+
+    /// Compare a variable and an integer stack offset.
+    pub fn compare_offset(&self, var: &Variable, offset: i64) -> std::cmp::Ordering {
+        match var.get_stack_offset() {
+            Some(off) => off.cmp(&offset),
+            None => std::cmp::Ordering::Greater,
+        }
+    }
+}
+
+// ============================================================================
+// VariableFilter — mirrors ghidra.program.model.listing.VariableFilter
+// ============================================================================
+
+/// A filter for matching variables. Pre-built filters are provided as constants.
+/// Mirrors `VariableFilter`.
+pub trait VariableFilter: Send + Sync {
+    /// Determine if the specified variable matches this filter criteria.
+    fn matches(&self, variable: &Variable, is_parameter: bool, is_auto_param: bool) -> bool;
+}
+
+/// Matches all parameters (includes auto-params).
+pub struct ParameterFilter {
+    allow_auto_params: bool,
+}
+
+impl ParameterFilter {
+    pub fn new(allow_auto_params: bool) -> Self {
+        Self { allow_auto_params }
+    }
+}
+
+impl VariableFilter for ParameterFilter {
+    fn matches(&self, _variable: &Variable, is_parameter: bool, is_auto_param: bool) -> bool {
+        if is_parameter {
+            !is_auto_param || self.allow_auto_params
+        } else {
+            false
+        }
+    }
+}
+
+/// Matches all variables that are not parameters (i.e., local variables).
+pub struct LocalVariableFilter;
+
+impl VariableFilter for LocalVariableFilter {
+    fn matches(&self, _variable: &Variable, is_parameter: bool, _is_auto_param: bool) -> bool {
+        !is_parameter
+    }
+}
+
+/// Matches all simple stack variables.
+pub struct StackVariableFilter;
+
+impl VariableFilter for StackVariableFilter {
+    fn matches(&self, variable: &Variable, _is_parameter: bool, _is_auto_param: bool) -> bool {
+        variable.is_stack_variable()
+    }
+}
+
+/// Matches all simple or compound variables which utilize a stack storage element.
+pub struct CompoundStackVariableFilter;
+
+impl VariableFilter for CompoundStackVariableFilter {
+    fn matches(&self, variable: &Variable, _is_parameter: bool, _is_auto_param: bool) -> bool {
+        matches!(
+            &variable.storage,
+            VariableStorage::Stack { .. } | VariableStorage::Compound(_)
+        )
+    }
+}
+
+/// Matches all simple register variables.
+pub struct RegisterVariableFilter;
+
+impl VariableFilter for RegisterVariableFilter {
+    fn matches(&self, variable: &Variable, _is_parameter: bool, _is_auto_param: bool) -> bool {
+        variable.is_register_variable()
+    }
+}
+
+/// Matches all simple memory variables.
+pub struct MemoryVariableFilter;
+
+impl VariableFilter for MemoryVariableFilter {
+    fn matches(&self, variable: &Variable, _is_parameter: bool, _is_auto_param: bool) -> bool {
+        variable.is_memory_variable()
+    }
+}
+
+/// Matches all simple unique variables identified by a hash value.
+pub struct UniqueVariableFilter;
+
+impl VariableFilter for UniqueVariableFilter {
+    fn matches(&self, variable: &Variable, _is_parameter: bool, _is_auto_param: bool) -> bool {
+        matches!(&variable.storage, VariableStorage::Compound(parts) if parts.iter().any(|p| matches!(p, VariableStorage::Memory { .. })))
+    }
+}
+
+// Convenience filter instances matching the Java static fields.
+/// Matches all parameters including auto-params.
+pub const PARAMETER_FILTER: &dyn Fn(&Variable, bool, bool) -> bool =
+    &|_v, is_param, _is_auto| is_param;
+
+/// Matches all parameters excluding auto-params.
+pub const NONAUTO_PARAMETER_FILTER: &dyn Fn(&Variable, bool, bool) -> bool =
+    &|_v, is_param, is_auto| is_param && !is_auto;
+
+/// Matches all local (non-parameter) variables.
+pub const LOCAL_VARIABLE_FILTER: &dyn Fn(&Variable, bool, bool) -> bool =
+    &|_v, is_param, _| !is_param;
+
+// ============================================================================
+// Change set interfaces
+// ============================================================================
+
+/// Interface for tracking changes on a set of addresses.
+/// Mirrors `AddressChangeSet`.
+pub trait AddressChangeSet: Send + Sync {
+    /// Returns the set of addresses where the listing has changed.
+    fn get_address_set(&self) -> Vec<Address>;
+
+    /// Add an address set as changed.
+    fn add_address_set(&mut self, addresses: &[Address]);
+
+    /// Add a range of addresses as changed.
+    fn add_range(&mut self, addr1: Address, addr2: Address);
+
+    /// Returns true if there are any changes.
+    fn has_changes(&self) -> bool {
+        !self.get_address_set().is_empty()
+    }
+}
+
+/// Tracks changes on a domain object.
+/// Mirrors `DomainObjectChangeSet`.
+pub trait DomainObjectChangeSet: Send + Sync {
+    /// Returns true if there are any changes.
+    fn has_changes(&self) -> bool;
+}
+
+/// Tracks data type changes.
+/// Mirrors `DataTypeChangeSet`.
+pub trait DataTypeChangeSet: Send + Sync {
+    /// Record a data type change.
+    fn data_type_changed(&mut self, id: i64);
+
+    /// Record a data type addition.
+    fn data_type_added(&mut self, id: i64);
+
+    /// Get IDs of changed data types.
+    fn get_data_type_changes(&self) -> Vec<i64>;
+
+    /// Get IDs of added data types.
+    fn get_data_type_additions(&self) -> Vec<i64>;
+
+    /// Record a category change.
+    fn category_changed(&mut self, id: i64);
+
+    /// Record a category addition.
+    fn category_added(&mut self, id: i64);
+
+    /// Get IDs of changed categories.
+    fn get_category_changes(&self) -> Vec<i64>;
+
+    /// Get IDs of added categories.
+    fn get_category_additions(&self) -> Vec<i64>;
+}
+
+/// Tracks data type archive changes.
+/// Mirrors `DataTypeArchiveChangeSet` (extends DomainObjectChangeSet + DataTypeChangeSet).
+pub trait DataTypeArchiveChangeSet: DomainObjectChangeSet + DataTypeChangeSet {}
+
+/// Tracks symbol changes.
+/// Mirrors `SymbolChangeSet`.
+pub trait SymbolChangeSet: Send + Sync {
+    /// Record a symbol change.
+    fn symbol_changed(&mut self, id: i64);
+
+    /// Record a symbol addition.
+    fn symbol_added(&mut self, id: i64);
+
+    /// Get IDs of changed symbols.
+    fn get_symbol_changes(&self) -> Vec<i64>;
+
+    /// Get IDs of added symbols.
+    fn get_symbol_additions(&self) -> Vec<i64>;
+}
+
+/// Tracks register value changes.
+/// Mirrors `RegisterChangeSet`.
+pub trait RegisterChangeSet: Send + Sync {
+    /// Add a range of addresses that have register changes.
+    fn add_register_range(&mut self, addr1: Address, addr2: Address);
+
+    /// Returns the set of addresses containing register changes.
+    fn get_register_address_set(&self) -> Vec<Address>;
+}
+
+/// Tracks function tag changes.
+/// Mirrors `FunctionTagChangeSet`.
+pub trait FunctionTagChangeSet: Send + Sync {
+    /// Record a tag change.
+    fn tag_changed(&mut self, id: i64);
+
+    /// Record a tag creation.
+    fn tag_created(&mut self, id: i64);
+
+    /// Get IDs of changed tags.
+    fn get_tag_changes(&self) -> Vec<i64>;
+
+    /// Get IDs of created tags.
+    fn get_tag_creations(&self) -> Vec<i64>;
+}
+
+/// Tracks program tree changes.
+/// Mirrors `ProgramTreeChangeSet`.
+pub trait ProgramTreeChangeSet: Send + Sync {
+    /// Record a program tree change.
+    fn program_tree_changed(&mut self, id: i64);
+
+    /// Record a program tree addition.
+    fn program_tree_added(&mut self, id: i64);
+
+    /// Get IDs of changed program trees.
+    fn get_program_tree_changes(&self) -> Vec<i64>;
+
+    /// Get IDs of added program trees.
+    fn get_program_tree_additions(&self) -> Vec<i64>;
+}
+
+/// Tracks all program changes (addresses, registers, data types, trees, symbols, tags).
+/// Mirrors `ProgramChangeSet`.
+pub trait ProgramChangeSetTrait:
+    DomainObjectChangeSet
+    + AddressChangeSet
+    + RegisterChangeSet
+    + DataTypeChangeSet
+    + ProgramTreeChangeSet
+    + SymbolChangeSet
+    + FunctionTagChangeSet
+{
+    /// Get all addresses changed since the last save.
+    fn get_addresses_since_last_save(&self) -> Vec<Address>;
+
+    /// Get all addresses changed since checkout.
+    fn get_addresses_since_checkout(&self) -> Vec<Address>;
+}
+
+// ============================================================================
+// DefaultProgramContext — mirrors DefaultProgramContext.java (interface)
+// ============================================================================
+
+/// Trait for setting and getting default register values over address ranges.
+/// Mirrors `DefaultProgramContext`.
+pub trait DefaultProgramContext: Send + Sync {
+    /// Associates a default value with the given register over the given range.
+    fn set_default_value(&mut self, register_name: &str, value: Vec<u8>, start: Address, end: Address);
+
+    /// Returns the default value of a register at a given address, or None.
+    fn get_default_value(&self, register_name: &str, address: &Address) -> Option<Vec<u8>>;
+}
+
+// ============================================================================
+// GhidraClass — mirrors ghidra.program.model.listing.GhidraClass
+// ============================================================================
+
+/// Interface for representing class objects in the program.
+/// Mirrors `GhidraClass` (extends Namespace).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GhidraClass {
+    /// The class name.
+    pub name: String,
+    /// The namespace ID.
+    pub namespace_id: u64,
+    /// The parent namespace ID (0 for global).
+    pub parent_id: u64,
+}
+
+impl GhidraClass {
+    pub fn new(name: impl Into<String>, namespace_id: u64, parent_id: u64) -> Self {
+        Self {
+            name: name.into(),
+            namespace_id,
+            parent_id,
+        }
+    }
+}
+
+// ============================================================================
+// Library — mirrors ghidra.program.model.listing.Library
+// ============================================================================
+
+/// A library dependency and namespace.
+/// Mirrors `Library` (extends Namespace).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Library {
+    /// The library name.
+    pub name: String,
+    /// The namespace ID.
+    pub namespace_id: u64,
+    /// The parent namespace ID (0 for global).
+    pub parent_id: u64,
+    /// The associated program file pathname within the project.
+    pub associated_program_path: Option<String>,
+    /// Whether this library is resolved to an actual file.
+    pub resolved: bool,
+}
+
+impl Library {
+    /// Constant for an unknown/unnamed library.
+    pub const UNKNOWN: &'static str = "<EXTERNAL>";
+
+    pub fn new(name: impl Into<String>, namespace_id: u64) -> Self {
+        Self {
+            name: name.into(),
+            namespace_id,
+            parent_id: 0,
+            associated_program_path: None,
+            resolved: false,
+        }
+    }
+
+    /// Returns the associated program path.
+    pub fn get_associated_program_path(&self) -> Option<&str> {
+        self.associated_program_path.as_deref()
+    }
+
+    /// Sets the associated program path.
+    pub fn set_associated_program_path(&mut self, path: Option<String>) {
+        if self.name != Self::UNKNOWN {
+            self.associated_program_path = path;
+        }
+    }
+}
+
+// ============================================================================
+// DataTypeArchive — mirrors ghidra.program.model.listing.DataTypeArchive
+// ============================================================================
+
+/// Represents a data type archive.
+/// Mirrors `DataTypeArchive`.
+#[derive(Debug, Clone)]
+pub struct DataTypeArchiveInfo {
+    /// Name of the archive.
+    pub name: String,
+    /// Default pointer size.
+    pub default_pointer_size: usize,
+    /// Creation date (Unix timestamp ms).
+    pub creation_date_ms: i64,
+    /// Ghidra version used to create this archive.
+    pub created_with_version: Option<String>,
+}
+
+impl DataTypeArchiveInfo {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            default_pointer_size: 4,
+            creation_date_ms: 0,
+            created_with_version: None,
+        }
+    }
+
+    pub fn with_pointer_size(mut self, size: usize) -> Self {
+        self.default_pointer_size = size;
+        self
+    }
+
+    pub fn with_creation_date(mut self, date_ms: i64) -> Self {
+        self.creation_date_ms = date_ms;
+        self
+    }
+
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        self.created_with_version = Some(version.into());
+        self
+    }
+}
+
+// ============================================================================
+// ProgramUserData — mirrors ghidra.program.model.listing.ProgramUserData
+// ============================================================================
+
+/// Manages per-program user data such as property maps and options.
+/// Mirrors `ProgramUserData`.
+#[derive(Debug, Clone, Default)]
+pub struct ProgramUserData {
+    /// String properties keyed by name.
+    string_properties: HashMap<String, String>,
+    /// Options collections keyed by name.
+    options: HashMap<String, HashMap<String, String>>,
+    /// Address-based string properties keyed by (owner, property_name).
+    address_string_properties: HashMap<(String, String), HashMap<Address, String>>,
+    /// Address-based integer properties keyed by (owner, property_name).
+    address_int_properties: HashMap<(String, String), HashMap<Address, i64>>,
+    /// Address-based boolean properties keyed by (owner, property_name).
+    address_bool_properties: HashMap<(String, String), HashMap<Address, bool>>,
+}
+
+impl ProgramUserData {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets a string property.
+    pub fn set_string_property(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.string_properties.insert(name.into(), value.into());
+    }
+
+    /// Gets a string property.
+    pub fn get_string_property(&self, name: &str, default: &str) -> String {
+        self.string_properties
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| default.to_string())
+    }
+
+    /// Removes a string property, returning its value.
+    pub fn remove_string_property(&mut self, name: &str) -> Option<String> {
+        self.string_properties.remove(name)
+    }
+
+    /// Returns all string property names.
+    pub fn get_string_property_names(&self) -> Vec<&String> {
+        self.string_properties.keys().collect()
+    }
+
+    /// Get or create an options set by name.
+    pub fn get_options(&mut self, name: impl Into<String>) -> &mut HashMap<String, String> {
+        self.options.entry(name.into()).or_default()
+    }
+
+    /// Get all options names.
+    pub fn get_options_names(&self) -> Vec<&String> {
+        self.options.keys().collect()
+    }
+
+    /// Set an address-based string property.
+    pub fn set_address_string_property(
+        &mut self,
+        owner: impl Into<String>,
+        property_name: impl Into<String>,
+        address: Address,
+        value: impl Into<String>,
+    ) {
+        self.address_string_properties
+            .entry((owner.into(), property_name.into()))
+            .or_default()
+            .insert(address, value.into());
+    }
+
+    /// Get an address-based string property.
+    pub fn get_address_string_property(
+        &self,
+        owner: &str,
+        property_name: &str,
+        address: &Address,
+    ) -> Option<&str> {
+        self.address_string_properties
+            .get(&(owner.to_string(), property_name.to_string()))
+            .and_then(|m| m.get(address))
+            .map(|s| s.as_str())
+    }
+
+    /// Set an address-based integer property.
+    pub fn set_address_int_property(
+        &mut self,
+        owner: impl Into<String>,
+        property_name: impl Into<String>,
+        address: Address,
+        value: i64,
+    ) {
+        self.address_int_properties
+            .entry((owner.into(), property_name.into()))
+            .or_default()
+            .insert(address, value);
+    }
+
+    /// Get an address-based integer property.
+    pub fn get_address_int_property(
+        &self,
+        owner: &str,
+        property_name: &str,
+        address: &Address,
+    ) -> Option<i64> {
+        self.address_int_properties
+            .get(&(owner.to_string(), property_name.to_string()))
+            .and_then(|m| m.get(address))
+            .copied()
+    }
+
+    /// Set an address-based boolean property.
+    pub fn set_address_bool_property(
+        &mut self,
+        owner: impl Into<String>,
+        property_name: impl Into<String>,
+        address: Address,
+        value: bool,
+    ) {
+        self.address_bool_properties
+            .entry((owner.into(), property_name.into()))
+            .or_default()
+            .insert(address, value);
+    }
+
+    /// Get an address-based boolean property.
+    pub fn get_address_bool_property(
+        &self,
+        owner: &str,
+        property_name: &str,
+        address: &Address,
+    ) -> Option<bool> {
+        self.address_bool_properties
+            .get(&(owner.to_string(), property_name.to_string()))
+            .and_then(|m| m.get(address))
+            .copied()
+    }
+}
+
+// ============================================================================
+// DataBuffer — mirrors ghidra.program.model.listing.DataBuffer
+// ============================================================================
+
+/// Provides an array-like interface into a set of Data at a specific index.
+/// Mirrors `DataBuffer`.
+#[derive(Debug, Clone)]
+pub struct DataBuffer {
+    /// The base address of this buffer.
+    pub base_address: Address,
+    /// The data items in this buffer, indexed by offset from base.
+    items: Vec<Data>,
+}
+
+impl DataBuffer {
+    pub fn new(base_address: Address) -> Self {
+        Self {
+            base_address,
+            items: Vec::new(),
+        }
+    }
+
+    /// Add a data item to this buffer.
+    pub fn add(&mut self, data: Data) {
+        self.items.push(data);
+    }
+
+    /// Get a data item at the given offset index.
+    pub fn get_data(&self, offset: usize) -> Option<&Data> {
+        self.items.get(offset)
+    }
+
+    /// Get the data item starting after the given offset index.
+    pub fn get_data_after(&self, offset: usize) -> Option<&Data> {
+        self.items.get(offset + 1)
+    }
+
+    /// Get the data item starting before the given offset index.
+    pub fn get_data_before(&self, offset: usize) -> Option<&Data> {
+        if offset > 0 {
+            self.items.get(offset - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Get the offset to the next data item after the given offset.
+    pub fn get_next_offset(&self, offset: usize) -> Option<usize> {
+        if offset + 1 < self.items.len() {
+            Some(offset + 1)
+        } else {
+            None
+        }
+    }
+
+    /// Get the offset to the previous data item before the given offset.
+    pub fn get_previous_offset(&self, offset: usize) -> Option<usize> {
+        if offset > 0 {
+            Some(offset - 1)
+        } else {
+            None
+        }
+    }
+
+    /// Get an array of data items between start and end offsets (inclusive).
+    pub fn get_data_range(&self, start: usize, end: usize) -> Vec<&Data> {
+        self.items
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i >= start && *i <= end)
+            .map(|(_, d)| d)
+            .collect()
+    }
+
+    /// Get the base address.
+    pub fn get_address(&self) -> Address {
+        self.base_address
+    }
+
+    /// The number of data items in this buffer.
+    pub fn len(&self) -> usize {
+        self.items.len()
+    }
+
+    /// Returns true if this buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.items.is_empty()
+    }
+}
+
+// ============================================================================
+// ThunkFunction — mirrors ghidra.program.model.listing.ThunkFunction
+// ============================================================================
+
+/// A function which simply passes control to a destination function.
+/// All Function behaviors are mapped through to the current destination function.
+/// Mirrors `ThunkFunction`.
+#[derive(Debug, Clone)]
+pub struct ThunkFunction {
+    /// The underlying function data.
+    pub function: Function,
+    /// The entry point address of the destination function.
+    pub destination_entry_point: Address,
+}
+
+impl ThunkFunction {
+    pub fn new(function: Function, destination_entry_point: Address) -> Self {
+        Self {
+            function,
+            destination_entry_point,
+        }
+    }
+
+    /// Set the destination function entry point.
+    pub fn set_destination_function(&mut self, function: Function) {
+        self.destination_entry_point = function.entry_point;
+        self.function.is_thunk = true;
+        self.function.thunked_function = Some(function.entry_point);
+    }
+
+    /// Returns the current destination function entry point address.
+    pub fn get_destination_function_entry_point(&self) -> Address {
+        self.destination_entry_point
+    }
+
+    /// Returns true if the destination is external.
+    pub fn is_external_destination(&self) -> bool {
+        self.function.is_external
+    }
+
+    /// Get the function name.
+    pub fn name(&self) -> &str {
+        &self.function.name
+    }
+
+    /// Get the function entry point.
+    pub fn entry_point(&self) -> Address {
+        self.function.entry_point
+    }
+
+    /// Get the function body.
+    pub fn body(&self) -> &AddressRange {
+        &self.function.body
+    }
+}
+
+// ============================================================================
+// InstructionPcodeOverride — mirrors InstructionPcodeOverride.java
+// ============================================================================
+
+/// Provides p-code override information for an instruction.
+/// Mirrors `InstructionPcodeOverride`.
+#[derive(Debug, Clone)]
+pub struct InstructionPcodeOverride {
+    /// The instruction being overridden.
+    pub instruction_address: Address,
+    /// Override for the fall-through address.
+    pub fallthrough_override: Option<Address>,
+    /// Override for the call target.
+    pub call_override: Option<Address>,
+    /// Override for the indirect call target.
+    pub computed_call_override: Option<Address>,
+    /// Override for the branch target.
+    pub branch_override: Option<Address>,
+    /// Whether this is a call override applied.
+    pub call_override_applied: bool,
+    /// Whether this is a jump override applied.
+    pub jump_override_applied: bool,
+}
+
+impl InstructionPcodeOverride {
+    pub fn new(instruction_address: Address) -> Self {
+        Self {
+            instruction_address,
+            fallthrough_override: None,
+            call_override: None,
+            computed_call_override: None,
+            branch_override: None,
+            call_override_applied: false,
+            jump_override_applied: false,
+        }
+    }
+
+    /// Get the fall-through override.
+    pub fn get_fallthrough_override(&self) -> Option<Address> {
+        self.fallthrough_override
+    }
+
+    /// Get the call override address.
+    pub fn get_call_override(&self) -> Option<Address> {
+        self.call_override
+    }
+
+    /// Get the computed call override address.
+    pub fn get_computed_call_override(&self) -> Option<Address> {
+        self.computed_call_override
+    }
+
+    /// Get the branch override address.
+    pub fn get_branch_override(&self) -> Option<Address> {
+        self.branch_override
+    }
+
+    /// Set the call override.
+    pub fn set_call_override(&mut self, addr: Address) {
+        self.call_override = Some(addr);
+        self.call_override_applied = true;
+    }
+
+    /// Set the branch override.
+    pub fn set_branch_override(&mut self, addr: Address) {
+        self.branch_override = Some(addr);
+        self.jump_override_applied = true;
+    }
+
+    /// Set the fallthrough override.
+    pub fn set_fallthrough_override(&mut self, addr: Address) {
+        self.fallthrough_override = Some(addr);
+    }
+
+    /// Returns true if any override has been applied.
+    pub fn has_override(&self) -> bool {
+        self.fallthrough_override.is_some()
+            || self.call_override.is_some()
+            || self.computed_call_override.is_some()
+            || self.branch_override.is_some()
+    }
+}
+
+// ============================================================================
+// Stub types for testing — DataStub, InstructionStub
+// ============================================================================
+
+/// A stub Data implementation for tests that throws on all methods.
+/// Mirrors `DataStub`.
+#[derive(Debug, Clone)]
+pub struct DataStub {
+    pub address: Address,
+    pub size: usize,
+    pub data_type_name: String,
+}
+
+impl DataStub {
+    pub fn new(address: Address) -> Self {
+        Self {
+            address,
+            size: 0,
+            data_type_name: "undefined".to_string(),
+        }
+    }
+
+    pub fn with_size(mut self, size: usize) -> Self {
+        self.size = size;
+        self
+    }
+
+    pub fn with_type(mut self, name: impl Into<String>) -> Self {
+        self.data_type_name = name.into();
+        self
+    }
+}
+
+/// A stub Instruction implementation for tests.
+/// Mirrors `InstructionStub`.
+#[derive(Debug, Clone)]
+pub struct InstructionStub {
+    pub address: Address,
+    pub mnemonic: String,
+    pub length: usize,
+}
+
+impl InstructionStub {
+    pub fn new(address: Address) -> Self {
+        Self {
+            address,
+            mnemonic: "???".to_string(),
+            length: 1,
+        }
+    }
+
+    pub fn with_mnemonic(mut self, mnemonic: impl Into<String>) -> Self {
+        self.mnemonic = mnemonic.into();
+        self
+    }
+
+    pub fn with_length(mut self, length: usize) -> Self {
+        self.length = length;
+        self
+    }
+}
+
+// ============================================================================
+// StubListing — mirrors ghidra.program.model.listing.StubListing
+// ============================================================================
+
+/// A stub Listing implementation for tests that can return custom data.
+/// Mirrors `StubListing`.
+#[derive(Debug, Clone, Default)]
+pub struct StubListing {
+    instructions: BTreeMap<Address, Instruction>,
+    data_items: BTreeMap<Address, Data>,
+    comments: HashMap<Address, CodeUnitComments>,
+}
+
+impl StubListing {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an instruction to the stub listing.
+    pub fn add_instruction(&mut self, ins: Instruction) {
+        self.instructions.insert(ins.address, ins);
+    }
+
+    /// Add a data item to the stub listing.
+    pub fn add_data(&mut self, data: Data) {
+        self.data_items.insert(data.address, data);
+    }
+
+    /// Set a comment at an address.
+    pub fn set_stub_comment(&mut self, address: Address, comment_type: CommentType, comment: Option<String>) {
+        self.comments
+            .entry(address)
+            .or_insert_with(|| CodeUnitComments::new(address))
+            .set_comment(comment_type, comment);
+    }
+}
+
+impl Listing for StubListing {
+    fn get_code_unit_at(&self, _addr: &Address) -> Option<CodeUnitData> { None }
+    fn get_code_unit_containing(&self, _addr: &Address) -> Option<CodeUnitData> { None }
+    fn get_code_unit_after(&self, _addr: &Address) -> Option<CodeUnitData> { None }
+    fn get_code_unit_before(&self, _addr: &Address) -> Option<CodeUnitData> { None }
+    fn get_instruction_at(&self, addr: &Address) -> Option<Instruction> { self.instructions.get(addr).cloned() }
+    fn get_instruction_containing(&self, _addr: &Address) -> Option<Instruction> { None }
+    fn get_instruction_after(&self, _addr: &Address) -> Option<Instruction> { None }
+    fn get_instruction_before(&self, _addr: &Address) -> Option<Instruction> { None }
+    fn get_data_at(&self, addr: &Address) -> Option<Data> { self.data_items.get(addr).cloned() }
+    fn get_data_containing(&self, _addr: &Address) -> Option<Data> { None }
+    fn get_data_after(&self, _addr: &Address) -> Option<Data> { None }
+    fn get_data_before(&self, _addr: &Address) -> Option<Data> { None }
+    fn get_defined_data_at(&self, addr: &Address) -> Option<Data> { self.data_items.get(addr).filter(|d| d.is_defined).cloned() }
+    fn get_undefined_data_at(&self, addr: &Address) -> Option<Data> { self.data_items.get(addr).filter(|d| !d.is_defined).cloned() }
+    fn get_comment(&self, comment_type: CommentType, address: &Address) -> Option<String> {
+        self.comments.get(address).and_then(|c| c.get_comment(comment_type)).map(|s| s.to_string())
+    }
+    fn get_all_comments(&self, address: &Address) -> CodeUnitComments {
+        self.comments.get(address).cloned().unwrap_or_else(|| CodeUnitComments::new(*address))
+    }
+    fn set_comment(&mut self, address: Address, comment_type: CommentType, comment: Option<String>) {
+        self.comments.entry(address).or_insert_with(|| CodeUnitComments::new(address)).set_comment(comment_type, comment);
+    }
+    fn get_code_units(&self, _range: &AddressRange) -> Vec<CodeUnitData> { Vec::new() }
+    fn get_instructions(&self, _range: &AddressRange) -> Vec<Instruction> { Vec::new() }
+    fn get_data(&self, _range: &AddressRange) -> Vec<Data> { Vec::new() }
+    fn create_code_unit(&mut self, _addr: Address, _length: usize, _bytes: Vec<u8>) -> Result<(), String> { Ok(()) }
+    fn remove_code_unit(&mut self, _addr: &Address) -> Result<(), String> { Ok(()) }
+    fn clear_code_units(&mut self, _range: &AddressRange) -> Result<(), String> { Ok(()) }
+    fn clear_comments(&mut self, _start_addr: Address, _end_addr: Address) {}
+    fn is_undefined(&self, _start: Address, _end: Address) -> bool { true }
+    fn get_tree_names(&self) -> Vec<String> { Vec::new() }
+    fn get_root_module(&self, _tree_name: &str) -> Option<Box<dyn ProgramModule>> { None }
+    fn create_root_module(&mut self, _tree_name: &str) -> Result<Box<dyn ProgramModule>, String> { Err("Not implemented in StubListing".to_string()) }
+    fn remove_tree(&mut self, _tree_name: &str) -> bool { false }
+    fn get_num_code_units(&self) -> usize { 0 }
+    fn get_num_defined_data(&self) -> usize { self.data_items.values().filter(|d| d.is_defined).count() }
+    fn get_num_instructions(&self) -> usize { self.instructions.len() }
+    fn get_min_address(&self) -> Option<Address> { None }
+    fn get_max_address(&self) -> Option<Address> { None }
+    fn get_bytes(&self, _addr: Address, _length: usize) -> Vec<u8> { Vec::new() }
+}
+
+// ============================================================================
+// VariableUtilities — mirrors ghidra.program.model.listing.VariableUtilities
+// ============================================================================
+
+/// Utility methods for working with variables.
+/// Mirrors `VariableUtilities`.
+pub struct VariableUtilities;
+
+impl VariableUtilities {
+    /// Compare two variables for ordering (by storage, then ordinal, then first use offset).
+    pub fn compare(v1: &Variable, v2: &Variable) -> std::cmp::Ordering {
+        // Compare by storage type first
+        let storage_order = Self::storage_type_order(v1).cmp(&Self::storage_type_order(v2));
+        if storage_order != std::cmp::Ordering::Equal {
+            return storage_order;
+        }
+        // Then by storage
+        v1.storage.cmp(&v2.storage)
+    }
+
+    fn storage_type_order(v: &Variable) -> u8 {
+        match &v.storage {
+            VariableStorage::Register { .. } => 0,
+            VariableStorage::Stack { .. } => 1,
+            VariableStorage::Memory { .. } => 2,
+            VariableStorage::Compound(_) => 3,
+            VariableStorage::Unassigned => 4,
+            VariableStorage::Void => 5,
+            VariableStorage::Bad => 6,
+        }
+    }
+
+    /// Returns true if the two variables have equivalent storage.
+    pub fn is_same_storage(v1: &Variable, v2: &Variable) -> bool {
+        v1.storage == v2.storage
+    }
+
+    /// Returns true if the two variables have equivalent data types.
+    /// Simplified: compares type names.
+    pub fn is_same_or_equivalent_data_type(
+        dt1: Option<&Arc<dyn DataType>>,
+        dt2: Option<&Arc<dyn DataType>>,
+    ) -> bool {
+        match (dt1, dt2) {
+            (Some(a), Some(b)) => a.name() == b.name() && a.get_size() == b.get_size(),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+
+    /// Check that a data type is valid for a variable with the given size.
+    pub fn check_data_type(
+        dt: &dyn DataType,
+        allow_void: bool,
+        min_size: usize,
+    ) -> Result<(), String> {
+        if dt.get_size() == 0 && !allow_void {
+            return Err("Void data type not allowed for this variable".to_string());
+        }
+        if dt.get_size() > 0 && dt.get_size() < min_size {
+            return Err(format!(
+                "Data type size {} is less than minimum {}",
+                dt.get_size(),
+                min_size
+            ));
+        }
+        Ok(())
+    }
+
+    /// Check that storage is compatible with the data type.
+    pub fn check_storage(
+        storage: &VariableStorage,
+        data_type: &dyn DataType,
+        force: bool,
+    ) -> Result<(), String> {
+        let storage_size = storage.size();
+        let dt_size = data_type.get_size();
+        if storage_size > 0 && dt_size > 0 && storage_size < dt_size {
+            if !force {
+                return Err(format!(
+                    "Storage size {} is less than data type size {}",
+                    storage_size, dt_size
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// Comprehensive tests covering all 72 Java files
+// ============================================================================
+
+#[cfg(test)]
+mod comprehensive_tests {
+    use super::*;
+
+    // ---- Exception tests ----
+
+    #[test]
+    fn test_circular_dependency_exception() {
+        let e = CircularDependencyException::new();
+        assert!(e.to_string().contains("invalid"));
+        let e2 = CircularDependencyException::with_message("custom");
+        assert_eq!(e2.0, "custom");
+    }
+
+    #[test]
+    fn test_context_change_exception() {
+        let e = ContextChangeException::new();
+        assert!(e.to_string().contains("context"));
+        let e2 = ContextChangeException::with_message("bad change");
+        assert!(e2.to_string().contains("bad change"));
+    }
+
+    #[test]
+    fn test_duplicate_group_exception() {
+        let e = DuplicateGroupException::new();
+        assert!(e.to_string().contains("already"));
+    }
+
+    #[test]
+    fn test_function_overlap_exception() {
+        let e = FunctionOverlapException::new();
+        assert!(e.to_string().contains("overlaps"));
+    }
+
+    #[test]
+    fn test_incompatible_language_exception() {
+        let e = IncompatibleLanguageException::with_message("test");
+        assert!(e.to_string().contains("test"));
+    }
+
+    #[test]
+    fn test_variable_size_exception() {
+        let e = VariableSizeException::new("too big");
+        assert!(!e.can_force());
+        let e2 = VariableSizeException::with_force("too big", true);
+        assert!(e2.can_force());
+    }
+
+    // ---- CommentHistory tests ----
+
+    #[test]
+    fn test_comment_history() {
+        let ch = CommentHistory::new(
+            Address::new(0x1000),
+            CommentType::Eol,
+            "admin",
+            "initial comment",
+            1234567890000,
+        );
+        assert_eq!(ch.address, Address::new(0x1000));
+        assert_eq!(ch.comment_type, CommentType::Eol);
+        assert_eq!(ch.user_name, "admin");
+        assert!(ch.to_string().contains("admin"));
+    }
+
+    // ---- RepeatableComment tests ----
+
+    #[test]
+    fn test_repeatable_comment() {
+        let mut rc = RepeatableComment::new(Address::new(0x2000), "original");
+        assert_eq!(rc.get_comment(), "original");
+        rc.set_comment("updated");
+        assert_eq!(rc.get_comment(), "updated");
+    }
+
+    // ---- LabelString tests ----
+
+    #[test]
+    fn test_label_string() {
+        let ls = LabelString::new("main", LabelType::CodeLabel);
+        assert_eq!(ls.to_string(), "main");
+        assert_eq!(ls.label_type, LabelType::CodeLabel);
+    }
+
+    // ---- VariableOffset tests ----
+
+    #[test]
+    fn test_variable_offset() {
+        let mut vo = VariableOffset::new("counter", "int", 4, false, true);
+        assert_eq!(vo.variable_name(), "counter");
+        assert_eq!(vo.get_offset(), 4);
+        assert!(!vo.is_indirect());
+        assert!(vo.is_data_access());
+        vo.set_replaced_register("eax");
+        assert_eq!(vo.get_replaced_element(), Some("eax"));
+    }
+
+    #[test]
+    fn test_variable_offset_display() {
+        let vo = VariableOffset::new("myvar", "int", 0, false, false);
+        assert_eq!(vo.to_string(), "myvar");
+    }
+
+    // ---- OperandRepresentationList tests ----
+
+    #[test]
+    fn test_operand_representation_list() {
+        let mut orl = OperandRepresentationList::new();
+        assert!(orl.is_empty());
+        orl.add_string("mov");
+        orl.add_char(' ');
+        orl.add_string("eax");
+        assert_eq!(orl.len(), 3);
+        assert_eq!(orl.to_string(), "mov eax");
+        assert!(!orl.has_error());
+    }
+
+    #[test]
+    fn test_operand_representation_list_error() {
+        let orl = OperandRepresentationList::with_error("parse error");
+        assert!(orl.has_error());
+        assert_eq!(orl.to_string(), "parse error");
+    }
+
+    // ---- Iterator tests ----
+
+    #[test]
+    fn test_code_unit_iterator() {
+        let cu1 = CodeUnitData::new(Address::new(0x1000), 1, vec![0x90]);
+        let cu2 = CodeUnitData::new(Address::new(0x1001), 2, vec![0xcc, 0xcc]);
+        let mut iter = CodeUnitIteratorImpl::new(vec![cu1, cu2]);
+        assert_eq!(iter.len(), 2);
+        let first = iter.next().unwrap();
+        assert_eq!(first.address, Address::new(0x1000));
+        let second = iter.next().unwrap();
+        assert_eq!(second.address, Address::new(0x1001));
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_data_iterator() {
+        let d1 = Data::new(Address::new(0x2000), 4, None);
+        let d2 = Data::new(Address::new(0x2004), 2, None);
+        let mut iter = DataIteratorImpl::new(vec![d1, d2]);
+        assert_eq!(iter.len(), 2);
+        assert!(iter.next().is_some());
+        assert!(iter.next().is_some());
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_function_iterator() {
+        let body = AddressRange::new(Address::new(0x1000), Address::new(0x1010));
+        let f = Function::new("test", Address::new(0x1000), body);
+        let mut iter = FunctionIteratorImpl::new(vec![f]);
+        assert_eq!(iter.len(), 1);
+        let func = iter.next().unwrap();
+        assert_eq!(func.name, "test");
+    }
+
+    #[test]
+    fn test_instruction_iterator() {
+        let ins = Instruction::new(Address::new(0x3000), 1, vec![0xc3], "ret");
+        let mut iter = InstructionIteratorImpl::new(vec![ins]);
+        assert_eq!(iter.len(), 1);
+        let i = iter.next().unwrap();
+        assert_eq!(i.mnemonic, "ret");
+    }
+
+    #[test]
+    fn test_empty_iterators() {
+        let mut cu = CodeUnitIteratorImpl::empty();
+        assert!(cu.next().is_none());
+        let mut d = DataIteratorImpl::empty();
+        assert!(d.next().is_none());
+        let mut f = FunctionIteratorImpl::empty();
+        assert!(f.next().is_none());
+        let mut i = InstructionIteratorImpl::empty();
+        assert!(i.next().is_none());
+    }
+
+    // ---- Comparator tests ----
+
+    #[test]
+    fn test_bookmark_comparator() {
+        let bm1 = Bookmark::new(1, Address::new(0x1000), "Analysis", "alpha", "note1");
+        let bm2 = Bookmark::new(2, Address::new(0x2000), "Analysis", "beta", "note2");
+        let bm3 = Bookmark::new(3, Address::new(0x3000), "Info", "test", "note3");
+        let comp = BookmarkComparator::new();
+        // Same type, different category: "alpha" < "beta"
+        assert_eq!(comp.compare(&bm1, &bm2), std::cmp::Ordering::Less);
+        assert_eq!(comp.compare(&bm2, &bm1), std::cmp::Ordering::Greater);
+        // Different type: "Analysis" < "Info"
+        assert_eq!(comp.compare(&bm1, &bm3), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_bookmark_type_comparator() {
+        let bt1 = BookmarkType::new("Analysis");
+        let bt2 = BookmarkType::new("Info");
+        let comp = BookmarkTypeComparator::new();
+        assert_eq!(comp.compare(&bt1, &bt2), std::cmp::Ordering::Less);
+    }
+
+    #[test]
+    fn test_stack_variable_comparator() {
+        let dt: Arc<dyn DataType> = Arc::new(crate::data::types::BuiltInDataTypeWrapper::new(
+            crate::data::types::BuiltInDataType::Int,
+        ));
+        let v1 = Variable::new("a", Some(dt.clone()), SourceType::Default)
+            .with_storage(VariableStorage::stack(-4, 4));
+        let v2 = Variable::new("b", Some(dt), SourceType::Default)
+            .with_storage(VariableStorage::stack(-8, 4));
+        let comp = StackVariableComparator::new();
+        assert_eq!(comp.compare(&v1, &v2), std::cmp::Ordering::Greater);
+    }
+
+    // ---- VariableFilter tests ----
+
+    #[test]
+    fn test_parameter_filter() {
+        let f = ParameterFilter::new(true);
+        let v = Variable::default();
+        assert!(f.matches(&v, true, false));
+        assert!(f.matches(&v, true, true));
+        assert!(!f.matches(&v, false, false));
+
+        let f2 = ParameterFilter::new(false);
+        assert!(f2.matches(&v, true, false));
+        assert!(!f2.matches(&v, true, true));
+    }
+
+    #[test]
+    fn test_local_variable_filter() {
+        let f = LocalVariableFilter;
+        let v = Variable::default();
+        assert!(f.matches(&v, false, false));
+        assert!(!f.matches(&v, true, false));
+    }
+
+    #[test]
+    fn test_stack_variable_filter() {
+        let f = StackVariableFilter;
+        let v_stack = Variable::new("s", None, SourceType::Default)
+            .with_storage(VariableStorage::stack(-4, 4));
+        let v_reg = Variable::new("r", None, SourceType::Default)
+            .with_storage(VariableStorage::register("eax", 4));
+        assert!(f.matches(&v_stack, false, false));
+        assert!(!f.matches(&v_reg, false, false));
+    }
+
+    #[test]
+    fn test_register_variable_filter() {
+        let f = RegisterVariableFilter;
+        let v_reg = Variable::new("r", None, SourceType::Default)
+            .with_storage(VariableStorage::register("eax", 4));
+        assert!(f.matches(&v_reg, false, false));
+    }
+
+    #[test]
+    fn test_memory_variable_filter() {
+        let f = MemoryVariableFilter;
+        let v_mem = Variable::new("m", None, SourceType::Default)
+            .with_storage(VariableStorage::memory(Address::new(0x1000), 4));
+        assert!(f.matches(&v_mem, false, false));
+    }
+
+    // ---- Change set tests (basic struct-level) ----
+
+    #[test]
+    fn test_change_set_traits_exist() {
+        // Verify the traits compile and can be used as trait objects.
+        fn _assert_address_change_set<T: AddressChangeSet>() {}
+        fn _assert_domain_change_set<T: DomainObjectChangeSet>() {}
+        fn _assert_data_type_change_set<T: DataTypeChangeSet>() {}
+        fn _assert_symbol_change_set<T: SymbolChangeSet>() {}
+        fn _assert_register_change_set<T: RegisterChangeSet>() {}
+        fn _assert_function_tag_change_set<T: FunctionTagChangeSet>() {}
+        fn _assert_program_tree_change_set<T: ProgramTreeChangeSet>() {}
+    }
+
+    // ---- GhidraClass tests ----
+
+    #[test]
+    fn test_ghidra_class() {
+        let gc = GhidraClass::new("MyClass", 100, 1);
+        assert_eq!(gc.name, "MyClass");
+        assert_eq!(gc.namespace_id, 100);
+    }
+
+    // ---- Library tests ----
+
+    #[test]
+    fn test_library() {
+        let mut lib = Library::new("libc", 200);
+        assert_eq!(lib.name, "libc");
+        assert!(lib.get_associated_program_path().is_none());
+        lib.set_associated_program_path(Some("/lib/libc.so".to_string()));
+        assert_eq!(lib.get_associated_program_path(), Some("/lib/libc.so"));
+    }
+
+    #[test]
+    fn test_library_unknown_no_set_path() {
+        let mut lib = Library::new(Library::UNKNOWN, 99);
+        lib.set_associated_program_path(Some("/some/path".to_string()));
+        assert!(lib.get_associated_program_path().is_none());
+    }
+
+    // ---- DataTypeArchiveInfo tests ----
+
+    #[test]
+    fn test_data_type_archive_info() {
+        let info = DataTypeArchiveInfo::new("my_types")
+            .with_pointer_size(8)
+            .with_creation_date(1234567890000)
+            .with_version("11.0");
+        assert_eq!(info.name, "my_types");
+        assert_eq!(info.default_pointer_size, 8);
+        assert_eq!(info.created_with_version, Some("11.0".to_string()));
+    }
+
+    // ---- ProgramUserData tests ----
+
+    #[test]
+    fn test_program_user_data() {
+        let mut pud = ProgramUserData::new();
+        pud.set_string_property("my_key", "my_value");
+        assert_eq!(pud.get_string_property("my_key", "default"), "my_value");
+        assert_eq!(pud.get_string_property("missing", "default"), "default");
+        assert_eq!(pud.get_string_property_names().len(), 1);
+        pud.remove_string_property("my_key");
+        assert!(pud.get_string_property_names().is_empty());
+    }
+
+    #[test]
+    fn test_program_user_data_address_properties() {
+        let mut pud = ProgramUserData::new();
+        pud.set_address_string_property("owner", "prop", Address::new(0x1000), "val");
+        assert_eq!(
+            pud.get_address_string_property("owner", "prop", &Address::new(0x1000)),
+            Some("val")
+        );
+        pud.set_address_int_property("owner", "count", Address::new(0x2000), 42);
+        assert_eq!(
+            pud.get_address_int_property("owner", "count", &Address::new(0x2000)),
+            Some(42)
+        );
+        pud.set_address_bool_property("owner", "flag", Address::new(0x3000), true);
+        assert_eq!(
+            pud.get_address_bool_property("owner", "flag", &Address::new(0x3000)),
+            Some(true)
+        );
+    }
+
+    // ---- DataBuffer tests ----
+
+    #[test]
+    fn test_data_buffer() {
+        let mut buf = DataBuffer::new(Address::new(0x1000));
+        buf.add(Data::new(Address::new(0x1000), 1, None));
+        buf.add(Data::new(Address::new(0x1001), 2, None));
+        buf.add(Data::new(Address::new(0x1003), 4, None));
+        assert_eq!(buf.len(), 3);
+        assert!(!buf.is_empty());
+        assert!(buf.get_data(0).is_some());
+        assert!(buf.get_data_after(0).is_some());
+        assert!(buf.get_data_before(1).is_some());
+        assert!(buf.get_data_before(0).is_none());
+        assert_eq!(buf.get_address(), Address::new(0x1000));
+    }
+
+    // ---- ThunkFunction tests ----
+
+    #[test]
+    fn test_thunk_function() {
+        let body = AddressRange::new(Address::new(0x1000), Address::new(0x1010));
+        let func = Function::new("thunk_main", Address::new(0x1000), body);
+        let tf = ThunkFunction::new(func, Address::new(0x2000));
+        assert_eq!(tf.name(), "thunk_main");
+        assert_eq!(tf.get_destination_function_entry_point(), Address::new(0x2000));
+        assert_eq!(tf.entry_point(), Address::new(0x1000));
+    }
+
+    // ---- InstructionPcodeOverride tests ----
+
+    #[test]
+    fn test_instruction_pcode_override() {
+        let mut pcode = InstructionPcodeOverride::new(Address::new(0x1000));
+        assert!(!pcode.has_override());
+        pcode.set_call_override(Address::new(0x2000));
+        assert!(pcode.has_override());
+        assert_eq!(pcode.get_call_override(), Some(Address::new(0x2000)));
+        pcode.set_fallthrough_override(Address::new(0x1005));
+        assert_eq!(pcode.get_fallthrough_override(), Some(Address::new(0x1005)));
+    }
+
+    // ---- Stub types tests ----
+
+    #[test]
+    fn test_data_stub() {
+        let ds = DataStub::new(Address::new(0x1000))
+            .with_size(4)
+            .with_type("int");
+        assert_eq!(ds.address, Address::new(0x1000));
+        assert_eq!(ds.size, 4);
+        assert_eq!(ds.data_type_name, "int");
+    }
+
+    #[test]
+    fn test_instruction_stub() {
+        let is = InstructionStub::new(Address::new(0x2000))
+            .with_mnemonic("nop")
+            .with_length(1);
+        assert_eq!(is.address, Address::new(0x2000));
+        assert_eq!(is.mnemonic, "nop");
+        assert_eq!(is.length, 1);
+    }
+
+    #[test]
+    fn test_stub_listing() {
+        let mut sl = StubListing::new();
+        let ins = Instruction::new(Address::new(0x1000), 1, vec![0x90], "nop");
+        sl.add_instruction(ins);
+        let found = sl.get_instruction_at(&Address::new(0x1000));
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().mnemonic, "nop");
+    }
+
+    // ---- VariableUtilities tests ----
+
+    #[test]
+    fn test_variable_utilities_compare() {
+        let v1 = Variable::new("a", None, SourceType::Default)
+            .with_storage(VariableStorage::register("eax", 4));
+        let v2 = Variable::new("b", None, SourceType::Default)
+            .with_storage(VariableStorage::stack(-4, 4));
+        let ord = VariableUtilities::compare(&v1, &v2);
+        assert_eq!(ord, std::cmp::Ordering::Less); // register < stack
+    }
+
+    #[test]
+    fn test_variable_utilities_check_data_type() {
+        let int_dt: Arc<dyn DataType> = Arc::new(crate::data::types::BuiltInDataTypeWrapper::new(
+            crate::data::types::BuiltInDataType::Int,
+        ));
+        assert!(VariableUtilities::check_data_type(int_dt.as_ref(), false, 1).is_ok());
+        assert!(VariableUtilities::check_data_type(int_dt.as_ref(), false, 10).is_err());
+    }
+
+    // ---- AutoParameterType display tests ----
+
+    #[test]
+    fn test_auto_parameter_type_display() {
+        assert_eq!(AutoParameterType::This.display_name(), "this");
+        assert_eq!(AutoParameterType::ReturnStoragePtr.display_name(), "__return_storage_ptr__");
+        assert_eq!(format!("{}", AutoParameterType::This), "this");
+        assert_eq!(format!("{}", AutoParameterType::ReturnStoragePtr), "__return_storage_ptr__");
+    }
+
+    // ---- FunctionSignatureImpl / AutoParameterImpl / ReturnParameterImpl ----
+
+    #[test]
+    fn test_function_signature_impl_is_alias() {
+        // FunctionSignatureImpl in Java is deprecated and extends FunctionDefinitionDataType.
+        // In Rust, we use the existing FunctionSignature struct.
+        let sig = FunctionSignature::new("test_func");
+        assert_eq!(sig.name, "test_func");
+    }
+
+    #[test]
+    fn test_auto_parameter_impl_is_parameter() {
+        // AutoParameterImpl in Java extends ParameterImpl.
+        // In Rust, auto-params are Parameters with auto_parameter=true.
+        let param = Parameter::new("this", None, 0, SourceType::Analysis)
+            .with_auto_param(AutoParameterType::This);
+        assert!(param.is_auto_parameter());
+        assert_eq!(param.auto_parameter_type, Some(AutoParameterType::This));
+    }
+
+    #[test]
+    fn test_return_parameter_impl_is_parameter() {
+        // ReturnParameterImpl in Java extends ParameterImpl for return values.
+        // In Rust, return params use RETURN_ORDINAL.
+        let dt: Arc<dyn DataType> = Arc::new(crate::data::types::BuiltInDataTypeWrapper::new(
+            crate::data::types::BuiltInDataType::Int,
+        ));
+        let ret = Parameter::return_param(Some(dt));
+        assert!(ret.is_return());
+        assert_eq!(ret.ordinal, Parameter::RETURN_ORDINAL);
+    }
+
+    // ---- DataStub / InstructionStub (as Java interfaces) ----
+
+    #[test]
+    fn test_data_stub_as_code_unit_data() {
+        let ds = DataStub::new(Address::new(0x1000)).with_size(4).with_type("int");
+        assert_eq!(ds.address.offset, 0x1000);
+        assert_eq!(ds.size, 4);
+    }
+
+    // ---- Comprehensive integration test ----
+
+    #[test]
+    fn test_full_integration() {
+        // Create a function with parameters, locals, and tags
+        let body = AddressRange::new(Address::new(0x4000), Address::new(0x4050));
+        let int_dt: Arc<dyn DataType> = Arc::new(crate::data::types::BuiltInDataTypeWrapper::new(
+            crate::data::types::BuiltInDataType::Int,
+        ));
+        let param = Parameter::new("argc", Some(int_dt.clone()), 0, SourceType::UserDefined)
+            .with_storage(VariableStorage::register("edi", 4));
+        let local = LocalVariable::new("buf", Some(int_dt.clone()), SourceType::Analysis)
+            .with_storage(VariableStorage::stack(-16, 4));
+        let func = Function::new("main", Address::new(0x4000), body)
+            .with_return_type(int_dt)
+            .with_parameter(param)
+            .with_local(local)
+            .with_calling_convention("__cdecl")
+            .with_tag(FunctionTag::new("entry"))
+            .with_comment("Main entry point");
+
+        // Verify function
+        assert_eq!(func.name, "main");
+        assert_eq!(func.get_parameter_count(), 1);
+        assert_eq!(func.get_local_variable_count(), 1);
+        assert!(func.has_tag_named("entry"));
+        assert!(func.comment.is_some());
+
+        // Create a bookmark
+        let mut bm_mgr = BookmarkManager::new();
+        bm_mgr.set_bookmark(func.entry_point, "Info", "Entry", "function entry");
+
+        // Create a listing
+        let mut listing = InMemoryListing::new();
+        listing.create_code_unit(Address::new(0x4000), 3, vec![0x48, 0x89, 0xe5]).unwrap();
+        let ins = Instruction::new(Address::new(0x4000), 3, vec![0x48, 0x89, 0xe5], "mov")
+            .with_operand(Operand::register("rbp"))
+            .with_operand(Operand::register("rsp"));
+        listing.instructions.insert(Address::new(0x4000), ins);
+
+        // Format
+        let fmt = CodeUnitFormat::new();
+        let ins = listing.get_instruction_at(&Address::new(0x4000)).unwrap();
+        let formatted = fmt.format_instruction(&ins);
+        assert!(formatted.contains("mov"));
+
+        // Iterator
+        let iter = InstructionIteratorImpl::new(vec![listing.get_instruction_at(&Address::new(0x4000)).unwrap()]);
+        assert_eq!(iter.count(), 1);
+
+        // Variable utilities
+        let v = Variable::new("x", Some(Arc::new(crate::data::types::BuiltInDataTypeWrapper::new(
+            crate::data::types::BuiltInDataType::Int,
+        ))), SourceType::Default)
+            .with_storage(VariableStorage::stack(-4, 4));
+        assert!(v.is_stack_variable());
+    }
 }

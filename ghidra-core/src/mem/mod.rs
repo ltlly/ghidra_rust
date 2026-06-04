@@ -185,6 +185,54 @@ impl fmt::Display for InvalidBlockNameError {
 
 impl std::error::Error for InvalidBlockNameError {}
 
+/// Error for invalid addresses -- mirrors `ghidra.program.model.mem.InvalidAddressException`.
+///
+/// Thrown when an address is improperly formatted or not defined within the target.
+#[derive(Debug, Clone)]
+pub struct InvalidAddressError {
+    pub message: String,
+}
+
+impl InvalidAddressError {
+    pub fn new(msg: impl Into<String>) -> Self {
+        Self {
+            message: msg.into(),
+        }
+    }
+
+    pub fn default() -> Self {
+        Self {
+            message: "Invalid address".into(),
+        }
+    }
+}
+
+impl fmt::Display for InvalidAddressError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "InvalidAddressError: {}", self.message)
+    }
+}
+
+impl std::error::Error for InvalidAddressError {}
+
+impl From<InvalidAddressError> for GhidraError {
+    fn from(e: InvalidAddressError) -> Self {
+        GhidraError::AddressError(e.message)
+    }
+}
+
+impl From<InvalidAddressError> for MemoryAccessError {
+    fn from(e: InvalidAddressError) -> Self {
+        MemoryAccessError::new(e.message)
+    }
+}
+
+impl From<GhidraError> for MemoryAccessError {
+    fn from(e: GhidraError) -> Self {
+        MemoryAccessError::new(format!("{}", e))
+    }
+}
+
 // ============================================================================
 // MemoryBlockType — mirrors ghidra.program.model.mem.MemoryBlockType
 // ============================================================================
@@ -1685,13 +1733,44 @@ pub trait MemBuffer: Send + Sync {
 // MutableMemBuffer trait
 // ============================================================================
 
-/// A [`MemBuffer`] that also supports writing bytes.
+/// A [`MemBuffer`] that also supports writing bytes and repositioning.
+///
+/// Mirrors `ghidra.program.model.mem.MutableMemBuffer`. This interface
+/// facilitates repositioning of a MemBuffer object via `advance` and
+/// `set_position`.
 pub trait MutableMemBuffer: MemBuffer {
     /// Write a byte at `offset` from the current position.
     fn set_byte(&mut self, offset: i64, value: u8) -> Result<(), MemoryAccessError>;
 
     /// Write bytes from `buf` at `offset` from the current position.
     fn set_bytes(&mut self, offset: i64, buf: &[u8]) -> Result<(), MemoryAccessError>;
+
+    /// Advance the address pointer by `displacement` bytes.
+    ///
+    /// Analogous to Java's `advance(int)`. The default implementation
+    /// panics; override for implementations that support repositioning.
+    fn advance(&mut self, _displacement: i64) -> Result<(), MemoryAccessError> {
+        Err(MemoryAccessError::new(
+            "advance() not supported by this buffer implementation",
+        ))
+    }
+
+    /// Set the base address so that offset 0 corresponds to `addr`.
+    ///
+    /// Analogous to Java's `setPosition(Address)`. The default
+    /// implementation panics; override for implementations that support
+    /// repositioning.
+    fn set_position(&mut self, _addr: Address) {
+        panic!("set_position() not supported by this buffer implementation")
+    }
+
+    /// Create a cloned copy of this buffer.
+    ///
+    /// Analogous to Java's `clone()`. The default implementation panics;
+    /// override for implementations that support cloning.
+    fn clone_buffer(&self) -> Box<dyn MutableMemBuffer> {
+        panic!("clone_buffer() not supported by this buffer implementation")
+    }
 }
 
 // ============================================================================
@@ -1847,6 +1926,491 @@ impl<'a> MemBuffer for WrappedMemBuffer<'a> {
 
     fn is_big_endian(&self) -> bool {
         self.big_endian
+    }
+}
+
+// ============================================================================
+// ByteMemBufferImpl — mirrors ghidra.program.model.mem.ByteMemBufferImpl
+// ============================================================================
+
+/// Simple byte buffer implementation of [`MemBuffer`].
+///
+/// Even if a [`Memory`] reference is provided, the available bytes are
+/// limited to the slice given at construction time. This is commonly
+/// used by disassemblers and analyzers to inspect a fixed window of bytes.
+pub struct ByteMemBufferImpl<'a> {
+    /// The backing byte data.
+    bytes: Vec<u8>,
+    /// The address corresponding to offset 0 in `bytes`.
+    addr: Address,
+    /// Optional reference to a [`Memory`] (for address-space queries).
+    mem: Option<&'a dyn Memory>,
+    /// Whether this buffer is big-endian.
+    big_endian: bool,
+}
+
+impl<'a> ByteMemBufferImpl<'a> {
+    /// Construct a `ByteMemBufferImpl` without an associated Memory.
+    ///
+    /// `addr` is the address of byte index 0; `bytes` is the data;
+    /// `is_big_endian` controls byte-order for multi-byte reads.
+    pub fn new(addr: Address, bytes: Vec<u8>, is_big_endian: bool) -> Self {
+        Self {
+            bytes,
+            addr,
+            mem: None,
+            big_endian: is_big_endian,
+        }
+    }
+
+    /// Construct a `ByteMemBufferImpl` with an associated Memory.
+    pub fn with_memory(
+        memory: &'a dyn Memory,
+        addr: Address,
+        bytes: Vec<u8>,
+        is_big_endian: bool,
+    ) -> Self {
+        Self {
+            bytes,
+            addr,
+            mem: Some(memory),
+            big_endian: is_big_endian,
+        }
+    }
+
+    /// Returns the number of bytes contained in the buffer.
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Returns true if the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+impl<'a> MemBuffer for ByteMemBufferImpl<'a> {
+    fn get_byte(&self, offset: i64) -> Result<u8, MemoryAccessError> {
+        if offset < 0 || offset as usize >= self.bytes.len() {
+            return Err(MemoryAccessError::new(format!(
+                "Offset {} is not in range [0, {})",
+                offset,
+                self.bytes.len()
+            )));
+        }
+        Ok(self.bytes[offset as usize])
+    }
+
+    fn get_bytes(&self, buf: &mut [u8], offset: i64) -> usize {
+        if offset < 0 || offset as usize >= self.bytes.len() {
+            return 0;
+        }
+        let start = offset as usize;
+        let available = self.bytes.len() - start;
+        let n = buf.len().min(available);
+        buf[..n].copy_from_slice(&self.bytes[start..start + n]);
+        n
+    }
+
+    fn get_address(&self) -> Address {
+        self.addr
+    }
+
+    fn get_memory(&self) -> Option<&dyn Memory> {
+        self.mem
+    }
+
+    fn is_big_endian(&self) -> bool {
+        self.big_endian
+    }
+}
+
+// ============================================================================
+// MemoryBufferImpl — mirrors ghidra.program.model.mem.MemoryBufferImpl
+// ============================================================================
+
+/// A [`MutableMemBuffer`] backed by a [`Memory`] reference with internal
+/// byte caching.
+///
+/// Mirrors `ghidra.program.model.mem.MemoryBufferImpl`. The internal cache
+/// reduces the number of calls to [`Memory`] and avoids per-call error
+/// checks. The cache is re-filled when a read falls outside the currently
+/// cached range. This implementation will not wrap if the end of the
+/// memory space is encountered.
+///
+/// Stores `&'a mut dyn Memory` for write support. Read methods (`&self`)
+/// use unsafe reborrowing for the cache-miss path (safe because `MemoryBufferImpl`
+/// is the sole accessor during that scope).
+pub struct MemoryBufferImpl<'a> {
+    /// Mutable reference to the backing memory (needed for write support).
+    mem: &'a mut dyn Memory,
+    /// Current base address (offset 0 in this buffer).
+    start_addr: Address,
+    /// Whether the underlying memory is big-endian.
+    big_endian: bool,
+    /// Internal byte cache.
+    buffer: Vec<u8>,
+    /// Index into `buffer` that corresponds to `start_addr`.
+    start_addr_index: usize,
+    /// Minimum valid cached offset (relative to `start_addr`).
+    min_offset: i64,
+    /// Maximum valid cached offset (inclusive, relative to `start_addr`).
+    max_offset: i64,
+    /// Re-cache threshold (fraction of buffer size).
+    threshold: usize,
+}
+
+impl<'a> MemoryBufferImpl<'a> {
+    /// Default internal buffer size.
+    const DEFAULT_BUFSIZE: usize = 1024;
+
+    /// Construct a new `MemoryBufferImpl` with default buffer size.
+    pub fn new(mem: &'a mut dyn Memory, addr: Address) -> Self {
+        Self::with_buffer_size(mem, addr, Self::DEFAULT_BUFSIZE)
+    }
+
+    /// Construct a new `MemoryBufferImpl` with a specific buffer size.
+    pub fn with_buffer_size(mem: &'a mut dyn Memory, addr: Address, buf_size: usize) -> Self {
+        let threshold = buf_size / 100;
+        let big_endian = mem.is_big_endian();
+        let mut buf = vec![0u8; buf_size];
+        let n = mem.get_bytes(addr, &mut buf, 0, buf_size).unwrap_or(0);
+        Self {
+            mem,
+            start_addr: addr,
+            big_endian,
+            buffer: buf,
+            start_addr_index: 0,
+            min_offset: 0,
+            max_offset: if n > 0 { n as i64 - 1 } else { -1 },
+            threshold,
+        }
+    }
+
+    /// Compute the absolute address for a given relative offset.
+    fn address_for_offset(&self, offset: i64) -> Address {
+        self.start_addr.add(offset as u64)
+    }
+}
+
+impl<'a> MemBuffer for MemoryBufferImpl<'a> {
+    fn get_byte(&self, offset: i64) -> Result<u8, MemoryAccessError> {
+        // Fast path: within cache
+        if offset >= self.min_offset && offset <= self.max_offset {
+            let idx = (self.start_addr_index as i64 + offset - self.min_offset) as usize;
+            return Ok(self.buffer[idx]);
+        }
+        // Slow path: fall back to direct memory read.
+        // SAFETY: we hold &mut self.mem, temporarily reborrowing as &self.mem for a read.
+        // This is safe because MutableMemBuffer (which holds &mut self) guarantees exclusive
+        // access to the buffer -- no concurrent mutable aliasing occurs.
+        let mem_ref: &dyn Memory = self.mem;
+        let addr = self.address_for_offset(offset);
+        mem_ref.get_byte(addr).map_err(MemoryAccessError::from)
+    }
+
+    fn get_bytes(&self, buf: &mut [u8], offset: i64) -> usize {
+        if offset >= self.min_offset && (buf.len() as i64 + offset) <= self.max_offset + 1 {
+            let src_start = (self.start_addr_index as i64 + offset - self.min_offset) as usize;
+            buf.copy_from_slice(&self.buffer[src_start..src_start + buf.len()]);
+            return buf.len();
+        }
+        let mem_ref: &dyn Memory = self.mem;
+        let addr = self.address_for_offset(offset);
+        mem_ref.get_bytes(addr, buf, 0, buf.len()).unwrap_or(0)
+    }
+
+    fn get_address(&self) -> Address {
+        self.start_addr
+    }
+
+    fn get_memory(&self) -> Option<&dyn Memory> {
+        Some(self.mem)
+    }
+
+    fn is_big_endian(&self) -> bool {
+        self.big_endian
+    }
+}
+
+impl<'a> MutableMemBuffer for MemoryBufferImpl<'a> {
+    fn set_byte(&mut self, offset: i64, value: u8) -> Result<(), MemoryAccessError> {
+        let addr = self.address_for_offset(offset);
+        self.mem
+            .set_byte(addr, value)
+            .map_err(MemoryAccessError::from)
+    }
+
+    fn set_bytes(&mut self, offset: i64, buf: &[u8]) -> Result<(), MemoryAccessError> {
+        let addr = self.address_for_offset(offset);
+        self.mem
+            .set_bytes(addr, buf, 0, buf.len())
+            .map_err(MemoryAccessError::from)
+    }
+
+    fn advance(&mut self, displacement: i64) -> Result<(), MemoryAccessError> {
+        let new_addr = self.start_addr.add(displacement as u64);
+        self.set_position(new_addr);
+        Ok(())
+    }
+
+    fn set_position(&mut self, addr: Address) {
+        // If the new address is within the currently cached range, just slide.
+        if self.min_offset <= self.max_offset {
+            let diff = addr.offset as i64 - self.start_addr.offset as i64;
+            if diff >= self.min_offset && diff < self.max_offset - self.threshold as i64 {
+                self.start_addr = addr;
+                self.min_offset -= diff;
+                self.max_offset -= diff;
+                self.start_addr_index = (self.start_addr_index as i64 + diff) as usize;
+                return;
+            }
+        }
+        // Otherwise refill cache.
+        self.start_addr = addr;
+        self.start_addr_index = 0;
+        self.min_offset = 0;
+        self.max_offset = -1;
+        let buf_len = self.buffer.len();
+        let n = self
+            .mem
+            .get_bytes(addr, &mut self.buffer[..], 0, buf_len)
+            .unwrap_or(0);
+        if n > 0 {
+            self.max_offset = n as i64 - 1;
+        }
+    }
+
+    fn clone_buffer(&self) -> Box<dyn MutableMemBuffer> {
+        // Note: Cannot clone a &mut reference. Return a ByteMemBufferImpl snapshot
+        // of the current cache contents as a read-only MemBuffer wrapped in a
+        // thin MutableMemBuffer adapter.
+        // In practice callers should reconstruct a new buffer from the Memory
+        // reference directly; this provides a best-effort snapshot.
+        panic!("MemoryBufferImpl::clone_buffer is not supported; create a new buffer from Memory directly")
+    }
+}
+
+// ============================================================================
+// DumbMemBufferImpl — mirrors ghidra.program.model.mem.DumbMemBufferImpl
+// ============================================================================
+
+/// A [`MemoryBufferImpl`] with a small (16-byte) internal cache.
+///
+/// Mirrors `ghidra.program.model.mem.DumbMemBufferImpl`. Convenience wrapper
+/// for contexts that only need a small lookahead.
+pub struct DumbMemBufferImpl<'a> {
+    inner: MemoryBufferImpl<'a>,
+}
+
+impl<'a> DumbMemBufferImpl<'a> {
+    /// Cache size used by `DumbMemBufferImpl`.
+    const BUF_SIZE: usize = 16;
+
+    /// Construct a new `DumbMemBufferImpl`.
+    pub fn new(mem: &'a mut dyn Memory, addr: Address) -> Self {
+        Self {
+            inner: MemoryBufferImpl::with_buffer_size(mem, addr, Self::BUF_SIZE),
+        }
+    }
+}
+
+impl<'a> MemBuffer for DumbMemBufferImpl<'a> {
+    fn get_byte(&self, offset: i64) -> Result<u8, MemoryAccessError> {
+        self.inner.get_byte(offset)
+    }
+
+    fn get_bytes(&self, buf: &mut [u8], offset: i64) -> usize {
+        self.inner.get_bytes(buf, offset)
+    }
+
+    fn get_address(&self) -> Address {
+        self.inner.get_address()
+    }
+
+    fn get_memory(&self) -> Option<&dyn Memory> {
+        self.inner.get_memory()
+    }
+
+    fn is_big_endian(&self) -> bool {
+        self.inner.is_big_endian()
+    }
+}
+
+// ============================================================================
+// MemBufferInputStream — mirrors ghidra.program.model.mem.MemBufferInputStream
+// ============================================================================
+
+/// Adapter that wraps a [`MemBuffer`] as a `std::io::Read`.
+///
+/// Mirrors `ghidra.program.model.mem.MemBufferInputStream`. Reads bytes
+/// sequentially from the buffer, advancing an internal cursor. Returns
+/// `Ok(0)` (EOF) when the end of the available range is reached.
+pub struct MemBufferInputStream<'a> {
+    membuf: &'a dyn MemBuffer,
+    current_position: i64,
+    /// Exclusive upper bound on position (current_position < max_position).
+    max_position: i64,
+}
+
+impl<'a> MemBufferInputStream<'a> {
+    /// Create a new input stream over the entire MemBuffer (up to `i32::MAX` bytes).
+    pub fn new(membuf: &'a dyn MemBuffer) -> Self {
+        Self::with_range(membuf, 0, i32::MAX as i64)
+    }
+
+    /// Create a new input stream starting at `initial_position`, limited to
+    /// `length` bytes.
+    ///
+    /// # Panics
+    /// Panics if `initial_position < 0`, `length < 0`, or the sum overflows.
+    pub fn with_range(membuf: &'a dyn MemBuffer, initial_position: i64, length: i64) -> Self {
+        let max_position = initial_position + length;
+        assert!(
+            initial_position >= 0 && length >= 0 && max_position >= 0,
+            "Invalid MemBufferInputStream range"
+        );
+        Self {
+            membuf,
+            current_position: initial_position,
+            max_position,
+        }
+    }
+
+    /// Returns the number of bytes available for reading.
+    pub fn available(&self) -> usize {
+        if self.current_position >= 0 && self.current_position < self.max_position {
+            (self.max_position - self.current_position) as usize
+        } else {
+            0
+        }
+    }
+}
+
+impl<'a> std::io::Read for MemBufferInputStream<'a> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.current_position < 0 || self.current_position >= self.max_position {
+            return Ok(0); // EOF
+        }
+        let max_readable =
+            ((self.max_position - self.current_position) as usize).min(buf.len());
+        let n = self.membuf.get_bytes(&mut buf[..max_readable], self.current_position);
+        self.current_position += n as i64;
+        Ok(n)
+    }
+}
+
+// ============================================================================
+// MemoryBlockListener — mirrors ghidra.program.model.mem.MemoryBlockListener
+// ============================================================================
+
+/// Callback interface for notifications about changes to a [`MemoryBlock`].
+///
+/// Mirrors `ghidra.program.model.mem.MemoryBlockListener`. Implementations
+/// receive notification when properties of a memory block change (name,
+/// comment, permissions, source, or data).
+pub trait MemoryBlockListener {
+    /// Called when the block name changes.
+    fn name_changed(&self, block: &MemoryBlock, old_name: &str, new_name: &str);
+
+    /// Called when the block comment changes.
+    fn comment_changed(&self, block: &MemoryBlock, old_comment: Option<&str>, new_comment: Option<&str>);
+
+    /// Called when the read permission changes.
+    fn read_status_changed(&self, block: &MemoryBlock, is_read: bool);
+
+    /// Called when the write permission changes.
+    fn write_status_changed(&self, block: &MemoryBlock, is_write: bool);
+
+    /// Called when the execute permission changes.
+    fn execute_status_changed(&self, block: &MemoryBlock, is_execute: bool);
+
+    /// Called when the source name changes.
+    fn source_changed(&self, block: &MemoryBlock, old_source: &str, new_source: &str);
+
+    /// Called when the source offset changes.
+    fn source_offset_changed(&self, block: &MemoryBlock, old_offset: i64, new_offset: i64);
+
+    /// Called when bytes in the block change.
+    fn data_changed(&self, block: &MemoryBlock, addr: Address, old_data: &[u8], new_data: &[u8]);
+}
+
+// ============================================================================
+// MemoryBlockStub — mirrors ghidra.program.model.mem.MemoryBlockStub
+// ============================================================================
+
+/// A stub [`MemoryBlock`] for use in tests.
+///
+/// Mirrors `ghidra.program.model.mem.MemoryBlockStub`. All methods that are
+/// not explicitly overridden will panic with `UnsupportedOperation`. Override
+/// individual methods via the builder pattern for test-specific behavior.
+#[derive(Debug, Clone)]
+pub struct MemoryBlockStub {
+    pub start: Address,
+    pub end: Address,
+}
+
+impl MemoryBlockStub {
+    /// Create a new stub with default (null) start/end addresses.
+    pub fn new() -> Self {
+        Self {
+            start: Address::NULL,
+            end: Address::NULL,
+        }
+    }
+
+    /// Create a new stub with the given start and end addresses.
+    pub fn with_range(start: Address, end: Address) -> Self {
+        Self { start, end }
+    }
+
+    /// Create a full [`MemoryBlock`] from this stub's range with given flags.
+    pub fn to_memory_block(&self, name: &str, flags: u8) -> MemoryBlock {
+        MemoryBlock::new_initialized(
+            name,
+            AddressRange::new(self.start, self.end),
+            flags,
+            vec![0u8; (self.end.offset - self.start.offset + 1) as usize],
+        )
+    }
+}
+
+impl Default for MemoryBlockStub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// FileBytes — simple representation of file-backed byte storage
+// ============================================================================
+
+/// Represents a stored sequence of file bytes that can back memory blocks.
+///
+/// This is a simplified version of Ghidra's `FileBytes` used in
+/// [`MemoryBlockSourceInfo`] references. Each `FileBytes` has a unique
+/// identifier and a total length.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FileBytes {
+    /// Unique identifier for this file bytes object.
+    pub id: u64,
+    /// Name of the source file.
+    pub filename: String,
+    /// Total number of bytes stored.
+    pub size: u64,
+    /// Offset within the source file where these bytes begin.
+    pub file_offset: u64,
+}
+
+impl FileBytes {
+    /// Create a new `FileBytes` descriptor.
+    pub fn new(id: u64, filename: impl Into<String>, size: u64, file_offset: u64) -> Self {
+        Self {
+            id,
+            filename: filename.into(),
+            size,
+            file_offset,
+        }
     }
 }
 
@@ -3930,6 +4494,1234 @@ mod tests {
         // Source offset 2 (non-mapped, skip_back=true) -> mapped offset 1 (prev)
         let addr = scheme.get_mapped_address(start, 64, 2, true).unwrap();
         assert_eq!(addr, Address::new(0x6001));
+    }
+
+    // =====================================================================
+    // Tests for InvalidAddressError
+    // =====================================================================
+
+    #[test]
+    fn test_invalid_address_error_new() {
+        let err = InvalidAddressError::new("bad address 0xGG");
+        assert_eq!(format!("{}", err), "InvalidAddressError: bad address 0xGG");
+        use std::error::Error;
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn test_invalid_address_error_default() {
+        let err = InvalidAddressError::default();
+        assert_eq!(format!("{}", err), "InvalidAddressError: Invalid address");
+    }
+
+    #[test]
+    fn test_invalid_address_error_into_ghidra_error() {
+        let err: GhidraError = InvalidAddressError::new("test").into();
+        assert!(matches!(err, GhidraError::AddressError(_)));
+    }
+
+    #[test]
+    fn test_invalid_address_error_into_memory_access_error() {
+        let err: MemoryAccessError = InvalidAddressError::new("test").into();
+        assert_eq!(err.message, "test");
+    }
+
+    // =====================================================================
+    // Tests for ByteMemBufferImpl
+    // =====================================================================
+
+    #[test]
+    fn test_byte_mem_buffer_impl_basic() {
+        let data = vec![0x10, 0x20, 0x30, 0x40];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert_eq!(buf.len(), 4);
+        assert!(!buf.is_empty());
+        assert_eq!(buf.get_address(), Address::new(0x1000));
+        assert!(!buf.is_big_endian());
+        assert!(buf.get_memory().is_none());
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_get_byte() {
+        let data = vec![0xAA, 0xBB, 0xCC, 0xDD];
+        let buf = ByteMemBufferImpl::new(Address::new(0x2000), data, true);
+        assert_eq!(buf.get_byte(0).unwrap(), 0xAA);
+        assert_eq!(buf.get_byte(1).unwrap(), 0xBB);
+        assert_eq!(buf.get_byte(3).unwrap(), 0xDD);
+        assert!(buf.get_byte(4).is_err());
+        assert!(buf.get_byte(-1).is_err());
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_get_bytes() {
+        let data = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let mut dest = [0u8; 3];
+        let n = buf.get_bytes(&mut dest, 1);
+        assert_eq!(n, 3);
+        assert_eq!(dest, [0x02, 0x03, 0x04]);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_get_bytes_beyond_end() {
+        let data = vec![0x01, 0x02];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let mut dest = [0u8; 10];
+        let n = buf.get_bytes(&mut dest, 0);
+        assert_eq!(n, 2);
+        assert_eq!(dest[0], 0x01);
+        assert_eq!(dest[1], 0x02);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_get_bytes_negative_offset() {
+        let data = vec![0x01, 0x02];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let mut dest = [0u8; 2];
+        let n = buf.get_bytes(&mut dest, -1);
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_empty() {
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), vec![], false);
+        assert!(buf.is_empty());
+        assert_eq!(buf.len(), 0);
+        assert!(buf.get_byte(0).is_err());
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_short() {
+        // Little-endian: 0x34 0x12 -> 0x1234
+        let data = vec![0x34, 0x12, 0x00, 0x00];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert_eq!(buf.get_short(0).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_int() {
+        // Little-endian: 0x78 0x56 0x34 0x12 -> 0x12345678
+        let data = vec![0x78, 0x56, 0x34, 0x12];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert_eq!(buf.get_int(0).unwrap(), 0x12345678i32);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_long() {
+        let data = vec![0xEF, 0xCD, 0xAB, 0x90, 0x78, 0x56, 0x34, 0x12];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert_eq!(buf.get_long(0).unwrap(), 0x1234567890ABCDEFi64);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_big_endian() {
+        // Big-endian: 0x12 0x34 -> 0x1234
+        let data = vec![0x12, 0x34];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, true);
+        assert_eq!(buf.get_short(0).unwrap(), 0x1234);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_is_initialized_memory() {
+        let data = vec![0x42];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert!(buf.is_initialized_memory());
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_unsigned_byte() {
+        let data = vec![0xFF, 0x80, 0x00];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert_eq!(buf.get_unsigned_byte(0).unwrap(), 255);
+        assert_eq!(buf.get_unsigned_byte(1).unwrap(), 128);
+        assert_eq!(buf.get_unsigned_byte(2).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_var_length_int() {
+        let data = vec![0xFF, 0x34, 0x12, 0x78, 0x56, 0x34, 0x12];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        // 1-byte signed: 0xFF = -1
+        assert_eq!(buf.get_var_length_int(0, 1).unwrap(), -1);
+        // 2-byte signed little-endian: 0x1234
+        assert_eq!(buf.get_var_length_int(1, 2).unwrap(), 0x1234);
+        // 4-byte signed little-endian: 0x12345678
+        assert_eq!(buf.get_var_length_int(3, 4).unwrap(), 0x12345678);
+    }
+
+    #[test]
+    fn test_byte_mem_buffer_impl_var_length_unsigned_int() {
+        let data = vec![0xFF, 0x34, 0x12];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        assert_eq!(buf.get_var_length_unsigned_int(0, 1).unwrap(), 255);
+        assert_eq!(buf.get_var_length_unsigned_int(1, 2).unwrap(), 0x1234);
+    }
+
+    // =====================================================================
+    // Tests for MemoryBufferImpl
+    // =====================================================================
+
+    fn make_memory_for_buffer() -> MemoryMap {
+        let mut mem = MemoryMap::new(false);
+        let data = vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+                        0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0, 0xFF];
+        mem.create_initialized_block(".text", Address::new(0x1000), data, false)
+            .unwrap();
+        mem
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_basic() {
+        let mut mem = make_memory_for_buffer();
+        let buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        assert_eq!(buf.get_address(), Address::new(0x1000));
+        assert!(!buf.is_big_endian());
+        assert!(buf.get_memory().is_some());
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_read_byte() {
+        let mut mem = make_memory_for_buffer();
+        let buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        assert_eq!(buf.get_byte(0).unwrap(), 0x10);
+        assert_eq!(buf.get_byte(1).unwrap(), 0x20);
+        assert_eq!(buf.get_byte(15).unwrap(), 0xFF);
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_read_bytes() {
+        let mut mem = make_memory_for_buffer();
+        let buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        let mut dest = [0u8; 4];
+        let n = buf.get_bytes(&mut dest, 2);
+        assert_eq!(n, 4);
+        assert_eq!(dest, [0x30, 0x40, 0x50, 0x60]);
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_out_of_range_fallback() {
+        let mut mem = make_memory_for_buffer();
+        // Use a small buffer size so cache is limited
+        let buf = MemoryBufferImpl::with_buffer_size(&mut mem, Address::new(0x1000), 4);
+        // Byte at offset 0 should be from cache
+        assert_eq!(buf.get_byte(0).unwrap(), 0x10);
+        // Byte at offset 10 should fall back to direct memory read
+        assert_eq!(buf.get_byte(10).unwrap(), 0xB0);
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_write_byte() {
+        let mut mem = make_memory_for_buffer();
+        let mut buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        buf.set_byte(0, 0x42).unwrap();
+        // Read back through the memory directly
+        assert_eq!(buf.get_memory().unwrap().get_byte(Address::new(0x1000)).unwrap(), 0x42);
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_write_bytes() {
+        let mut mem = make_memory_for_buffer();
+        let mut buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        buf.set_bytes(4, &[0xAA, 0xBB]).unwrap();
+        assert_eq!(buf.get_memory().unwrap().get_byte(Address::new(0x1004)).unwrap(), 0xAA);
+        assert_eq!(buf.get_memory().unwrap().get_byte(Address::new(0x1005)).unwrap(), 0xBB);
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_advance() {
+        let mut mem = make_memory_for_buffer();
+        let mut buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        // Before advance: byte at offset 0 is 0x10
+        assert_eq!(buf.get_byte(0).unwrap(), 0x10);
+        // Advance by 4
+        buf.advance(4).unwrap();
+        // Now offset 0 points to 0x1004 = 0x50
+        assert_eq!(buf.get_address(), Address::new(0x1004));
+    }
+
+    #[test]
+    fn test_memory_buffer_impl_set_position() {
+        let mut mem = make_memory_for_buffer();
+        let mut buf = MemoryBufferImpl::new(&mut mem, Address::new(0x1000));
+        buf.set_position(Address::new(0x1008));
+        assert_eq!(buf.get_address(), Address::new(0x1008));
+        assert_eq!(buf.get_byte(0).unwrap(), 0x90);
+    }
+
+    // =====================================================================
+    // Tests for DumbMemBufferImpl
+    // =====================================================================
+
+    #[test]
+    fn test_dumb_mem_buffer_impl_basic() {
+        let mut mem = make_memory_for_buffer();
+        let buf = DumbMemBufferImpl::new(&mut mem, Address::new(0x1000));
+        assert_eq!(buf.get_address(), Address::new(0x1000));
+        assert_eq!(buf.get_byte(0).unwrap(), 0x10);
+        assert_eq!(buf.get_byte(5).unwrap(), 0x60);
+    }
+
+    #[test]
+    fn test_dumb_mem_buffer_impl_short() {
+        let mut mem = make_memory_for_buffer();
+        let buf = DumbMemBufferImpl::new(&mut mem, Address::new(0x1000));
+        assert_eq!(buf.get_short(0).unwrap(), 0x2010);
+    }
+
+    // =====================================================================
+    // Tests for MemBufferInputStream
+    // =====================================================================
+
+    #[test]
+    fn test_mem_buffer_input_stream_basic() {
+        let data = vec![0x01, 0x02, 0x03, 0x04, 0x05];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let mut stream = MemBufferInputStream::new(&buf);
+        assert_eq!(stream.available(), i32::MAX as usize);
+
+        let mut out = [0u8; 3];
+        let n = std::io::Read::read(&mut stream, &mut out).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(out, [0x01, 0x02, 0x03]);
+
+        let n = std::io::Read::read(&mut stream, &mut out).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(out[0], 0x04);
+        assert_eq!(out[1], 0x05);
+    }
+
+    #[test]
+    fn test_mem_buffer_input_stream_with_range() {
+        let data = vec![0x10, 0x20, 0x30, 0x40, 0x50];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let mut stream = MemBufferInputStream::with_range(&buf, 1, 3);
+        assert_eq!(stream.available(), 3);
+
+        let mut out = [0u8; 10];
+        let n = std::io::Read::read(&mut stream, &mut out).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(out[0], 0x20);
+        assert_eq!(out[1], 0x30);
+        assert_eq!(out[2], 0x40);
+
+        // Should be EOF now
+        let n = std::io::Read::read(&mut stream, &mut out).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(stream.available(), 0);
+    }
+
+    #[test]
+    fn test_mem_buffer_input_stream_read_to_end() {
+        let data = vec![0xAA, 0xBB, 0xCC];
+        let buf = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let mut stream = MemBufferInputStream::with_range(&buf, 0, 3);
+        let mut out = Vec::new();
+        std::io::Read::read_to_end(&mut stream, &mut out).unwrap();
+        assert_eq!(out, vec![0xAA, 0xBB, 0xCC]);
+    }
+
+    // =====================================================================
+    // Tests for MemoryBlockListener (trait existence and dispatch)
+    // =====================================================================
+
+    struct TestBlockListener {
+        name_changed: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    impl TestBlockListener {
+        fn new() -> Self {
+            Self {
+                name_changed: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl MemoryBlockListener for TestBlockListener {
+        fn name_changed(&self, _block: &MemoryBlock, old_name: &str, new_name: &str) {
+            self.name_changed
+                .lock()
+                .unwrap()
+                .push((old_name.to_string(), new_name.to_string()));
+        }
+        fn comment_changed(&self, _block: &MemoryBlock, _old: Option<&str>, _new: Option<&str>) {}
+        fn read_status_changed(&self, _block: &MemoryBlock, _is_read: bool) {}
+        fn write_status_changed(&self, _block: &MemoryBlock, _is_write: bool) {}
+        fn execute_status_changed(&self, _block: &MemoryBlock, _is_execute: bool) {}
+        fn source_changed(&self, _block: &MemoryBlock, _old: &str, _new: &str) {}
+        fn source_offset_changed(&self, _block: &MemoryBlock, _old: i64, _new: i64) {}
+        fn data_changed(&self, _block: &MemoryBlock, _addr: Address, _old: &[u8], _new: &[u8]) {}
+    }
+
+    #[test]
+    fn test_memory_block_listener_name_changed() {
+        let listener = TestBlockListener::new();
+        let block = MemoryBlock::new_initialized(
+            "old_name",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        listener.name_changed(&block, "old_name", "new_name");
+        let changes = listener.name_changed.lock().unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].0, "old_name");
+        assert_eq!(changes[0].1, "new_name");
+    }
+
+    // =====================================================================
+    // Tests for MemoryBlockStub
+    // =====================================================================
+
+    #[test]
+    fn test_memory_block_stub_new() {
+        let stub = MemoryBlockStub::new();
+        assert!(stub.start.is_null());
+        assert!(stub.end.is_null());
+    }
+
+    #[test]
+    fn test_memory_block_stub_with_range() {
+        let stub = MemoryBlockStub::with_range(Address::new(0x1000), Address::new(0x10FF));
+        assert_eq!(stub.start, Address::new(0x1000));
+        assert_eq!(stub.end, Address::new(0x10FF));
+    }
+
+    #[test]
+    fn test_memory_block_stub_to_memory_block() {
+        let stub = MemoryBlockStub::with_range(Address::new(0x1000), Address::new(0x100F));
+        let block = stub.to_memory_block("test", FLAG_READ | FLAG_WRITE);
+        assert_eq!(block.name, "test");
+        assert_eq!(block.size(), 16);
+        assert!(block.is_read());
+        assert!(block.is_write());
+        assert!(!block.is_execute());
+    }
+
+    // =====================================================================
+    // Tests for FileBytes
+    // =====================================================================
+
+    #[test]
+    fn test_file_bytes_new() {
+        let fb = FileBytes::new(42, "test.bin", 1024, 0);
+        assert_eq!(fb.id, 42);
+        assert_eq!(fb.filename, "test.bin");
+        assert_eq!(fb.size, 1024);
+        assert_eq!(fb.file_offset, 0);
+    }
+
+    #[test]
+    fn test_file_bytes_equality() {
+        let fb1 = FileBytes::new(1, "a.bin", 100, 0);
+        let fb2 = FileBytes::new(1, "a.bin", 100, 0);
+        assert_eq!(fb1, fb2);
+    }
+
+    // =====================================================================
+    // Additional MemoryBlock tests
+    // =====================================================================
+
+    #[test]
+    fn test_memory_block_permissions_string() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ | FLAG_WRITE | FLAG_EXECUTE,
+            vec![0u8; 256],
+        );
+        assert_eq!(block.permissions_string(), "rwx");
+
+        let ro = MemoryBlock::new_initialized(
+            "ro",
+            AddressRange::new(Address::new(0x2000), Address::new(0x20FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert_eq!(ro.permissions_string(), "r--");
+    }
+
+    #[test]
+    fn test_memory_block_uninitialized() {
+        let block = MemoryBlock::new_uninitialized(
+            "heap",
+            AddressRange::new(Address::new(0x5000), Address::new(0x5FFF)),
+            FLAG_READ | FLAG_WRITE,
+        );
+        assert!(!block.initialized);
+        assert!(block.data.is_empty());
+        assert!(block.get_byte_at_offset(0).is_none());
+    }
+
+    #[test]
+    fn test_memory_block_adjacent() {
+        let b1 = MemoryBlock::new_initialized(
+            "A",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let b2 = MemoryBlock::new_initialized(
+            "B",
+            AddressRange::new(Address::new(0x1100), Address::new(0x11FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert!(b1.is_adjacent_to(&b2));
+        assert!(b2.is_adjacent_to(&b1));
+    }
+
+    #[test]
+    fn test_memory_block_not_adjacent() {
+        let b1 = MemoryBlock::new_initialized(
+            "A",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let b2 = MemoryBlock::new_initialized(
+            "B",
+            AddressRange::new(Address::new(0x2000), Address::new(0x20FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert!(!b1.is_adjacent_to(&b2));
+    }
+
+    #[test]
+    fn test_memory_block_intersects() {
+        let b1 = MemoryBlock::new_initialized(
+            "A",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let b2 = MemoryBlock::new_initialized(
+            "B",
+            AddressRange::new(Address::new(0x1080), Address::new(0x1180)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert!(b1.intersects(&b2));
+        assert!(b2.intersects(&b1));
+    }
+
+    #[test]
+    fn test_memory_block_intersection() {
+        let b1 = MemoryBlock::new_initialized(
+            "A",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let b2 = MemoryBlock::new_initialized(
+            "B",
+            AddressRange::new(Address::new(0x1080), Address::new(0x1180)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let isect = b1.intersection(&b2).unwrap();
+        assert_eq!(isect.start, Address::new(0x1080));
+        assert_eq!(isect.end, Address::new(0x10FF));
+    }
+
+    #[test]
+    fn test_memory_block_with_comment() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        )
+        .with_comment("This is a comment");
+        assert!(block.has_comment());
+        assert_eq!(block.get_comment(), "This is a comment");
+    }
+
+    #[test]
+    fn test_memory_block_with_source_name() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        )
+        .with_source_name("a.out");
+        assert!(block.has_source_name());
+        assert_eq!(block.get_source_name(), "a.out");
+    }
+
+    #[test]
+    fn test_memory_block_display_label() {
+        let block = MemoryBlock::new_initialized(
+            ".text",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ | FLAG_EXECUTE,
+            vec![0u8; 256],
+        );
+        // Address::Display uses 8-digit lowercase hex
+        assert_eq!(block.display_label(), ".text [00001000-000010ff]");
+    }
+
+    #[test]
+    fn test_memory_block_sub_range() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let sub = block.sub_range(0x10, 0x20).unwrap();
+        assert_eq!(sub.start, Address::new(0x1010));
+        assert_eq!(sub.end, Address::new(0x102F));
+    }
+
+    #[test]
+    fn test_memory_block_sub_range_out_of_bounds() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        // Offset beyond block
+        assert!(block.sub_range(0x200, 0x10).is_none());
+        // Size extending beyond block
+        assert!(block.sub_range(0x100, 0x200).is_none());
+    }
+
+    #[test]
+    fn test_memory_block_contains_range() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        let inner = AddressRange::new(Address::new(0x1020), Address::new(0x1040));
+        assert!(block.contains_range(&inner));
+        let outer = AddressRange::new(Address::new(0x0F00), Address::new(0x1100));
+        assert!(!block.contains_range(&outer));
+    }
+
+    #[test]
+    fn test_memory_block_iter_addresses() {
+        let block = MemoryBlock::new_initialized(
+            "tiny",
+            AddressRange::new(Address::new(0x1000), Address::new(0x1003)),
+            FLAG_READ,
+            vec![0u8; 4],
+        );
+        let addrs: Vec<Address> = block.iter_addresses().collect();
+        assert_eq!(addrs.len(), 4);
+        assert_eq!(addrs[0], Address::new(0x1000));
+        assert_eq!(addrs[3], Address::new(0x1003));
+    }
+
+    // =====================================================================
+    // Additional MemoryMap tests
+    // =====================================================================
+
+    #[test]
+    fn test_memory_map_min_max_address() {
+        let mut mem = make_memory();
+        mem.create_initialized_block("A", Address::new(0x1000), vec![0u8; 100], false)
+            .unwrap();
+        mem.create_initialized_block("B", Address::new(0x5000), vec![0u8; 50], false)
+            .unwrap();
+        assert_eq!(mem.min_address(), Some(Address::new(0x1000)));
+        assert_eq!(mem.max_address(), Some(Address::new(0x5031)));
+    }
+
+    #[test]
+    fn test_memory_map_contains() {
+        let mut mem = make_memory();
+        mem.create_initialized_block("A", Address::new(0x1000), vec![0u8; 256], false)
+            .unwrap();
+        assert!(mem.contains(&Address::new(0x1000)));
+        assert!(mem.contains(&Address::new(0x10FF)));
+        assert!(!mem.contains(&Address::new(0x0FFF)));
+        assert!(!mem.contains(&Address::new(0x1100)));
+    }
+
+    #[test]
+    fn test_memory_map_blocks_in_order() {
+        let mut mem = make_memory();
+        mem.create_initialized_block("C", Address::new(0x3000), vec![0u8; 10], false)
+            .unwrap();
+        mem.create_initialized_block("A", Address::new(0x1000), vec![0u8; 10], false)
+            .unwrap();
+        mem.create_initialized_block("B", Address::new(0x2000), vec![0u8; 10], false)
+            .unwrap();
+        let blocks = mem.get_blocks();
+        assert_eq!(blocks[0].name, "A");
+        assert_eq!(blocks[1].name, "B");
+        assert_eq!(blocks[2].name, "C");
+    }
+
+    #[test]
+    fn test_memory_map_num_blocks() {
+        let mut mem = make_memory();
+        assert_eq!(mem.num_blocks(), 0);
+        assert!(mem.is_empty());
+        mem.create_initialized_block("A", Address::new(0x1000), vec![0u8; 10], false)
+            .unwrap();
+        assert_eq!(mem.num_blocks(), 1);
+        assert!(!mem.is_empty());
+    }
+
+    #[test]
+    fn test_memory_map_iter_blocks() {
+        let mut mem = make_memory();
+        mem.create_initialized_block("A", Address::new(0x1000), vec![0u8; 10], false)
+            .unwrap();
+        mem.create_initialized_block("B", Address::new(0x2000), vec![0u8; 10], false)
+            .unwrap();
+        let names: Vec<&str> = mem.iter_blocks().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_memory_map_big_endian() {
+        let mut mem = MemoryMap::new(true);
+        assert!(mem.is_big_endian());
+        mem.create_initialized_block(".text", Address::new(0x1000), vec![0x12, 0x34], false)
+            .unwrap();
+        let s = mem.get_short(Address::new(0x1000)).unwrap();
+        assert_eq!(s, 0x1234);
+    }
+
+    #[test]
+    fn test_memory_map_write_set_int() {
+        let mut mem = make_memory();
+        mem.create_initialized_block(".text", Address::new(0x1000), vec![0u8; 16], false)
+            .unwrap();
+        mem.set_int(Address::new(0x1000), 0x12345678i32).unwrap();
+        assert_eq!(mem.get_int(Address::new(0x1000)).unwrap(), 0x12345678i32);
+    }
+
+    #[test]
+    fn test_memory_map_write_set_long() {
+        let mut mem = make_memory();
+        mem.create_initialized_block(".text", Address::new(0x1000), vec![0u8; 16], false)
+            .unwrap();
+        mem.set_long(Address::new(0x1000), 0x1234567890ABCDEFi64)
+            .unwrap();
+        assert_eq!(
+            mem.get_long(Address::new(0x1000)).unwrap(),
+            0x1234567890ABCDEFi64
+        );
+    }
+
+    #[test]
+    fn test_memory_map_uninitialized_block_read_fails() {
+        let mut mem = make_memory();
+        mem.create_uninitialized_block("heap", Address::new(0x5000), 64, false)
+            .unwrap();
+        assert!(mem.get_byte(Address::new(0x5000)).is_err());
+    }
+
+    #[test]
+    fn test_memory_map_initialized_block_value() {
+        let mut mem = make_memory();
+        mem.create_initialized_block_value(".bss", Address::new(0x3000), 16, 0xCC, false)
+            .unwrap();
+        assert_eq!(mem.get_byte(Address::new(0x3000)).unwrap(), 0xCC);
+        assert_eq!(mem.get_byte(Address::new(0x300F)).unwrap(), 0xCC);
+    }
+
+    #[test]
+    fn test_memory_map_find_bytes_backward() {
+        let mut mem = make_memory();
+        let mut data = vec![0u8; 256];
+        data[100..104].copy_from_slice(&[0xDE, 0xAD, 0xBE, 0xEF]);
+        mem.create_initialized_block(".text", Address::new(0x1000), data, false)
+            .unwrap();
+        let result = mem.find_bytes(
+            Address::new(0x1000),
+            Address::new(0x10FF),
+            &[0xDE, 0xAD, 0xBE, 0xEF],
+            None,
+            false,
+        );
+        assert_eq!(result, Some(Address::new(0x1064)));
+    }
+
+    #[test]
+    fn test_memory_map_find_bytes_multiple_matches_forward() {
+        let mut mem = make_memory();
+        let mut data = vec![0u8; 256];
+        data[10..12].copy_from_slice(&[0xAB, 0xCD]);
+        data[200..202].copy_from_slice(&[0xAB, 0xCD]);
+        mem.create_initialized_block(".text", Address::new(0x1000), data, false)
+            .unwrap();
+        let result = mem.find_bytes(
+            Address::new(0x1000),
+            Address::new(0x10FF),
+            &[0xAB, 0xCD],
+            None,
+            true,
+        );
+        // Should find the first match
+        assert_eq!(result, Some(Address::new(0x100A)));
+    }
+
+    // =====================================================================
+    // Tests for ByteMappingScheme additional scenarios
+    // =====================================================================
+
+    #[test]
+    fn test_byte_mapping_scheme_display() {
+        let scheme = ByteMappingScheme::one_to_one();
+        assert_eq!(format!("{}", scheme), "1:1 mapping");
+
+        let scheme = ByteMappingScheme::new(2, 4);
+        assert_eq!(format!("{}", scheme), "2:4 mapping");
+    }
+
+    #[test]
+    fn test_byte_mapping_scheme_encode_roundtrip() {
+        let scheme = ByteMappingScheme::new(3, 7);
+        let encoded = scheme.encode();
+        let decoded = ByteMappingScheme::from_encoded(encoded);
+        assert_eq!(decoded.mapped_byte_count(), 3);
+        assert_eq!(decoded.mapped_source_byte_count(), 7);
+    }
+
+    #[test]
+    fn test_byte_mapping_scheme_3_to_4() {
+        let scheme = ByteMappingScheme::new(3, 4);
+        let base = Address::new(0x1000);
+        // Offset 0 -> source 0
+        assert_eq!(scheme.get_mapped_source_address(base, 0), Address::new(0x1000));
+        // Offset 1 -> source 1
+        assert_eq!(scheme.get_mapped_source_address(base, 1), Address::new(0x1001));
+        // Offset 2 -> source 2
+        assert_eq!(scheme.get_mapped_source_address(base, 2), Address::new(0x1002));
+        // Offset 3 -> next pattern: source offset 4
+        assert_eq!(scheme.get_mapped_source_address(base, 3), Address::new(0x1004));
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid byte mapping ratio")]
+    fn test_byte_mapping_scheme_invalid_zero() {
+        ByteMappingScheme::new(0, 4);
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid byte mapping ratio")]
+    fn test_byte_mapping_scheme_invalid_exceeds() {
+        ByteMappingScheme::new(5, 4);
+    }
+
+    // =====================================================================
+    // Tests for MemoryBlockSourceInfo additional scenarios
+    // =====================================================================
+
+    #[test]
+    fn test_memory_block_source_info_byte_mapped() {
+        let info = MemoryBlockSourceInfo::new_byte_mapped(
+            100,
+            Address::new(0x2000),
+            AddressRange::new(Address::new(0x1000), Address::new(0x1063)),
+            ByteMappingScheme::default(),
+        );
+        assert!(info.is_byte_mapped());
+        assert!(info.is_mapped());
+        assert!(!info.is_bit_mapped());
+        assert!(info.get_byte_mapping_scheme().is_some());
+        assert_eq!(info.get_length(), 100);
+        assert!(info.get_mapped_range().is_some());
+    }
+
+    #[test]
+    fn test_memory_block_source_info_bit_mapped() {
+        let info = MemoryBlockSourceInfo::new_bit_mapped(
+            64,
+            Address::new(0x3000),
+            AddressRange::new(Address::new(0x1000), Address::new(0x103F)),
+        );
+        assert!(info.is_bit_mapped());
+        assert!(info.is_mapped());
+        assert!(!info.is_byte_mapped());
+        assert!(info.get_byte_mapping_scheme().is_none());
+    }
+
+    #[test]
+    fn test_memory_block_source_info_no_file_bytes() {
+        let info = MemoryBlockSourceInfo::new_initialized(100, Address::new(0x1000), None, -1);
+        assert!(!info.has_file_bytes());
+        assert!(!info.is_file_bytes_range());
+        assert!(info.get_file_bytes_id().is_none());
+        assert!(info.get_file_bytes_offset().is_none());
+    }
+
+    #[test]
+    fn test_memory_block_source_info_address_range() {
+        let info = MemoryBlockSourceInfo::new_initialized(100, Address::new(0x1000), Some(1), 0);
+        let range = info.get_address_range();
+        assert_eq!(range.start, Address::new(0x1000));
+        assert_eq!(range.end, Address::new(0x1063));
+    }
+
+    // =====================================================================
+    // Additional error type tests
+    // =====================================================================
+
+    #[test]
+    fn test_memory_access_error_is_clone() {
+        let err = MemoryAccessError::new("test");
+        let err2 = err.clone();
+        assert_eq!(err.message, err2.message);
+    }
+
+    #[test]
+    fn test_memory_access_error_is_std_error() {
+        let err: Box<dyn std::error::Error> =
+            Box::new(MemoryAccessError::new("test error"));
+        assert!(err.to_string().contains("test error"));
+    }
+
+    #[test]
+    fn test_memory_block_error_into_memory_access_error() {
+        let block_err = MemoryBlockError::new("block problem");
+        let access_err: MemoryAccessError = block_err.into();
+        assert_eq!(access_err.message, "block problem");
+    }
+
+    #[test]
+    fn test_memory_conflict_error_into_ghidra_error() {
+        let err: GhidraError = MemoryConflictError::new("conflict").into();
+        assert!(matches!(err, GhidraError::MemoryError(_)));
+    }
+
+    // =====================================================================
+    // StubMemory additional tests
+    // =====================================================================
+
+    #[test]
+    fn test_stub_memory_big_endian() {
+        let mem = StubMemory::new(true);
+        assert!(mem.is_big_endian());
+    }
+
+    #[test]
+    fn test_stub_memory_all_methods_return_error() {
+        let mut mem = StubMemory::new(false);
+        assert!(mem.get_byte(Address::new(0)).is_err());
+        assert!(mem.get_short(Address::new(0)).is_err());
+        assert!(mem.get_int(Address::new(0)).is_err());
+        assert!(mem.get_long(Address::new(0)).is_err());
+        assert!(mem.set_byte(Address::new(0), 0).is_err());
+        assert!(mem.set_short(Address::new(0), 0).is_err());
+        assert!(mem.set_int(Address::new(0), 0).is_err());
+        assert!(mem.set_long(Address::new(0), 0).is_err());
+        assert!(mem.create_initialized_block("x", Address::new(0), vec![], false).is_err());
+        assert!(mem.remove_block("x").is_err());
+    }
+
+    #[test]
+    fn test_stub_memory_find_bytes_returns_none() {
+        let mem = StubMemory::new(false);
+        assert!(mem
+            .find_bytes(Address::new(0), Address::new(10), &[0x00], None, true)
+            .is_none());
+    }
+
+    #[test]
+    fn test_stub_memory_address_sets_empty() {
+        let mem = StubMemory::new(false);
+        assert!(mem.loaded_and_initialized_address_set().is_empty());
+        assert!(mem.all_initialized_address_set().is_empty());
+        assert!(mem.execute_set().is_empty());
+    }
+
+    // =====================================================================
+    // Tests for Memory trait helper methods
+    // =====================================================================
+
+    #[test]
+    fn test_memory_max_binary_size() {
+        let mem = make_memory();
+        assert_eq!(mem.max_binary_size(), MAX_BINARY_SIZE);
+        assert_eq!(mem.max_block_size(), MAX_BLOCK_SIZE);
+    }
+
+    #[test]
+    fn test_memory_is_valid_block_name() {
+        let mem = make_memory();
+        assert!(mem.is_valid_memory_block_name("hello"));
+        assert!(mem.is_valid_memory_block_name(".text"));
+        assert!(mem.is_valid_memory_block_name("block with spaces"));
+        assert!(!mem.is_valid_memory_block_name(""));
+        assert!(!mem.is_valid_memory_block_name("\n"));
+        assert!(!mem.is_valid_memory_block_name("\t"));
+        assert!(!mem.is_valid_memory_block_name("\x00abc"));
+    }
+
+    #[test]
+    fn test_memory_is_external_block_address() {
+        let mut mem = make_memory();
+        mem.create_initialized_block(
+            EXTERNAL_BLOCK_NAME,
+            Address::new(0xF000),
+            vec![0u8; 16],
+            false,
+        )
+        .unwrap();
+        assert!(mem.is_external_block_address(&Address::new(0xF000)));
+        assert!(!mem.is_external_block_address(&Address::new(0x0000)));
+    }
+
+    #[test]
+    fn test_memory_locate_addresses_for_file_offset() {
+        let mut mem = make_memory();
+        // Create a block with file-backed source info
+        let mut block = MemoryBlock::new_initialized(
+            ".text",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        block.source_infos = vec![MemoryBlockSourceInfo::new_initialized(
+            256,
+            Address::new(0x1000),
+            Some(1),
+            100, // File bytes start at offset 100
+        )];
+        mem.insert_block(block).unwrap();
+
+        // File offset 100 should map to address 0x1000
+        let addrs = mem.locate_addresses_for_file_offset(100);
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0], Address::new(0x1000));
+
+        // File offset 150 should map to address 0x1032
+        let addrs = mem.locate_addresses_for_file_offset(150);
+        assert_eq!(addrs.len(), 1);
+        assert_eq!(addrs[0], Address::new(0x1032));
+
+        // File offset 0 should not match (out of range)
+        let addrs = mem.locate_addresses_for_file_offset(0);
+        assert!(addrs.is_empty());
+    }
+
+    #[test]
+    fn test_memory_get_address_source_info() {
+        let mut mem = make_memory();
+        let mut block = MemoryBlock::new_initialized(
+            ".text",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        block.source_infos = vec![MemoryBlockSourceInfo::new_initialized(
+            256,
+            Address::new(0x1000),
+            Some(1),
+            0,
+        )];
+        mem.insert_block(block).unwrap();
+
+        let info = mem.get_address_source_info(&Address::new(0x1050));
+        assert!(info.is_some());
+        assert_eq!(info.unwrap().get_length(), 256);
+
+        let info = mem.get_address_source_info(&Address::new(0x9999));
+        assert!(info.is_none());
+    }
+
+    // =====================================================================
+    // Constants tests
+    // =====================================================================
+
+    #[test]
+    fn test_constants_values() {
+        assert_eq!(EXTERNAL_BLOCK_NAME, "EXTERNAL");
+        assert_eq!(HEAP_BLOCK_NAME, "__HEAP__");
+        assert_eq!(GBYTE_SHIFT_FACTOR, 30);
+        assert_eq!(GBYTE, 1 << 30);
+        assert_eq!(MAX_BINARY_SIZE_GB, 16);
+        assert_eq!(MAX_BINARY_SIZE, 16u64 << 30);
+        assert_eq!(MAX_BLOCK_SIZE_GB, 16);
+        assert_eq!(MAX_BLOCK_SIZE, 16u64 << 30);
+        assert_eq!(FLAG_READ, 0x4);
+        assert_eq!(FLAG_WRITE, 0x2);
+        assert_eq!(FLAG_EXECUTE, 0x01);
+        assert_eq!(FLAG_VOLATILE, 0x8);
+        assert_eq!(FLAG_ARTIFICIAL, 0x10);
+    }
+
+    // =====================================================================
+    // WrappedMemBuffer additional tests
+    // =====================================================================
+
+    #[test]
+    fn test_wrapped_mem_buffer_basic() {
+        let data = vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80];
+        let inner = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let wrapped = WrappedMemBuffer::new(Box::new(inner), 4).unwrap();
+        // offset 0 in wrapped = offset 4 in inner = 0x50
+        assert_eq!(wrapped.get_address(), Address::new(0x1004));
+        assert_eq!(wrapped.get_byte(0).unwrap(), 0x50);
+        assert_eq!(wrapped.get_byte(3).unwrap(), 0x80);
+    }
+
+    #[test]
+    fn test_wrapped_mem_buffer_with_cache() {
+        let data = vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80];
+        let inner = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let wrapped = WrappedMemBuffer::with_buffer_size(Box::new(inner), 4, 0).unwrap();
+        assert_eq!(wrapped.get_address(), Address::new(0x1000));
+        assert_eq!(wrapped.get_byte(0).unwrap(), 0x10);
+        assert_eq!(wrapped.get_byte(1).unwrap(), 0x20);
+    }
+
+    #[test]
+    fn test_wrapped_mem_buffer_get_bytes() {
+        let data = vec![0x10, 0x20, 0x30, 0x40, 0x50];
+        let inner = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        // base_offset=2 means wrapped offset 0 = inner offset 2
+        let wrapped = WrappedMemBuffer::new(Box::new(inner), 2).unwrap();
+        let mut dest = [0u8; 3];
+        let n = wrapped.get_bytes(&mut dest, 0);
+        assert_eq!(n, 3);
+        assert_eq!(dest, [0x30, 0x40, 0x50]);
+    }
+
+    #[test]
+    fn test_wrapped_mem_buffer_endian() {
+        let data = vec![0x34, 0x12];
+        let inner = ByteMemBufferImpl::new(Address::new(0x1000), data, false);
+        let wrapped = WrappedMemBuffer::new(Box::new(inner), 0).unwrap();
+        assert!(!wrapped.is_big_endian());
+        assert_eq!(wrapped.get_short(0).unwrap(), 0x1234);
+    }
+
+    // =====================================================================
+    // Edge case tests
+    // =====================================================================
+
+    #[test]
+    fn test_memory_map_join_non_contiguous_fails() {
+        let mut mem = make_memory();
+        mem.create_initialized_block("A", Address::new(0x1000), vec![0xAA; 64], false)
+            .unwrap();
+        mem.create_initialized_block("B", Address::new(0x3000), vec![0xBB; 64], false)
+            .unwrap();
+        let result = mem.join_blocks("A", "B");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_map_split_at_start_fails() {
+        let mut mem = make_memory();
+        mem.create_initialized_block(".text", Address::new(0x1000), vec![0x90; 64], false)
+            .unwrap();
+        let result = mem.split_block(".text", Address::new(0x1000));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_map_remove_nonexistent_fails() {
+        let mut mem = make_memory();
+        let result = mem.remove_block("nonexistent");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_map_move_nonexistent_fails() {
+        let mut mem = make_memory();
+        let result = mem.move_block("nonexistent", Address::new(0x2000));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_block_write_to_readonly_fails() {
+        let mut mem = make_memory();
+        mem.create_initialized_block(
+            ".rodata",
+            Address::new(0x1000),
+            vec![0u8; 16],
+            false,
+        )
+        .unwrap();
+        // Remove write permission
+        let block = mem.blocks.get_mut(".rodata").unwrap();
+        block.flags = FLAG_READ;
+
+        let result = mem.set_byte(Address::new(0x1000), 0x42);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_block_get_bytes_at_offset() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x100F)),
+            FLAG_READ,
+            vec![0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, 0x80,
+                 0x90, 0xA0, 0xB0, 0xC0, 0xD0, 0xE0, 0xF0, 0xFF],
+        );
+        let bytes = block.get_bytes_at_offset(4, 4).unwrap();
+        assert_eq!(bytes, &[0x50, 0x60, 0x70, 0x80]);
+    }
+
+    #[test]
+    fn test_memory_block_get_bytes_at_offset_out_of_range() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x1003)),
+            FLAG_READ,
+            vec![0x10, 0x20, 0x30, 0x40],
+        );
+        assert!(block.get_bytes_at_offset(2, 10).is_none());
+    }
+
+    #[test]
+    fn test_memory_block_has_data() {
+        let init = MemoryBlock::new_initialized(
+            "init",
+            AddressRange::new(Address::new(0x1000), Address::new(0x100F)),
+            FLAG_READ,
+            vec![0u8; 16],
+        );
+        assert!(init.has_data());
+
+        let uninit = MemoryBlock::new_uninitialized(
+            "uninit",
+            AddressRange::new(Address::new(0x2000), Address::new(0x200F)),
+            FLAG_READ,
+        );
+        assert!(!uninit.has_data());
+    }
+
+    #[test]
+    fn test_memory_block_is_fully_initialized() {
+        let full = MemoryBlock::new_initialized(
+            "full",
+            AddressRange::new(Address::new(0x1000), Address::new(0x100F)),
+            FLAG_READ,
+            vec![0u8; 16],
+        );
+        assert!(full.is_fully_initialized());
+
+        // A block with size > data.len() is not fully initialized
+        let partial = MemoryBlock {
+            name: "partial".to_string(),
+            range: AddressRange::new(Address::new(0x2000), Address::new(0x20FF)),
+            block_type: MemoryBlockType::Default,
+            flags: FLAG_READ,
+            comment: String::new(),
+            source_name: String::new(),
+            source_infos: vec![],
+            initialized: true,
+            data: vec![0u8; 10], // only 10 bytes but size is 256
+            mapped_source_base: None,
+            mapping_scheme: None,
+            is_overlay: false,
+            is_loaded: true,
+        };
+        assert!(!partial.is_fully_initialized());
     }
 }
 
