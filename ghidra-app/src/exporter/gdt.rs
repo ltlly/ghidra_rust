@@ -107,7 +107,7 @@ impl Exporter for GdtExporter {
 
 /// Internal serializable structure for a GDT file.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct GdtFile {
+pub struct GdtFile {
     version: u32,
     program_name: String,
     image_base: String,
@@ -116,7 +116,7 @@ struct GdtFile {
 
 /// A single data type entry in a GDT file.
 #[derive(serde::Serialize, serde::Deserialize)]
-struct GdtEntry {
+pub struct GdtEntry {
     address: String,
     name: String,
     size: usize,

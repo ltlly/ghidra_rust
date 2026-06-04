@@ -91,7 +91,7 @@ impl Exporter for GzfExporter {
 
 /// Serializable summary of a Program (since Program doesn't implement Serialize).
 #[derive(serde::Serialize, serde::Deserialize)]
-struct GzfSummary {
+pub struct GzfSummary {
     name: String,
     file_path: Option<String>,
     image_base: u64,

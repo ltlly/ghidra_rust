@@ -9,3 +9,4 @@
 //! - Built-in analyzers (function start, code boundary, references, etc.)
 
 pub mod analyzer;
+pub mod merge;

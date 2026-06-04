@@ -25,6 +25,7 @@ pub mod base;
 pub mod bsim;
 pub mod bsim_elastic;
 pub mod byte_patterns;
+pub mod datamgr;
 pub mod byteviewer;
 pub mod demangler;
 pub mod codecompare;

@@ -4,17 +4,14 @@
 //! formats: decompiled C, C headers, JSON, HTML reports, CSV, SQLite,
 //! Ghidra project format, IDA Python scripts, and binary patches.
 
-use ghidra_core::addr::{Address, AddressRange};
 use ghidra_core::listing::ListingRow;
 use ghidra_core::program::{
-    Comment, CommentKind, ListingData, MemoryBlock, MemoryPermissions, Program,
-    SimpleDataType, SymbolTable,
+    CommentKind, MemoryPermissions, Program, SimpleDataType,
 };
 use ghidra_core::symbol::{Symbol, SymbolType as SymbolKind};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -1752,6 +1749,8 @@ if __name__ == "__main__":
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::{Address, AddressRange};
+    use ghidra_core::program::{MemoryBlock, SimpleDataType};
 
     fn make_test_program() -> Program {
         let mut prog = Program::new("test.bin", Address::new(0x400000));
