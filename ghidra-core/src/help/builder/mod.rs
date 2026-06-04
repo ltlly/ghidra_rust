@@ -6,10 +6,8 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::help::location::HelpModuleCollection;
-use crate::help::model::{AnchorDefinition, GhidraTocFile};
 use crate::help::validator::link_database::LinkDatabase;
 use crate::help::validator::JavaHelpValidator;
-use crate::help::PathKey;
 
 /// Constants for file name suffixes.
 const TOC_OUTPUT_FILE_APPENDIX: &str = "_TOC.xml";

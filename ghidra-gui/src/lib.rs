@@ -35,6 +35,7 @@ pub mod listing;
 pub mod mainview;
 pub mod menus;
 pub mod options;
+pub mod plugins;
 pub mod resources;
 pub mod symboltree;
 pub mod theme;

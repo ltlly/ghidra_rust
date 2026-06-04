@@ -170,13 +170,13 @@ pub struct BinaryPatch {
 
 /// A single row in the CSV disassembly export.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct CsvRow {
-    address: String,
-    bytes: String,
-    label: String,
-    mnemonic: String,
-    operands: String,
-    comment: String,
+pub struct CsvRow {
+    pub address: String,
+    pub bytes: String,
+    pub label: String,
+    pub mnemonic: String,
+    pub operands: String,
+    pub comment: String,
 }
 
 // ---------------------------------------------------------------------------

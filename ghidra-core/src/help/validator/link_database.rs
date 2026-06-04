@@ -1,14 +1,11 @@
 // Port of help.validator.LinkDatabase
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 use crate::help::links::InvalidLink;
-use crate::help::model::{
-    AnchorDefinition, GhidraTocFile, HelpFile, TocItemDefinition, TocItemExternal,
-};
+use crate::help::model::{AnchorDefinition, GhidraTocFile, TocItemDefinition, TocItemExternal};
 use crate::help::location::HelpModuleCollection;
-use crate::help::PathKey;
 
 /// A database of all known TOC definitions, externals, and unresolved links.
 ///

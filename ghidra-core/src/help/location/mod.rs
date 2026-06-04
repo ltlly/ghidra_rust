@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 use crate::help::model::{
     AnchorDefinition, GhidraTocFile, HelpTopic, Href, Img, TocItemDefinition,
 };
-use crate::help::PathKey;
 
 // ---------------------------------------------------------------------------
 // HelpModuleLocation (trait + impl)
@@ -178,7 +177,6 @@ impl std::fmt::Display for HelpModuleLocation {
 pub struct HelpModuleCollection {
     help_locations: Vec<HelpModuleLocation>,
     input_help_index: Option<usize>,
-    path_to_help_file: Option<HashMap<PathKey, usize>>,
 }
 
 impl HelpModuleCollection {
@@ -188,7 +186,6 @@ impl HelpModuleCollection {
         let mut collection = HelpModuleCollection {
             help_locations: vec![loc],
             input_help_index: None,
-            path_to_help_file: None,
         };
         collection.initialize();
         Ok(collection)
@@ -209,7 +206,6 @@ impl HelpModuleCollection {
         let mut collection = HelpModuleCollection {
             help_locations: locations,
             input_help_index: None,
-            path_to_help_file: None,
         };
         collection.initialize();
         Ok(collection)

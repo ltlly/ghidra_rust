@@ -121,7 +121,7 @@ impl JavaHelpValidator {
         &self,
         href: &crate::help::model::Href,
         help_file_found: bool,
-        help_path: &Path,
+        _help_path: &Path,
         unresolved_links: &mut Vec<InvalidLink>,
     ) {
         if !help_file_found {

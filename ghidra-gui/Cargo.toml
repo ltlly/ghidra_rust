@@ -20,5 +20,6 @@ log = { workspace = true }
 env_logger = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
+regex = { workspace = true }
 tokio = { workspace = true }
 chrono = { workspace = true }
