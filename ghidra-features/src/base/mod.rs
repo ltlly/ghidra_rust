@@ -25,6 +25,7 @@ pub mod assembler;
 pub mod association;
 pub mod bookmark;
 pub mod checksums;
+pub mod data;
 pub mod clear;
 pub mod clipboard;
 pub mod colorizer;

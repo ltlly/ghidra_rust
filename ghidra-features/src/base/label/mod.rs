@@ -22,6 +22,7 @@
 
 pub mod actions;
 pub mod history;
+pub mod operand_label;
 pub mod plugin;
 
 pub use actions::{

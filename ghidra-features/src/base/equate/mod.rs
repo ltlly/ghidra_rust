@@ -15,6 +15,7 @@
 
 pub mod actions;
 pub mod commands;
+pub mod convert_cmd;
 pub mod format;
 pub mod manager;
 pub mod plugin;
@@ -28,6 +29,9 @@ pub use actions::{
 pub use commands::{
     ConvertCommand, CreateEquateCmd, CreateEnumEquateCommand, RemoveEquateCmd, RenameEquateCmd,
     RenameEquatesCmd,
+};
+pub use convert_cmd::{
+    all_convert_actions, convert_scalar, ConvertedValue, FormatConvertAction, ScalarFormat,
 };
 pub use format::{format_scalar, FormatChoice};
 pub use manager::{EquateManager, EquateTable};

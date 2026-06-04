@@ -21,8 +21,10 @@
 //! Ghidra's Command pattern where mutations are encapsulated in command
 //! objects for undo/redo support.
 
+pub mod actions;
 pub mod commands;
 pub mod model;
+pub mod provider;
 pub mod navigator;
 pub mod table;
 pub mod types;

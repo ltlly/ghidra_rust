@@ -8,6 +8,11 @@
 //!
 //! The GUI-specific portions (Swing dialogs, key listeners) are omitted.
 //! Only the domain model, state management, and action logic are ported.
+//!
+//! Sub-modules:
+//! - [`history_panel`] -- comment history dialog model and popup path resolution
+
+pub mod history_panel;
 
 use ghidra_core::addr::Address;
 use ghidra_core::program::listing::CommentType;

@@ -33,6 +33,7 @@
 //! assert_eq!(handler.all_archives().len(), 0);
 //! ```
 
+pub mod actions;
 pub mod archive;
 pub mod sync;
 pub mod handler;

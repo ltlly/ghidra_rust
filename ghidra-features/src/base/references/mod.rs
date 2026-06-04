@@ -26,6 +26,7 @@
 //! - Exception types: [`ParameterConflictException`], [`ReservedNameException`]
 
 pub mod commands;
+pub mod default_ref_action;
 pub mod edit_model;
 pub mod edit_panels;
 pub mod exceptions;

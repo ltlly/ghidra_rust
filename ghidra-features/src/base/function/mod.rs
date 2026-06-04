@@ -19,9 +19,11 @@ pub mod actions;
 pub mod variable;
 pub mod thunk;
 pub mod stack;
+pub mod editor;
 
 pub use plugin::*;
 pub use actions::*;
 pub use variable::*;
 pub use thunk::*;
 pub use stack::*;
+pub use editor::*;

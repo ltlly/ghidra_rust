@@ -6,6 +6,11 @@
 //! Provides functions for retrieving direct and offcut cross-references
 //! to code units and variables, plus a [`CrossReferenceManager`] that
 //! wraps [`ReferenceManager`] with higher-level xref queries.
+//!
+//! Sub-modules:
+//! - [`xref_table`] -- tabular display model for xrefs and reference change tracking
+
+pub mod xref_table;
 
 use ghidra_core::addr::Address;
 use ghidra_core::symbol::{RefType, Reference, ReferenceManager, SourceType, MNEMONIC};
