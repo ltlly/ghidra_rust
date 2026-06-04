@@ -3,8 +3,13 @@
 //! Ports `resources.ResourceManager`, `resources.IconProvider`,
 //! and `resources.MultiIcon` / `resources.MultiIconBuilder`.
 
+pub mod icons;
 pub mod multi_icon;
 
+pub use icons::{
+    ColorIcon, ColorIcon3D, DerivedImageIcon, DisabledImageIcon, EmptyIcon, OvalColorIcon,
+    ReflectedIcon, RotateIcon, RotationAngle, ScaledImageIcon, TranslateIcon,
+};
 pub use multi_icon::{BuiltinIcon, IconId, IconOverlay, MultiIcon, MultiIconBuilder, Quadrant};
 
 use std::collections::HashMap;

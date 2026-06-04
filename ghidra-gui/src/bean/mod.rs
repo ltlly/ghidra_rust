@@ -3,6 +3,88 @@
 //! Ports Ghidra's `ghidra.util.bean` types for option editor panels and
 //! chooser widgets.
 
+/// Exception thrown when an option editor vetoes a proposed change.
+///
+/// Port of Ghidra's `ghidra.util.bean.opteditor.OptionsVetoException`.
+#[derive(Debug, Clone)]
+pub struct OptionsVetoException {
+    /// The reason the change was vetoed.
+    pub message: String,
+}
+
+impl OptionsVetoException {
+    /// Create a new OptionsVetoException with the given message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for OptionsVetoException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for OptionsVetoException {}
+
+/// A glass pane overlay for the application window.
+///
+/// Port of Ghidra's `ghidra.util.bean.GGlassPane`. Used to paint
+/// temporary overlays (drag-and-drop feedback, selection rectangles,
+/// custom cursors) on top of the main content.
+#[derive(Debug, Clone)]
+pub struct GGlassPane {
+    /// Whether the glass pane is currently visible.
+    visible: bool,
+    /// Opacity of the glass pane overlay (0.0 = transparent, 1.0 = opaque).
+    pub opacity: f64,
+    /// Whether mouse events should be captured by the glass pane.
+    pub capture_mouse: bool,
+    /// Description of what the glass pane is currently painting.
+    pub paint_description: Option<String>,
+}
+
+impl GGlassPane {
+    /// Create a new glass pane.
+    pub fn new() -> Self {
+        Self {
+            visible: false,
+            opacity: 0.3,
+            capture_mouse: false,
+            paint_description: None,
+        }
+    }
+
+    /// Show the glass pane.
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+
+    /// Hide the glass pane.
+    pub fn hide(&mut self) {
+        self.visible = false;
+        self.paint_description = None;
+    }
+
+    /// Whether the glass pane is currently visible.
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Set what the glass pane is painting (for debugging/UI purposes).
+    pub fn set_paint_description(&mut self, desc: impl Into<String>) {
+        self.paint_description = Some(desc.into());
+    }
+}
+
+impl Default for GGlassPane {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Select mode for choosers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SelectMode {
@@ -87,6 +169,33 @@ impl AbstractChooser {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_options_veto_exception() {
+        let exc = OptionsVetoException::new("Value out of range");
+        assert_eq!(exc.to_string(), "Value out of range");
+        assert_eq!(exc.message, "Value out of range");
+    }
+
+    #[test]
+    fn test_gglass_pane_default() {
+        let pane = GGlassPane::new();
+        assert!(!pane.is_visible());
+        assert!((pane.opacity - 0.3).abs() < 1e-6);
+        assert!(!pane.capture_mouse);
+    }
+
+    #[test]
+    fn test_gglass_pane_show_hide() {
+        let mut pane = GGlassPane::new();
+        pane.show();
+        assert!(pane.is_visible());
+        pane.set_paint_description("drag");
+        assert_eq!(pane.paint_description.as_deref(), Some("drag"));
+        pane.hide();
+        assert!(!pane.is_visible());
+        assert!(pane.paint_description.is_none());
+    }
 
     #[test]
     fn test_abstract_chooser_basic() {

@@ -66,6 +66,7 @@ pub mod analysis_cmd;
 pub mod clang_line;
 pub mod clang_node;
 pub mod component;
+pub mod concurrent_q;
 pub mod cpp_exporter;
 pub mod highlight_types;
 pub mod decompile_callback;
@@ -195,6 +196,9 @@ pub use highlight_types::NullDecompileResultsListener as HtNullDecompileResultsL
 pub use highlight_types::ClangFieldElement as HtFieldElement;
 pub use highlight_types::PanelLine as HtPanelLine;
 pub use highlight_types::PanelToken as HtPanelToken;
+
+// Concurrent queue types (from ghidra.app.util.DecompilerConcurrentQ)
+pub use concurrent_q::{DecompilerConcurrentQ, QCallback, QResult};
 
 // ============================================================================
 // Tests

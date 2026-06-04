@@ -4,5 +4,6 @@
 
 pub mod filechooser;
 pub mod html;
+pub mod image;
 pub mod layout;
 pub mod task;

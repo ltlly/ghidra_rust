@@ -43,6 +43,7 @@ pub mod description;
 pub mod elastic_db;
 pub mod facade;
 pub mod file;
+pub mod function_database;
 pub mod gui;
 pub mod ingest;
 pub mod postgresql;
@@ -135,6 +136,15 @@ pub use tables::vector_store::{VectorStore, VectorStoreEntry, VectorStoreManager
 pub use tables::weight_table::{WeightEntry, WeightTable};
 pub use tables::callgraph_table::{CallgraphEdge, CallgraphTable};
 pub use tables::description_table::{DescriptionTable, FunctionRecord};
+
+// Re-export function database types (trait prefixed to avoid conflict with query::FunctionDatabase).
+pub use function_database::{
+    BSimConnectionType, BSimDatabaseError, BSimErrorCategory,
+    BSimServerInfo as FunctionDBServerInfo, DatabaseNonFatalException,
+    FunctionDatabase as FunctionDatabaseTrait, FunctionDatabaseStatus,
+    H2FileFunctionDatabase, PostgresFunctionDatabase,
+    SimilarFunctionQueryService as DbSimilarFunctionQueryService,
+};
 
 use anyhow::{anyhow, Context, Result};
 use ghidra_core::addr::{Address, AddressRange};

@@ -12,6 +12,7 @@ pub mod popup;
 pub mod renderer;
 pub mod satellite;
 pub mod shape;
+pub mod utils;
 pub mod vertex;
 
 use std::collections::HashMap;

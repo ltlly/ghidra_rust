@@ -124,6 +124,8 @@ pub mod terminal;
 pub mod totd;
 pub mod validator;
 pub mod vscode;
+pub mod functionwindow;
+pub mod processors;
 
 pub use base::analyzer::*;
 pub use dwarf::*;

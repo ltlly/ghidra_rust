@@ -10,10 +10,15 @@
 //! - `tracemgr_impl`: Trace manager service implementation.
 //! - `control_impl`: Debugger control service implementation.
 //! - `modules_impl`: Modules/mapping service implementation.
+//! - `emulation_impl`: Emulation service implementation with p-code data access.
+//! - `progress_impl`: Progress service implementation.
+//! - `target_impl`: Target service implementation.
+//! - `console_impl`: Console service implementation.
 
 pub mod breakpoint_impl;
 pub mod console_impl;
 pub mod control_impl;
+pub mod emulation_impl;
 pub mod modules_impl;
 pub mod platform_impl;
 pub mod progress_impl;

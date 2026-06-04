@@ -10,11 +10,15 @@ pub mod action_name;
 pub mod address_translator;
 pub mod breakpoint;
 pub mod control_mode;
+pub mod emulation;
 pub mod flat_api;
+pub mod listing;
 pub mod modules;
 pub mod platform;
+pub mod progress;
 pub mod target;
 pub mod tracemgr;
+pub mod tracermi;
 pub mod watch;
 
 pub use action::{ActionSource, AutoMapSpec, AutoMapSpecRegistry, GoToInput, LocationTrackingSpec, TrackingEvent};
