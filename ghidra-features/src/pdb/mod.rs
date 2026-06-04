@@ -12,6 +12,15 @@
 //!    unions, enums, pointers, procedures, member functions, and field lists.
 //! 4. **Symbol Records** — CodeView S_* records for data, procedures,
 //!    publics, labels, locals, thunks, inline sites, etc.
+//! 5. **Debug Information** — C13 line numbers, file checksums, section
+//!    headers, image function entries, debug stream types.
+//! 6. **Register Names** — CV register name mapping for all architectures.
+//! 7. **Global/Public Symbol Tables** — GSI/PSI hash table parsing.
+
+pub mod errors;
+pub mod debug_info;
+pub mod registers;
+pub mod globals;
 
 use std::collections::HashMap;
 use std::fmt;
@@ -771,6 +780,8 @@ pub mod leaf_id {
     pub const LF_NESTTYPEEX: u16 = 0x040E;
     pub const LF_MEMBERMODIFY: u16 = 0x040F;
     pub const LF_MANAGED: u16    = 0x0410;
+    pub const LF_TYPESERVER2: u16 = 0x0017;
+    // Additional numeric types
     pub const LF_NUMERIC: u16    = 0x8000;
     pub const LF_CHAR: u16       = 0x8000;
     pub const LF_SHORT: u16      = 0x8001;
@@ -1020,6 +1031,17 @@ pub enum TypeRecord {
     BuildInfo { count: u16, arg_indices: Vec<u32> },
     VtShape { count: u16, descriptors: Vec<u8> },
     TypeServer { signature: u32, age: u32, name: String },
+    // New type records ported from Java
+    Cobol0Type { type_index: u32, name: String },
+    VftPath { count: u16, base_classes: Vec<u32> },
+    PrecompiledType { signature: u32, count: u16, names: Vec<String> },
+    EndPrecompiled { signature: u32 },
+    OemType { oem_id: u16, recog_id: u16, count: u16, raw_data: Vec<u8> },
+    DimArrayType { element_type_index: u32, rank: u32, name: String },
+    BArrayType { element_type_index: u32, index_type_index: u32 },
+    LabelType { mode: u8 },
+    DefaultArgument { type_index: u32, expression: Vec<u8> },
+    DerivedClassList { count: u32, derived_type_indices: Vec<u32> },
     Simple { leaf_id: u16 },
     Unknown { leaf_id: u16, raw_data: Vec<u8> },
 }
@@ -1050,8 +1072,19 @@ pub fn parse_type_record(data: &[u8]) -> Option<TypeRecord> {
         leaf_id::LF_METHODLIST => parse_methodlist_type(payload),
         leaf_id::LF_BITFIELD => parse_bitfield_type(payload),
         leaf_id::LF_CHAR|leaf_id::LF_SHORT|leaf_id::LF_USHORT|leaf_id::LF_LONG|leaf_id::LF_ULONG|leaf_id::LF_QUADWORD|leaf_id::LF_UQUADWORD|leaf_id::LF_REAL32|leaf_id::LF_REAL64|leaf_id::LF_REAL80|leaf_id::LF_REAL128|leaf_id::LF_COMPLEX32|leaf_id::LF_COMPLEX64|leaf_id::LF_COMPLEX80|leaf_id::LF_COMPLEX128 => TypeRecord::Simple{leaf_id:lid},
-        leaf_id::LF_TYPESERVER => parse_typeserver_type(payload),
-        leaf_id::LF_SKIP => TypeRecord::Unknown{leaf_id:lid,raw_data:data.to_vec()},
+        leaf_id::LF_TYPESERVER|leaf_id::LF_TYPESERVER2 => parse_typeserver_type(payload),
+        leaf_id::LF_COBOL0 => parse_cobol0_type(payload),
+        leaf_id::LF_VFTPATH => parse_vftpath_type(payload),
+        leaf_id::LF_PRECOMP => parse_precomp_type(payload),
+        leaf_id::LF_ENDPRECOMP => parse_endprecomp_type(payload),
+        leaf_id::LF_OEM => parse_oem_type(payload),
+        leaf_id::LF_DIMARRAY => parse_dimarray_type(payload),
+        leaf_id::LF_BARRAY => parse_barray_type(payload),
+        leaf_id::LF_LABEL => parse_label_type(payload),
+        leaf_id::LF_DEFARG => parse_defarg_type(payload),
+        leaf_id::LF_DERIVED => parse_derived_type(payload),
+        leaf_id::LF_SKIP => parse_skip_type(payload),
+        leaf_id::LF_NULL => TypeRecord::Simple{leaf_id: lid},
         _ => TypeRecord::Unknown{leaf_id:lid,raw_data:data.to_vec()},
     })
 }
@@ -1194,6 +1227,87 @@ fn parse_methodlist_type(payload: &[u8]) -> TypeRecord {
 fn parse_typeserver_type(payload: &[u8]) -> TypeRecord {
     if payload.len()<8 { return TypeRecord::Unknown{leaf_id:leaf_id::LF_TYPESERVER,raw_data:payload.to_vec()}; }
     TypeRecord::TypeServer{signature:le_u32_at(payload,0),age:le_u32_at(payload,4),name:parse_null_terminated_string(&payload[8..])}
+}
+
+fn parse_cobol0_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 4 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_COBOL0, raw_data: payload.to_vec()}; }
+    let ti = le_u32_at(payload, 0);
+    let name = parse_null_terminated_string(&payload[4..]);
+    TypeRecord::Cobol0Type{type_index: ti, name}
+}
+
+fn parse_vftpath_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 2 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_VFTPATH, raw_data: payload.to_vec()}; }
+    let count = u16::from_le_bytes([payload[0], payload[1]]);
+    let mut classes = Vec::with_capacity(count as usize);
+    for i in 0..count as usize {
+        let off = 2 + i * 4;
+        if off + 4 <= payload.len() { classes.push(le_u32_at(payload, off)); }
+    }
+    TypeRecord::VftPath{count, base_classes: classes}
+}
+
+fn parse_precomp_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 12 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_PRECOMP, raw_data: payload.to_vec()}; }
+    let count = u16::from_le_bytes([payload[0], payload[1]]);
+    let signature = le_u32_at(payload, 4);
+    let name = parse_null_terminated_string(&payload[8..]);
+    TypeRecord::PrecompiledType{signature, count, names: vec![name]}
+}
+
+fn parse_endprecomp_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 4 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_ENDPRECOMP, raw_data: payload.to_vec()}; }
+    TypeRecord::EndPrecompiled{signature: le_u32_at(payload, 0)}
+}
+
+fn parse_oem_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 8 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_OEM, raw_data: payload.to_vec()}; }
+    let oem_id = u16::from_le_bytes([payload[0], payload[1]]);
+    let recog_id = u16::from_le_bytes([payload[2], payload[3]]);
+    let count = u16::from_le_bytes([payload[4], payload[5]]);
+    TypeRecord::OemType{oem_id, recog_id, count, raw_data: payload[6..].to_vec()}
+}
+
+fn parse_dimarray_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 8 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_DIMARRAY, raw_data: payload.to_vec()}; }
+    let eti = le_u32_at(payload, 0);
+    let rank = le_u32_at(payload, 4);
+    let name = parse_null_terminated_string(&payload[8..]);
+    TypeRecord::DimArrayType{element_type_index: eti, rank, name}
+}
+
+fn parse_barray_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 8 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_BARRAY, raw_data: payload.to_vec()}; }
+    TypeRecord::BArrayType{element_type_index: le_u32_at(payload, 0), index_type_index: le_u32_at(payload, 4)}
+}
+
+fn parse_label_type(payload: &[u8]) -> TypeRecord {
+    if payload.is_empty() { return TypeRecord::Unknown{leaf_id: leaf_id::LF_LABEL, raw_data: payload.to_vec()}; }
+    TypeRecord::LabelType{mode: payload[0]}
+}
+
+fn parse_defarg_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 4 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_DEFARG, raw_data: payload.to_vec()}; }
+    let ti = le_u32_at(payload, 0);
+    TypeRecord::DefaultArgument{type_index: ti, expression: payload[4..].to_vec()}
+}
+
+fn parse_derived_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 4 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_DERIVED, raw_data: payload.to_vec()}; }
+    let count = le_u32_at(payload, 0);
+    let mut indices = Vec::with_capacity(count as usize);
+    for i in 0..count as usize {
+        let off = 4 + i * 4;
+        if off + 4 <= payload.len() { indices.push(le_u32_at(payload, off)); }
+    }
+    TypeRecord::DerivedClassList{count, derived_type_indices: indices}
+}
+
+fn parse_skip_type(payload: &[u8]) -> TypeRecord {
+    if payload.len() < 2 { return TypeRecord::Unknown{leaf_id: leaf_id::LF_SKIP, raw_data: payload.to_vec()}; }
+    // LF_SKIP contains a type index to skip to
+    let _skip_to = le_u32_at(payload, 0);
+    TypeRecord::Unknown{leaf_id: leaf_id::LF_SKIP, raw_data: payload.to_vec()}
 }
 
 // =============================================================================
@@ -1458,6 +1572,27 @@ pub enum SymbolRecord {
     BuildInfo { item_id: u32 },
     SeparatedCode { parent_offset: u32, end_offset: u32, length: u32, separated_code_segment: u16, separated_code_offset: u32, parent_segment: u16 },
     Trampoline { trampoline_type: u16, size: u16, thunk_offset: u32, target_offset: u32, thunk_section: u16, target_section: u16 },
+    // New symbol variants ported from Java
+    Compile2(CompileInfo),
+    Return { flags: u32, return_value_register: u16 },
+    EntryThis { flags: u8, this_register: u16 },
+    VfTable { type_index: u32, offset: u32, segment: u16, name: String },
+    Export { ordinal: u16, flags: u16, name: String },
+    FrameCookie { offset: u32, register: u16, cookie_type: u8 },
+    ManagedProcedure(ProcSymbol),
+    ManagedData(DataSymbol),
+    ManyRegister { type_index: u16, count: u8, registers: Vec<u16>, name: String },
+    EnvironmentBlock { fields: Vec<(String, String)> },
+    LocalV2 { type_index: u32, flags: u16, name: String },
+    DefRangeRegister { register: u16, offset_parent: i32, range_offset: u16, range_length: u16 },
+    DefRangeFrameRel { frame_offset: i32, range_offset: u16, range_length: u16 },
+    DefRangeSubfieldRegister { register: u16, offset_parent: i32, offset_in_parent: u32, range_offset: u16, range_length: u16 },
+    DefRangeRegisterRel { register: u16, flags: u16, offset: i32, range_offset: u16, range_length: u16 },
+    LocalSlot { type_index: u32, slot: u16, name: String },
+    ParamSlot { type_index: u32, slot: u16, name: String },
+    LProc32Id(ProcSymbol),
+    GProc32Id(ProcSymbol),
+    ProcIdEnd,
     Unknown { kind: u16 },
 }
 
@@ -1481,21 +1616,23 @@ fn parse_symbol_payload(kind: u16, payload: &[u8]) -> SymbolRecord {
         symbol_kind::S_GDATA32|symbol_kind::S_LDATA32|symbol_kind::S_GDATA32_ST|symbol_kind::S_LDATA32_ST => parse_data_symbol(kind, payload),
         symbol_kind::S_GPROC32|symbol_kind::S_LPROC32|symbol_kind::S_GPROC32_ST|symbol_kind::S_LPROC32_ST => parse_proc_symbol(kind, payload),
         symbol_kind::S_PUB32|symbol_kind::S_PUB32_ST => parse_public_symbol(payload),
-        symbol_kind::S_LABEL32 => parse_label_symbol(payload),
-        symbol_kind::S_BLOCK32 => parse_block32(payload),
-        symbol_kind::S_WITH32 => parse_with32(payload),
-        symbol_kind::S_END => SymbolRecord::End,
+        symbol_kind::S_LABEL32|symbol_kind::S_LABEL16 => parse_label_symbol(payload),
+        symbol_kind::S_BLOCK32|symbol_kind::S_BLOCK16 => parse_block32(payload),
+        symbol_kind::S_WITH32|symbol_kind::S_WITH16 => parse_with32(payload),
+        symbol_kind::S_END|symbol_kind::S_ENDARG|symbol_kind::S_PROC_ID_END => SymbolRecord::End,
         symbol_kind::S_REGISTER|symbol_kind::S_REGISTER_ST => parse_register_symbol(payload),
-        symbol_kind::S_REGREL32|symbol_kind::S_REGREL32_ST => parse_regrel_symbol(payload),
-        symbol_kind::S_BPREL32|symbol_kind::S_BPREL32_ST => parse_bprel_symbol(payload),
-        symbol_kind::S_CONSTANT|symbol_kind::S_CONSTANT_ST => parse_constant_symbol(payload),
+        symbol_kind::S_REGREL32|symbol_kind::S_REGREL32_ST|symbol_kind::S_REGREL16 => parse_regrel_symbol(payload),
+        symbol_kind::S_BPREL32|symbol_kind::S_BPREL32_ST|symbol_kind::S_BPREL16 => parse_bprel_symbol(payload),
+        symbol_kind::S_CONSTANT|symbol_kind::S_CONSTANT_ST|symbol_kind::S_MANCONSTANT => parse_constant_symbol(payload),
         symbol_kind::S_UDT|symbol_kind::S_UDT_ST => parse_udt_symbol(payload),
         symbol_kind::S_LTHREAD32|symbol_kind::S_GTHREAD32|symbol_kind::S_LTHREAD32_ST|symbol_kind::S_GTHREAD32_ST => parse_thread_symbol(payload, kind),
         symbol_kind::S_COMPILE3 => parse_compile3(payload),
+        symbol_kind::S_COMPILE2 => parse_compile3(payload),
+        symbol_kind::S_COMPILE => parse_compile_v1(payload),
         symbol_kind::S_OBJNAME => parse_objname(payload),
         symbol_kind::S_FRAMEPROC => parse_frameproc(payload),
-        symbol_kind::S_THUNK32 => parse_thunk(payload),
-        symbol_kind::S_PROCREF => parse_procref(payload),
+        symbol_kind::S_THUNK32|symbol_kind::S_THUNK16 => parse_thunk(payload),
+        symbol_kind::S_PROCREF|symbol_kind::S_LPROCREF => parse_procref(payload),
         symbol_kind::S_DATAREF => parse_dataref(payload),
         symbol_kind::S_ANNOTATION => parse_annotation(payload),
         symbol_kind::S_TRAMPOLINE => parse_trampoline(payload),
@@ -1506,6 +1643,25 @@ fn parse_symbol_payload(kind: u16, payload: &[u8]) -> SymbolRecord {
         symbol_kind::S_INLINESITE => parse_inlinesite(payload),
         symbol_kind::S_INLINESITE_END => SymbolRecord::InlineSiteEnd,
         symbol_kind::S_CALLSITEINFO => parse_callsite(payload),
+        symbol_kind::S_RETURN => parse_return_symbol(payload),
+        symbol_kind::S_ENTRYTHIS => parse_entry_this(payload),
+        symbol_kind::S_VFTABLE32|symbol_kind::S_VFTABLE16|symbol_kind::S_VFTABLE32_ST => parse_vftable_symbol(payload),
+        symbol_kind::S_EXPORT => parse_export_symbol(payload),
+        symbol_kind::S_FRAMECOOKIE => parse_frame_cookie(payload),
+        symbol_kind::S_ENVBLOCK => parse_envblock(payload),
+        symbol_kind::S_LOCAL_V2|symbol_kind::S_LOCAL_2005 => parse_local_v2(payload),
+        symbol_kind::S_DEFRANGE_REGISTER => parse_defrange_register(payload),
+        symbol_kind::S_DEFRANGE_FRAMEPOINTER_REL => parse_defrange_framepointer_rel(payload),
+        symbol_kind::S_DEFRANGE_SUBFIELD_REGISTER => parse_defrange_subfield_register(payload),
+        symbol_kind::S_DEFRANGE_FRAMEPOINTER_REL_FULL_SCOPE => parse_defrange_framepointer_rel(payload),
+        symbol_kind::S_DEFRANGE_REGISTER_REL => parse_defrange_register_rel(payload),
+        symbol_kind::S_GMANDATA => { let sym = parse_data_symbol(kind, payload); if let SymbolRecord::GlobalData(d) = sym { SymbolRecord::ManagedData(d) } else { sym } }
+        symbol_kind::S_LMANDATA => { let sym = parse_data_symbol(kind, payload); if let SymbolRecord::LocalVariable(d) = sym { SymbolRecord::ManagedData(d) } else { sym } }
+        symbol_kind::S_GMANPROC|symbol_kind::S_LMANPROC => { let sym = parse_proc_symbol(kind, payload); SymbolRecord::ManagedProcedure(match sym { SymbolRecord::GlobalProcedure(p)|SymbolRecord::LocalProcedure(p)=>p, _=>ProcSymbol{type_index:0,debug_start:0,debug_end:0,offset:0,segment:0,flags:0,name:String::new()} }) }
+        symbol_kind::S_LOCALSLOT => parse_slot_symbol(payload, true),
+        symbol_kind::S_PARAMSLOT => parse_slot_symbol(payload, false),
+        symbol_kind::S_LPROC32_ID|symbol_kind::S_GPROC32_ID => parse_proc_id_symbol(kind, payload),
+        symbol_kind::S_MANYREG2|symbol_kind::S_MANYREG => parse_many_register(payload),
         _ => SymbolRecord::Unknown{kind},
     }
 }
@@ -1660,6 +1816,144 @@ fn parse_inlinesite(payload: &[u8]) -> SymbolRecord {
 fn parse_callsite(payload: &[u8]) -> SymbolRecord {
     if payload.len()<12 { return SymbolRecord::Unknown{kind:symbol_kind::S_CALLSITEINFO}; }
     SymbolRecord::CallSiteInfo{offset:le_u32_at(payload,0),section:u16::from_le_bytes([payload[4],payload[5]]),type_index:le_u32_at(payload,8)}
+}
+
+fn parse_compile_v1(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 6 { return SymbolRecord::Unknown{kind: symbol_kind::S_COMPILE}; }
+    let flags = le_u32_at(payload, 0);
+    let machine = u16::from_le_bytes([payload[4], payload[5]]);
+    let version_string = if payload.len() > 6 { parse_null_terminated_string(&payload[6..]) } else { String::new() };
+    SymbolRecord::CompileInfo(CompileInfo{flags, machine, frontend_major: 0, frontend_minor: 0, frontend_build: 0, backend_major: 0, backend_minor: 0, backend_build: 0, version_string})
+}
+
+fn parse_return_symbol(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 4 { return SymbolRecord::Unknown{kind: symbol_kind::S_RETURN}; }
+    let flags = le_u32_at(payload, 0);
+    let reg = if payload.len() >= 6 { u16::from_le_bytes([payload[4], payload[5]]) } else { 0 };
+    SymbolRecord::Return{flags, return_value_register: reg}
+}
+
+fn parse_entry_this(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 3 { return SymbolRecord::Unknown{kind: symbol_kind::S_ENTRYTHIS}; }
+    let flags = payload[0];
+    let reg = u16::from_le_bytes([payload[1], payload[2]]);
+    SymbolRecord::EntryThis{flags, this_register: reg}
+}
+
+fn parse_vftable_symbol(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 4 { return SymbolRecord::Unknown{kind: symbol_kind::S_VFTABLE32}; }
+    let ti = le_u32_at(payload, 0);
+    let (off, seg) = if payload.len() >= 10 {
+        (le_u32_at(payload, 4), u16::from_le_bytes([payload[8], payload[9]]))
+    } else { (0, 0) };
+    let name_start = if payload.len() >= 10 { 10 } else { 4 };
+    let name = if name_start < payload.len() { parse_null_terminated_string(&payload[name_start..]) } else { String::new() };
+    SymbolRecord::VfTable{type_index: ti, offset: off, segment: seg, name}
+}
+
+fn parse_export_symbol(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 6 { return SymbolRecord::Unknown{kind: symbol_kind::S_EXPORT}; }
+    let ordinal = u16::from_le_bytes([payload[0], payload[1]]);
+    let flags = u16::from_le_bytes([payload[2], payload[3]]);
+    let name = parse_null_terminated_string(&payload[4..]);
+    SymbolRecord::Export{ordinal, flags, name}
+}
+
+fn parse_frame_cookie(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 6 { return SymbolRecord::Unknown{kind: symbol_kind::S_FRAMECOOKIE}; }
+    let offset = le_u32_at(payload, 0);
+    let register = u16::from_le_bytes([payload[4], payload[5]]);
+    let cookie_type = if payload.len() > 6 { payload[6] } else { 0 };
+    SymbolRecord::FrameCookie{offset, register, cookie_type}
+}
+
+fn parse_envblock(payload: &[u8]) -> SymbolRecord {
+    let mut fields = Vec::new();
+    let mut pos = 1usize; // skip flags byte
+    while pos < payload.len() {
+        let (key, k1) = read_null_terminated_string(payload, pos);
+        if key.is_empty() { break; }
+        let (val, k2) = read_null_terminated_string(payload, k1);
+        fields.push((key, val));
+        pos = k2;
+    }
+    SymbolRecord::EnvironmentBlock{fields}
+}
+
+fn parse_local_v2(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 6 { return SymbolRecord::Unknown{kind: symbol_kind::S_LOCAL_V2}; }
+    let ti = le_u32_at(payload, 0);
+    let flags = u16::from_le_bytes([payload[4], payload[5]]);
+    let name = parse_null_terminated_string(&payload[6..]);
+    SymbolRecord::LocalV2{type_index: ti, flags, name}
+}
+
+fn parse_defrange_register(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 10 { return SymbolRecord::Unknown{kind: symbol_kind::S_DEFRANGE_REGISTER}; }
+    let register = u16::from_le_bytes([payload[0], payload[1]]);
+    let offset_parent = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let range_offset = u16::from_le_bytes([payload[8], payload[9]]);
+    let range_length = if payload.len() >= 12 { u16::from_le_bytes([payload[10], payload[11]]) } else { 0 };
+    SymbolRecord::DefRangeRegister{register, offset_parent, range_offset, range_length}
+}
+
+fn parse_defrange_framepointer_rel(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 8 { return SymbolRecord::Unknown{kind: symbol_kind::S_DEFRANGE_FRAMEPOINTER_REL}; }
+    let frame_offset = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+    let range_offset = u16::from_le_bytes([payload[4], payload[5]]);
+    let range_length = u16::from_le_bytes([payload[6], payload[7]]);
+    SymbolRecord::DefRangeFrameRel{frame_offset, range_offset, range_length}
+}
+
+fn parse_defrange_subfield_register(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 14 { return SymbolRecord::Unknown{kind: symbol_kind::S_DEFRANGE_SUBFIELD_REGISTER}; }
+    let register = u16::from_le_bytes([payload[0], payload[1]]);
+    let offset_parent = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let offset_in_parent = le_u32_at(payload, 8);
+    let range_offset = u16::from_le_bytes([payload[12], payload[13]]);
+    let range_length = if payload.len() >= 16 { u16::from_le_bytes([payload[14], payload[15]]) } else { 0 };
+    SymbolRecord::DefRangeSubfieldRegister{register, offset_parent, offset_in_parent, range_offset, range_length}
+}
+
+fn parse_defrange_register_rel(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 12 { return SymbolRecord::Unknown{kind: symbol_kind::S_DEFRANGE_REGISTER_REL}; }
+    let register = u16::from_le_bytes([payload[0], payload[1]]);
+    let flags = u16::from_le_bytes([payload[2], payload[3]]);
+    let offset = i32::from_le_bytes([payload[4], payload[5], payload[6], payload[7]]);
+    let range_offset = u16::from_le_bytes([payload[8], payload[9]]);
+    let range_length = if payload.len() >= 12 { u16::from_le_bytes([payload[10], payload[11]]) } else { 0 };
+    SymbolRecord::DefRangeRegisterRel{register, flags, offset, range_offset, range_length}
+}
+
+fn parse_slot_symbol(payload: &[u8], is_local: bool) -> SymbolRecord {
+    if payload.len() < 6 { return SymbolRecord::Unknown{kind: if is_local { symbol_kind::S_LOCALSLOT } else { symbol_kind::S_PARAMSLOT }}; }
+    let ti = le_u32_at(payload, 0);
+    let slot = u16::from_le_bytes([payload[4], payload[5]]);
+    let name = if payload.len() > 6 { parse_null_terminated_string(&payload[6..]) } else { String::new() };
+    if is_local { SymbolRecord::LocalSlot{type_index: ti, slot, name} }
+    else { SymbolRecord::ParamSlot{type_index: ti, slot, name} }
+}
+
+fn parse_proc_id_symbol(kind: u16, payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 17 { return SymbolRecord::Unknown{kind}; }
+    let sym = ProcSymbol{type_index:le_u32_at(payload,0),debug_start:le_u32_at(payload,4),debug_end:le_u32_at(payload,8),offset:le_u32_at(payload,12),segment:u16::from_le_bytes([payload[16],payload[17]]),flags:if payload.len()>18{payload[18]}else{0},name:parse_null_terminated_string(&payload[19..])};
+    match kind { symbol_kind::S_GPROC32_ID => SymbolRecord::GProc32Id(sym), _ => SymbolRecord::LProc32Id(sym) }
+}
+
+fn parse_many_register(payload: &[u8]) -> SymbolRecord {
+    if payload.len() < 5 { return SymbolRecord::Unknown{kind: symbol_kind::S_MANYREG2}; }
+    let ti = u16::from_le_bytes([payload[0], payload[1]]);
+    let count = payload[2];
+    let mut regs = Vec::with_capacity(count as usize);
+    for i in 0..count as usize {
+        let off = 3 + i * 2;
+        if off + 2 <= payload.len() {
+            regs.push(u16::from_le_bytes([payload[off], payload[off+1]]));
+        }
+    }
+    let name_off = 3 + count as usize * 2;
+    let name = if name_off < payload.len() { parse_null_terminated_string(&payload[name_off..]) } else { String::new() };
+    SymbolRecord::ManyRegister{type_index: ti, count, registers: regs, name}
 }
 
 
@@ -2201,6 +2495,670 @@ mod tests {
             assert_eq!(ps.segment, 1);
         } else {
             panic!("Expected GlobalProcedure symbol record");
+        }
+    }
+
+    // =====================================================================
+    // Tests for new type records
+    // =====================================================================
+
+    #[test]
+    fn test_procedure_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1022u32.to_le_bytes()); // return_type
+        payload.push(0x00); // calling convention = NearC
+        payload.push(0); // func_attributes
+        payload.extend_from_slice(&0u16.to_le_bytes()); // num_params
+        payload.extend_from_slice(&0x1033u32.to_le_bytes()); // arg_list
+        payload.extend_from_slice(&0u16.to_le_bytes()); // padding to reach 14 bytes
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_PROCEDURE.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::Procedure(p)) = result {
+            assert_eq!(p.return_type_index, 0x1022);
+            assert_eq!(p.arg_list_type_index, 0x1033);
+        } else {
+            panic!("Expected Procedure");
+        }
+    }
+
+    #[test]
+    fn test_array_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // element type
+        payload.extend_from_slice(&0x1001u32.to_le_bytes()); // index type
+        payload.extend_from_slice(&10u16.to_le_bytes()); // size = 10
+        payload.extend_from_slice(b"arr\0"); // name
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_ARRAY.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::Array(a)) = result {
+            assert_eq!(a.element_type_index, 0x1000);
+            assert_eq!(a.size, 10);
+            assert_eq!(a.name, "arr");
+        } else {
+            panic!("Expected Array");
+        }
+    }
+
+    #[test]
+    fn test_enum_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&5u16.to_le_bytes()); // count
+        payload.extend_from_slice(&0u16.to_le_bytes()); // property
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // underlying type
+        payload.extend_from_slice(&0x1001u32.to_le_bytes()); // field list
+        payload.extend_from_slice(b"Color\0");
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_ENUM.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::Enum(e)) = result {
+            assert_eq!(e.count, 5);
+            assert_eq!(e.name, "Color");
+            assert_eq!(e.underlying_type_index, 0x1000);
+        } else {
+            panic!("Expected Enum");
+        }
+    }
+
+    #[test]
+    fn test_vtshape_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&4u16.to_le_bytes()); // count
+        payload.push(0x0F); // descriptors
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_VTSHAPE.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::VtShape { count, .. }) = result {
+            assert_eq!(count, 4);
+        } else {
+            panic!("Expected VtShape");
+        }
+    }
+
+    #[test]
+    fn test_vftpath_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_le_bytes()); // count
+        payload.extend_from_slice(&0x1000u32.to_le_bytes());
+        payload.extend_from_slice(&0x1001u32.to_le_bytes());
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_VFTPATH.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::VftPath { count, base_classes }) = result {
+            assert_eq!(count, 2);
+            assert_eq!(base_classes, vec![0x1000, 0x1001]);
+        } else {
+            panic!("Expected VftPath");
+        }
+    }
+
+    #[test]
+    fn test_derived_class_list_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&3u32.to_le_bytes()); // count
+        payload.extend_from_slice(&0x1000u32.to_le_bytes());
+        payload.extend_from_slice(&0x1001u32.to_le_bytes());
+        payload.extend_from_slice(&0x1002u32.to_le_bytes());
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_DERIVED.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::DerivedClassList { count, derived_type_indices }) = result {
+            assert_eq!(count, 3);
+            assert_eq!(derived_type_indices.len(), 3);
+        } else {
+            panic!("Expected DerivedClassList");
+        }
+    }
+
+    #[test]
+    fn test_barray_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // element type
+        payload.extend_from_slice(&0x1001u32.to_le_bytes()); // index type
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_BARRAY.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::BArrayType { element_type_index, index_type_index }) = result {
+            assert_eq!(element_type_index, 0x1000);
+            assert_eq!(index_type_index, 0x1001);
+        } else {
+            panic!("Expected BArrayType");
+        }
+    }
+
+    #[test]
+    fn test_label_type_parsing() {
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_LABEL.to_le_bytes());
+        record.push(0x01); // mode
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::LabelType { mode }) = result {
+            assert_eq!(mode, 1);
+        } else {
+            panic!("Expected LabelType");
+        }
+    }
+
+    // =====================================================================
+    // Tests for new symbol records
+    // =====================================================================
+
+    #[test]
+    fn test_compile_v1_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1234u32.to_le_bytes()); // flags
+        payload.extend_from_slice(&0x014Cu16.to_le_bytes()); // x86
+        payload.extend_from_slice(b"MSVC 19.0\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_COMPILE.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::CompileInfo(ci)) = result {
+            assert_eq!(ci.flags, 0x1234);
+            assert_eq!(ci.machine, 0x014C);
+        } else {
+            panic!("Expected CompileInfo from S_COMPILE");
+        }
+    }
+
+    #[test]
+    fn test_label_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x2000u32.to_le_bytes()); // offset
+        payload.extend_from_slice(&1u16.to_le_bytes()); // segment
+        payload.push(0u8); // flags
+        payload.extend_from_slice(b"loop_start\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_LABEL32.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::Label(l)) = result {
+            assert_eq!(l.offset, 0x2000);
+            assert_eq!(l.name, "loop_start");
+        } else {
+            panic!("Expected Label");
+        }
+    }
+
+    #[test]
+    fn test_constant_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // type_index
+        payload.extend_from_slice(&42u16.to_le_bytes()); // value (small numeric)
+        payload.extend_from_slice(b"ANSWER\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_CONSTANT.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::Constant(c)) = result {
+            assert_eq!(c.value, 42);
+            assert_eq!(c.name, "ANSWER");
+        } else {
+            panic!("Expected Constant");
+        }
+    }
+
+    #[test]
+    fn test_register_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // type_index
+        payload.extend_from_slice(&0x0011u16.to_le_bytes()); // EAX
+        payload.extend_from_slice(b"regvar\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_REGISTER.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::RegisterVariable(r)) = result {
+            assert_eq!(r.register, 0x0011);
+            assert_eq!(r.name, "regvar");
+        } else {
+            panic!("Expected RegisterVariable");
+        }
+    }
+
+    #[test]
+    fn test_udt_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1020u32.to_le_bytes()); // type_index
+        payload.extend_from_slice(b"MyStruct\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_UDT.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::UserDefinedType(u)) = result {
+            assert_eq!(u.type_index, 0x1020);
+            assert_eq!(u.name, "MyStruct");
+        } else {
+            panic!("Expected UDT");
+        }
+    }
+
+    #[test]
+    fn test_objname_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0xABCDu32.to_le_bytes()); // signature
+        payload.extend_from_slice(b"test.obj\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_OBJNAME.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::ObjectName { signature, name }) = result {
+            assert_eq!(signature, 0xABCD);
+            assert_eq!(name, "test.obj");
+        } else {
+            panic!("Expected ObjectName");
+        }
+    }
+
+    #[test]
+    fn test_section_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&1u16.to_le_bytes()); // section_number
+        payload.push(4u8); // alignment
+        payload.push(0u8); // reserved
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // rva
+        payload.extend_from_slice(&0x2000u32.to_le_bytes()); // size
+        payload.extend_from_slice(&0x60000020u32.to_le_bytes()); // characteristics
+        payload.extend_from_slice(b".text\0");
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_SECTION.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::Section { section_number, rva, name, .. }) = result {
+            assert_eq!(section_number, 1);
+            assert_eq!(rva, 0x1000);
+            assert_eq!(name, ".text");
+        } else {
+            panic!("Expected Section");
+        }
+    }
+
+    #[test]
+    fn test_buildinfo_symbol() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&0x1042u32.to_le_bytes()); // item_id
+
+        let mut record_data = Vec::new();
+        let total_len = 2 + 2 + payload.len() as u16;
+        record_data.extend_from_slice(&total_len.to_le_bytes());
+        record_data.extend_from_slice(&symbol_kind::S_BUILDINFO.to_le_bytes());
+        record_data.extend_from_slice(&payload);
+        while record_data.len() % 4 != 0 { record_data.push(0); }
+
+        let result = parse_symbol_record(&record_data);
+        assert!(result.is_some());
+        if let Some(SymbolRecord::BuildInfo { item_id }) = result {
+            assert_eq!(item_id, 0x1042);
+        } else {
+            panic!("Expected BuildInfo");
+        }
+    }
+
+    // =====================================================================
+    // Tests for debug info
+    // =====================================================================
+
+    #[test]
+    fn test_c13_line_record() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x100u32.to_le_bytes()); // offset
+        data.extend_from_slice(&0x80000025u32.to_le_bytes()); // bit_vals: line=37, statement=true
+
+        let lr = super::debug_info::C13LineRecord::parse(&data, false);
+        assert!(lr.is_some());
+        let lr = lr.unwrap();
+        assert_eq!(lr.offset, 0x100);
+        assert_eq!(lr.line_num_start(), 37);
+        assert!(lr.is_statement());
+        assert!(!lr.is_special_line());
+    }
+
+    #[test]
+    fn test_c13_file_checksum() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x42u32.to_le_bytes()); // offset_filename
+        data.push(16u8); // length (MD5 = 16 bytes)
+        data.push(1u8); // checksum_type = Md5
+        data.extend_from_slice(&[0u8; 16]); // 16 bytes of zeros for checksum
+        // Align to 4
+        while data.len() % 4 != 0 { data.push(0); }
+
+        let result = super::debug_info::C13FileChecksum::parse(&data);
+        assert!(result.is_some());
+        let (fc, consumed) = result.unwrap();
+        assert_eq!(fc.offset_filename, 0x42);
+        assert_eq!(fc.length, 16);
+        assert_eq!(fc.checksum_type, super::debug_info::C13ChecksumType::Md5);
+        assert_eq!(consumed, 24); // 6 + 16 = 22, aligned to 24
+    }
+
+    #[test]
+    fn test_image_section_header() {
+        let mut data = Vec::new();
+        data.extend_from_slice(b".data\0\0\0"); // 8 bytes name
+        data.extend_from_slice(&0u32.to_le_bytes()); // physical_address
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // virtual_address
+        data.extend_from_slice(&0x500u32.to_le_bytes()); // raw_data_size
+        data.extend_from_slice(&0x4000u32.to_le_bytes()); // raw_data_pointer
+        data.extend_from_slice(&0u32.to_le_bytes()); // relocations_pointer
+        data.extend_from_slice(&0u32.to_le_bytes()); // line_numbers_pointer
+        data.extend_from_slice(&0u16.to_le_bytes()); // num_relocations
+        data.extend_from_slice(&0u16.to_le_bytes()); // num_line_numbers
+        data.extend_from_slice(&0xC0000040u32.to_le_bytes()); // characteristics
+
+        let hdr = super::debug_info::ImageSectionHeader::parse(&data);
+        assert!(hdr.is_some());
+        let hdr = hdr.unwrap();
+        assert_eq!(hdr.name, ".data");
+        assert_eq!(hdr.virtual_address, 0x2000);
+        assert_eq!(hdr.raw_data_size, 0x500);
+    }
+
+    #[test]
+    fn test_image_function_entry() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // starting_address
+        data.extend_from_slice(&0x1080u32.to_le_bytes()); // ending_address
+        data.extend_from_slice(&0x1010u32.to_le_bytes()); // end_of_prologue_address
+
+        let entry = super::debug_info::ImageFunctionEntry::parse(&data);
+        assert!(entry.is_some());
+        let entry = entry.unwrap();
+        assert_eq!(entry.starting_address, 0x1000);
+        assert_eq!(entry.ending_address, 0x1080);
+        assert_eq!(entry.end_of_prologue_address, 0x1010);
+    }
+
+    #[test]
+    fn test_debug_data_header() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0xFFFFu16.to_le_bytes()); // stream 0 = FramePointerOmission = NIL
+        data.extend_from_slice(&0xFFFFu16.to_le_bytes()); // stream 1 = Exception = NIL
+        data.extend_from_slice(&0xFFFFu16.to_le_bytes()); // stream 2 = Fixup = NIL
+        data.extend_from_slice(&0xFFFFu16.to_le_bytes()); // stream 3 = OmapToSrc = NIL
+        data.extend_from_slice(&0xFFFFu16.to_le_bytes()); // stream 4 = OmapFromSrc = NIL
+        data.extend_from_slice(&5u16.to_le_bytes());       // stream 5 = SectionHeader = 5
+
+        let dd = super::debug_info::DebugData::parse_header(&data);
+        assert_eq!(dd.debug_streams.len(), 6);
+        assert_eq!(dd.get_stream(super::debug_info::DebugType::SectionHeader), Some(5));
+        assert_eq!(dd.get_stream(super::debug_info::DebugType::Exception), None); // 0xFFFF is NIL
+        assert_eq!(dd.get_stream(super::debug_info::DebugType::Fixup), None);
+    }
+
+    #[test]
+    fn test_c13_checksum_type() {
+        assert_eq!(super::debug_info::C13ChecksumType::from_u8(0), super::debug_info::C13ChecksumType::None);
+        assert_eq!(super::debug_info::C13ChecksumType::from_u8(1), super::debug_info::C13ChecksumType::Md5);
+        assert_eq!(super::debug_info::C13ChecksumType::from_u8(2), super::debug_info::C13ChecksumType::Sha1);
+        assert_eq!(super::debug_info::C13ChecksumType::from_u8(3), super::debug_info::C13ChecksumType::Sha256);
+        assert!(matches!(super::debug_info::C13ChecksumType::from_u8(99), super::debug_info::C13ChecksumType::Unknown(99)));
+    }
+
+    // =====================================================================
+    // Tests for register names
+    // =====================================================================
+
+    #[test]
+    fn test_register_name_x86() {
+        assert_eq!(super::registers::register_name(0x0011), "EAX");
+        assert_eq!(super::registers::register_name(0x0012), "ECX");
+        assert_eq!(super::registers::register_name(0x0000), "None");
+    }
+
+    #[test]
+    fn test_register_name_x64() {
+        assert_eq!(super::registers::register_name(0x008F), "RAX");
+        assert_eq!(super::registers::register_name(0x0097), "R8");
+        assert_eq!(super::registers::register_name(0x009F), "RIP");
+    }
+
+    #[test]
+    fn test_register_name_arm64() {
+        assert_eq!(super::registers::register_name(0x0180), "X0");
+        assert_eq!(super::registers::register_name(0x019F), "SP");
+        assert_eq!(super::registers::register_name(0x01A0), "PC");
+    }
+
+    #[test]
+    fn test_register_name_zmm() {
+        assert_eq!(super::registers::register_name(0x00F0), "ZMM0");
+        assert_eq!(super::registers::register_name(0x010F), "ZMM31");
+    }
+
+    #[test]
+    fn test_register_name_kmask() {
+        assert_eq!(super::registers::register_name(0x0110), "K0");
+        assert_eq!(super::registers::register_name(0x0117), "K7");
+    }
+
+    // =====================================================================
+    // Tests for GSI hash table
+    // =====================================================================
+
+    #[test]
+    fn test_gsi_hash_header_parse() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0xeffeeffe_u32.to_le_bytes()); // version_signature
+        data.extend_from_slice(&20040203u32.to_le_bytes()); // version_header
+        data.extend_from_slice(&8u32.to_le_bytes()); // hash_record_size
+        data.extend_from_slice(&4096u32.to_le_bytes()); // num_buckets
+
+        let header = super::globals::GsiHashHeader::parse(&data);
+        assert!(header.is_some());
+        let h = header.unwrap();
+        assert_eq!(h.version_signature, 0xeffeeffe);
+        assert_eq!(h.num_buckets, 4096);
+    }
+
+    #[test]
+    fn test_pdb_symbol_hash() {
+        let h1 = super::globals::pdb_symbol_hash("main");
+        let h2 = super::globals::pdb_symbol_hash("main");
+        let h3 = super::globals::pdb_symbol_hash("other");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+    }
+
+    // =====================================================================
+    // Tests for PdbFile convenience API
+    // =====================================================================
+
+    #[test]
+    fn test_simple_type_pointer() {
+        let st = resolve_simple_type(0x0404); // NearPointer32 + SignedChar
+        assert!(st.is_pointer());
+        assert_eq!(st.mode, SimpleTypeMode::NearPointer32);
+        assert_eq!(st.kind, SimpleTypeKind::SignedChar);
+        assert_eq!(st.byte_size(), 4); // 32-bit pointer
+    }
+
+    #[test]
+    fn test_simple_type_non_pointer() {
+        let st = resolve_simple_type(0x0010); // Real32
+        assert!(!st.is_pointer());
+        assert_eq!(st.kind, SimpleTypeKind::Real32);
+        assert_eq!(st.byte_size(), 4);
+    }
+
+    #[test]
+    fn test_type_property_flags() {
+        let packed = TypeProperty::PACKED;
+        let nested = TypeProperty::NESTED;
+        assert!(packed.contains(TypeProperty::PACKED));
+        assert!(!packed.contains(TypeProperty::NESTED));
+        let combined = packed | nested;
+        assert!(combined.contains(TypeProperty::PACKED));
+        assert!(combined.contains(TypeProperty::NESTED));
+    }
+
+    #[test]
+    fn test_member_access_protection() {
+        assert_eq!(MemberAccessProtection::from_u8(0), MemberAccessProtection::None);
+        assert_eq!(MemberAccessProtection::from_u8(1), MemberAccessProtection::Private);
+        assert_eq!(MemberAccessProtection::from_u8(2), MemberAccessProtection::Protected);
+        assert_eq!(MemberAccessProtection::from_u8(3), MemberAccessProtection::Public);
+    }
+
+    #[test]
+    fn test_machine_type_names() {
+        assert_eq!(machine_type::name(machine_type::X86), "x86");
+        assert_eq!(machine_type::name(machine_type::AMD64), "x64 (AMD64)");
+        assert_eq!(machine_type::name(machine_type::ARM64), "AArch64 (ARM64)");
+        assert_eq!(machine_type::name(0xFFFF), "Unknown");
+    }
+
+    // =====================================================================
+    // Test union type parsing
+    // =====================================================================
+
+    #[test]
+    fn test_union_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&2u16.to_le_bytes()); // count
+        payload.extend_from_slice(&0u16.to_le_bytes()); // property
+        payload.extend_from_slice(&0x1000u32.to_le_bytes()); // field_list
+        payload.extend_from_slice(&8u16.to_le_bytes()); // size = 8
+        payload.extend_from_slice(b"U\0");
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_UNION.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::Union(u)) = result {
+            assert_eq!(u.count, 2);
+            assert_eq!(u.name, "U");
+            assert_eq!(u.size, 8);
+        } else {
+            panic!("Expected Union");
+        }
+    }
+
+    #[test]
+    fn test_field_list_parsing() {
+        // Build a field list with one LF_MEMBER record
+        let mut data = Vec::new();
+        // LF_MEMBER: access(2) + type_index(4) + offset(2 numeric) + name("x\0")
+        data.extend_from_slice(&leaf_id::LF_MEMBER.to_le_bytes()); // leaf id
+        data.extend_from_slice(&3u16.to_le_bytes()); // access = Public
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // type_index
+        data.extend_from_slice(&0u16.to_le_bytes()); // offset = 0 (small numeric)
+        data.extend_from_slice(b"x\0"); // name
+        // Align to 4
+        while data.len() % 4 != 0 { data.push(0xF4); }
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_FIELDLIST.to_le_bytes());
+        record.extend_from_slice(&data);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::FieldList { fields }) = result {
+            assert!(!fields.is_empty());
+            if let FieldRecord::Member { name, .. } = &fields[0] {
+                assert_eq!(name, "x");
+            } else {
+                panic!("Expected Member field record");
+            }
+        } else {
+            panic!("Expected FieldList");
+        }
+    }
+
+    #[test]
+    fn test_arglist_type_parsing() {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&3u32.to_le_bytes()); // count
+        payload.extend_from_slice(&0x1000u32.to_le_bytes());
+        payload.extend_from_slice(&0x1001u32.to_le_bytes());
+        payload.extend_from_slice(&0x1002u32.to_le_bytes());
+
+        let mut record = Vec::new();
+        record.extend_from_slice(&leaf_id::LF_ARGLIST.to_le_bytes());
+        record.extend_from_slice(&payload);
+
+        let result = parse_type_record(&record);
+        assert!(result.is_some());
+        if let Some(TypeRecord::ArgumentList(al)) = result {
+            assert_eq!(al.count, 3);
+            assert_eq!(al.arg_type_indices, vec![0x1000, 0x1001, 0x1002]);
+        } else {
+            panic!("Expected ArgumentList");
         }
     }
 }

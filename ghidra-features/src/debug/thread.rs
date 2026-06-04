@@ -355,7 +355,7 @@ mod tests {
     fn test_thread_manager() {
         let mut mgr = TraceThreadManager::new();
         let k1 = mgr.add_thread(100, 0, "main");
-        let k2 = mgr.add_thread(200, 5, "worker");
+        let _k2 = mgr.add_thread(200, 5, "worker");
 
         assert_eq!(mgr.len(), 2);
         assert!(!mgr.is_empty());

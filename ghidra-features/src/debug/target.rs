@@ -242,7 +242,7 @@ pub trait Target: Send + Sync {
     fn disconnect(&self) -> Result<(), TargetError>;
 
     /// Collect all actions that implement the given action name.
-    fn collect_actions(&self, name: &ActionName) -> HashMap<String, ActionEntry> {
+    fn collect_actions(&self, _name: &ActionName) -> HashMap<String, ActionEntry> {
         HashMap::new()
     }
 
