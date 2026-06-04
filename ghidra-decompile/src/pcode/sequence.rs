@@ -415,6 +415,97 @@ impl SequenceBuilder {
 }
 
 // ---------------------------------------------------------------------------
+// SequenceNumber - unique address for a PcodeOp
+// ---------------------------------------------------------------------------
+
+/// A unique address for a PcodeOp within the AST.
+///
+/// Contains the original assembly instruction address, a unique sub-address
+/// for distinguishing multiple PcodeOps at the same instruction, and an
+/// ordering field that may change as the basic block is edited.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SequenceNumber {
+    /// Address of the assembly language instruction.
+    pub address: Address,
+    /// Sub-address for distinguishing multiple PcodeOps at one instruction.
+    /// Does not change over lifetime of PcodeOp.
+    pub time: i32,
+    /// Relative position of PcodeOp within a basic block.
+    /// May change as basic block is edited.
+    pub order: i32,
+}
+
+impl SequenceNumber {
+    /// Create a new sequence number.
+    pub fn new(address: Address, time: i32) -> Self {
+        Self {
+            address,
+            time,
+            order: 0,
+        }
+    }
+
+    /// Create a sequence number with an explicit order.
+    pub fn with_order(address: Address, time: i32, order: i32) -> Self {
+        Self {
+            address,
+            time,
+            order,
+        }
+    }
+
+    /// Get the target address.
+    pub fn get_target(&self) -> Address {
+        self.address
+    }
+
+    /// Get the time (unique id within the instruction).
+    pub fn get_time(&self) -> i32 {
+        self.time
+    }
+
+    /// Set the time.
+    pub fn set_time(&mut self, t: i32) {
+        self.time = t;
+    }
+
+    /// Get the order.
+    pub fn get_order(&self) -> i32 {
+        self.order
+    }
+
+    /// Set the order.
+    pub fn set_order(&mut self, o: i32) {
+        self.order = o;
+    }
+}
+
+impl PartialOrd for SequenceNumber {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for SequenceNumber {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.address
+            .offset
+            .cmp(&other.address.offset)
+            .then_with(|| self.time.cmp(&other.time))
+    }
+}
+
+impl std::fmt::Display for SequenceNumber {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "(0x{:x}, {}, {})",
+            self.address.offset, self.time, self.order
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

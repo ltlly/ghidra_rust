@@ -3024,6 +3024,1726 @@ impl std::hash::Hash for Processor {
 }
 
 // ============================================================================
+// Endian
+// ============================================================================
+
+/// Processor endianness.
+///
+/// Corresponds to `ghidra.program.model.lang.Endian`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Endian {
+    Big,
+    Little,
+}
+
+impl Endian {
+    /// Parse an endianness string ("big", "BE", "little", "LE", case-insensitive).
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "big" | "be" => Some(Endian::Big),
+            "little" | "le" => Some(Endian::Little),
+            _ => None,
+        }
+    }
+
+    pub fn is_big_endian(&self) -> bool {
+        *self == Endian::Big
+    }
+
+    pub fn is_little_endian(&self) -> bool {
+        *self == Endian::Little
+    }
+
+    /// Short string form: "BE" or "LE".
+    pub fn to_short_string(&self) -> &str {
+        match self {
+            Endian::Big => "BE",
+            Endian::Little => "LE",
+        }
+    }
+}
+
+impl fmt::Display for Endian {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Endian::Big => write!(f, "Big"),
+            Endian::Little => write!(f, "Little"),
+        }
+    }
+}
+
+// ============================================================================
+// DecompilerLanguage
+// ============================================================================
+
+/// Languages the decompiler can output.
+///
+/// Corresponds to `ghidra.program.model.lang.DecompilerLanguage`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DecompilerLanguage {
+    CLanguage,
+    JavaLanguage,
+}
+
+impl fmt::Display for DecompilerLanguage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DecompilerLanguage::CLanguage => write!(f, "c-language"),
+            DecompilerLanguage::JavaLanguage => write!(f, "java-language"),
+        }
+    }
+}
+
+// ============================================================================
+// InputListType
+// ============================================================================
+
+/// Strategy for parameter list allocation.
+///
+/// Corresponds to `ghidra.program.model.lang.InputListType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum InputListType {
+    Standard,
+    Register,
+}
+
+// ============================================================================
+// StorageClass
+// ============================================================================
+
+/// Classification of data-types for storage assignment.
+///
+/// Corresponds to `ghidra.program.model.lang.StorageClass`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StorageClass {
+    General,
+    Float,
+    Ptr,
+    HiddenRet,
+    Vector,
+    Class1,
+    Class2,
+    Class3,
+    Class4,
+}
+
+impl StorageClass {
+    pub fn value(&self) -> i32 {
+        match self {
+            StorageClass::General => 0,
+            StorageClass::Float => 1,
+            StorageClass::Ptr => 2,
+            StorageClass::HiddenRet => 3,
+            StorageClass::Vector => 4,
+            StorageClass::Class1 => 100,
+            StorageClass::Class2 => 101,
+            StorageClass::Class3 => 102,
+            StorageClass::Class4 => 103,
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "general" => Some(StorageClass::General),
+            "float" => Some(StorageClass::Float),
+            "ptr" => Some(StorageClass::Ptr),
+            "hiddenret" => Some(StorageClass::HiddenRet),
+            "vector" => Some(StorageClass::Vector),
+            "class1" => Some(StorageClass::Class1),
+            "class2" => Some(StorageClass::Class2),
+            "class3" => Some(StorageClass::Class3),
+            "class4" => Some(StorageClass::Class4),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for StorageClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            StorageClass::General => write!(f, "general"),
+            StorageClass::Float => write!(f, "float"),
+            StorageClass::Ptr => write!(f, "ptr"),
+            StorageClass::HiddenRet => write!(f, "hiddenret"),
+            StorageClass::Vector => write!(f, "vector"),
+            StorageClass::Class1 => write!(f, "class1"),
+            StorageClass::Class2 => write!(f, "class2"),
+            StorageClass::Class3 => write!(f, "class3"),
+            StorageClass::Class4 => write!(f, "class4"),
+        }
+    }
+}
+
+// ============================================================================
+// OperandType
+// ============================================================================
+
+/// Bitflags for classifying instruction operand types.
+///
+/// Corresponds to `ghidra.program.model.lang.OperandType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct OperandType(u32);
+
+impl OperandType {
+    pub const READ: u32 = 0x0000_0001;
+    pub const WRITE: u32 = 0x0000_0002;
+    pub const INDIRECT: u32 = 0x0000_0004;
+    pub const IMMEDIATE: u32 = 0x0000_0008;
+    pub const RELATIVE: u32 = 0x0000_0010;
+    pub const IMPLICIT: u32 = 0x0000_0020;
+    pub const CODE: u32 = 0x0000_0040;
+    pub const DATA: u32 = 0x0000_0080;
+    pub const PORT: u32 = 0x0000_0100;
+    pub const REGISTER: u32 = 0x0000_0200;
+    pub const LIST: u32 = 0x0000_0400;
+    pub const FLAG: u32 = 0x0000_0800;
+    pub const TEXT: u32 = 0x0000_1000;
+    pub const ADDRESS: u32 = 0x0000_2000;
+    pub const SCALAR: u32 = 0x0000_4000;
+    pub const BIT: u32 = 0x0000_8000;
+    pub const BYTE: u32 = 0x0001_0000;
+    pub const WORD: u32 = 0x0002_0000;
+    pub const QUADWORD: u32 = 0x0004_0000;
+    pub const SIGNED: u32 = 0x0008_0000;
+    pub const FLOAT: u32 = 0x0010_0000;
+    pub const COP: u32 = 0x0020_0000;
+    pub const DYNAMIC: u32 = 0x0040_0000;
+
+    pub fn new(bits: u32) -> Self {
+        Self(bits)
+    }
+
+    pub fn bits(&self) -> u32 {
+        self.0
+    }
+
+    pub fn does_read(t: u32) -> bool { (t & Self::READ) != 0 }
+    pub fn does_write(t: u32) -> bool { (t & Self::WRITE) != 0 }
+    pub fn is_indirect(t: u32) -> bool { (t & Self::INDIRECT) != 0 }
+    pub fn is_immediate(t: u32) -> bool { (t & Self::IMMEDIATE) != 0 }
+    pub fn is_relative(t: u32) -> bool { (t & Self::RELATIVE) != 0 }
+    pub fn is_implicit(t: u32) -> bool { (t & Self::IMPLICIT) != 0 }
+    pub fn is_code_reference(t: u32) -> bool { (t & Self::CODE) != 0 }
+    pub fn is_data_reference(t: u32) -> bool { (t & Self::DATA) != 0 }
+    pub fn is_port(t: u32) -> bool { (t & Self::PORT) != 0 }
+    pub fn is_register(t: u32) -> bool { (t & Self::REGISTER) != 0 }
+    pub fn is_list(t: u32) -> bool { (t & Self::LIST) != 0 }
+    pub fn is_flag(t: u32) -> bool { (t & Self::FLAG) != 0 }
+    pub fn is_text(t: u32) -> bool { (t & Self::TEXT) != 0 }
+    pub fn is_address(t: u32) -> bool { (t & Self::ADDRESS) != 0 }
+    pub fn is_scalar(t: u32) -> bool { (t & Self::SCALAR) != 0 }
+    pub fn is_bit(t: u32) -> bool { (t & Self::BIT) != 0 }
+    pub fn is_byte(t: u32) -> bool { (t & Self::BYTE) != 0 }
+    pub fn is_word(t: u32) -> bool { (t & Self::WORD) != 0 }
+    pub fn is_quad_word(t: u32) -> bool { (t & Self::QUADWORD) != 0 }
+    pub fn is_signed(t: u32) -> bool { (t & Self::SIGNED) != 0 }
+    pub fn is_float(t: u32) -> bool { (t & Self::FLOAT) != 0 }
+    pub fn is_co_processor(t: u32) -> bool { (t & Self::COP) != 0 }
+    pub fn is_dynamic(t: u32) -> bool { (t & Self::DYNAMIC) != 0 }
+    pub fn is_scalar_as_address(t: u32) -> bool { Self::is_address(t) && Self::is_scalar(t) }
+
+    pub fn contains(&self, flag: u32) -> bool {
+        (self.0 & flag) != 0
+    }
+
+    /// Render a human-readable summary of the operand type flags.
+    pub fn to_debug_string(t: u32) -> String {
+        let mut parts = Vec::new();
+        if Self::is_address(t) { parts.push("ADDR"); }
+        if Self::is_scalar(t) { parts.push("SCAL"); }
+        if Self::is_port(t) { parts.push("PORT"); }
+        if Self::is_register(t) { parts.push("REG"); }
+        if Self::is_list(t) { parts.push("LIST"); }
+        if Self::is_flag(t) { parts.push("FLAG"); }
+        if Self::is_text(t) { parts.push("TEXT"); }
+        if Self::is_code_reference(t) { parts.push("CODE"); }
+        if Self::is_data_reference(t) { parts.push("DATA"); }
+        if Self::is_bit(t) { parts.push("BIT"); }
+        if Self::is_byte(t) { parts.push("BYTE"); }
+        if Self::is_word(t) { parts.push("WORD"); }
+        if Self::is_quad_word(t) { parts.push("QUAD"); }
+        if Self::is_signed(t) { parts.push("SIGN"); }
+        if Self::is_float(t) { parts.push("FLT"); }
+        if Self::is_indirect(t) { parts.push("IND"); }
+        if Self::is_immediate(t) { parts.push("IMM"); }
+        if Self::is_relative(t) { parts.push("REL"); }
+        if Self::is_implicit(t) { parts.push("IMPL"); }
+        if Self::does_read(t) { parts.push("READ"); }
+        if Self::does_write(t) { parts.push("WRTE"); }
+        if Self::is_co_processor(t) { parts.push("COP"); }
+        if Self::is_dynamic(t) { parts.push("DYN"); }
+        parts.join(" | ")
+    }
+}
+
+// ============================================================================
+// SpaceNames
+// ============================================================================
+
+/// Reserved address space names used across all Ghidra architectures.
+///
+/// Corresponds to `ghidra.program.model.lang.SpaceNames`.
+pub struct SpaceNames;
+
+impl SpaceNames {
+    pub const CONSTANT_SPACE_NAME: &'static str = "const";
+    pub const UNIQUE_SPACE_NAME: &'static str = "unique";
+    pub const STACK_SPACE_NAME: &'static str = "stack";
+    pub const JOIN_SPACE_NAME: &'static str = "join";
+    pub const OTHER_SPACE_NAME: &'static str = "OTHER";
+    pub const IOP_SPACE_NAME: &'static str = "iop";
+    pub const FSPEC_SPACE_NAME: &'static str = "fspec";
+
+    pub const CONSTANT_SPACE_INDEX: u32 = 0;
+    pub const OTHER_SPACE_INDEX: u32 = 1;
+    pub const UNIQUE_SPACE_SIZE: usize = 4;
+}
+
+// ============================================================================
+// GhidraLanguagePropertyKeys
+// ============================================================================
+
+/// Standard property key names used by Ghidra language specifications.
+///
+/// Corresponds to `ghidra.program.model.lang.GhidraLanguagePropertyKeys`.
+pub struct GhidraLanguagePropertyKeys;
+
+impl GhidraLanguagePropertyKeys {
+    pub const MAXIMUM_INSTRUCTION_LENGTH: &'static str = "maximumInstructionLength";
+    pub const CUSTOM_DISASSEMBLER_CLASS: &'static str = "customDisassemblerClass";
+    pub const ALLOW_OFFCUT_REFERENCES_TO_FUNCTION_STARTS: &'static str =
+        "allowOffcutReferencesToFunctionStarts";
+    pub const USE_OPERAND_REFERENCE_ANALYZER_SWITCH_TABLES: &'static str =
+        "useOperandReferenceAnalyzerSwitchTables";
+    pub const IS_TMS320_FAMILY: &'static str = "isTMS320Family";
+    pub const PARALLEL_INSTRUCTION_HELPER_CLASS: &'static str = "parallelInstructionHelperClass";
+    pub const ADDRESSES_DO_NOT_APPEAR_DIRECTLY_IN_CODE: &'static str =
+        "addressesDoNotAppearDirectlyInCode";
+    pub const USE_NEW_FUNCTION_STACK_ANALYSIS: &'static str = "useNewFunctionStackAnalysis";
+    pub const EMULATE_INSTRUCTION_STATE_MODIFIER_CLASS: &'static str =
+        "emulateInstructionStateModifierClass";
+    pub const USEROP_LIBS: &'static str = "useropLibs";
+    pub const PCODE_INJECT_LIBRARY_CLASS: &'static str = "pcodeInjectLibraryClass";
+    pub const ENABLE_SHARED_RETURN_ANALYSIS: &'static str = "enableSharedReturnAnalysis";
+    pub const ENABLE_ASSUME_CONTIGUOUS_FUNCTIONS_ONLY: &'static str =
+        "enableContiguousFunctionsOnly";
+    pub const ENABLE_NO_RETURN_ANALYSIS: &'static str = "enableNoReturnAnalysis";
+    pub const RESET_CONTEXT_ON_UPGRADE: &'static str = "resetContextOnUpgrade";
+    pub const MINIMUM_DATA_IMAGE_BASE: &'static str = "minimumDataImageBase";
+}
+
+// ============================================================================
+// CompilerSpecDescription (trait) + BasicCompilerSpecDescription
+// ============================================================================
+
+/// Describes a compiler specification without a full `CompilerSpec` loaded.
+///
+/// Corresponds to `ghidra.program.model.lang.CompilerSpecDescription` (interface).
+pub trait CompilerSpecDescription: fmt::Debug + Send + Sync {
+    fn get_compiler_spec_id(&self) -> &CompilerSpecID;
+    fn get_compiler_spec_name(&self) -> &str;
+    fn get_source(&self) -> String;
+}
+
+/// Concrete implementation of `CompilerSpecDescription`.
+///
+/// Corresponds to `ghidra.program.model.lang.BasicCompilerSpecDescription`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BasicCompilerSpecDescription {
+    pub id: CompilerSpecID,
+    pub name: String,
+}
+
+impl BasicCompilerSpecDescription {
+    pub fn new(id: CompilerSpecID, name: impl Into<String>) -> Self {
+        Self { id, name: name.into() }
+    }
+}
+
+impl CompilerSpecDescription for BasicCompilerSpecDescription {
+    fn get_compiler_spec_id(&self) -> &CompilerSpecID {
+        &self.id
+    }
+    fn get_compiler_spec_name(&self) -> &str {
+        &self.name
+    }
+    fn get_source(&self) -> String {
+        format!("{} {}", self.id, self.name)
+    }
+}
+
+impl fmt::Display for BasicCompilerSpecDescription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl PartialEq for BasicCompilerSpecDescription {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl Eq for BasicCompilerSpecDescription {}
+
+// ============================================================================
+// LanguageDescription (trait) + BasicLanguageDescription
+// ============================================================================
+
+/// Describes a language without a full `Language` loaded.
+///
+/// Corresponds to `ghidra.program.model.lang.LanguageDescription` (interface).
+pub trait LanguageDescription: fmt::Debug + Send + Sync {
+    fn get_language_id(&self) -> &LanguageID;
+    fn get_processor(&self) -> &str;
+    fn get_endian(&self) -> Endian;
+    fn get_instruction_endian(&self) -> Endian;
+    fn get_size(&self) -> usize;
+    fn get_variant(&self) -> &str;
+    fn get_version(&self) -> i32;
+    fn get_minor_version(&self) -> i32;
+    fn get_description(&self) -> &str;
+    fn is_deprecated(&self) -> bool;
+    fn get_compatible_compiler_spec_descriptions(&self) -> &[Box<dyn CompilerSpecDescription>];
+    fn get_compiler_spec_description_by_id(
+        &self,
+        id: &CompilerSpecID,
+    ) -> Result<&dyn CompilerSpecDescription, LangError>;
+    fn get_external_names(&self, tool: &str) -> Option<Vec<String>>;
+}
+
+/// Concrete implementation of `LanguageDescription`.
+///
+/// Corresponds to `ghidra.program.model.lang.BasicLanguageDescription`.
+#[derive(Debug)]
+pub struct BasicLanguageDescription {
+    pub language_id: LanguageID,
+    pub processor_name: String,
+    pub endian: Endian,
+    pub instruction_endian: Endian,
+    pub size: usize,
+    pub variant: String,
+    pub description: String,
+    pub version: i32,
+    pub minor_version: i32,
+    pub deprecated: bool,
+    pub compatible_compiler_specs: Vec<Box<dyn CompilerSpecDescription>>,
+    pub external_names: HashMap<String, Vec<String>>,
+}
+
+impl BasicLanguageDescription {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        language_id: LanguageID,
+        processor_name: impl Into<String>,
+        endian: Endian,
+        instruction_endian: Endian,
+        size: usize,
+        variant: impl Into<String>,
+        description: impl Into<String>,
+        version: i32,
+        minor_version: i32,
+        deprecated: bool,
+        compiler_specs: Vec<Box<dyn CompilerSpecDescription>>,
+        external_names: HashMap<String, Vec<String>>,
+    ) -> Self {
+        Self {
+            language_id,
+            processor_name: processor_name.into(),
+            endian,
+            instruction_endian,
+            size,
+            variant: variant.into(),
+            description: description.into(),
+            version,
+            minor_version,
+            deprecated,
+            compatible_compiler_specs: compiler_specs,
+            external_names,
+        }
+    }
+}
+
+impl LanguageDescription for BasicLanguageDescription {
+    fn get_language_id(&self) -> &LanguageID {
+        &self.language_id
+    }
+    fn get_processor(&self) -> &str {
+        &self.processor_name
+    }
+    fn get_endian(&self) -> Endian {
+        self.endian
+    }
+    fn get_instruction_endian(&self) -> Endian {
+        self.instruction_endian
+    }
+    fn get_size(&self) -> usize {
+        self.size
+    }
+    fn get_variant(&self) -> &str {
+        &self.variant
+    }
+    fn get_version(&self) -> i32 {
+        self.version
+    }
+    fn get_minor_version(&self) -> i32 {
+        self.minor_version
+    }
+    fn get_description(&self) -> &str {
+        &self.description
+    }
+    fn is_deprecated(&self) -> bool {
+        self.deprecated
+    }
+    fn get_compatible_compiler_spec_descriptions(&self) -> &[Box<dyn CompilerSpecDescription>] {
+        &self.compatible_compiler_specs
+    }
+    fn get_compiler_spec_description_by_id(
+        &self,
+        id: &CompilerSpecID,
+    ) -> Result<&dyn CompilerSpecDescription, LangError> {
+        self.compatible_compiler_specs
+            .iter()
+            .find(|cs| cs.get_compiler_spec_id() == id)
+            .map(|cs| cs.as_ref())
+            .ok_or_else(|| LangError::CompilerSpecNotFound {
+                language_id: self.language_id.clone(),
+                compiler_spec_id: id.clone(),
+            })
+    }
+    fn get_external_names(&self, tool: &str) -> Option<Vec<String>> {
+        self.external_names.get(tool).cloned()
+    }
+}
+
+impl fmt::Display for BasicLanguageDescription {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}/{}/{}/{}",
+            self.processor_name, self.endian, self.size, self.variant
+        )
+    }
+}
+
+impl PartialEq for BasicLanguageDescription {
+    fn eq(&self, other: &Self) -> bool {
+        self.language_id == other.language_id
+    }
+}
+impl Eq for BasicLanguageDescription {}
+
+// ============================================================================
+// LanguageCompilerSpecPair
+// ============================================================================
+
+/// A (LanguageID, CompilerSpecID) pair used for language/opinion lookups.
+///
+/// Corresponds to `ghidra.program.model.lang.LanguageCompilerSpecPair`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LanguageCompilerSpecPair {
+    pub language_id: LanguageID,
+    pub compiler_spec_id: CompilerSpecID,
+}
+
+impl LanguageCompilerSpecPair {
+    pub fn new(language_id: LanguageID, compiler_spec_id: CompilerSpecID) -> Self {
+        Self { language_id, compiler_spec_id }
+    }
+
+    pub fn from_strings(
+        language_id: &str,
+        compiler_spec_id: &str,
+    ) -> Result<Self, LangError> {
+        let lid = LanguageID::parse(language_id)
+            .ok_or_else(|| LangError::InvalidLanguageID(language_id.to_string()))?;
+        Ok(Self {
+            language_id: lid,
+            compiler_spec_id: CompilerSpecID::new(compiler_spec_id),
+        })
+    }
+}
+
+impl PartialOrd for LanguageCompilerSpecPair {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for LanguageCompilerSpecPair {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.language_id
+            .cmp(&other.language_id)
+            .then_with(|| self.compiler_spec_id.cmp(&other.compiler_spec_id))
+    }
+}
+
+impl fmt::Display for LanguageCompilerSpecPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.language_id, self.compiler_spec_id)
+    }
+}
+
+// ============================================================================
+// LanguageCompilerSpecQuery + ExternalLanguageCompilerSpecQuery
+// ============================================================================
+
+/// A query for matching language/compiler spec pairs.
+///
+/// Corresponds to `ghidra.program.model.lang.LanguageCompilerSpecQuery`.
+#[derive(Debug, Clone, Default)]
+pub struct LanguageCompilerSpecQuery {
+    pub processor: Option<String>,
+    pub endian: Option<Endian>,
+    pub size: Option<usize>,
+    pub variant: Option<String>,
+}
+
+impl LanguageCompilerSpecQuery {
+    pub fn matches(&self, desc: &dyn LanguageDescription) -> bool {
+        if let Some(ref proc) = self.processor {
+            if desc.get_processor() != proc.as_str() {
+                return false;
+            }
+        }
+        if let Some(endian) = self.endian {
+            if desc.get_endian() != endian {
+                return false;
+            }
+        }
+        if let Some(size) = self.size {
+            if desc.get_size() != size {
+                return false;
+            }
+        }
+        if let Some(ref variant) = self.variant {
+            if desc.get_variant() != variant.as_str() {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Query for external language mappings (e.g., IDA-Pro's "metapc").
+///
+/// Corresponds to `ghidra.program.model.lang.ExternalLanguageCompilerSpecQuery`.
+#[derive(Debug, Clone)]
+pub struct ExternalLanguageCompilerSpecQuery {
+    pub external_processor_name: String,
+    pub external_tool: String,
+    pub endian: Option<Endian>,
+    pub size: Option<usize>,
+    pub compiler_spec_id: Option<CompilerSpecID>,
+}
+
+impl ExternalLanguageCompilerSpecQuery {
+    pub fn new(
+        external_processor_name: impl Into<String>,
+        external_tool: impl Into<String>,
+    ) -> Self {
+        Self {
+            external_processor_name: external_processor_name.into(),
+            external_tool: external_tool.into(),
+            endian: None,
+            size: None,
+            compiler_spec_id: None,
+        }
+    }
+}
+
+impl fmt::Display for ExternalLanguageCompilerSpecQuery {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "externalProcessorName={}; externalTool={}; endian={:?}; size={:?}; compiler={:?}",
+            self.external_processor_name, self.external_tool, self.endian, self.size,
+            self.compiler_spec_id
+        )
+    }
+}
+
+// ============================================================================
+// AddressLabelInfo
+// ============================================================================
+
+/// Stores an address together with a language-defined label.
+///
+/// Corresponds to `ghidra.program.model.lang.AddressLabelInfo`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddressLabelInfo {
+    pub addr: Address,
+    pub end_addr: Address,
+    pub label: String,
+    pub description: Option<String>,
+    pub is_primary: bool,
+    pub is_entry: bool,
+    pub size_in_bytes: usize,
+    pub is_volatile: Option<bool>,
+}
+
+impl AddressLabelInfo {
+    pub fn new(
+        addr: Address,
+        size_in_bytes: usize,
+        label: impl Into<String>,
+        description: Option<String>,
+        is_primary: bool,
+        is_entry: bool,
+        is_volatile: Option<bool>,
+    ) -> Self {
+        let label = label.into();
+        let size = if size_in_bytes == 0 { 1 } else { size_in_bytes };
+        Self {
+            addr,
+            end_addr: Address::new(addr.offset + size as u64 - 1),
+            label,
+            description,
+            is_primary,
+            is_entry,
+            size_in_bytes: size,
+            is_volatile,
+        }
+    }
+
+    pub fn get_address(&self) -> Address {
+        self.addr
+    }
+
+    pub fn get_end_address(&self) -> Address {
+        self.end_addr
+    }
+
+    pub fn get_label(&self) -> &str {
+        &self.label
+    }
+
+    pub fn get_byte_size(&self) -> usize {
+        self.size_in_bytes
+    }
+}
+
+impl PartialEq for AddressLabelInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.addr == other.addr && self.label == other.label
+    }
+}
+impl Eq for AddressLabelInfo {}
+
+impl PartialOrd for AddressLabelInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AddressLabelInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.addr
+            .cmp(&other.addr)
+            .then_with(|| self.label.cmp(&other.label))
+    }
+}
+
+// ============================================================================
+// UnknownRegister
+// ============================================================================
+
+/// A register returned for undefined locations in the register address space.
+///
+/// Corresponds to `ghidra.program.model.lang.UnknownRegister`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnknownRegister {
+    pub register: Register,
+}
+
+impl UnknownRegister {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        address: Address,
+        num_bytes: usize,
+        big_endian: bool,
+        type_flags: RegisterTypeFlags,
+    ) -> Self {
+        Self {
+            register: Register::full(
+                name,
+                description,
+                address,
+                num_bytes,
+                0,
+                (num_bytes * 8) as u32,
+                big_endian,
+                type_flags,
+            ),
+        }
+    }
+}
+
+impl std::ops::Deref for UnknownRegister {
+    type Target = Register;
+    fn deref(&self) -> &Self::Target {
+        &self.register
+    }
+}
+
+// ============================================================================
+// ContextSetting
+// ============================================================================
+
+/// A context register setting over a memory range, used in compiler specs.
+///
+/// Corresponds to `ghidra.program.model.lang.ContextSetting`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextSetting {
+    pub register_name: String,
+    pub value: u64,
+    pub start_addr: Address,
+    pub end_addr: Address,
+}
+
+impl ContextSetting {
+    pub fn new(
+        register_name: impl Into<String>,
+        value: u64,
+        start_addr: Address,
+        end_addr: Address,
+    ) -> Self {
+        Self {
+            register_name: register_name.into(),
+            value,
+            start_addr,
+            end_addr,
+        }
+    }
+
+    pub fn is_equivalent(&self, other: &Self) -> bool {
+        self.register_name == other.register_name
+            && self.value == other.value
+            && self.start_addr == other.start_addr
+            && self.end_addr == other.end_addr
+    }
+}
+
+// ============================================================================
+// RegisterValue
+// ============================================================================
+
+/// A register value with a validity mask tracking which bits are known.
+///
+/// Corresponds to `ghidra.program.model.lang.RegisterValue`.
+///
+/// Values are stored as big-endian: MSB of mask is at index 0, MSB of value
+/// is at (bytes.len()/2).
+#[derive(Debug, Clone)]
+pub struct RegisterValue {
+    pub register_name: String,
+    pub bytes: Vec<u8>,
+    pub start_bit: u32,
+    pub end_bit: u32,
+    pub big_endian: bool,
+}
+
+impl RegisterValue {
+    /// Create a RegisterValue with all mask bits set (fully known value).
+    pub fn new(register_name: impl Into<String>, bit_length: u32, value: u64, big_endian: bool) -> Self {
+        let num_bytes = ((bit_length as usize) + 7) / 8;
+        let mask_len = num_bytes;
+        let mut bytes = vec![0u8; mask_len * 2];
+
+        // Set all mask bits
+        for i in 0..mask_len {
+            bytes[i] = 0xff;
+        }
+
+        // Set value bytes (big-endian in the second half)
+        let value_bytes = value.to_be_bytes();
+        let value_start = 8usize.saturating_sub(num_bytes);
+        for i in 0..num_bytes {
+            if big_endian {
+                bytes[mask_len + i] = value_bytes[value_start + i];
+            } else {
+                // Little-endian: reverse byte order
+                bytes[mask_len + i] = value_bytes[8 - 1 - i];
+            }
+        }
+
+        Self {
+            register_name: register_name.into(),
+            bytes,
+            start_bit: 0,
+            end_bit: bit_length.saturating_sub(1),
+            big_endian,
+        }
+    }
+
+    /// Create a RegisterValue with no valid bits (all mask bits off).
+    pub fn empty(register_name: impl Into<String>, mask_byte_len: usize) -> Self {
+        Self {
+            register_name: register_name.into(),
+            bytes: vec![0u8; mask_byte_len * 2],
+            start_bit: 0,
+            end_bit: (mask_byte_len * 8 - 1) as u32,
+            big_endian: false,
+        }
+    }
+
+    /// Returns the register name.
+    pub fn get_register_name(&self) -> &str {
+        &self.register_name
+    }
+
+    /// Returns true if all mask bits for the register range are set.
+    pub fn has_value(&self) -> bool {
+        let mask_len = self.bytes.len() / 2;
+        self.bytes[..mask_len].iter().all(|&b| b == 0xff)
+    }
+
+    /// Returns true if any mask bit is set.
+    pub fn has_any_value(&self) -> bool {
+        let mask_len = self.bytes.len() / 2;
+        self.bytes[..mask_len].iter().any(|&b| b != 0)
+    }
+
+    /// Get the unsigned value ignoring the mask.
+    pub fn get_unsigned_value_ignore_mask(&self) -> u64 {
+        let mask_len = self.bytes.len() / 2;
+        let value_bytes = &self.bytes[mask_len..];
+        let mut result = 0u64;
+        for &b in value_bytes.iter() {
+            result = (result << 8) | (b as u64);
+        }
+        result
+    }
+
+    /// Get the unsigned value if all mask bits are set, otherwise None.
+    pub fn get_unsigned_value(&self) -> Option<u64> {
+        if self.has_value() {
+            Some(self.get_unsigned_value_ignore_mask())
+        } else {
+            None
+        }
+    }
+
+    /// Combine this register value with another, preferring the other's masked bits.
+    pub fn combine_values(&self, other: &RegisterValue) -> RegisterValue {
+        let n = self.bytes.len() / 2;
+        let mut result_bytes = vec![0u8; self.bytes.len()];
+        for i in 0..n {
+            let mask = other.bytes[i];
+            let clear_mask = !mask;
+            result_bytes[n + i] = (other.bytes[n + i] & mask) | (self.bytes[n + i] & clear_mask);
+            result_bytes[i] = self.bytes[i] | other.bytes[i];
+        }
+        RegisterValue {
+            register_name: self.register_name.clone(),
+            bytes: result_bytes,
+            start_bit: self.start_bit,
+            end_bit: self.end_bit,
+            big_endian: self.big_endian,
+        }
+    }
+
+    /// Return the raw mask/value byte array.
+    pub fn to_bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+impl PartialEq for RegisterValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.register_name == other.register_name && self.bytes == other.bytes
+    }
+}
+impl Eq for RegisterValue {}
+
+impl fmt::Display for RegisterValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mask_len = self.bytes.len() / 2;
+        let mask_str: String = self.bytes[..mask_len]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        let val_str: String = self.bytes[mask_len..]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        write!(
+            f,
+            "RegisterValue({}): mask=0x{} value=0x{}",
+            self.register_name, mask_str, val_str
+        )
+    }
+}
+
+// ============================================================================
+// Mask / MaskImpl
+// ============================================================================
+
+/// A bit mask for testing instruction bits.
+///
+/// Corresponds to `ghidra.program.model.lang.Mask` (interface).
+pub trait Mask: fmt::Debug + Send + Sync {
+    fn apply_mask(&self, cde: &[u8], result: &mut [u8]) -> Result<(), LangError>;
+    fn equal_masked_value(&self, cde: &[u8], target: &[u8]) -> Result<bool, LangError>;
+    fn complement_mask(&self, msk: &[u8], result: &mut [u8]) -> Result<(), LangError>;
+    fn get_bytes(&self) -> &[u8];
+}
+
+/// Byte-array implementation of `Mask`.
+///
+/// Corresponds to `ghidra.program.model.lang.MaskImpl`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MaskImpl {
+    mask: Vec<u8>,
+}
+
+impl MaskImpl {
+    pub fn new(mask: Vec<u8>) -> Self {
+        Self { mask }
+    }
+}
+
+impl Mask for MaskImpl {
+    fn apply_mask(&self, cde: &[u8], result: &mut [u8]) -> Result<(), LangError> {
+        if cde.len() < self.mask.len() || result.len() < cde.len() {
+            return Err(LangError::IncompatibleMask);
+        }
+        for i in 0..self.mask.len() {
+            result[i] = self.mask[i] & cde[i];
+        }
+        for i in self.mask.len()..cde.len() {
+            result[i] = cde[i];
+        }
+        Ok(())
+    }
+
+    fn equal_masked_value(&self, cde: &[u8], target: &[u8]) -> Result<bool, LangError> {
+        if cde.len() < self.mask.len() || target.len() < self.mask.len() {
+            return Err(LangError::IncompatibleMask);
+        }
+        for i in 0..self.mask.len() {
+            if (self.mask[i] & cde[i]) != target[i] {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    fn complement_mask(&self, msk: &[u8], result: &mut [u8]) -> Result<(), LangError> {
+        if msk.len() < self.mask.len() || result.len() < self.mask.len() {
+            return Err(LangError::IncompatibleMask);
+        }
+        for i in 0..self.mask.len() {
+            result[i] = !self.mask[i] & msk[i];
+        }
+        Ok(())
+    }
+
+    fn get_bytes(&self) -> &[u8] {
+        &self.mask
+    }
+}
+
+impl PartialEq for MaskImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.mask == other.mask
+    }
+}
+impl Eq for MaskImpl {}
+
+// ============================================================================
+// PrototypeModel
+// ============================================================================
+
+/// A function calling convention model.
+///
+/// Corresponds to `ghidra.program.model.lang.ProtoypeModel`.
+/// This is a simplified Rust representation; the Java version has XML parsing
+/// and complex storage assignment logic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrototypeModel {
+    pub name: String,
+    pub extrapop: i32,
+    pub stackshift: i32,
+    pub input_list_type: InputListType,
+    pub has_this: bool,
+    pub is_construct: bool,
+    pub has_upon_entry: bool,
+    pub has_upon_return: bool,
+    pub is_extension: bool,
+    pub unaffected: Vec<String>,
+    pub killed_by_call: Vec<String>,
+    pub return_address: Vec<String>,
+    pub likely_trash: Vec<String>,
+    pub internal_storage: Vec<String>,
+}
+
+impl PrototypeModel {
+    pub const UNKNOWN_EXTRAPOP: i32 = 0x8000;
+
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            extrapop: Self::UNKNOWN_EXTRAPOP,
+            stackshift: -1,
+            input_list_type: InputListType::Standard,
+            has_this: false,
+            is_construct: false,
+            has_upon_entry: false,
+            has_upon_return: false,
+            is_extension: false,
+            unaffected: Vec::new(),
+            killed_by_call: Vec::new(),
+            return_address: Vec::new(),
+            likely_trash: Vec::new(),
+            internal_storage: Vec::new(),
+        }
+    }
+
+    /// Create an alias of another PrototypeModel.
+    pub fn alias(name: impl Into<String>, other: &PrototypeModel) -> Self {
+        Self {
+            name: name.into(),
+            extrapop: other.extrapop,
+            stackshift: other.stackshift,
+            input_list_type: other.input_list_type,
+            has_this: other.has_this,
+            is_construct: other.is_construct,
+            has_upon_entry: other.has_upon_entry,
+            has_upon_return: other.has_upon_return,
+            is_extension: false,
+            unaffected: other.unaffected.clone(),
+            killed_by_call: other.killed_by_call.clone(),
+            return_address: other.return_address.clone(),
+            likely_trash: other.likely_trash.clone(),
+            internal_storage: other.internal_storage.clone(),
+        }
+    }
+
+    pub fn is_merged(&self) -> bool {
+        false
+    }
+
+    pub fn has_injection(&self) -> bool {
+        self.has_upon_entry || self.has_upon_return
+    }
+
+    pub fn get_extrapop(&self) -> i32 {
+        self.extrapop
+    }
+
+    pub fn is_equivalent(&self, other: &PrototypeModel) -> bool {
+        self.name == other.name
+            && self.extrapop == other.extrapop
+            && self.stackshift == other.stackshift
+            && self.has_this == other.has_this
+            && self.is_construct == other.is_construct
+            && self.has_upon_entry == other.has_upon_entry
+            && self.has_upon_return == other.has_upon_return
+            && self.input_list_type == other.input_list_type
+    }
+
+    /// Predefined: cdecl calling convention model.
+    pub fn cdecl() -> Self {
+        Self::new("__cdecl")
+    }
+
+    /// Predefined: stdcall calling convention model.
+    pub fn stdcall() -> Self {
+        Self::new("__stdcall")
+    }
+
+    /// Predefined: fastcall calling convention model.
+    pub fn fastcall() -> Self {
+        Self::new("__fastcall")
+    }
+
+    /// Predefined: thiscall calling convention model.
+    pub fn thiscall() -> Self {
+        let mut m = Self::new("__thiscall");
+        m.has_this = true;
+        m
+    }
+}
+
+impl fmt::Display for PrototypeModel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name)
+    }
+}
+
+impl PartialEq for PrototypeModel {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+impl Eq for PrototypeModel {}
+
+// ============================================================================
+// ParamEntry
+// ============================================================================
+
+/// A single entry in a parameter list describing a storage location.
+///
+/// Corresponds to `ghidra.program.model.lang.ParamEntry`.
+/// This is a simplified version for Rust; the Java version has XML parsing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParamEntry {
+    pub group: i32,
+    pub storage_class: StorageClass,
+    pub space_name: String,
+    pub address_base: u64,
+    pub size: usize,
+    pub min_size: usize,
+    pub alignment: usize,
+    pub num_slots: usize,
+    pub is_big_endian: bool,
+    pub force_left_justify: bool,
+    pub reverse_stack: bool,
+    pub overlapping: bool,
+}
+
+impl ParamEntry {
+    pub fn new(group: i32) -> Self {
+        Self {
+            group,
+            storage_class: StorageClass::General,
+            space_name: String::new(),
+            address_base: 0,
+            size: 0,
+            min_size: 0,
+            alignment: 0,
+            num_slots: 0,
+            is_big_endian: false,
+            force_left_justify: false,
+            reverse_stack: false,
+            overlapping: false,
+        }
+    }
+
+    pub fn get_group(&self) -> i32 {
+        self.group
+    }
+
+    pub fn get_size(&self) -> usize {
+        self.size
+    }
+
+    pub fn get_min_size(&self) -> usize {
+        self.min_size
+    }
+
+    pub fn get_align(&self) -> usize {
+        self.alignment
+    }
+}
+
+// ============================================================================
+// PrototypePieces
+// ============================================================================
+
+/// Raw components of a function prototype obtained from parsing source code.
+///
+/// Corresponds to `ghidra.program.model.lang.PrototypePieces`.
+#[derive(Debug, Clone)]
+pub struct PrototypePieces {
+    pub model_name: Option<String>,
+    pub out_type: Option<String>,
+    pub in_types: Vec<String>,
+    pub first_var_arg_slot: i32,
+}
+
+impl PrototypePieces {
+    pub fn new() -> Self {
+        Self {
+            model_name: None,
+            out_type: None,
+            in_types: Vec::new(),
+            first_var_arg_slot: -1,
+        }
+    }
+}
+
+impl Default for PrototypePieces {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// ParameterPieces
+// ============================================================================
+
+/// Basic elements of a parameter: address, data-type, properties.
+///
+/// Corresponds to `ghidra.program.model.lang.ParameterPieces`.
+#[derive(Debug, Clone, Default)]
+pub struct ParameterPieces {
+    pub address: Option<Address>,
+    pub type_name: Option<String>,
+    pub join_pieces: Vec<Address>,
+    pub is_this_pointer: bool,
+    pub hidden_return_ptr: bool,
+    pub is_indirect: bool,
+}
+
+impl ParameterPieces {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn swap_markup(&mut self, other: &mut ParameterPieces) {
+        std::mem::swap(&mut self.type_name, &mut other.type_name);
+        std::mem::swap(&mut self.join_pieces, &mut other.join_pieces);
+        std::mem::swap(&mut self.is_this_pointer, &mut other.is_this_pointer);
+        std::mem::swap(&mut self.hidden_return_ptr, &mut other.hidden_return_ptr);
+        std::mem::swap(&mut self.is_indirect, &mut other.is_indirect);
+    }
+}
+
+// ============================================================================
+// ProcessorContextView (trait) + ProcessorContext (trait)
+// ============================================================================
+
+/// Read-only view of processor register state.
+///
+/// Corresponds to `ghidra.program.model.lang.ProcessorContextView` (interface).
+pub trait ProcessorContextView: fmt::Debug + Send + Sync {
+    fn get_base_context_register(&self) -> Option<&Register>;
+    fn get_registers(&self) -> Vec<&Register>;
+    fn get_register(&self, name: &str) -> Option<&Register>;
+    fn get_value(&self, register: &Register, signed: bool) -> Option<u64>;
+    fn get_register_value(&self, register: &Register) -> Option<RegisterValue>;
+    fn has_value(&self, register: &Register) -> bool;
+}
+
+/// Mutable processor register state.
+///
+/// Corresponds to `ghidra.program.model.lang.ProcessorContext` (interface).
+pub trait ProcessorContext: ProcessorContextView {
+    fn set_value(&mut self, register: &Register, value: u64) -> Result<(), LangError>;
+    fn set_register_value(&mut self, value: RegisterValue) -> Result<(), LangError>;
+    fn clear_register(&mut self, register: &Register) -> Result<(), LangError>;
+}
+
+// ============================================================================
+// InstructionPrototype (trait)
+// ============================================================================
+
+/// Describes one machine-level instruction.
+///
+/// Corresponds to `ghidra.program.model.lang.InstructionPrototype` (interface).
+pub trait InstructionPrototype: fmt::Debug + Send + Sync {
+    fn has_delay_slots(&self) -> bool;
+    fn has_cross_build_dependency(&self) -> bool;
+    fn has_next2_dependency(&self) -> bool;
+    fn get_mnemonic(&self) -> &str;
+    fn get_length(&self) -> usize;
+    fn get_flow_type(&self) -> FlowType;
+    fn get_delay_slot_depth(&self) -> usize;
+    fn is_in_delay_slot(&self) -> bool;
+    fn get_num_operands(&self) -> usize;
+    fn get_op_type(&self, operand_index: usize) -> u32;
+    fn get_fall_through_offset(&self) -> Option<usize>;
+    fn get_flows(&self) -> Vec<Address>;
+}
+
+/// Flow type for an instruction.
+///
+/// Corresponds to `ghidra.program.model.symbol.FlowType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum FlowType {
+    Fall,
+    UnconditionalBranch,
+    ConditionalBranch,
+    Call,
+    CallReturn,
+    Terminal,
+    Unknown,
+}
+
+impl FlowType {
+    pub fn is_call(&self) -> bool {
+        matches!(self, FlowType::Call | FlowType::CallReturn)
+    }
+
+    pub fn is_branch(&self) -> bool {
+        matches!(
+            self,
+            FlowType::UnconditionalBranch | FlowType::ConditionalBranch
+        )
+    }
+
+    pub fn is_terminal(&self) -> bool {
+        *self == FlowType::Terminal
+    }
+
+    pub fn is_fall(&self) -> bool {
+        *self == FlowType::Fall
+    }
+
+    pub fn is_conditional(&self) -> bool {
+        *self == FlowType::ConditionalBranch
+    }
+
+    pub fn has_fallthrough(&self) -> bool {
+        !matches!(
+            self,
+            FlowType::Terminal | FlowType::UnconditionalBranch
+        )
+    }
+}
+
+/// InstructionPrototype sentinel value for invalid depth change.
+pub const INVALID_DEPTH_CHANGE: i32 = 1 << 24;
+
+// ============================================================================
+// ConstantPool
+// ============================================================================
+
+/// A deferred constant pool (e.g., JVM constant pool).
+///
+/// Corresponds to `ghidra.program.model.lang.ConstantPool`.
+#[derive(Debug, Clone)]
+pub enum ConstantPoolRecord {
+    Primitive {
+        tag: u8,
+        value: i64,
+        type_name: String,
+    },
+    StringLiteral {
+        token: String,
+    },
+    ClassReference {
+        token: String,
+    },
+    PointerMethod {
+        token: String,
+        type_name: String,
+    },
+    PointerField {
+        token: String,
+        type_name: String,
+    },
+    ArrayLength {
+        token: String,
+        type_name: String,
+    },
+    InstanceOf {
+        token: String,
+        type_name: String,
+    },
+    CheckCast {
+        token: String,
+        type_name: String,
+    },
+}
+
+impl ConstantPoolRecord {
+    pub const PRIMITIVE: u8 = 0;
+    pub const STRING_LITERAL: u8 = 1;
+    pub const CLASS_REFERENCE: u8 = 2;
+    pub const POINTER_METHOD: u8 = 3;
+    pub const POINTER_FIELD: u8 = 4;
+    pub const ARRAY_LENGTH: u8 = 5;
+    pub const INSTANCE_OF: u8 = 6;
+    pub const CHECK_CAST: u8 = 7;
+}
+
+/// Trait for deferred constant pool lookups.
+pub trait ConstantPool: fmt::Debug + Send + Sync {
+    fn get_record(&self, ref_path: &[u64]) -> Option<ConstantPoolRecord>;
+}
+
+// ============================================================================
+// InjectPayload
+// ============================================================================
+
+/// A P-code injection payload used for call-fixups and callother-fixups.
+///
+/// Corresponds to `ghidra.program.model.lang.InjectPayload`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectPayload {
+    pub name: String,
+    pub payload_type: InjectPayloadType,
+    pub pcode_snippet: String,
+    pub source: String,
+}
+
+/// The type of inject payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum InjectPayloadType {
+    CallFixup,
+    CallOtherFixup,
+    CallMechanism,
+    ExecutablePcode,
+}
+
+impl InjectPayload {
+    pub const CALLFIXUP_TYPE: u32 = 0;
+    pub const CALLOTHERFIXUP_TYPE: u32 = 1;
+    pub const CALLMECHANISM_TYPE: u32 = 2;
+    pub const EXECUTABLEPCODE_TYPE: u32 = 3;
+}
+
+// ============================================================================
+// PcodeInjectLibrary
+// ============================================================================
+
+/// A library of P-code injection payloads.
+///
+/// Corresponds to `ghidra.program.model.lang.PcodeInjectLibrary`.
+/// This is a simplified Rust version; the Java version has complex
+/// Sleigh parsing and injection machinery.
+#[derive(Debug, Clone, Default)]
+pub struct PcodeInjectLibrary {
+    pub payloads: HashMap<String, InjectPayload>,
+}
+
+impl PcodeInjectLibrary {
+    pub fn new() -> Self {
+        Self {
+            payloads: HashMap::new(),
+        }
+    }
+
+    pub fn register_payload(&mut self, payload: InjectPayload) {
+        self.payloads.insert(payload.name.clone(), payload);
+    }
+
+    pub fn get_payload(&self, name: &str) -> Option<&InjectPayload> {
+        self.payloads.get(name)
+    }
+}
+
+// ============================================================================
+// ProgramArchitecture (trait)
+// ============================================================================
+
+/// Identifies the program architecture (language + compiler spec).
+///
+/// Corresponds to `ghidra.program.model.lang.ProgramArchitecture` (interface).
+pub trait ProgramArchitecture: fmt::Debug + Send + Sync {
+    fn get_language(&self) -> &Language;
+    fn get_compiler_spec(&self) -> &CompilerSpec;
+    fn get_language_compiler_spec_pair(&self) -> LanguageCompilerSpecPair;
+}
+
+// ============================================================================
+// LanguageService (trait)
+// ============================================================================
+
+/// Service for looking up languages and compiler specs.
+///
+/// Corresponds to `ghidra.program.model.lang.LanguageService` (interface).
+pub trait LanguageService: fmt::Debug + Send + Sync {
+    fn get_language(&self, id: &LanguageID) -> Result<Arc<Language>, LangError>;
+    fn get_default_language(&self, processor: &str) -> Result<Arc<Language>, LangError>;
+    fn get_language_description(&self, id: &LanguageID) -> Result<Box<dyn LanguageDescription>, LangError>;
+    fn get_language_descriptions(&self, include_deprecated: bool) -> Vec<Box<dyn LanguageDescription>>;
+    fn get_language_compiler_spec_pairs(
+        &self,
+        query: &LanguageCompilerSpecQuery,
+    ) -> Vec<LanguageCompilerSpecPair>;
+}
+
+// ============================================================================
+// RegisterBuilder
+// ============================================================================
+
+/// Helper for building a set of registers with proper parent-child relationships.
+///
+/// Corresponds to `ghidra.program.model.lang.RegisterBuilder`.
+/// (In Java, RegisterBuilder is a helper used during language loading.)
+#[derive(Debug)]
+pub struct RegisterBuilder {
+    registers: Vec<Register>,
+    parent_map: HashMap<String, usize>,
+}
+
+impl RegisterBuilder {
+    pub fn new() -> Self {
+        Self {
+            registers: Vec::new(),
+            parent_map: HashMap::new(),
+        }
+    }
+
+    /// Add a base (no parent) register.
+    pub fn add_register(&mut self, reg: Register) {
+        let name = reg.name.clone();
+        let idx = self.registers.len();
+        self.parent_map.insert(name, idx);
+        self.registers.push(reg);
+    }
+
+    /// Add a child register under the named parent.
+    pub fn add_child_register(
+        &mut self,
+        parent_name: &str,
+        reg: Register,
+    ) -> Result<(), LangError> {
+        if !self.parent_map.contains_key(parent_name) {
+            return Err(LangError::RegisterNotFound(parent_name.to_string()));
+        }
+        let name = reg.name.clone();
+        let idx = self.registers.len();
+        self.parent_map.insert(name, idx);
+        self.registers.push(reg);
+        Ok(())
+    }
+
+    /// Build the final RegisterManager from the added registers.
+    pub fn build(mut self) -> RegisterManager {
+        let mut rm = RegisterManager::new();
+        for reg in self.registers.drain(..) {
+            rm.add_register(reg);
+        }
+        rm.initialize();
+        rm
+    }
+}
+
+impl Default for RegisterBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// RegisterTree
+// ============================================================================
+
+/// A tree of register names representing parent-child relationships.
+///
+/// Corresponds to `ghidra.program.model.lang.RegisterTree`.
+#[derive(Debug, Clone)]
+pub struct RegisterTree {
+    pub name: String,
+    pub children: Vec<RegisterTree>,
+}
+
+impl RegisterTree {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            children: Vec::new(),
+        }
+    }
+
+    pub fn add_child(&mut self, child: RegisterTree) {
+        self.children.push(child);
+    }
+
+    /// Collect all register names in this tree (depth-first).
+    pub fn collect_names(&self) -> Vec<&str> {
+        let mut names = vec![self.name.as_str()];
+        for child in &self.children {
+            names.extend(child.collect_names());
+        }
+        names
+    }
+}
+
+// ============================================================================
+// ParallelInstructionLanguageHelper (trait)
+// ============================================================================
+
+/// Helper for identifying parallel instruction execution in a language.
+///
+/// Corresponds to `ghidra.program.model.lang.ParallelInstructionLanguageHelper` (interface).
+pub trait ParallelInstructionLanguageHelper: fmt::Debug + Send + Sync {
+    /// Returns true if the given instruction bytes indicate parallel execution.
+    fn is_parallel_instruction(&self, addr: Address, mem: &[u8]) -> bool;
+}
+
+// ============================================================================
+// LanguageVersionException + other errors
+// ============================================================================
+
+/// Comprehensive error type for the lang module.
+///
+/// Corresponds to various Java exception types in `ghidra.program.model.lang`.
+#[derive(Debug, Clone)]
+pub enum LangError {
+    /// No language found for the given LanguageID.
+    LanguageNotFound(String),
+    /// No compiler spec found for the given CompilerSpecID.
+    CompilerSpecNotFound {
+        language_id: LanguageID,
+        compiler_spec_id: CompilerSpecID,
+    },
+    /// No processor found for the given name.
+    ProcessorNotFound(String),
+    /// Register not found by name.
+    RegisterNotFound(String),
+    /// Invalid language ID string.
+    InvalidLanguageID(String),
+    /// Not enough bytes to parse instruction.
+    InsufficientBytes {
+        needed: usize,
+        available: usize,
+    },
+    /// Unrecognized instruction bytes.
+    UnknownInstruction,
+    /// Unknown context register value.
+    UnknownContext,
+    /// Mask byte array size mismatch.
+    IncompatibleMask,
+    /// Nested delay slot detected.
+    NestedDelaySlot,
+    /// Language version mismatch.
+    LanguageVersionMismatch {
+        expected: i32,
+        found: i32,
+    },
+    /// Context change not allowed.
+    ContextChangeError(String),
+    /// Generic error message.
+    Other(String),
+}
+
+impl fmt::Display for LangError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LangError::LanguageNotFound(id) => write!(f, "Language not found: {}", id),
+            LangError::CompilerSpecNotFound { language_id, compiler_spec_id } => {
+                write!(
+                    f,
+                    "Compiler spec not found: {} (language: {})",
+                    compiler_spec_id, language_id
+                )
+            }
+            LangError::ProcessorNotFound(name) => write!(f, "Processor not found: {}", name),
+            LangError::RegisterNotFound(name) => write!(f, "Register not found: {}", name),
+            LangError::InvalidLanguageID(id) => write!(f, "Invalid language ID: {}", id),
+            LangError::InsufficientBytes { needed, available } => {
+                write!(
+                    f,
+                    "Insufficient bytes: need {}, have {}",
+                    needed, available
+                )
+            }
+            LangError::UnknownInstruction => write!(f, "Unknown instruction"),
+            LangError::UnknownContext => write!(f, "Unknown context"),
+            LangError::IncompatibleMask => write!(f, "Incompatible mask"),
+            LangError::NestedDelaySlot => write!(f, "Nested delay slot"),
+            LangError::LanguageVersionMismatch { expected, found } => {
+                write!(
+                    f,
+                    "Language version mismatch: expected {}, found {}",
+                    expected, found
+                )
+            }
+            LangError::ContextChangeError(msg) => write!(f, "Context change error: {}", msg),
+            LangError::Other(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for LangError {}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -3654,5 +5374,604 @@ mod tests {
         let p1 = Processor::new("x86");
         let p2 = Processor::new("x86").with_language(LanguageID::x86_64());
         assert_eq!(p1, p2);
+    }
+
+    // ========================================================================
+    // Endian tests
+    // ========================================================================
+
+    #[test]
+    fn test_endian_from_str() {
+        assert_eq!(Endian::from_str("big"), Some(Endian::Big));
+        assert_eq!(Endian::from_str("BE"), Some(Endian::Big));
+        assert_eq!(Endian::from_str("little"), Some(Endian::Little));
+        assert_eq!(Endian::from_str("LE"), Some(Endian::Little));
+        assert_eq!(Endian::from_str("BOTH"), None);
+    }
+
+    #[test]
+    fn test_endian_properties() {
+        assert!(Endian::Big.is_big_endian());
+        assert!(!Endian::Big.is_little_endian());
+        assert!(!Endian::Little.is_big_endian());
+        assert!(Endian::Little.is_little_endian());
+        assert_eq!(Endian::Big.to_short_string(), "BE");
+        assert_eq!(Endian::Little.to_short_string(), "LE");
+    }
+
+    #[test]
+    fn test_endian_display() {
+        assert_eq!(format!("{}", Endian::Big), "Big");
+        assert_eq!(format!("{}", Endian::Little), "Little");
+    }
+
+    // ========================================================================
+    // DecompilerLanguage tests
+    // ========================================================================
+
+    #[test]
+    fn test_decompiler_language_display() {
+        assert_eq!(format!("{}", DecompilerLanguage::CLanguage), "c-language");
+        assert_eq!(format!("{}", DecompilerLanguage::JavaLanguage), "java-language");
+    }
+
+    // ========================================================================
+    // StorageClass tests
+    // ========================================================================
+
+    #[test]
+    fn test_storage_class_values() {
+        assert_eq!(StorageClass::General.value(), 0);
+        assert_eq!(StorageClass::Float.value(), 1);
+        assert_eq!(StorageClass::Ptr.value(), 2);
+        assert_eq!(StorageClass::Class1.value(), 100);
+    }
+
+    #[test]
+    fn test_storage_class_from_name() {
+        assert_eq!(StorageClass::from_name("general"), Some(StorageClass::General));
+        assert_eq!(StorageClass::from_name("float"), Some(StorageClass::Float));
+        assert_eq!(StorageClass::from_name("ptr"), Some(StorageClass::Ptr));
+        assert_eq!(StorageClass::from_name("hiddenret"), Some(StorageClass::HiddenRet));
+        assert_eq!(StorageClass::from_name("vector"), Some(StorageClass::Vector));
+        assert_eq!(StorageClass::from_name("class1"), Some(StorageClass::Class1));
+        assert_eq!(StorageClass::from_name("unknown"), None);
+    }
+
+    #[test]
+    fn test_storage_class_display() {
+        assert_eq!(format!("{}", StorageClass::General), "general");
+        assert_eq!(format!("{}", StorageClass::Float), "float");
+    }
+
+    // ========================================================================
+    // OperandType tests
+    // ========================================================================
+
+    #[test]
+    fn test_operand_type_flags() {
+        assert!(OperandType::does_read(OperandType::READ));
+        assert!(!OperandType::does_read(0));
+        assert!(OperandType::does_write(OperandType::WRITE));
+        assert!(OperandType::is_immediate(OperandType::IMMEDIATE));
+        assert!(OperandType::is_register(OperandType::REGISTER));
+        assert!(OperandType::is_address(OperandType::ADDRESS));
+        assert!(OperandType::is_scalar(OperandType::SCALAR));
+        assert!(OperandType::is_dynamic(OperandType::DYNAMIC));
+        assert!(OperandType::is_float(OperandType::FLOAT));
+        assert!(OperandType::is_signed(OperandType::SIGNED));
+    }
+
+    #[test]
+    fn test_operand_type_combined() {
+        let t = OperandType::ADDRESS | OperandType::READ | OperandType::DYNAMIC;
+        assert!(OperandType::is_address(t));
+        assert!(OperandType::does_read(t));
+        assert!(OperandType::is_dynamic(t));
+        assert!(!OperandType::does_write(t));
+    }
+
+    #[test]
+    fn test_operand_type_debug_string() {
+        let t = OperandType::ADDRESS | OperandType::READ;
+        let s = OperandType::to_debug_string(t);
+        assert!(s.contains("ADDR"));
+        assert!(s.contains("READ"));
+    }
+
+    #[test]
+    fn test_operand_type_scalar_as_address() {
+        let t = OperandType::ADDRESS | OperandType::SCALAR;
+        assert!(OperandType::is_scalar_as_address(t));
+    }
+
+    #[test]
+    fn test_operand_type_struct() {
+        let ot = OperandType::new(OperandType::REGISTER | OperandType::WRITE);
+        assert!(ot.contains(OperandType::REGISTER));
+        assert!(ot.contains(OperandType::WRITE));
+        assert!(!ot.contains(OperandType::READ));
+    }
+
+    // ========================================================================
+    // SpaceNames tests
+    // ========================================================================
+
+    #[test]
+    fn test_space_names() {
+        assert_eq!(SpaceNames::CONSTANT_SPACE_NAME, "const");
+        assert_eq!(SpaceNames::UNIQUE_SPACE_NAME, "unique");
+        assert_eq!(SpaceNames::STACK_SPACE_NAME, "stack");
+        assert_eq!(SpaceNames::JOIN_SPACE_NAME, "join");
+        assert_eq!(SpaceNames::CONSTANT_SPACE_INDEX, 0);
+        assert_eq!(SpaceNames::OTHER_SPACE_INDEX, 1);
+        assert_eq!(SpaceNames::UNIQUE_SPACE_SIZE, 4);
+    }
+
+    // ========================================================================
+    // GhidraLanguagePropertyKeys tests
+    // ========================================================================
+
+    #[test]
+    fn test_language_property_keys() {
+        assert_eq!(
+            GhidraLanguagePropertyKeys::MAXIMUM_INSTRUCTION_LENGTH,
+            "maximumInstructionLength"
+        );
+        assert_eq!(
+            GhidraLanguagePropertyKeys::CUSTOM_DISASSEMBLER_CLASS,
+            "customDisassemblerClass"
+        );
+        assert_eq!(
+            GhidraLanguagePropertyKeys::ENABLE_NO_RETURN_ANALYSIS,
+            "enableNoReturnAnalysis"
+        );
+    }
+
+    // ========================================================================
+    // BasicCompilerSpecDescription tests
+    // ========================================================================
+
+    #[test]
+    fn test_basic_compiler_spec_description() {
+        let desc = BasicCompilerSpecDescription::new(
+            CompilerSpecID::gcc(),
+            "GNU C Compiler",
+        );
+        assert_eq!(desc.get_compiler_spec_id().name, "gcc");
+        assert_eq!(desc.get_compiler_spec_name(), "GNU C Compiler");
+        assert_eq!(format!("{}", desc), "GNU C Compiler");
+    }
+
+    #[test]
+    fn test_basic_compiler_spec_description_eq() {
+        let d1 = BasicCompilerSpecDescription::new(CompilerSpecID::gcc(), "GCC");
+        let d2 = BasicCompilerSpecDescription::new(CompilerSpecID::gcc(), "Other");
+        assert_eq!(d1, d2); // same id = equal
+    }
+
+    // ========================================================================
+    // LanguageCompilerSpecPair tests
+    // ========================================================================
+
+    #[test]
+    fn test_language_compiler_spec_pair() {
+        let pair = LanguageCompilerSpecPair::new(
+            LanguageID::x86_64(),
+            CompilerSpecID::gcc(),
+        );
+        assert_eq!(pair.language_id, LanguageID::x86_64());
+        assert_eq!(pair.compiler_spec_id, CompilerSpecID::gcc());
+        assert_eq!(format!("{}", pair), "x86:LE:64:default:gcc");
+    }
+
+    #[test]
+    fn test_language_compiler_spec_pair_from_strings() {
+        let pair = LanguageCompilerSpecPair::from_strings("x86:LE:64:default", "gcc");
+        assert!(pair.is_ok());
+        let pair = pair.unwrap();
+        assert_eq!(pair.compiler_spec_id, CompilerSpecID::gcc());
+
+        let bad = LanguageCompilerSpecPair::from_strings("invalid", "gcc");
+        assert!(bad.is_err());
+    }
+
+    #[test]
+    fn test_language_compiler_spec_pair_ordering() {
+        let p1 = LanguageCompilerSpecPair::new(
+            LanguageID::x86_64(),
+            CompilerSpecID::gcc(),
+        );
+        let p2 = LanguageCompilerSpecPair::new(
+            LanguageID::x86_64(),
+            CompilerSpecID::windows(),
+        );
+        assert!(p1 < p2); // gcc < windows
+    }
+
+    // ========================================================================
+    // LanguageCompilerSpecQuery tests
+    // ========================================================================
+
+    #[test]
+    fn test_language_compiler_spec_query() {
+        let q = LanguageCompilerSpecQuery {
+            processor: Some("x86".to_string()),
+            endian: Some(Endian::Little),
+            size: Some(64),
+            variant: None,
+        };
+        assert!(q.processor.is_some());
+        assert_eq!(q.size, Some(64));
+    }
+
+    // ========================================================================
+    // ExternalLanguageCompilerSpecQuery tests
+    // ========================================================================
+
+    #[test]
+    fn test_external_language_compiler_spec_query() {
+        let q = ExternalLanguageCompilerSpecQuery::new("metapc", "IDA-PRO");
+        assert_eq!(q.external_processor_name, "metapc");
+        assert_eq!(q.external_tool, "IDA-PRO");
+        let s = format!("{}", q);
+        assert!(s.contains("metapc"));
+        assert!(s.contains("IDA-PRO"));
+    }
+
+    // ========================================================================
+    // AddressLabelInfo tests
+    // ========================================================================
+
+    #[test]
+    fn test_address_label_info() {
+        let info = AddressLabelInfo::new(
+            Address::new(0x1000),
+            4,
+            "_start",
+            Some("Entry point".to_string()),
+            true,
+            true,
+            None,
+        );
+        assert_eq!(info.get_address().offset, 0x1000);
+        assert_eq!(info.get_end_address().offset, 0x1003);
+        assert_eq!(info.get_label(), "_start");
+        assert_eq!(info.get_byte_size(), 4);
+        assert!(info.is_primary);
+        assert!(info.is_entry);
+    }
+
+    #[test]
+    fn test_address_label_info_ordering() {
+        let i1 = AddressLabelInfo::new(Address::new(0x1000), 1, "a", None, false, false, None);
+        let i2 = AddressLabelInfo::new(Address::new(0x2000), 1, "b", None, false, false, None);
+        assert!(i1 < i2);
+    }
+
+    // ========================================================================
+    // UnknownRegister tests
+    // ========================================================================
+
+    #[test]
+    fn test_unknown_register() {
+        let ur = UnknownRegister::new(
+            "UNK", "Unknown", Address::new(0x100), 4, false,
+            RegisterTypeFlags::default(),
+        );
+        assert_eq!(ur.name, "UNK");
+        assert_eq!(ur.bit_length, 32);
+    }
+
+    // ========================================================================
+    // ContextSetting tests
+    // ========================================================================
+
+    #[test]
+    fn test_context_setting() {
+        let cs = ContextSetting::new("TMode", 1, Address::new(0x1000), Address::new(0x2000));
+        assert_eq!(cs.register_name, "TMode");
+        assert_eq!(cs.value, 1);
+        assert!(cs.is_equivalent(&ContextSetting::new("TMode", 1, Address::new(0x1000), Address::new(0x2000))));
+        assert!(!cs.is_equivalent(&ContextSetting::new("TMode", 0, Address::new(0x1000), Address::new(0x2000))));
+    }
+
+    // ========================================================================
+    // RegisterValue tests
+    // ========================================================================
+
+    #[test]
+    fn test_register_value_new() {
+        let rv = RegisterValue::new("EAX", 32, 0xDEADBEEF, false);
+        assert_eq!(rv.get_register_name(), "EAX");
+        assert!(rv.has_value());
+        let val = rv.get_unsigned_value();
+        assert!(val.is_some());
+    }
+
+    #[test]
+    fn test_register_value_empty() {
+        let rv = RegisterValue::empty("EAX", 4);
+        assert!(!rv.has_value());
+        assert!(!rv.has_any_value());
+        assert!(rv.get_unsigned_value().is_none());
+    }
+
+    #[test]
+    fn test_register_value_combine() {
+        let rv1 = RegisterValue::new("EAX", 32, 0x11111111, false);
+        let rv2 = RegisterValue::new("EAX", 32, 0x22222222, false);
+        let combined = rv1.combine_values(&rv2);
+        assert!(combined.has_value());
+    }
+
+    #[test]
+    fn test_register_value_display() {
+        let rv = RegisterValue::new("AL", 8, 0xFF, false);
+        let s = format!("{}", rv);
+        assert!(s.contains("RegisterValue(AL)"));
+        assert!(s.contains("mask=0x"));
+        assert!(s.contains("value=0x"));
+    }
+
+    // ========================================================================
+    // MaskImpl tests
+    // ========================================================================
+
+    #[test]
+    fn test_mask_impl_apply() {
+        let mask = MaskImpl::new(vec![0xFF, 0x00, 0xF0, 0x0F]);
+        let cde = vec![0xAB, 0xCD, 0xEF, 0x12];
+        let mut result = vec![0u8; 4];
+        mask.apply_mask(&cde, &mut result).unwrap();
+        assert_eq!(result[0], 0xAB); // 0xFF & 0xAB
+        assert_eq!(result[1], 0x00); // 0x00 & 0xCD
+        assert_eq!(result[2], 0xE0); // 0xF0 & 0xEF
+        assert_eq!(result[3], 0x02); // 0x0F & 0x12
+    }
+
+    #[test]
+    fn test_mask_impl_equal_masked_value() {
+        let mask = MaskImpl::new(vec![0xFF, 0x0F]);
+        let cde = vec![0xAB, 0xCD];
+        let target_match = vec![0xAB, 0x0D];
+        let target_mismatch = vec![0xAB, 0x0C];
+        assert!(mask.equal_masked_value(&cde, &target_match).unwrap());
+        assert!(!mask.equal_masked_value(&cde, &target_mismatch).unwrap());
+    }
+
+    // ========================================================================
+    // PrototypeModel tests
+    // ========================================================================
+
+    #[test]
+    fn test_prototype_model_new() {
+        let pm = PrototypeModel::new("__cdecl");
+        assert_eq!(pm.name, "__cdecl");
+        assert_eq!(pm.extrapop, PrototypeModel::UNKNOWN_EXTRAPOP);
+        assert!(!pm.has_this);
+        assert!(!pm.has_injection());
+    }
+
+    #[test]
+    fn test_prototype_model_alias() {
+        let base = PrototypeModel::new("__cdecl");
+        let alias = PrototypeModel::alias("custom_cdecl", &base);
+        assert_eq!(alias.name, "custom_cdecl");
+        assert_eq!(alias.extrapop, base.extrapop);
+    }
+
+    #[test]
+    fn test_prototype_model_predefined() {
+        let cdecl = PrototypeModel::cdecl();
+        assert_eq!(cdecl.name, "__cdecl");
+
+        let thiscall = PrototypeModel::thiscall();
+        assert!(thiscall.has_this);
+
+        let stdcall = PrototypeModel::stdcall();
+        assert_eq!(stdcall.name, "__stdcall");
+    }
+
+    #[test]
+    fn test_prototype_model_equivalent() {
+        let a = PrototypeModel::new("test");
+        let mut b = PrototypeModel::new("test");
+        assert!(a.is_equivalent(&b));
+        b.extrapop = 42;
+        assert!(!a.is_equivalent(&b));
+    }
+
+    // ========================================================================
+    // ParamEntry tests
+    // ========================================================================
+
+    #[test]
+    fn test_param_entry() {
+        let mut pe = ParamEntry::new(0);
+        pe.storage_class = StorageClass::General;
+        pe.space_name = "register".to_string();
+        pe.size = 8;
+        pe.min_size = 4;
+        pe.alignment = 8;
+        assert_eq!(pe.get_group(), 0);
+        assert_eq!(pe.get_size(), 8);
+        assert_eq!(pe.get_min_size(), 4);
+        assert_eq!(pe.get_align(), 8);
+    }
+
+    // ========================================================================
+    // PrototypePieces tests
+    // ========================================================================
+
+    #[test]
+    fn test_prototype_pieces() {
+        let pp = PrototypePieces::new();
+        assert!(pp.model_name.is_none());
+        assert!(pp.out_type.is_none());
+        assert!(pp.in_types.is_empty());
+        assert_eq!(pp.first_var_arg_slot, -1);
+    }
+
+    // ========================================================================
+    // ParameterPieces tests
+    // ========================================================================
+
+    #[test]
+    fn test_parameter_pieces_default() {
+        let pp = ParameterPieces::new();
+        assert!(pp.address.is_none());
+        assert!(!pp.is_this_pointer);
+        assert!(!pp.hidden_return_ptr);
+        assert!(!pp.is_indirect);
+    }
+
+    #[test]
+    fn test_parameter_pieces_swap_markup() {
+        let mut a = ParameterPieces {
+            type_name: Some("int".to_string()),
+            is_this_pointer: true,
+            ..ParameterPieces::new()
+        };
+        let mut b = ParameterPieces {
+            type_name: Some("float".to_string()),
+            hidden_return_ptr: true,
+            ..ParameterPieces::new()
+        };
+        a.swap_markup(&mut b);
+        assert_eq!(a.type_name, Some("float".to_string()));
+        assert!(a.hidden_return_ptr);
+        assert!(!a.is_this_pointer);
+        assert_eq!(b.type_name, Some("int".to_string()));
+        assert!(b.is_this_pointer);
+    }
+
+    // ========================================================================
+    // FlowType tests
+    // ========================================================================
+
+    #[test]
+    fn test_flow_type() {
+        assert!(FlowType::Call.is_call());
+        assert!(FlowType::CallReturn.is_call());
+        assert!(!FlowType::Fall.is_call());
+        assert!(FlowType::UnconditionalBranch.is_branch());
+        assert!(FlowType::ConditionalBranch.is_branch());
+        assert!(FlowType::ConditionalBranch.is_conditional());
+        assert!(FlowType::Terminal.is_terminal());
+        assert!(!FlowType::Terminal.has_fallthrough());
+        assert!(FlowType::Fall.has_fallthrough());
+        assert!(FlowType::ConditionalBranch.has_fallthrough());
+    }
+
+    // ========================================================================
+    // RegisterBuilder tests
+    // ========================================================================
+
+    #[test]
+    fn test_register_builder() {
+        let mut rb = RegisterBuilder::new();
+        rb.add_register(
+            Register::new("RAX", 64, "register", 0x00)
+                .with_children(vec!["EAX"]),
+        );
+        rb.add_register(
+            Register::new("EAX", 32, "register", 0x00)
+                .with_base_register("RAX")
+                .with_parent("RAX")
+                .with_lsb(0),
+        );
+
+        let rm = rb.build();
+        assert!(rm.get_register("RAX").is_some());
+        assert!(rm.get_register("EAX").is_some());
+    }
+
+    // ========================================================================
+    // RegisterTree tests
+    // ========================================================================
+
+    #[test]
+    fn test_register_tree() {
+        let mut root = RegisterTree::new("RAX");
+        let mut eax = RegisterTree::new("EAX");
+        eax.add_child(RegisterTree::new("AX"));
+        root.add_child(eax);
+
+        let names = root.collect_names();
+        assert_eq!(names, vec!["RAX", "EAX", "AX"]);
+    }
+
+    // ========================================================================
+    // LangError tests
+    // ========================================================================
+
+    #[test]
+    fn test_lang_error_display() {
+        let err = LangError::LanguageNotFound("x86:LE:64:default".to_string());
+        assert!(format!("{}", err).contains("Language not found"));
+
+        let err = LangError::InsufficientBytes { needed: 4, available: 2 };
+        assert!(format!("{}", err).contains("4"));
+        assert!(format!("{}", err).contains("2"));
+
+        let err = LangError::CompilerSpecNotFound {
+            language_id: LanguageID::x86_64(),
+            compiler_spec_id: CompilerSpecID::gcc(),
+        };
+        assert!(format!("{}", err).contains("gcc"));
+    }
+
+    #[test]
+    fn test_lang_error_is_std_error() {
+        let err: Box<dyn std::error::Error> =
+            Box::new(LangError::UnknownInstruction);
+        assert!(err.to_string().contains("Unknown instruction"));
+    }
+
+    // ========================================================================
+    // InjectPayload tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_payload() {
+        let p = InjectPayload {
+            name: "fixup_malloc".to_string(),
+            payload_type: InjectPayloadType::CallFixup,
+            pcode_snippet: "RAX = 0;".to_string(),
+            source: "default".to_string(),
+        };
+        assert_eq!(p.name, "fixup_malloc");
+        assert_eq!(p.payload_type, InjectPayloadType::CallFixup);
+    }
+
+    // ========================================================================
+    // PcodeInjectLibrary tests
+    // ========================================================================
+
+    #[test]
+    fn test_pcode_inject_library() {
+        let mut lib = PcodeInjectLibrary::new();
+        lib.register_payload(InjectPayload {
+            name: "test".to_string(),
+            payload_type: InjectPayloadType::CallFixup,
+            pcode_snippet: "".to_string(),
+            source: "".to_string(),
+        });
+        assert!(lib.get_payload("test").is_some());
+        assert!(lib.get_payload("missing").is_none());
+    }
+
+    // ========================================================================
+    // ConstantPoolRecord tests
+    // ========================================================================
+
+    #[test]
+    fn test_constant_pool_record_tag_constants() {
+        assert_eq!(ConstantPoolRecord::PRIMITIVE, 0);
+        assert_eq!(ConstantPoolRecord::STRING_LITERAL, 1);
+        assert_eq!(ConstantPoolRecord::CLASS_REFERENCE, 2);
+        assert_eq!(ConstantPoolRecord::POINTER_METHOD, 3);
+        assert_eq!(ConstantPoolRecord::POINTER_FIELD, 4);
     }
 }

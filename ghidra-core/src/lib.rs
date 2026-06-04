@@ -23,11 +23,19 @@ pub mod utility;
 pub use addr::{AddrSpaceType, Address, AddressFactory, AddressRange, AddressSet, AddressSpace};
 pub use data::{DataType, DataTypePath, DataTypeTreeNode};
 pub use symbol::{
-    ClassSymbol, DataRefType, ExportSymbol, FlowType, FunctionSymbol, GlobalSymbol,
-    GlobalVarSymbol, ImportSymbol, LabelHistory, LabelSymbol, LibrarySymbol, LocalVarSymbol,
-    Namespace, NamespaceSymbol, ParameterSymbol, RefType, Reference, ReferenceManager,
-    SourceType, Symbol, SymbolApi, SymbolKind, SymbolPath, SymbolSource,
-    SymbolTable as SymbolTableTrait, SymbolTreeNode, SymbolType,
+    AddressLabelPair, ClassSymbol, DataRefType, EntryPointReference, EquateApi,
+    EquateReference, ExportSymbol, ExternalLocation, ExternalLocationImpl,
+    ExternalLocationIterator, ExternalPath, ExternalReference, FlowType,
+    FunctionSymbol, GlobalSymbol, GlobalVarSymbol, IdentityNameTransformer,
+    IllegalCharCppTransformer, ImportSymbol, LabelHistory, LabelSymbol,
+    LibrarySymbol, LocalVarSymbol, MemReferenceImpl, NameTransformer,
+    Namespace, NamespaceSymbol, OffsetReference, ParameterSymbol, RefType,
+    RefTypeFactory, Reference, ReferenceIteratorAdapter, ReferenceListener,
+    ReferenceManager, ShiftedReference, SourceType, StackReference, Symbol,
+    SymbolApi, SymbolIteratorAdapter, SymbolIteratorStruct, SymbolKind,
+    SymbolPath, SymbolSource, SymbolTable as SymbolTableTrait,
+    SymbolTableListener, SymbolTreeNode, SymbolType, SymbolUtilities,
+    ThunkReference, MAX_SYMBOL_NAME_LENGTH, MIN_LABEL_ADDRESS_DIGITS,
 };
 pub use listing::{InstructionMnemonic, ListingRow};
 pub use program::program::{

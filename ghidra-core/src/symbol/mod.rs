@@ -4744,6 +4744,1313 @@ impl SymbolApi for Symbol {
 }
 
 // ---------------------------------------------------------------------------
+// AddressLabelPair  (AddressLabelPair.java)
+// ---------------------------------------------------------------------------
+
+/// Container for holding an address and label.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AddressLabelPair {
+    addr: Address,
+    label: String,
+}
+
+impl AddressLabelPair {
+    pub fn new(addr: Address, label: impl Into<String>) -> Self {
+        Self { addr, label: label.into() }
+    }
+    pub fn get_address(&self) -> &Address { &self.addr }
+    pub fn get_label(&self) -> &str { &self.label }
+}
+
+impl fmt::Display for AddressLabelPair {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}: {}", self.addr, self.label)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DynamicReference  (DynamicReference.java)
+// ---------------------------------------------------------------------------
+
+/// Marker trait for dynamically determined references which may not be
+/// explicitly added, deleted or modified.
+pub trait DynamicReference {
+    /// Returns the from address.
+    fn get_from_address(&self) -> &Address;
+    /// Returns the to address.
+    fn get_to_address(&self) -> &Address;
+    /// Returns the reference type.
+    fn get_reference_type(&self) -> RefType;
+    /// Returns the operand index.
+    fn get_operand_index(&self) -> i32;
+    /// Returns the symbol ID.
+    fn get_symbol_id(&self) -> i64;
+    /// Returns `true` if primary.
+    fn is_primary(&self) -> bool;
+    /// Returns the source.
+    fn get_source(&self) -> SourceType;
+    /// Returns `true` if this is a memory reference.
+    fn is_memory_reference(&self) -> bool;
+    /// Returns `true` if this is a register reference.
+    fn is_register_reference(&self) -> bool;
+    /// Returns `true` if this is a stack reference.
+    fn is_stack_reference(&self) -> bool;
+    /// Returns `true` if this is an external reference.
+    fn is_external_reference(&self) -> bool;
+    /// Returns `true` if this is an entry point reference.
+    fn is_entry_point_reference(&self) -> bool;
+    /// Returns `true` if this is an offset reference.
+    fn is_offset_reference(&self) -> bool;
+    /// Returns `true` if this is a shifted reference.
+    fn is_shifted_reference(&self) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// EntryPointReference  (EntryPointReference.java)
+// ---------------------------------------------------------------------------
+
+/// Reference object for entry points. Extends the base reference concept.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EntryPointReference {
+    from_address: Address,
+    to_address: Address,
+    ref_type: RefType,
+    op_index: i32,
+    source: SourceType,
+    primary: bool,
+}
+
+impl EntryPointReference {
+    pub fn new(from_address: Address, to_address: Address, ref_type: RefType, op_index: i32) -> Self {
+        Self { from_address, to_address, ref_type, op_index, source: SourceType::Default, primary: false }
+    }
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_reference_type(&self) -> RefType { self.ref_type }
+    pub fn get_operand_index(&self) -> i32 { self.op_index }
+    pub fn get_source(&self) -> SourceType { self.source }
+    pub fn is_primary(&self) -> bool { self.primary }
+    pub fn is_entry_point_reference(&self) -> bool { true }
+    pub fn is_memory_reference(&self) -> bool { true }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { false }
+    pub fn is_external_reference(&self) -> bool { false }
+}
+
+// ---------------------------------------------------------------------------
+// EquateReference  (EquateReference.java)
+// ---------------------------------------------------------------------------
+
+/// An equate reference consists of an address and an operand index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EquateReference {
+    address: Address,
+    op_index: i16,
+    dynamic_hash_value: u64,
+}
+
+impl EquateReference {
+    pub fn new(address: Address, op_index: i16) -> Self {
+        Self { address, op_index, dynamic_hash_value: 0 }
+    }
+    pub fn with_dynamic_hash(address: Address, op_index: i16, dynamic_hash_value: u64) -> Self {
+        Self { address, op_index, dynamic_hash_value }
+    }
+    pub fn get_address(&self) -> &Address { &self.address }
+    pub fn get_op_index(&self) -> i16 { self.op_index }
+    pub fn get_dynamic_hash_value(&self) -> u64 { self.dynamic_hash_value }
+}
+
+// ---------------------------------------------------------------------------
+// Equate  (Equate.java)
+// ---------------------------------------------------------------------------
+
+/// An equate defines a relationship between a scalar value and a string.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Equate {
+    /// The equate name.
+    name: String,
+    /// The numeric value.
+    value: i64,
+    /// References where this equate is used.
+    references: Vec<EquateReference>,
+}
+
+impl Equate {
+    pub fn new(name: impl Into<String>, value: i64) -> Self {
+        Self { name: name.into(), value, references: Vec::new() }
+    }
+    pub fn get_name(&self) -> &str { &self.name }
+    pub fn get_display_name(&self) -> String { self.name.clone() }
+    pub fn get_value(&self) -> i64 { self.value }
+    pub fn set_value(&mut self, value: i64) { self.value = value; }
+    pub fn get_references(&self) -> &[EquateReference] { &self.references }
+    pub fn get_reference_count(&self) -> usize { self.references.len() }
+    pub fn add_reference(&mut self, er: EquateReference) { self.references.push(er); }
+    pub fn remove_reference(&mut self, address: &Address, op_index: i16) -> bool {
+        let len_before = self.references.len();
+        self.references.retain(|r| !(r.address == *address && r.op_index == op_index));
+        self.references.len() < len_before
+    }
+    /// Returns the equate name for a given value, or the value as hex string.
+    pub fn get_equated_string_masked(value: i64, mask: i64, prefix: &str) -> String {
+        let masked = value & mask;
+        format!("{}{:X}", prefix, masked)
+    }
+}
+
+impl fmt::Display for Equate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} = 0x{:X}", self.name, self.value)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EquateTable  (EquateTable.java)
+// ---------------------------------------------------------------------------
+
+/// Manages all equates for a program. An equate defines a relationship between
+/// a scalar value and a string whereby the scalar may be represented by the string.
+pub trait EquateTable: fmt::Debug + Send + Sync {
+    /// Creates a new equate.
+    fn create_equate(&mut self, name: &str, value: i64) -> SymbolResult<Box<dyn EquateApi>>;
+    /// Returns the equate with the given name.
+    fn get_equate(&self, name: &str) -> Option<&dyn EquateApi>;
+    /// Returns all equates with the given value.
+    fn get_equates(&self, value: i64) -> Vec<&dyn EquateApi>;
+    /// Returns all equates.
+    fn get_all_equates(&self) -> Vec<&dyn EquateApi>;
+    /// Removes the equate with the given name.
+    fn remove_equate(&mut self, name: &str) -> SymbolResult<()>;
+    /// Returns the equate at the given address and operand index.
+    fn get_equate_at(&self, address: &Address, op_index: i16) -> Option<&dyn EquateApi>;
+    /// Returns all equate references at the given address.
+    fn get_equate_references(&self, address: &Address) -> Vec<&dyn EquateApi>;
+}
+
+/// Trait object interface for equates (used by EquateTable).
+pub trait EquateApi: fmt::Debug + Send + Sync {
+    fn get_name(&self) -> String;
+    fn get_display_name(&self) -> String;
+    fn get_value(&self) -> i64;
+    fn set_value(&mut self, value: i64);
+    fn get_references(&self) -> &[EquateReference];
+    fn get_reference_count(&self) -> usize;
+    fn add_reference(&mut self, er: EquateReference);
+    fn remove_reference(&mut self, address: &Address, op_index: i16) -> bool;
+}
+
+impl EquateApi for Equate {
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_display_name(&self) -> String { self.name.clone() }
+    fn get_value(&self) -> i64 { self.value }
+    fn set_value(&mut self, value: i64) { self.value = value; }
+    fn get_references(&self) -> &[EquateReference] { &self.references }
+    fn get_reference_count(&self) -> usize { self.references.len() }
+    fn add_reference(&mut self, er: EquateReference) { self.references.push(er); }
+    fn remove_reference(&mut self, address: &Address, op_index: i16) -> bool {
+        let len_before = self.references.len();
+        self.references.retain(|r| !(r.address == *address && r.op_index == op_index));
+        self.references.len() < len_before
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExternalPath  (ExternalPath.java)
+// ---------------------------------------------------------------------------
+
+/// Represents the path to an external library or namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ExternalPath {
+    /// Path components (library name, namespace, ...).
+    pub segments: Vec<String>,
+}
+
+impl ExternalPath {
+    const DELIMITER: &'static str = "::";
+
+    /// Creates a new external path from segments. At least 2 segments required.
+    pub fn new(segments: Vec<String>) -> SymbolResult<Self> {
+        if segments.len() < 2 {
+            return Err(SymbolError::InvalidInput(
+                "An external path must contain at least 2 segments.".to_string(),
+            ));
+        }
+        for s in &segments {
+            if s.is_empty() {
+                return Err(SymbolError::InvalidInput(
+                    "An external path cannot contain an empty string.".to_string(),
+                ));
+            }
+        }
+        Ok(Self { segments })
+    }
+
+    /// Creates an external path from library name and label.
+    pub fn from_library_and_label(library: impl Into<String>, label: impl Into<String>) -> Self {
+        Self { segments: vec![library.into(), label.into()] }
+    }
+
+    /// Returns the library name (first segment).
+    pub fn get_library_name(&self) -> &str {
+        &self.segments[0]
+    }
+
+    /// Returns the label (last segment).
+    pub fn get_label(&self) -> &str {
+        self.segments.last().map(String::as_str).unwrap_or("")
+    }
+
+    /// Returns the parent path (all segments except the last).
+    pub fn get_parent_path(&self) -> Option<ExternalPath> {
+        if self.segments.len() <= 2 {
+            None
+        } else {
+            Some(ExternalPath {
+                segments: self.segments[..self.segments.len() - 1].to_vec(),
+            })
+        }
+    }
+
+    /// Returns the full delimited path.
+    pub fn to_delimited_string(&self) -> String {
+        self.segments.join(Self::DELIMITER)
+    }
+}
+
+impl fmt::Display for ExternalPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.to_delimited_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExternalLocation  (ExternalLocation.java)
+// ---------------------------------------------------------------------------
+
+/// Defines a location within an external program (i.e., library).
+pub trait ExternalLocation: fmt::Debug + Send + Sync {
+    /// Returns the symbol associated with this external location or None.
+    fn get_symbol(&self) -> Option<&dyn SymbolApi>;
+    /// Returns the name of the external program containing this location.
+    fn get_library_name(&self) -> &str;
+    /// Returns the external label.
+    fn get_label(&self) -> Option<&str>;
+    /// Returns the external path.
+    fn get_external_path(&self) -> &ExternalPath;
+    /// Returns the external address, or None if label-only.
+    fn get_address(&self) -> Option<Address>;
+    /// Returns the source of this external location.
+    fn get_source(&self) -> SourceType;
+    /// Returns `true` if this location has an associated function.
+    fn is_function(&self) -> bool;
+    /// Returns `true` if this location has a data type.
+    fn is_data(&self) -> bool;
+    /// Sets the label and optionally address.
+    fn set(&mut self, label: &str, addr: Option<Address>, source: SourceType) -> SymbolResult<()>;
+}
+
+// ---------------------------------------------------------------------------
+// ExternalLocationIterator  (ExternalLocationIterator.java)
+// ---------------------------------------------------------------------------
+
+/// Iterator over external locations.
+pub struct ExternalLocationIterator {
+    locations: Vec<ExternalLocationImpl>,
+    index: usize,
+}
+
+impl ExternalLocationIterator {
+    pub fn new(locations: Vec<ExternalLocationImpl>) -> Self {
+        Self { locations, index: 0 }
+    }
+    pub fn has_next(&self) -> bool { self.index < self.locations.len() }
+    pub fn peek(&self) -> Option<&ExternalLocationImpl> {
+        self.locations.get(self.index)
+    }
+    pub fn len(&self) -> usize { self.locations.len() }
+    pub fn is_empty(&self) -> bool { self.locations.is_empty() }
+}
+
+impl Iterator for ExternalLocationIterator {
+    type Item = ExternalLocationImpl;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.locations.len() {
+            let loc = self.locations[self.index].clone();
+            self.index += 1;
+            Some(loc)
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExternalLocationImpl  (ExternalLocationAdapter.java / concrete impl)
+// ---------------------------------------------------------------------------
+
+/// Concrete implementation of ExternalLocation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalLocationImpl {
+    external_path: ExternalPath,
+    label: Option<String>,
+    address: Option<Address>,
+    source: SourceType,
+    is_function: bool,
+    symbol_id: Option<u64>,
+}
+
+impl ExternalLocationImpl {
+    pub fn new(
+        external_path: ExternalPath,
+        label: Option<String>,
+        address: Option<Address>,
+        source: SourceType,
+        is_function: bool,
+    ) -> Self {
+        Self { external_path, label, address, source, is_function, symbol_id: None }
+    }
+
+    pub fn get_library_name_str(&self) -> &str {
+        self.external_path.get_library_name()
+    }
+    pub fn get_label_str(&self) -> Option<&str> {
+        self.label.as_deref()
+    }
+    pub fn get_address_opt(&self) -> Option<Address> {
+        self.address
+    }
+    pub fn get_source_type(&self) -> SourceType { self.source }
+    pub fn is_function_loc(&self) -> bool { self.is_function }
+    pub fn set_symbol_id(&mut self, id: u64) { self.symbol_id = Some(id); }
+    pub fn get_symbol_id(&self) -> Option<u64> { self.symbol_id }
+}
+
+impl ExternalLocation for ExternalLocationImpl {
+    fn get_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn get_library_name(&self) -> &str { self.external_path.get_library_name() }
+    fn get_label(&self) -> Option<&str> { self.label.as_deref() }
+    fn get_external_path(&self) -> &ExternalPath { &self.external_path }
+    fn get_address(&self) -> Option<Address> { self.address }
+    fn get_source(&self) -> SourceType { self.source }
+    fn is_function(&self) -> bool { self.is_function }
+    fn is_data(&self) -> bool { !self.is_function }
+    fn set(&mut self, label: &str, addr: Option<Address>, source: SourceType) -> SymbolResult<()> {
+        self.label = Some(label.to_string());
+        self.address = addr;
+        self.source = source;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExternalManager  (ExternalManager.java)
+// ---------------------------------------------------------------------------
+
+/// Manages external programs and locations within those programs.
+pub trait ExternalManager: fmt::Debug + Send + Sync {
+    /// Returns all external library names sorted by preferred search order.
+    fn get_external_library_names(&self) -> Vec<String>;
+    /// Returns the external library with the given name.
+    fn get_external_library(&self, name: &str) -> Option<&dyn ExternalLocation>;
+    /// Returns the external location for the given address.
+    fn get_external_location(&self, addr: Address) -> Option<&dyn ExternalLocation>;
+    /// Returns all external locations.
+    fn get_external_locations(&self) -> Vec<&dyn ExternalLocation>;
+    /// Adds an external library name.
+    fn add_external_library_name(&mut self, name: &str, source: SourceType) -> SymbolResult<()>;
+    /// Removes an external library name.
+    fn remove_external_library_name(&mut self, name: &str) -> SymbolResult<()>;
+    /// Returns the external location for the given symbol.
+    fn get_location(&self, symbol: &dyn SymbolApi) -> Option<&dyn ExternalLocation>;
+    /// Gets the default external location for the given label.
+    fn get_default_external_location(&self, label: &str) -> Option<&dyn ExternalLocation>;
+    /// Gets all external locations with the given label across all libraries.
+    fn get_external_locations_by_label(&self, label: &str) -> Vec<&dyn ExternalLocation>;
+}
+
+// ---------------------------------------------------------------------------
+// ExternalReference  (ExternalReference.java)
+// ---------------------------------------------------------------------------
+
+/// A reference to an external location.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalReference {
+    from_address: Address,
+    to_address: Address,
+    ref_type: RefType,
+    op_index: i32,
+    source: SourceType,
+    primary: bool,
+    library_name: String,
+    label: Option<String>,
+    external_path: ExternalPath,
+}
+
+impl ExternalReference {
+    pub fn new(
+        from_address: Address,
+        to_address: Address,
+        ref_type: RefType,
+        op_index: i32,
+        library_name: impl Into<String>,
+        label: Option<String>,
+    ) -> Self {
+        let lib = library_name.into();
+        let lbl = label.clone().unwrap_or_default();
+        Self {
+            from_address,
+            to_address,
+            ref_type,
+            op_index,
+            source: SourceType::Default,
+            primary: false,
+            library_name: lib.clone(),
+            label,
+            external_path: ExternalPath::from_library_and_label(lib, lbl),
+        }
+    }
+
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_reference_type(&self) -> RefType { self.ref_type }
+    pub fn get_operand_index(&self) -> i32 { self.op_index }
+    pub fn get_source(&self) -> SourceType { self.source }
+    pub fn is_primary(&self) -> bool { self.primary }
+    pub fn is_memory_reference(&self) -> bool { true }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { false }
+    pub fn is_external_reference(&self) -> bool { true }
+    pub fn is_entry_point_reference(&self) -> bool { false }
+    pub fn is_offset_reference(&self) -> bool { false }
+    pub fn is_shifted_reference(&self) -> bool { false }
+    pub fn get_library_name(&self) -> &str { &self.library_name }
+    pub fn get_label(&self) -> Option<&str> { self.label.as_deref() }
+    pub fn get_external_location_ref(&self) -> &ExternalPath { &self.external_path }
+}
+
+// ---------------------------------------------------------------------------
+// NameTransformer  (NameTransformer.java)
+// ---------------------------------------------------------------------------
+
+/// Interface to transform (shorten, simplify) names for display.
+pub trait NameTransformer {
+    /// Return a transformed version of the given input. If no change is made,
+    /// returns the input unchanged.
+    fn simplify(&self, input: &str) -> String;
+}
+
+// ---------------------------------------------------------------------------
+// IdentityNameTransformer  (IdentityNameTransformer.java)
+// ---------------------------------------------------------------------------
+
+/// A name transformer that returns the input unchanged.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IdentityNameTransformer;
+
+impl NameTransformer for IdentityNameTransformer {
+    fn simplify(&self, input: &str) -> String {
+        input.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IllegalCharCppTransformer  (IllegalCharCppTransformer.java)
+// ---------------------------------------------------------------------------
+
+/// A name transformer that replaces illegal C++ identifier characters with '_'.
+///
+/// Treats the name as a C++ symbol. Letters and digits are generally legal.
+/// '~' is allowed at the start. Template parameters allow additional special
+/// characters. Certain special characters are allowed after "operator".
+#[derive(Debug, Clone)]
+pub struct IllegalCharCppTransformer {
+    legal_chars: [u8; 128],
+}
+
+const AFTER_FIRST_CHAR: u8 = 1;
+const TEMPLATE: u8 = 2;
+const OPERATOR: u8 = 4;
+const FIRST_CHAR_FLAG: u8 = 8;
+
+impl IllegalCharCppTransformer {
+    pub fn new() -> Self {
+        let mut legal_chars = [0u8; 128];
+        legal_chars[b'_' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR | FIRST_CHAR_FLAG;
+        legal_chars[b'0' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'1' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'2' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'3' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'4' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'5' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'6' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'7' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'8' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'9' as usize] = AFTER_FIRST_CHAR | TEMPLATE | OPERATOR;
+        legal_chars[b'~' as usize] = FIRST_CHAR_FLAG;
+        legal_chars[b'(' as usize] = OPERATOR;
+        legal_chars[b')' as usize] = OPERATOR;
+        legal_chars[b'+' as usize] = OPERATOR;
+        legal_chars[b'-' as usize] = OPERATOR;
+        legal_chars[b'*' as usize] = OPERATOR;
+        legal_chars[b'/' as usize] = OPERATOR;
+        legal_chars[b'%' as usize] = OPERATOR;
+        legal_chars[b'^' as usize] = OPERATOR;
+        legal_chars[b'&' as usize] = OPERATOR;
+        legal_chars[b'|' as usize] = OPERATOR;
+        legal_chars[b'!' as usize] = OPERATOR;
+        legal_chars[b'=' as usize] = OPERATOR;
+        legal_chars[b'<' as usize] = OPERATOR;
+        legal_chars[b'>' as usize] = OPERATOR;
+        legal_chars[b'[' as usize] = OPERATOR;
+        legal_chars[b']' as usize] = OPERATOR;
+        legal_chars[b' ' as usize] = OPERATOR;
+        legal_chars[b',' as usize] = TEMPLATE;
+        Self { legal_chars }
+    }
+}
+
+impl Default for IllegalCharCppTransformer {
+    fn default() -> Self { Self::new() }
+}
+
+impl NameTransformer for IllegalCharCppTransformer {
+    fn simplify(&self, input: &str) -> String {
+        let chars: Vec<char> = input.chars().collect();
+        let mut template_depth: i32 = 0;
+        let mut transform: Option<Vec<char>> = None;
+
+        for (i, &c) in chars.iter().enumerate() {
+            if c.is_alphabetic() {
+                continue;
+            }
+            if c == '<' {
+                template_depth += 1;
+                continue;
+            }
+            if c == '>' {
+                template_depth -= 1;
+                if template_depth < 0 { template_depth = 0; }
+                continue;
+            }
+            if (c as u32) < 128 {
+                let val = self.legal_chars[c as usize];
+                if val != 0 {
+                    if (val & AFTER_FIRST_CHAR) != 0 && i > 0 { continue; }
+                    if (val & FIRST_CHAR_FLAG) != 0 && i == 0 { continue; }
+                    if (val & TEMPLATE) != 0 && template_depth > 0 { continue; }
+                    if (val & OPERATOR) != 0 && i >= 8 && i <= 10 {
+                        if input.starts_with("operator") { continue; }
+                    }
+                }
+            }
+            // Illegal character found
+            if transform.is_none() {
+                transform = Some(chars.clone());
+            }
+            if let Some(ref mut t) = transform {
+                t[i] = '_';
+            }
+        }
+        match transform {
+            Some(t) => t.into_iter().collect(),
+            None => input.to_string(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MemReferenceImpl  (MemReferenceImpl.java)
+// ---------------------------------------------------------------------------
+
+/// Implementation for a reference not associated with a program.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemReferenceImpl {
+    from_address: Address,
+    to_address: Address,
+    ref_type: RefType,
+    op_index: i32,
+    source_type: SourceType,
+    symbol_id: i64,
+    is_primary: bool,
+}
+
+impl MemReferenceImpl {
+    pub fn new(
+        from_address: Address,
+        to_address: Address,
+        ref_type: RefType,
+        source_type: SourceType,
+        op_index: i32,
+        is_primary: bool,
+    ) -> Self {
+        Self {
+            from_address,
+            to_address,
+            ref_type,
+            op_index,
+            source_type,
+            symbol_id: -1,
+            is_primary,
+        }
+    }
+
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_reference_type(&self) -> RefType { self.ref_type }
+    pub fn set_reference_type(&mut self, ref_type: RefType) { self.ref_type = ref_type; }
+    pub fn get_operand_index(&self) -> i32 { self.op_index }
+    pub fn get_symbol_id(&self) -> i64 { self.symbol_id }
+    pub fn set_symbol_id(&mut self, id: i64) { self.symbol_id = id; }
+    pub fn is_primary(&self) -> bool { self.is_primary }
+    pub fn set_primary(&mut self, primary: bool) { self.is_primary = primary; }
+    pub fn get_source(&self) -> SourceType { self.source_type }
+    pub fn set_source(&mut self, source: SourceType) { self.source_type = source; }
+    pub fn is_mnemonic_reference(&self) -> bool { self.op_index == MNEMONIC }
+    pub fn is_operand_reference(&self) -> bool { self.op_index != MNEMONIC && self.op_index != OTHER_OP_INDEX }
+    pub fn is_memory_reference(&self) -> bool { true }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { false }
+    pub fn is_external_reference(&self) -> bool { false }
+    pub fn is_entry_point_reference(&self) -> bool { false }
+    pub fn is_offset_reference(&self) -> bool { false }
+    pub fn is_shifted_reference(&self) -> bool { false }
+}
+
+impl PartialOrd for MemReferenceImpl {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MemReferenceImpl {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.from_address
+            .cmp(&other.from_address)
+            .then_with(|| self.op_index.cmp(&other.op_index))
+            .then_with(|| self.to_address.cmp(&other.to_address))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OffsetReference  (OffsetReference.java)
+// ---------------------------------------------------------------------------
+
+/// A memory reference whose "to" address is computed from a base address plus an offset.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OffsetReference {
+    from_address: Address,
+    to_address: Address,
+    base_address: Address,
+    offset: i64,
+    ref_type: RefType,
+    op_index: i32,
+    source: SourceType,
+    primary: bool,
+}
+
+impl OffsetReference {
+    pub fn new(
+        from_address: Address,
+        to_address: Address,
+        base_address: Address,
+        offset: i64,
+        ref_type: RefType,
+        op_index: i32,
+    ) -> Self {
+        Self {
+            from_address,
+            to_address,
+            base_address,
+            offset,
+            ref_type,
+            op_index,
+            source: SourceType::Default,
+            primary: false,
+        }
+    }
+
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_base_address(&self) -> &Address { &self.base_address }
+    pub fn get_offset(&self) -> i64 { self.offset }
+    pub fn get_reference_type(&self) -> RefType { self.ref_type }
+    pub fn get_operand_index(&self) -> i32 { self.op_index }
+    pub fn get_source(&self) -> SourceType { self.source }
+    pub fn is_primary(&self) -> bool { self.primary }
+    pub fn is_memory_reference(&self) -> bool { true }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { false }
+    pub fn is_external_reference(&self) -> bool { false }
+    pub fn is_entry_point_reference(&self) -> bool { false }
+    pub fn is_offset_reference(&self) -> bool { true }
+    pub fn is_shifted_reference(&self) -> bool { false }
+}
+
+// ---------------------------------------------------------------------------
+// ShiftedReference  (ShiftedReference.java)
+// ---------------------------------------------------------------------------
+
+/// A memory reference whose "to" address is computed by shifting the value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShiftedReference {
+    from_address: Address,
+    to_address: Address,
+    shift_value: i32,
+    ref_type: RefType,
+    op_index: i32,
+    source: SourceType,
+    primary: bool,
+}
+
+impl ShiftedReference {
+    pub fn new(
+        from_address: Address,
+        to_address: Address,
+        shift_value: i32,
+        ref_type: RefType,
+        op_index: i32,
+    ) -> Self {
+        Self {
+            from_address,
+            to_address,
+            shift_value,
+            ref_type,
+            op_index,
+            source: SourceType::Default,
+            primary: false,
+        }
+    }
+
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_shift_value(&self) -> i32 { self.shift_value }
+    pub fn get_reference_type(&self) -> RefType { self.ref_type }
+    pub fn get_operand_index(&self) -> i32 { self.op_index }
+    pub fn get_source(&self) -> SourceType { self.source }
+    pub fn is_primary(&self) -> bool { self.primary }
+    pub fn is_memory_reference(&self) -> bool { true }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { false }
+    pub fn is_external_reference(&self) -> bool { false }
+    pub fn is_entry_point_reference(&self) -> bool { false }
+    pub fn is_offset_reference(&self) -> bool { false }
+    pub fn is_shifted_reference(&self) -> bool { true }
+}
+
+// ---------------------------------------------------------------------------
+// StackReference  (StackReference.java)
+// ---------------------------------------------------------------------------
+
+/// A reference to a stack location.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StackReference {
+    from_address: Address,
+    to_address: Address,
+    stack_offset: i32,
+    ref_type: RefType,
+    op_index: i32,
+    source: SourceType,
+    primary: bool,
+}
+
+impl StackReference {
+    pub fn new(
+        from_address: Address,
+        stack_offset: i32,
+        ref_type: RefType,
+        op_index: i32,
+    ) -> Self {
+        Self {
+            from_address,
+            to_address: Address::new(0), // stack address placeholder
+            stack_offset,
+            ref_type,
+            op_index,
+            source: SourceType::Default,
+            primary: false,
+        }
+    }
+
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_stack_offset(&self) -> i32 { self.stack_offset }
+    pub fn get_reference_type(&self) -> RefType { self.ref_type }
+    pub fn get_operand_index(&self) -> i32 { self.op_index }
+    pub fn get_source(&self) -> SourceType { self.source }
+    pub fn is_primary(&self) -> bool { self.primary }
+    pub fn is_memory_reference(&self) -> bool { false }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { true }
+    pub fn is_external_reference(&self) -> bool { false }
+    pub fn is_entry_point_reference(&self) -> bool { false }
+    pub fn is_offset_reference(&self) -> bool { false }
+    pub fn is_shifted_reference(&self) -> bool { false }
+}
+
+// ---------------------------------------------------------------------------
+// ThunkReference  (ThunkReference.java)
+// ---------------------------------------------------------------------------
+
+/// Implementation for a thunk function reference. These references are dynamic
+/// in nature and may not be explicitly added, removed or altered. Their presence
+/// is inferred by the existence of a thunk function.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ThunkReference {
+    from_address: Address,
+    to_address: Address,
+}
+
+impl ThunkReference {
+    pub fn new(thunk_addr: Address, thunked_addr: Address) -> Self {
+        Self { from_address: thunk_addr, to_address: thunked_addr }
+    }
+
+    pub fn get_from_address(&self) -> &Address { &self.from_address }
+    pub fn get_to_address(&self) -> &Address { &self.to_address }
+    pub fn get_reference_type(&self) -> RefType { RefType::THUNK }
+    pub fn get_operand_index(&self) -> i32 { OTHER_OP_INDEX }
+    pub fn get_symbol_id(&self) -> i64 { -1 }
+    pub fn is_primary(&self) -> bool { false }
+    pub fn get_source(&self) -> SourceType { SourceType::Default }
+    pub fn is_memory_reference(&self) -> bool { false }
+    pub fn is_register_reference(&self) -> bool { false }
+    pub fn is_stack_reference(&self) -> bool { false }
+    pub fn is_external_reference(&self) -> bool { false }
+    pub fn is_entry_point_reference(&self) -> bool { false }
+    pub fn is_offset_reference(&self) -> bool { false }
+    pub fn is_shifted_reference(&self) -> bool { false }
+}
+
+impl DynamicReference for ThunkReference {
+    fn get_from_address(&self) -> &Address { &self.from_address }
+    fn get_to_address(&self) -> &Address { &self.to_address }
+    fn get_reference_type(&self) -> RefType { RefType::THUNK }
+    fn get_operand_index(&self) -> i32 { OTHER_OP_INDEX }
+    fn get_symbol_id(&self) -> i64 { -1 }
+    fn is_primary(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { SourceType::Default }
+    fn is_memory_reference(&self) -> bool { false }
+    fn is_register_reference(&self) -> bool { false }
+    fn is_stack_reference(&self) -> bool { false }
+    fn is_external_reference(&self) -> bool { false }
+    fn is_entry_point_reference(&self) -> bool { false }
+    fn is_offset_reference(&self) -> bool { false }
+    fn is_shifted_reference(&self) -> bool { false }
+}
+
+// ---------------------------------------------------------------------------
+// RefTypeFactory  (RefTypeFactory.java)
+// ---------------------------------------------------------------------------
+
+/// Factory for creating and looking up RefType instances.
+pub struct RefTypeFactory;
+
+impl RefTypeFactory {
+    /// All valid memory reference types.
+    const MEMORY_REF_TYPES: [RefType; 22] = [
+        RefType::DATA, RefType::PARAM, RefType::READ, RefType::WRITE,
+        RefType::READ_WRITE, RefType::READ_IND, RefType::WRITE_IND,
+        RefType::READ_WRITE_IND, RefType::DATA_IND, RefType::EXTERNAL_REF,
+        RefType::FALL_THROUGH, RefType::UNCONDITIONAL_JUMP, RefType::CONDITIONAL_JUMP,
+        RefType::UNCONDITIONAL_CALL, RefType::CONDITIONAL_CALL,
+        RefType::COMPUTED_JUMP, RefType::COMPUTED_CALL,
+        RefType::CONDITIONAL_COMPUTED_CALL, RefType::CONDITIONAL_COMPUTED_JUMP,
+        RefType::CALL_OVERRIDE_UNCONDITIONAL, RefType::JUMP_OVERRIDE_UNCONDITIONAL,
+        RefType::INDIRECTION,
+    ];
+
+    /// Valid stack reference types.
+    const STACK_REF_TYPES: [RefType; 4] = [
+        RefType::DATA, RefType::READ, RefType::WRITE, RefType::READ_WRITE,
+    ];
+
+    /// Valid data reference types.
+    const DATA_REF_TYPES: [RefType; 5] = [
+        RefType::DATA, RefType::PARAM, RefType::READ, RefType::WRITE, RefType::READ_WRITE,
+    ];
+
+    /// Valid external reference types.
+    const EXTERNAL_REF_TYPES: [RefType; 19] = [
+        RefType::COMPUTED_CALL, RefType::COMPUTED_JUMP,
+        RefType::CONDITIONAL_CALL, RefType::CONDITIONAL_JUMP,
+        RefType::UNCONDITIONAL_CALL, RefType::UNCONDITIONAL_JUMP,
+        RefType::CONDITIONAL_COMPUTED_CALL, RefType::CONDITIONAL_COMPUTED_JUMP,
+        RefType::DATA, RefType::DATA_IND,
+        RefType::READ, RefType::READ_IND,
+        RefType::WRITE, RefType::WRITE_IND,
+        RefType::READ_WRITE, RefType::READ_WRITE_IND,
+        RefType::CALL_OVERRIDE_UNCONDITIONAL,
+        RefType::CALLOTHER_OVERRIDE_CALL,
+        RefType::CALLOTHER_OVERRIDE_JUMP,
+    ];
+
+    /// Returns all valid memory reference types.
+    pub fn get_memory_ref_types() -> &'static [RefType] { &Self::MEMORY_REF_TYPES }
+
+    /// Returns all valid stack reference types.
+    pub fn get_stack_ref_types() -> &'static [RefType] { &Self::STACK_REF_TYPES }
+
+    /// Returns all valid data reference types.
+    pub fn get_data_ref_types() -> &'static [RefType] { &Self::DATA_REF_TYPES }
+
+    /// Returns all valid external reference types.
+    pub fn get_external_ref_types() -> &'static [RefType] { &Self::EXTERNAL_REF_TYPES }
+
+    /// Looks up a RefType by its numeric value.
+    pub fn get(value: i8) -> Option<RefType> {
+        // Check flow types first
+        for ft in &[
+            FlowType::Invalid, FlowType::Flow, FlowType::FallThrough,
+            FlowType::UnconditionalJump, FlowType::ConditionalJump,
+            FlowType::UnconditionalCall, FlowType::ConditionalCall,
+            FlowType::Terminator, FlowType::ComputedJump,
+            FlowType::ConditionalTerminator, FlowType::ComputedCall,
+            FlowType::Indirection, FlowType::CallTerminator,
+            FlowType::JumpTerminator, FlowType::ConditionalComputedJump,
+            FlowType::ConditionalComputedCall, FlowType::ConditionalCallTerminator,
+            FlowType::ComputedCallTerminator, FlowType::CallOverrideUnconditional,
+            FlowType::JumpOverrideUnconditional, FlowType::CallOtherOverrideCall,
+            FlowType::CallOtherOverrideJump,
+        ] {
+            if ft.value() == value {
+                return Some(RefType::Flow(*ft));
+            }
+        }
+        // Check data types
+        for dt in &[
+            DataRefType::Data, DataRefType::Read, DataRefType::Write,
+            DataRefType::ReadWrite, DataRefType::ReadInd, DataRefType::WriteInd,
+            DataRefType::ReadWriteInd, DataRefType::Param, DataRefType::ExternalRef,
+            DataRefType::DataInd, DataRefType::Thunk,
+        ] {
+            if dt.value() == value {
+                return Some(RefType::Data(*dt));
+            }
+        }
+        None
+    }
+
+    /// Returns `true` if the given RefType is a valid memory reference type.
+    pub fn is_memory_ref_type(ref_type: RefType) -> bool {
+        Self::MEMORY_REF_TYPES.contains(&ref_type)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReferenceIteratorAdapter  (ReferenceIteratorAdapter.java)
+// ---------------------------------------------------------------------------
+
+/// Wraps a `Vec<Reference>` to provide a Java-style iterator with `has_next()`
+/// and `next()` methods, alongside the standard Rust `Iterator` trait.
+pub struct ReferenceIteratorAdapter {
+    references: Vec<Reference>,
+    index: usize,
+}
+
+impl ReferenceIteratorAdapter {
+    pub fn new(references: Vec<Reference>) -> Self {
+        Self { references, index: 0 }
+    }
+    pub fn has_next(&self) -> bool { self.index < self.references.len() }
+    pub fn peek(&self) -> Option<&Reference> { self.references.get(self.index) }
+    pub fn len(&self) -> usize { self.references.len() }
+    pub fn is_empty(&self) -> bool { self.references.is_empty() }
+    pub fn reset(&mut self) { self.index = 0; }
+}
+
+impl Iterator for ReferenceIteratorAdapter {
+    type Item = Reference;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.references.len() {
+            let r = self.references[self.index].clone();
+            self.index += 1;
+            Some(r)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for ReferenceIteratorAdapter {}
+impl std::iter::FusedIterator for ReferenceIteratorAdapter {}
+
+// ---------------------------------------------------------------------------
+// ReferenceListener  (ReferenceListener.java)
+// ---------------------------------------------------------------------------
+
+/// Callback interface for reference change notifications.
+pub trait ReferenceListener {
+    /// Notification that the given memory reference has been added.
+    fn mem_reference_added(&self, ref_obj: &Reference);
+    /// Notification that the given memory reference has been removed.
+    fn mem_reference_removed(&self, ref_obj: &Reference);
+    /// Notification that the given stack reference has been added.
+    fn stack_reference_added(&self, ref_obj: &Reference);
+    /// Notification that the given stack reference has been removed.
+    fn stack_reference_removed(&self, ref_obj: &Reference);
+    /// Notification that the given register reference has been added.
+    fn register_reference_added(&self, ref_obj: &Reference);
+    /// Notification that the given register reference has been removed.
+    fn register_reference_removed(&self, ref_obj: &Reference);
+    /// Notification that the given external reference has been added.
+    fn external_reference_added(&self, ref_obj: &Reference);
+    /// Notification that the given external reference has been removed.
+    fn external_reference_removed(&self, ref_obj: &Reference);
+    /// Notification that a reference was overridden.
+    fn reference_overridden(&self, ref_obj: &Reference);
+    /// Notification that a reference override was removed.
+    fn reference_override_removed(&self, ref_obj: &Reference);
+}
+
+// ---------------------------------------------------------------------------
+// SymbolIterator  (SymbolIterator.java)
+// ---------------------------------------------------------------------------
+
+/// Iterator over symbols.
+pub struct SymbolIteratorStruct {
+    symbols: Vec<Symbol>,
+    index: usize,
+}
+
+impl SymbolIteratorStruct {
+    pub fn new(symbols: Vec<Symbol>) -> Self {
+        Self { symbols, index: 0 }
+    }
+
+    /// Returns an empty symbol iterator.
+    pub fn empty() -> Self {
+        Self { symbols: Vec::new(), index: 0 }
+    }
+
+    pub fn has_next(&self) -> bool { self.index < self.symbols.len() }
+    pub fn len(&self) -> usize { self.symbols.len() }
+    pub fn is_empty(&self) -> bool { self.symbols.is_empty() }
+    pub fn reset(&mut self) { self.index = 0; }
+}
+
+impl Iterator for SymbolIteratorStruct {
+    type Item = Symbol;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.symbols.len() {
+            let s = self.symbols[self.index].clone();
+            self.index += 1;
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for SymbolIteratorStruct {}
+impl std::iter::FusedIterator for SymbolIteratorStruct {}
+
+// ---------------------------------------------------------------------------
+// SymbolIteratorAdapter  (SymbolIteratorAdapter.java)
+// ---------------------------------------------------------------------------
+
+/// Wraps a `Vec<Symbol>` to provide Java-style iteration.
+pub struct SymbolIteratorAdapter {
+    symbols: Vec<Symbol>,
+    index: usize,
+}
+
+impl SymbolIteratorAdapter {
+    pub fn new(symbols: Vec<Symbol>) -> Self {
+        Self { symbols, index: 0 }
+    }
+    pub fn has_next(&self) -> bool { self.index < self.symbols.len() }
+    pub fn len(&self) -> usize { self.symbols.len() }
+    pub fn is_empty(&self) -> bool { self.symbols.is_empty() }
+    pub fn reset(&mut self) { self.index = 0; }
+    pub fn to_vec(&self) -> &[Symbol] { &self.symbols }
+}
+
+impl Iterator for SymbolIteratorAdapter {
+    type Item = Symbol;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.symbols.len() {
+            let s = self.symbols[self.index].clone();
+            self.index += 1;
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl ExactSizeIterator for SymbolIteratorAdapter {}
+impl std::iter::FusedIterator for SymbolIteratorAdapter {}
+
+// ---------------------------------------------------------------------------
+// SymbolTableListener  (SymbolTableListener.java)
+// ---------------------------------------------------------------------------
+
+/// Callback interface for symbol table change notifications.
+pub trait SymbolTableListener {
+    /// Notification that the given symbol has been added.
+    fn symbol_added(&self, symbol: &dyn SymbolApi);
+    /// Notification that a symbol was removed.
+    fn symbol_removed(&self, addr: Address, name: &str, is_local: bool);
+    /// Notification that the given symbol was renamed.
+    fn symbol_renamed(&self, symbol: &dyn SymbolApi, old_name: &str);
+    /// Notification that the given symbol was set as the primary symbol.
+    fn primary_symbol_set(&self, symbol: &dyn SymbolApi);
+    /// Notification that the scope on a symbol changed.
+    fn symbol_scope_changed(&self, symbol: &dyn SymbolApi);
+    /// Notification that an external entry point was added at the given address.
+    fn external_entry_point_added(&self, addr: Address);
+    /// Notification that an external entry point was removed from the given address.
+    fn external_entry_point_removed(&self, addr: Address);
+    /// Notification that the association between a reference and a specific symbol has changed.
+    fn association_added(&self, symbol: &dyn SymbolApi, reference: &Reference);
+    /// Notification that the association between the given reference and any symbol was removed.
+    fn association_removed(&self, reference: &Reference);
+}
+
+// ---------------------------------------------------------------------------
+// SymbolUtilities  (SymbolUtilities.java)
+// ---------------------------------------------------------------------------
+
+/// Utility methods for working with symbol strings and default naming conventions.
+pub struct SymbolUtilities;
+
+/// Maximum allowed symbol name length.
+pub const MAX_SYMBOL_NAME_LENGTH: usize = 2000;
+
+/// Default prefix for a subroutine.
+pub const DEFAULT_SUBROUTINE_PREFIX: &str = "SUB_";
+/// Default prefix for a reference that has flow but is not a call.
+pub const DEFAULT_SYMBOL_PREFIX: &str = "LAB_";
+/// Default prefix for a data reference.
+pub const DEFAULT_DATA_PREFIX: &str = "DAT_";
+/// Default prefix for a reference that is unknown.
+pub const DEFAULT_UNKNOWN_PREFIX: &str = "UNK_";
+/// Default prefix for an entry point.
+pub const DEFAULT_EXTERNAL_ENTRY_PREFIX: &str = "EXT_ENTRY_";
+/// Default prefix for a function.
+pub const DEFAULT_FUNCTION_PREFIX: &str = "FUN_";
+/// Default prefix for internal references.
+pub const DEFAULT_INTERNAL_REF_PREFIX: &str = "REF_";
+/// Default prefix for local reserved names.
+pub const DEFAULT_LOCAL_RESERVED_PREFIX: &str = "var_";
+/// Default prefix for local variables.
+pub const DEFAULT_LOCAL_PREFIX: &str = "local_";
+/// Ordinal prefix.
+pub const ORDINAL_PREFIX: &str = "ordinal_";
+/// Minimum number of hex digits in default label addresses.
+pub const MIN_LABEL_ADDRESS_DIGITS: usize = 8;
+/// Underscore separator for label construction.
+pub const UNDERSCORE: &str = "_";
+
+/// Reference level constants.
+pub const UNK_LEVEL: u8 = 0;
+pub const DAT_LEVEL: u8 = 1;
+pub const LAB_LEVEL: u8 = 2;
+pub const SUB_LEVEL: u8 = 3;
+pub const FUN_LEVEL: u8 = 4;
+pub const EXT_LEVEL: u8 = 5;
+
+impl SymbolUtilities {
+    /// Returns `true` if the name appears to be an auto-generated default symbol name.
+    pub fn is_default_label_name(name: &str) -> bool {
+        if name.len() < 4 { return false; }
+        name.starts_with(DEFAULT_SUBROUTINE_PREFIX)
+            || name.starts_with(DEFAULT_SYMBOL_PREFIX)
+            || name.starts_with(DEFAULT_DATA_PREFIX)
+            || name.starts_with(DEFAULT_UNKNOWN_PREFIX)
+            || name.starts_with(DEFAULT_EXTERNAL_ENTRY_PREFIX)
+    }
+
+    /// Returns `true` if the name appears to be an auto-generated default function name.
+    pub fn is_default_function_name(name: &str) -> bool {
+        name.starts_with(DEFAULT_FUNCTION_PREFIX)
+    }
+
+    /// Returns `true` if the name appears to be a default label prefix.
+    pub fn is_default_label_prefix(prefix: &str) -> bool {
+        prefix == DEFAULT_SUBROUTINE_PREFIX
+            || prefix == DEFAULT_SYMBOL_PREFIX
+            || prefix == DEFAULT_DATA_PREFIX
+            || prefix == DEFAULT_UNKNOWN_PREFIX
+    }
+
+    /// Creates a default function name from an address, e.g., "FUN_00401000".
+    pub fn default_function_name(addr: &Address) -> String {
+        format!("{}{:0width$X}", DEFAULT_FUNCTION_PREFIX, addr.offset, width = MIN_LABEL_ADDRESS_DIGITS)
+    }
+
+    /// Creates a default label name from an address, e.g., "LAB_00401000".
+    pub fn default_label_name(addr: &Address) -> String {
+        format!("{}{:0width$X}", DEFAULT_SYMBOL_PREFIX, addr.offset, width = MIN_LABEL_ADDRESS_DIGITS)
+    }
+
+    /// Creates a default data label name from an address, e.g., "DAT_00401000".
+    pub fn default_data_name(addr: &Address) -> String {
+        format!("{}{:0width$X}", DEFAULT_DATA_PREFIX, addr.offset, width = MIN_LABEL_ADDRESS_DIGITS)
+    }
+
+    /// Creates a default external entry name from an address.
+    pub fn default_external_entry_name(addr: &Address) -> String {
+        format!("{}{:0width$X}", DEFAULT_EXTERNAL_ENTRY_PREFIX, addr.offset, width = MIN_LABEL_ADDRESS_DIGITS)
+    }
+
+    /// Returns `true` if the given name is a valid symbol name (non-empty,
+    /// no whitespace, no namespace delimiter).
+    pub fn is_valid_symbol_name(name: &str) -> bool {
+        validate_symbol_name(name).is_ok()
+    }
+
+    /// Returns a case-insensitive comparison of two symbol names.
+    pub fn compare_symbol_names(a: &str, b: &str) -> std::cmp::Ordering {
+        a.to_lowercase().cmp(&b.to_lowercase())
+    }
+
+    /// Returns `true` if the name starts with a known dynamic data type prefix.
+    pub fn is_dynamic_data_type_prefix(name: &str) -> bool {
+        let lower = name.to_lowercase();
+        // Check common built-in data type prefixes
+        const PREFIXES: &[&str] = &[
+            "byte_", "word_", "dword_", "qword_", "oword_", "char_",
+            "short_", "int_", "long_", "float_", "double_", "bool_",
+            "string_", "unicode_", "pointer_", "struct_", "array_",
+            "undefined_", "undefined1_", "undefined2_", "undefined4_", "undefined8_",
+        ];
+        PREFIXES.iter().any(|p| lower.starts_with(p))
+    }
+
+    /// Strips the namespace path from a qualified name, returning just the leaf name.
+    pub fn get_name_without_namespace(qualified_name: &str) -> &str {
+        qualified_name.rsplit("::").next().unwrap_or(qualified_name)
+    }
+
+    /// Returns the namespace path from a qualified name, or None if no delimiter.
+    pub fn get_namespace_path(qualified_name: &str) -> Option<&str> {
+        qualified_name.rfind("::").map(|pos| &qualified_name[..pos])
+    }
+
+    /// Parses a possibly-qualified symbol name into its path components.
+    pub fn parse_qualified_name(qualified_name: &str) -> Vec<&str> {
+        qualified_name.split("::").collect()
+    }
+
+    /// Returns the default prefix for the given symbol type.
+    pub fn get_default_prefix(symbol_type: SymbolType) -> &'static str {
+        match symbol_type {
+            SymbolType::Function => DEFAULT_FUNCTION_PREFIX,
+            SymbolType::Label => DEFAULT_SYMBOL_PREFIX,
+            _ => DEFAULT_UNKNOWN_PREFIX,
+        }
+    }
+
+    /// Returns `true` if the given symbol has a non-default name.
+    pub fn has_non_default_name(symbol: &dyn SymbolApi) -> bool {
+        !Self::is_default_label_name(&symbol.get_name())
+            && !Self::is_default_function_name(&symbol.get_name())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Backward-compatible aliases from the original simplified module
 // ---------------------------------------------------------------------------
 
@@ -5127,5 +6434,640 @@ mod tests {
         assert!(func.delete());
         assert!(func.is_deleted());
         assert!(!func.delete()); // Already deleted.
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for AddressLabelPair
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_address_label_pair() {
+        let pair = AddressLabelPair::new(Address::new(0x401000), "main");
+        assert_eq!(*pair.get_address(), Address::new(0x401000));
+        assert_eq!(pair.get_label(), "main");
+        assert_eq!(pair.to_string(), format!("{}: main", Address::new(0x401000)));
+    }
+
+    #[test]
+    fn test_address_label_pair_equality() {
+        let p1 = AddressLabelPair::new(Address::new(0x1000), "foo");
+        let p2 = AddressLabelPair::new(Address::new(0x1000), "foo");
+        let p3 = AddressLabelPair::new(Address::new(0x2000), "bar");
+        assert_eq!(p1, p2);
+        assert_ne!(p1, p3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for Equate
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_equate_basics() {
+        let mut eq = Equate::new("MY_CONSTANT", 42);
+        assert_eq!(eq.get_name(), "MY_CONSTANT");
+        assert_eq!(eq.get_value(), 42);
+        eq.set_value(100);
+        assert_eq!(eq.get_value(), 100);
+    }
+
+    #[test]
+    fn test_equate_references() {
+        let mut eq = Equate::new("FOO", 10);
+        let er = EquateReference::new(Address::new(0x1000), 0);
+        eq.add_reference(er);
+        assert_eq!(eq.get_reference_count(), 1);
+        assert!(eq.remove_reference(&Address::new(0x1000), 0));
+        assert_eq!(eq.get_reference_count(), 0);
+        assert!(!eq.remove_reference(&Address::new(0x9999), 0));
+    }
+
+    #[test]
+    fn test_equate_display() {
+        let eq = Equate::new("FLAG", 0xFF);
+        assert_eq!(eq.to_string(), "FLAG = 0xFF");
+    }
+
+    #[test]
+    fn test_equate_equated_string_masked() {
+        let s = Equate::get_equated_string_masked(0x1234, 0xFF, "0x");
+        assert_eq!(s, "0x34");
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for EquateReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_equate_reference() {
+        let er = EquateReference::with_dynamic_hash(Address::new(0x1000), 1, 12345);
+        assert_eq!(*er.get_address(), Address::new(0x1000));
+        assert_eq!(er.get_op_index(), 1);
+        assert_eq!(er.get_dynamic_hash_value(), 12345);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for EquateApi trait (on Equate)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_equate_api_trait() {
+        let eq: Box<dyn EquateApi> = Box::new(Equate::new("X", 5));
+        assert_eq!(eq.get_name(), "X");
+        assert_eq!(eq.get_value(), 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ExternalPath
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_external_path_basic() {
+        let path = ExternalPath::from_library_and_label("libc.so.6", "printf");
+        assert_eq!(path.get_library_name(), "libc.so.6");
+        assert_eq!(path.get_label(), "printf");
+        assert_eq!(path.to_delimited_string(), "libc.so.6::printf");
+        assert_eq!(path.to_string(), "libc.so.6::printf");
+    }
+
+    #[test]
+    fn test_external_path_new_valid() {
+        let path = ExternalPath::new(vec!["lib.so".into(), "ns".into(), "func".into()]);
+        assert!(path.is_ok());
+        let path = path.unwrap();
+        assert_eq!(path.get_library_name(), "lib.so");
+        assert_eq!(path.get_label(), "func");
+        assert_eq!(path.segments.len(), 3);
+    }
+
+    #[test]
+    fn test_external_path_new_too_few() {
+        let path = ExternalPath::new(vec!["lib.so".into()]);
+        assert!(path.is_err());
+    }
+
+    #[test]
+    fn test_external_path_empty_segment() {
+        let path = ExternalPath::new(vec!["lib.so".into(), "".into()]);
+        assert!(path.is_err());
+    }
+
+    #[test]
+    fn test_external_path_parent() {
+        let path = ExternalPath::new(vec!["lib.so".into(), "ns".into(), "func".into()]).unwrap();
+        let parent = path.get_parent_path();
+        assert!(parent.is_some());
+        let parent = parent.unwrap();
+        assert_eq!(parent.segments, vec!["lib.so".to_string(), "ns".to_string()]);
+    }
+
+    #[test]
+    fn test_external_path_parent_none_for_two_segments() {
+        let path = ExternalPath::from_library_and_label("lib.so", "func");
+        assert!(path.get_parent_path().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ExternalLocationImpl
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_external_location_impl() {
+        let path = ExternalPath::from_library_and_label("libc.so.6", "printf");
+        let mut loc = ExternalLocationImpl::new(
+            path, Some("printf".to_string()), None, SourceType::Imported, true,
+        );
+        assert_eq!(loc.get_library_name(), "libc.so.6");
+        assert_eq!(loc.get_label(), Some("printf"));
+        assert!(loc.get_address().is_none());
+        assert!(loc.is_function());
+        assert!(!loc.is_data());
+        assert_eq!(loc.get_source(), SourceType::Imported);
+
+        loc.set("puts", Some(Address::new(0x1000)), SourceType::UserDefined).unwrap();
+        assert_eq!(loc.get_label(), Some("puts"));
+        assert_eq!(loc.get_address(), Some(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_external_location_iterator() {
+        let path1 = ExternalPath::from_library_and_label("lib.so", "a");
+        let path2 = ExternalPath::from_library_and_label("lib.so", "b");
+        let locs = vec![
+            ExternalLocationImpl::new(path1, Some("a".into()), None, SourceType::Imported, false),
+            ExternalLocationImpl::new(path2, Some("b".into()), None, SourceType::Imported, true),
+        ];
+        let mut iter = ExternalLocationIterator::new(locs);
+        assert!(iter.has_next());
+        assert_eq!(iter.len(), 2);
+        let first = iter.next().unwrap();
+        assert_eq!(first.get_label(), Some("a"));
+        let second = iter.next().unwrap();
+        assert_eq!(second.get_label(), Some("b"));
+        assert!(!iter.has_next());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ExternalReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_external_reference() {
+        let er = ExternalReference::new(
+            Address::new(0x401000),
+            Address::new(0x500000),
+            RefType::UNCONDITIONAL_CALL,
+            0,
+            "libc.so.6",
+            Some("printf".to_string()),
+        );
+        assert_eq!(*er.get_from_address(), Address::new(0x401000));
+        assert_eq!(*er.get_to_address(), Address::new(0x500000));
+        assert!(er.is_external_reference());
+        assert!(er.is_memory_reference());
+        assert!(!er.is_stack_reference());
+        assert!(!er.is_offset_reference());
+        assert!(!er.is_shifted_reference());
+        assert_eq!(er.get_library_name(), "libc.so.6");
+        assert_eq!(er.get_label(), Some("printf"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for NameTransformer
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_identity_name_transformer() {
+        let t = IdentityNameTransformer;
+        assert_eq!(t.simplify("hello"), "hello");
+        assert_eq!(t.simplify(""), "");
+        assert_eq!(t.simplify("std::vector<int>"), "std::vector<int>");
+    }
+
+    #[test]
+    fn test_illegal_char_cpp_transformer() {
+        let t = IllegalCharCppTransformer::new();
+        // Valid identifier: no change
+        assert_eq!(t.simplify("my_func"), "my_func");
+        // Digit after first char: ok
+        assert_eq!(t.simplify("func2"), "func2");
+        // Template: ok
+        assert_eq!(t.simplify("vector<int>"), "vector<int>");
+        // Space: illegal
+        assert_eq!(t.simplify("my func"), "my_func");
+        // Dollar sign: illegal
+        assert_eq!(t.simplify("$var"), "_var");
+        // Operator special chars: ok after "operator"
+        assert_eq!(t.simplify("operator+"), "operator+");
+        assert_eq!(t.simplify("operator[]"), "operator[]");
+        // Tilde at start: ok
+        assert_eq!(t.simplify("~MyClass"), "~MyClass");
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for MemReferenceImpl
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mem_reference_impl() {
+        let r = MemReferenceImpl::new(
+            Address::new(0x401000),
+            Address::new(0x500000),
+            RefType::UNCONDITIONAL_CALL,
+            SourceType::UserDefined,
+            0,
+            true,
+        );
+        assert_eq!(*r.get_from_address(), Address::new(0x401000));
+        assert_eq!(*r.get_to_address(), Address::new(0x500000));
+        assert!(r.is_primary());
+        assert!(r.is_memory_reference());
+        assert!(!r.is_register_reference());
+        assert!(!r.is_stack_reference());
+        assert!(!r.is_external_reference());
+        assert!(!r.is_offset_reference());
+        assert!(!r.is_shifted_reference());
+        assert_eq!(r.get_symbol_id(), -1);
+        assert!(!r.is_mnemonic_reference());
+    }
+
+    #[test]
+    fn test_mem_reference_impl_ordering() {
+        let r1 = MemReferenceImpl::new(
+            Address::new(0x1000), Address::new(0x2000),
+            RefType::DATA, SourceType::Default, 0, false,
+        );
+        let r2 = MemReferenceImpl::new(
+            Address::new(0x2000), Address::new(0x3000),
+            RefType::DATA, SourceType::Default, 0, false,
+        );
+        assert!(r1 < r2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for OffsetReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_offset_reference() {
+        let r = OffsetReference::new(
+            Address::new(0x401000),
+            Address::new(0x500100),
+            Address::new(0x500000),
+            0x100,
+            RefType::READ,
+            0,
+        );
+        assert_eq!(*r.get_base_address(), Address::new(0x500000));
+        assert_eq!(r.get_offset(), 0x100);
+        assert!(r.is_offset_reference());
+        assert!(r.is_memory_reference());
+        assert!(!r.is_shifted_reference());
+        assert!(!r.is_stack_reference());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ShiftedReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_shifted_reference() {
+        let r = ShiftedReference::new(
+            Address::new(0x401000),
+            Address::new(0x500002),
+            2,
+            RefType::READ,
+            0,
+        );
+        assert_eq!(r.get_shift_value(), 2);
+        assert!(r.is_shifted_reference());
+        assert!(r.is_memory_reference());
+        assert!(!r.is_offset_reference());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for StackReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_reference() {
+        let r = StackReference::new(
+            Address::new(0x401000),
+            -8,
+            RefType::READ,
+            0,
+        );
+        assert_eq!(r.get_stack_offset(), -8);
+        assert!(r.is_stack_reference());
+        assert!(!r.is_memory_reference());
+        assert!(!r.is_register_reference());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ThunkReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_thunk_reference() {
+        let r = ThunkReference::new(Address::new(0x401000), Address::new(0x500000));
+        assert_eq!(*r.get_from_address(), Address::new(0x401000));
+        assert_eq!(*r.get_to_address(), Address::new(0x500000));
+        assert_eq!(r.get_reference_type(), RefType::THUNK);
+        assert_eq!(r.get_operand_index(), OTHER_OP_INDEX);
+        assert!(!r.is_memory_reference());
+        assert!(!r.is_register_reference());
+        assert!(!r.is_stack_reference());
+        assert_eq!(r.get_source(), SourceType::Default);
+    }
+
+    #[test]
+    fn test_thunk_reference_dynamic_ref_trait() {
+        let r = ThunkReference::new(Address::new(0x1000), Address::new(0x2000));
+        let dr: &dyn DynamicReference = &r;
+        assert_eq!(*dr.get_from_address(), Address::new(0x1000));
+        assert_eq!(dr.get_reference_type(), RefType::THUNK);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for EntryPointReference
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_entry_point_reference() {
+        let r = EntryPointReference::new(
+            Address::new(0x401000),
+            Address::new(0x500000),
+            RefType::UNCONDITIONAL_JUMP,
+            MNEMONIC,
+        );
+        assert!(r.is_entry_point_reference());
+        assert!(r.is_memory_reference());
+        assert!(!r.is_register_reference());
+        assert!(!r.is_stack_reference());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for RefTypeFactory
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_ref_type_factory_get() {
+        assert_eq!(RefTypeFactory::get(0), Some(RefType::Flow(FlowType::FallThrough)));
+        assert_eq!(RefTypeFactory::get(1), Some(RefType::Flow(FlowType::UnconditionalJump)));
+        assert_eq!(RefTypeFactory::get(100), Some(RefType::Data(DataRefType::Data)));
+        assert_eq!(RefTypeFactory::get(101), Some(RefType::Data(DataRefType::Read)));
+        assert!(RefTypeFactory::get(99).is_none());
+    }
+
+    #[test]
+    fn test_ref_type_factory_arrays() {
+        assert!(!RefTypeFactory::get_memory_ref_types().is_empty());
+        assert!(!RefTypeFactory::get_stack_ref_types().is_empty());
+        assert!(!RefTypeFactory::get_data_ref_types().is_empty());
+        assert!(!RefTypeFactory::get_external_ref_types().is_empty());
+    }
+
+    #[test]
+    fn test_ref_type_factory_is_memory_ref_type() {
+        assert!(RefTypeFactory::is_memory_ref_type(RefType::DATA));
+        assert!(RefTypeFactory::is_memory_ref_type(RefType::READ));
+        assert!(RefTypeFactory::is_memory_ref_type(RefType::UNCONDITIONAL_CALL));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ReferenceIteratorAdapter
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_reference_iterator_adapter() {
+        let refs = vec![
+            Reference::new(Address::new(0x100), Address::new(0x200), RefType::DATA, 0),
+            Reference::new(Address::new(0x300), Address::new(0x400), RefType::READ, 1),
+        ];
+        let mut adapter = ReferenceIteratorAdapter::new(refs);
+        assert!(adapter.has_next());
+        assert_eq!(adapter.len(), 2);
+        let first = adapter.next().unwrap();
+        assert_eq!(*first.get_from_address(), Address::new(0x100));
+        let _second = adapter.next().unwrap();
+        assert!(!adapter.has_next());
+
+        adapter.reset();
+        assert!(adapter.has_next());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for SymbolIteratorStruct
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_symbol_iterator_struct() {
+        let symbols = vec![
+            Symbol::label("foo", Address::new(0x1000)),
+            Symbol::label("bar", Address::new(0x2000)),
+        ];
+        let mut iter = SymbolIteratorStruct::new(symbols);
+        assert!(iter.has_next());
+        assert_eq!(iter.len(), 2);
+        let first = iter.next().unwrap();
+        assert_eq!(first.name(), "foo");
+        let second = iter.next().unwrap();
+        assert_eq!(second.name(), "bar");
+        assert!(!iter.has_next());
+    }
+
+    #[test]
+    fn test_symbol_iterator_empty() {
+        let mut iter = SymbolIteratorStruct::empty();
+        assert!(!iter.has_next());
+        assert!(iter.is_empty());
+        assert!(iter.next().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for SymbolIteratorAdapter
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_symbol_iterator_adapter() {
+        let symbols = vec![
+            Symbol::function("main", Address::new(0x401000)),
+        ];
+        let mut adapter = SymbolIteratorAdapter::new(symbols);
+        assert!(adapter.has_next());
+        let sym = adapter.next().unwrap();
+        assert_eq!(sym.name(), "main");
+        assert!(!adapter.has_next());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for SymbolUtilities
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_symbol_utilities_is_default_label_name() {
+        assert!(SymbolUtilities::is_default_label_name("LAB_00401000"));
+        assert!(SymbolUtilities::is_default_label_name("SUB_00401000"));
+        assert!(SymbolUtilities::is_default_label_name("DAT_00401000"));
+        assert!(SymbolUtilities::is_default_label_name("UNK_00401000"));
+        assert!(!SymbolUtilities::is_default_label_name("main"));
+        assert!(!SymbolUtilities::is_default_label_name("ab"));
+    }
+
+    #[test]
+    fn test_symbol_utilities_is_default_function_name() {
+        assert!(SymbolUtilities::is_default_function_name("FUN_00401000"));
+        assert!(!SymbolUtilities::is_default_function_name("main"));
+    }
+
+    #[test]
+    fn test_symbol_utilities_default_names() {
+        let addr = Address::new(0x401000);
+        assert_eq!(SymbolUtilities::default_function_name(&addr), "FUN_00401000");
+        assert_eq!(SymbolUtilities::default_label_name(&addr), "LAB_00401000");
+        assert_eq!(SymbolUtilities::default_data_name(&addr), "DAT_00401000");
+    }
+
+    #[test]
+    fn test_symbol_utilities_parse_qualified_name() {
+        let parts = SymbolUtilities::parse_qualified_name("Global::my_ns::func");
+        assert_eq!(parts, vec!["Global", "my_ns", "func"]);
+    }
+
+    #[test]
+    fn test_symbol_utilities_get_name_without_namespace() {
+        assert_eq!(SymbolUtilities::get_name_without_namespace("Global::ns::func"), "func");
+        assert_eq!(SymbolUtilities::get_name_without_namespace("simple"), "simple");
+    }
+
+    #[test]
+    fn test_symbol_utilities_get_namespace_path() {
+        assert_eq!(SymbolUtilities::get_namespace_path("Global::ns::func"), Some("Global::ns"));
+        assert_eq!(SymbolUtilities::get_namespace_path("simple"), None);
+    }
+
+    #[test]
+    fn test_symbol_utilities_is_dynamic_data_type_prefix() {
+        assert!(SymbolUtilities::is_dynamic_data_type_prefix("dword_00401000"));
+        assert!(SymbolUtilities::is_dynamic_data_type_prefix("byte_1234"));
+        assert!(!SymbolUtilities::is_dynamic_data_type_prefix("my_variable"));
+    }
+
+    #[test]
+    fn test_symbol_utilities_compare_names() {
+        use std::cmp::Ordering;
+        assert_eq!(SymbolUtilities::compare_symbol_names("abc", "ABC"), Ordering::Equal);
+        assert_eq!(SymbolUtilities::compare_symbol_names("abc", "def"), Ordering::Less);
+        assert_eq!(SymbolUtilities::compare_symbol_names("DEF", "abc"), Ordering::Greater);
+    }
+
+    #[test]
+    fn test_symbol_utilities_get_default_prefix() {
+        assert_eq!(SymbolUtilities::get_default_prefix(SymbolType::Function), DEFAULT_FUNCTION_PREFIX);
+        assert_eq!(SymbolUtilities::get_default_prefix(SymbolType::Label), DEFAULT_SYMBOL_PREFIX);
+    }
+
+    #[test]
+    fn test_symbol_utilities_has_non_default_name() {
+        let label = LabelSymbol::new(1, "main", Address::new(0x1000));
+        assert!(SymbolUtilities::has_non_default_name(&label));
+
+        let default_label = LabelSymbol::new(2, "LAB_00001000", Address::new(0x1000));
+        assert!(!SymbolUtilities::has_non_default_name(&default_label));
+    }
+
+    #[test]
+    fn test_symbol_utilities_is_valid() {
+        assert!(SymbolUtilities::is_valid_symbol_name("valid_name"));
+        assert!(!SymbolUtilities::is_valid_symbol_name(""));
+        assert!(!SymbolUtilities::is_valid_symbol_name("bad name"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for constants
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_symbol_utility_constants() {
+        assert_eq!(MAX_SYMBOL_NAME_LENGTH, 2000);
+        assert_eq!(DEFAULT_SUBROUTINE_PREFIX, "SUB_");
+        assert_eq!(DEFAULT_SYMBOL_PREFIX, "LAB_");
+        assert_eq!(DEFAULT_DATA_PREFIX, "DAT_");
+        assert_eq!(DEFAULT_UNKNOWN_PREFIX, "UNK_");
+        assert_eq!(DEFAULT_FUNCTION_PREFIX, "FUN_");
+        assert_eq!(MIN_LABEL_ADDRESS_DIGITS, 8);
+        assert_eq!(UNK_LEVEL, 0);
+        assert_eq!(FUN_LEVEL, 4);
+        assert_eq!(EXT_LEVEL, 5);
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for ExternalLocation trait on ExternalLocationImpl
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_external_location_trait() {
+        let path = ExternalPath::from_library_and_label("libc.so.6", "malloc");
+        let loc: Box<dyn ExternalLocation> = Box::new(ExternalLocationImpl::new(
+            path, Some("malloc".into()), Some(Address::new(0x1000)),
+            SourceType::Imported, true,
+        ));
+        assert_eq!(loc.get_library_name(), "libc.so.6");
+        assert_eq!(loc.get_label(), Some("malloc"));
+        assert_eq!(loc.get_address(), Some(Address::new(0x1000)));
+        assert!(loc.is_function());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for Symbol variants' namespace_id and type checks
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_symbol_namespace_id() {
+        let label = Symbol::Label(LabelSymbol::with_options(1, "foo", Address::new(0x1000), 5, SourceType::UserDefined));
+        assert_eq!(label.namespace_id(), Some(5));
+        assert!(label.is_in_namespace(5));
+        assert!(!label.is_in_namespace(0));
+
+        let lib = Symbol::library("libc.so.6");
+        assert_eq!(lib.namespace_id(), Some(0));
+    }
+
+    #[test]
+    fn test_symbol_type_checks() {
+        let func = Symbol::function("main", Address::new(0x1000));
+        assert!(func.is_function_symbol());
+        assert!(!func.is_label_symbol());
+
+        let label = Symbol::label("lab", Address::new(0x2000));
+        assert!(label.is_label_symbol());
+        assert!(!label.is_function_symbol());
+
+        let lib = Symbol::library("libc.so.6");
+        assert!(lib.is_library_symbol());
+        assert!(lib.is_namespace_symbol());
+
+        let ns = Symbol::namespace("my_ns", 0);
+        assert!(ns.is_namespace_type());
+
+        let cls = Symbol::class("MyClass", 0);
+        assert!(cls.is_class_symbol());
+    }
+
+    // -----------------------------------------------------------------------
+    // Tests for DynamicReference trait
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_dynamic_reference_methods() {
+        let tr = ThunkReference::new(Address::new(0x1000), Address::new(0x2000));
+        assert_eq!(*tr.get_from_address(), Address::new(0x1000));
+        assert_eq!(*tr.get_to_address(), Address::new(0x2000));
+        assert!(!tr.is_memory_reference());
+        assert!(!tr.is_register_reference());
+        assert!(!tr.is_stack_reference());
+        assert!(!tr.is_external_reference());
+        assert!(!tr.is_entry_point_reference());
+        assert!(!tr.is_offset_reference());
+        assert!(!tr.is_shifted_reference());
     }
 }
