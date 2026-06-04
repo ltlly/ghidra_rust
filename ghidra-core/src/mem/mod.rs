@@ -2594,6 +2594,13 @@ pub trait Memory: Send + Sync {
     /// Convert an initialized block to uninitialized (discarding data).
     fn convert_to_uninitialized(&mut self, block_name: &str) -> Result<(), GhidraError>;
 
+    /// Rename a memory block.
+    ///
+    /// The block identified by `old_name` is renamed to `new_name`.
+    /// Returns an error if the old block does not exist or the new name
+    /// is already taken.
+    fn rename_block(&mut self, old_name: &str, new_name: &str) -> Result<(), GhidraError>;
+
     // ---- byte read ----
 
     /// Read a single byte.
@@ -3081,6 +3088,28 @@ impl Memory for MemoryMap {
         }
         block.data.clear();
         block.initialized = false;
+        Ok(())
+    }
+
+    fn rename_block(&mut self, old_name: &str, new_name: &str) -> Result<(), GhidraError> {
+        if old_name == new_name {
+            return Ok(());
+        }
+        if self.blocks.contains_key(new_name) {
+            return Err(GhidraError::MemoryError(format!(
+                "Block name '{}' already in use",
+                new_name
+            )));
+        }
+        let mut block = self.blocks.remove(old_name).ok_or_else(|| {
+            GhidraError::NotFound(format!("Block '{}' not found", old_name))
+        })?;
+        // Update the blocks_by_addr index
+        if let Some(pos) = self.blocks_by_addr.iter().position(|n| n == old_name) {
+            self.blocks_by_addr[pos] = new_name.to_string();
+        }
+        block.name = new_name.to_string();
+        self.blocks.insert(new_name.to_string(), block);
         Ok(())
     }
 
@@ -3776,6 +3805,9 @@ impl Memory for StubMemory {
         Err(GhidraError::NotSupported("StubMemory".into()))
     }
     fn convert_to_uninitialized(&mut self, _block_name: &str) -> Result<(), GhidraError> {
+        Err(GhidraError::NotSupported("StubMemory".into()))
+    }
+    fn rename_block(&mut self, _old_name: &str, _new_name: &str) -> Result<(), GhidraError> {
         Err(GhidraError::NotSupported("StubMemory".into()))
     }
     fn get_byte(&self, _addr: Address) -> Result<u8, GhidraError> {
