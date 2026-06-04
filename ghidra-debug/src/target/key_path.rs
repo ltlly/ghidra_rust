@@ -106,6 +106,30 @@ impl KeyPath {
         key.parse::<i64>().is_ok()
     }
 
+    /// Whether a key is a bracketed index in the path sense (starts with `[` and ends with `]`).
+    pub fn is_index_str(key: &str) -> bool {
+        key.starts_with('[') && key.ends_with(']')
+    }
+
+    /// Whether a key is an attribute name (i.e., not an index).
+    pub fn is_name(key: &str) -> bool {
+        !key.is_empty() && !Self::is_index_str(key)
+    }
+
+    /// Parse an index value from a bracketed key, e.g., `"[42]"` returns `"42"`.
+    pub fn parse_index(key: &str) -> &str {
+        if Self::is_index_str(key) {
+            &key[1..key.len() - 1]
+        } else {
+            panic!("Index keys must be of the form '[index]'. Got {}", key)
+        }
+    }
+
+    /// Encode the given index as a bracketed key.
+    pub fn make_key(index: &str) -> String {
+        format!("[{}]", index)
+    }
+
     /// Encode an index without brackets.
     pub fn make_index(i: i64) -> String {
         i.to_string()
@@ -121,10 +145,30 @@ impl KeyPath {
         }
     }
 
+    /// Create a new path by removing the last `n` keys.
+    ///
+    /// Returns `None` if `n` exceeds the path length.
+    pub fn parent_n(&self, n: usize) -> Option<KeyPath> {
+        if n > self.keys.len() {
+            None
+        } else {
+            Some(Self {
+                keys: self.keys[..self.keys.len() - n].to_vec(),
+            })
+        }
+    }
+
     /// Append a key to this path.
     pub fn extend(&self, key: &str) -> KeyPath {
         let mut new_keys = self.keys.clone();
         new_keys.push(key.to_string());
+        Self { keys: new_keys }
+    }
+
+    /// Append another path to this path.
+    pub fn extend_path(&self, sub: &KeyPath) -> KeyPath {
+        let mut new_keys = self.keys.clone();
+        new_keys.extend_from_slice(&sub.keys);
         Self { keys: new_keys }
     }
 
@@ -152,6 +196,26 @@ impl KeyPath {
     /// Iterator over keys.
     pub fn iter(&self) -> impl Iterator<Item = &str> {
         self.keys.iter().map(|s| s.as_str())
+    }
+
+    /// Check if this path contains any wildcard keys.
+    pub fn contains_wildcard(&self) -> bool {
+        self.keys.iter().any(|k| {
+            k.as_str() == "[]" || k.is_empty()
+        })
+    }
+
+    /// Count the number of wildcard keys in this path.
+    pub fn count_wildcards(&self) -> usize {
+        self.keys
+            .iter()
+            .filter(|k| k.as_str() == "[]" || k.is_empty())
+            .count()
+    }
+
+    /// Get the raw keys as a slice.
+    pub fn keys(&self) -> &[String] {
+        &self.keys
     }
 }
 

@@ -20,6 +20,7 @@ bitflags = { workspace = true }
 regex = { workspace = true }
 lazy_static = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt"] }
+once_cell = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

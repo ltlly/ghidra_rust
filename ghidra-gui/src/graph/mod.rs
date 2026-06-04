@@ -38,6 +38,7 @@
 
 pub mod algo;
 pub mod job;
+pub mod jung;
 pub mod service;
 pub mod viewer;
 

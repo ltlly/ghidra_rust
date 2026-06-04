@@ -2,6 +2,11 @@
 //!
 //! Ports `ghidra.features.bsim.query.client.tables` package.
 
+pub mod vector_store;
+pub mod weight_table;
+pub mod callgraph_table;
+pub mod description_table;
+
 /// SQL table name constants.
 pub mod table_names {
     /// Executable metadata table.

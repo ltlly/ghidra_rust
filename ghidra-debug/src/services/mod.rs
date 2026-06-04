@@ -12,9 +12,12 @@
 //! - `modules_impl`: Modules/mapping service implementation.
 
 pub mod breakpoint_impl;
+pub mod console_impl;
 pub mod control_impl;
 pub mod modules_impl;
 pub mod platform_impl;
+pub mod progress_impl;
+pub mod target_impl;
 pub mod tracemgr_impl;
 
 use crate::api::breakpoint::LogicalBreakpoint;

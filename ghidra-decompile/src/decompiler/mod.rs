@@ -66,6 +66,7 @@ pub mod analysis_cmd;
 pub mod clang_line;
 pub mod clang_node;
 pub mod component;
+pub mod cpp_exporter;
 pub mod highlight_types;
 pub mod decompile_callback;
 pub mod decompile_debug;
@@ -168,6 +169,11 @@ pub use actions::{
 pub use util::{
     DataTypeDependencyOrderer, FillOutStructureHelper, StructFieldEntry,
     find_token_at, line_display_width, to_lines, to_plain_text,
+};
+
+// CppExporter types
+pub use cpp_exporter::{
+    CppExportOptions, CppExporter, DecompiledFunctionExport,
 };
 
 // Highlight types (panel, controller, color provider) -- from highlight_types module

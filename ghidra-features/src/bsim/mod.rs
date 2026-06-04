@@ -35,9 +35,12 @@
 //! }
 //! ```
 
+pub mod bulk_signatures;
 pub mod client;
 pub mod client_factory;
+pub mod configuration;
 pub mod description;
+pub mod elastic_db;
 pub mod facade;
 pub mod file;
 pub mod gui;
@@ -112,6 +115,26 @@ pub use search_results::{
     BSimMatchResult, BSimMatchResultsModel, BSimResultStatus,
     BSimSearchResultsFilter, BSimSearchSettings, ExecutableResult,
 };
+
+// Re-export configuration types.
+pub use configuration::{
+    BSimServerConfig, BSimConfiguration, BSimDatabaseType,
+};
+
+// Re-export elastic database types.
+pub use elastic_db::{
+    ConnectionStatus, ElasticConnection, ElasticDatabase, ElasticError,
+    NullElasticConnection,
+};
+
+// Re-export bulk signature types.
+pub use bulk_signatures::{BulkIngestStats, BulkSignatureGenerator};
+
+// Re-export table types.
+pub use tables::vector_store::{VectorStore, VectorStoreEntry, VectorStoreManager};
+pub use tables::weight_table::{WeightEntry, WeightTable};
+pub use tables::callgraph_table::{CallgraphEdge, CallgraphTable};
+pub use tables::description_table::{DescriptionTable, FunctionRecord};
 
 use anyhow::{anyhow, Context, Result};
 use ghidra_core::addr::{Address, AddressRange};

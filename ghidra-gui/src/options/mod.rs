@@ -28,6 +28,7 @@ pub mod preference_state;
 pub mod sub_options;
 pub mod tool_options;
 pub mod wrapped_option;
+pub mod wrapped_options;
 
 pub use action_trigger::ActionTrigger;
 pub use editor_state::EditorState;
@@ -40,3 +41,7 @@ pub use preference_state::PreferenceState;
 pub use sub_options::SubOptions;
 pub use tool_options::ToolOptions;
 pub use wrapped_option::WrappedOption;
+pub use wrapped_options::{
+    CustomOption, KeyStroke, WrappedActionTrigger, WrappedCustomOption,
+    WrappedDate, WrappedFile, WrappedKeyStroke,
+};

@@ -102,6 +102,29 @@ pub mod help;
 pub mod check;
 pub mod data_plugin;
 
+// -- Additional modules ported from Ghidra's Features/Base plugin/core --
+pub mod algorithmtree;
+pub mod archive;
+pub mod blockmodel;
+pub mod compositeeditor;
+pub mod cparser;
+pub mod datapreview;
+pub mod datawindow;
+pub mod eclipse;
+pub mod functioncompare;
+pub mod graph;
+pub mod interpreter;
+pub mod osgi;
+pub mod resources;
+pub mod script;
+pub mod string;
+pub mod strings;
+pub mod symboltree;
+pub mod terminal;
+pub mod totd;
+pub mod validator;
+pub mod vscode;
+
 pub use base::analyzer::*;
 pub use dwarf::*;
 pub use fileformats::*;

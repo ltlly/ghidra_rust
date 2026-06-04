@@ -8,6 +8,7 @@ description = "Ghidra Rust - GUI: egui-based graphical interface with listing vi
 ghidra-core = { path = "../ghidra-core" }
 ghidra-decompile = { path = "../ghidra-decompile" }
 ghidra-features = { path = "../ghidra-features" }
+petgraph = { workspace = true }
 egui = { workspace = true }
 eframe = { workspace = true }
 egui-winit = { workspace = true }

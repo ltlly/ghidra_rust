@@ -1,6 +1,11 @@
 //! Resource management for icons and images.
 //!
-//! Ports `resources.ResourceManager` and `resources.IconProvider`.
+//! Ports `resources.ResourceManager`, `resources.IconProvider`,
+//! and `resources.MultiIcon` / `resources.MultiIconBuilder`.
+
+pub mod multi_icon;
+
+pub use multi_icon::{BuiltinIcon, IconId, IconOverlay, MultiIcon, MultiIconBuilder, Quadrant};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
