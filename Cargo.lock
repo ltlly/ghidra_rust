@@ -1690,6 +1690,8 @@ dependencies = [
  "log",
  "md-5",
  "nom",
+ "num-bigint",
+ "num-traits",
  "petgraph",
  "regex",
  "rusqlite",

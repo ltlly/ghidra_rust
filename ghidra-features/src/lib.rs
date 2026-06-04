@@ -52,6 +52,7 @@ pub mod recognizers;
 pub mod rust;
 pub mod swift;
 pub mod system_emulation;
+pub mod table;
 pub mod versiontracking;
 
 pub use base::analyzer::*;

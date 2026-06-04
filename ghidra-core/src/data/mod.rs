@@ -1104,6 +1104,38 @@ impl Settings {
     pub fn clear(&mut self, key: &str) {
         self.values.remove(key);
     }
+
+    /// Get a long (i64) value from settings, parsing the stored string.
+    /// Returns None if the key is absent or the value is not a valid integer.
+    pub fn get_long(&self, key: &str) -> Option<i64> {
+        self.values.get(key).and_then(|s| s.parse::<i64>().ok())
+    }
+
+    /// Set a long (i64) value in settings, stored as its string representation.
+    pub fn set_long(&mut self, key: impl Into<String>, value: i64) {
+        self.values.insert(key.into(), value.to_string());
+    }
+
+    /// Get a string value from settings.
+    /// Returns None if the key is absent.
+    pub fn get_string(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(|s| s.as_str())
+    }
+
+    /// Set a string value in settings.
+    pub fn set_string(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.values.insert(key.into(), value.into());
+    }
+
+    /// Clear a setting by key (alias for `clear`).
+    pub fn clear_setting(&mut self, key: &str) {
+        self.values.remove(key);
+    }
+
+    /// Get a raw value from settings.
+    pub fn get_value(&self, key: &str) -> Option<&str> {
+        self.values.get(key).map(|s| s.as_str())
+    }
 }
 
 // ============================================================================
