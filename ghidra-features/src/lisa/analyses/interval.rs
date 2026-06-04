@@ -417,6 +417,22 @@ impl LatticeElement for PcodeInterval {
     }
 }
 
+impl fmt::Display for LongInterval {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_infinity() {
+            write!(f, "[-\u{221e}, +\u{221e}]")
+        } else {
+            let low = self
+                .get_low()
+                .map_or("-\u{221e}".to_string(), |l| l.to_string());
+            let high = self
+                .get_high()
+                .map_or("+\u{221e}".to_string(), |h| h.to_string());
+            write!(f, "[{low}, {high}]")
+        }
+    }
+}
+
 impl fmt::Display for PcodeInterval {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.interval {

@@ -16,12 +16,26 @@
 //! - [`PcodeInterval`] -- Interval abstract domain with widening/narrowing.
 //! - [`PcodeStability`] -- Stability domain (stable / unstable).
 //! - [`PcodeUpperBounds`] -- Upper bounds domain.
+//! - [`Pentagon`] -- Pentagon domain combining interval + parity + sign + relations.
 //! - [`PcodeByteBasedConstantPropagation`] -- Byte-level constant propagation.
+//! - [`PcodeNonRelationalValue`] -- Combined non-relational value domain.
+//! - [`PcodePowersetInterval`] -- Non-redundant powerset of intervals.
 //! - [`PcodeDataflowConstantPropagation`] -- Dataflow constant propagation.
 //!
 //! ## Lattice
 //!
-//! - [`Lattice`] -- Core lattice trait for abstract domains.
+//! - [`LatticeElement`] -- Core lattice trait for abstract domains.
+//!
+//! ## P-code Infrastructure
+//!
+//! - [`PcodeFrontend`] -- Translates machine instructions to p-code ops.
+//! - [`PcodeFeatures`] -- Tracks opcodes/features present in analyzed code.
+//! - [`PcodeBranch`] -- Represents control flow branches.
+//! - [`WorkItem`] -- Work items for fixpoint iteration.
+//!
+//! ## Contexts, Expressions, Statements, Locations, Types
+//!
+//! See the respective submodules for p-code IR types.
 //!
 //! # Licensing
 //!
@@ -30,6 +44,15 @@
 
 pub mod analyses;
 pub mod lattice;
+pub mod contexts;
+pub mod expressions;
+pub mod statements;
+pub mod locations;
+pub mod types;
+pub mod pcode_frontend;
+pub mod pcode_features;
+pub mod pcode_branch;
+pub mod work_item;
 
 pub use analyses::PcodeDataflowConstantPropagation;
 pub use analyses::PcodeInterval;
@@ -37,4 +60,14 @@ pub use analyses::PcodeParity;
 pub use analyses::PcodeSign;
 pub use analyses::PcodeTaint;
 pub use analyses::PcodeThreeLevelTaint;
+pub use analyses::PcodeStability;
+pub use analyses::PcodeUpperBounds;
+pub use analyses::Pentagon;
+pub use analyses::PcodeByteBasedConstantPropagation;
+pub use analyses::PcodeNonRelationalValue;
+pub use analyses::PcodePowersetInterval;
 pub use lattice::{LatticeElement, Satisfiability};
+pub use pcode_frontend::{PcodeFrontend, PcodeOp};
+pub use pcode_features::PcodeFeatures;
+pub use pcode_branch::{PcodeBranch, BranchKind};
+pub use work_item::WorkItem;

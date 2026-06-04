@@ -11,6 +11,8 @@
 //! - [`match_set`] - Match and match set
 //! - [`markup`] - Markup items and types
 //! - [`session`] - Session container
+//! - [`db`] - Database persistence layer (rusqlite)
+//! - [`impl_module`] - Implementation details (events, change management)
 //! - [`correlator`] - Address and program correlators
 //! - [`stringable`] - Value serialization
 //! - [`markuptype`] - Markup type definitions
@@ -18,8 +20,10 @@
 
 pub mod association;
 pub mod correlator;
+pub mod db;
 pub mod error;
 pub mod helpers;
+pub mod impl_module;
 pub mod markup;
 pub mod match_set;
 pub mod markuptype;

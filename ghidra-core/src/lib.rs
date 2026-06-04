@@ -63,3 +63,42 @@ pub use project::{
     DomainFolder, Project, ProjectData, ProjectError, ProjectFile, ProjectLocator,
     ProjectManager, ProjectResult, PROJECT_DIR_SUFFIX, PROJECT_FILE_SUFFIX,
 };
+pub use project::model::{
+    AbortedTransactionListener as ProjectAbortedTransactionListener,
+    ChangeSet as ProjectChangeSet, CheckinHandler as ProjectCheckinHandler,
+    DomainFolderChangeListener, DomainObject2, DomainObjectChangeRecord,
+    DomainObjectChangedEvent, DomainObjectClosedListener, DomainObjectEvent,
+    DomainObjectListener as ProjectDomainObjectListener, DomainFile2,
+    DomainFolder2, DynamicEventType, EventQueueID, EventType as ProjectEventType,
+    ItemCheckoutStatus, LinkFileInfo, LinkStatus, LinkedDomainFile, LinkedDomainFolder,
+    ProjectData2, SimpleCheckinHandler, SimpleTransactionInfo, ToolAssociationInfo,
+    TransactionInfo as ProjectTransactionInfo, TransactionListener,
+    TransactionStatus, Version as ProjectVersion,
+};
+pub use project::data::{
+    ContentHandler, DefaultCheckinHandler, DefaultProjectData, DomainFileIndex,
+    DomainFolderChangeListenerList, DomainObjectChangeSupport, DomainObjectDBChangeSet,
+    LinkHandler, MetadataManager, MISSING_CONTENT, OpenMode, OptionValue, OptionsDB,
+    PluginConfig, PROGRAM_CONTENT, ToolState, ToolStateFactory, TransientDataManager,
+    UNKNOWN_CONTENT,
+};
+pub use project::cmd::{
+    BackgroundCommand, BackgroundCommandMonitor, Command, CommandManager, CommandResult,
+    CompoundBackgroundCommand, CompoundCmd, MergeableBackgroundCommand,
+};
+pub use project::plugintool::{
+    Plugin, PluginDescription, PluginEvent, PluginLifecycle, PluginManager as ProjectPluginManager,
+    PluginToolInterface, ServiceInfo, ServiceManager,
+};
+pub use project::task::{
+    GhidraTask, GTask, ScheduledTask, TaskDialogResult, TaskError, TaskMonitor,
+    TaskScheduler, TaskState,
+};
+pub use project::protocol::{
+    GhidraUrl, GhidraUrlError, GhidraUrlHandler, UrlResource, parse_ghidra_url,
+};
+pub use project::manager::{
+    ProjectHandle, ProjectManager as ProjectManagerTrait, RepositoryAdapter,
+    RepositoryServerAdapter, SaveState, ServerInfo, SimpleProjectManager, ToolChest,
+    ToolManager, ToolServices, ToolTemplate, ProjectViewListener,
+};

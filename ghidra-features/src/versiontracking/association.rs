@@ -19,7 +19,7 @@ pub struct VtAssociation {
 impl VtAssociation {
     pub fn new(id: u64, association_type: VtAssociationType, source_address: Address, destination_address: Address) -> Self {
         Self { id, association_type, source_address, destination_address, status: VtAssociationStatus::Available,
-            markup_status: VtAssociationMarkupStatus::HasNone, vote_count: 0 }
+            markup_status: VtAssociationMarkupStatus::new_none(), vote_count: 0 }
     }
     pub fn association_type(&self) -> VtAssociationType { self.association_type }
     pub fn source_address(&self) -> Address { self.source_address }
@@ -27,7 +27,7 @@ impl VtAssociation {
     pub fn status(&self) -> VtAssociationStatus { self.status }
     pub fn markup_status(&self) -> VtAssociationMarkupStatus { self.markup_status }
     pub fn set_markup_status(&mut self, status: VtAssociationMarkupStatus) { self.markup_status = status; }
-    pub fn has_applied_markup_items(&self) -> bool { self.status == VtAssociationStatus::Accepted && self.markup_status == VtAssociationMarkupStatus::HasAppliedMarkup }
+    pub fn has_applied_markup_items(&self) -> bool { self.status == VtAssociationStatus::Accepted && self.markup_status.has_applied_markup() }
     pub fn set_accepted(&mut self) -> Result<(), VtError> {
         if self.status.is_blocked() { return Err(VtError::AssociationStatusError { message: format!("Cannot accept: status is {}", self.status.display_name()) }); }
         self.status = VtAssociationStatus::Accepted; Ok(())

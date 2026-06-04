@@ -16,6 +16,26 @@
 //! | [`DomainFile`]    | Trait for an individual project file       |
 //! | [`DomainFolder`]  | Trait for a folder within a project        |
 //! | [`ProjectData`]   | Trait for root-level data access           |
+//!
+//! ## Submodules
+//!
+//! | Submodule        | Java package(s) ported                        |
+//! |------------------|-----------------------------------------------|
+//! | [`model`]        | `ghidra.framework.model` (DomainObject, events, listeners, transactions) |
+//! | [`data`]         | `ghidra.framework.data` (OpenMode, ContentHandler, OptionsDB, etc.) |
+//! | [`cmd`]          | `ghidra.framework.cmd` (Command, BackgroundCommand, CompoundCmd) |
+//! | [`plugintool`]   | `ghidra.framework.plugintool` (Plugin, PluginTool, ServiceManager) |
+//! | [`task`]         | `ghidra.framework.task` (GTask, GhidraTask, TaskScheduler, TaskMonitor) |
+//! | [`protocol`]     | `ghidra.framework.protocol.ghidra` (GhidraURL parsing) |
+//! | [`manager`]      | Project manager trait and related types        |
+
+pub mod cmd;
+pub mod data;
+pub mod manager;
+pub mod model;
+pub mod plugintool;
+pub mod protocol;
+pub mod task;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
@@ -628,7 +648,7 @@ impl Project {
     }
 
     /// Close the project, releasing the lock and saving if modified.
-    pub fn close(mut self) -> ProjectResult<()> {
+    pub fn close(&mut self) -> ProjectResult<()> {
         if self.modified_flag {
             self.save()?;
         }
@@ -702,6 +722,27 @@ impl Project {
             .map(|e| e.path())
             .collect();
         Ok(entries)
+    }
+}
+
+impl manager::ProjectHandle for Project {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn locator(&self) -> &ProjectLocator {
+        &self.location
+    }
+    fn is_modified(&self) -> bool {
+        self.modified_flag
+    }
+    fn project_path(&self) -> PathBuf {
+        self.location.project_path()
+    }
+    fn save(&mut self) -> ProjectResult<()> {
+        Project::save(self)
+    }
+    fn close(&mut self) -> ProjectResult<()> {
+        Project::close(self)
     }
 }
 
@@ -843,7 +884,7 @@ impl ProjectManager {
         if self.active_project == Some(index) {
             self.active_project = None;
         }
-        let project = self.projects.remove(index);
+        let mut project = self.projects.remove(index);
         project.close()?;
         Ok(())
     }
@@ -1372,7 +1413,7 @@ mod tests {
         cleanup(&base);
         fs::create_dir_all(&base).unwrap();
 
-        let proj = Project::create("lock_proj", &base).unwrap();
+        let mut proj = Project::create("lock_proj", &base).unwrap();
         let lock_path = proj.project_path().join(".ghidra_lock");
         assert!(proj.is_locked());
         assert!(lock_path.exists());

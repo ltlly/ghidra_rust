@@ -25,6 +25,7 @@ pub enum Purpose {
 ///
 /// Dispatches p-code operations (as opcodes) to the corresponding
 /// `SymValueZ3` methods, producing new symbolic values.
+#[derive(Debug, Clone, Copy)]
 pub struct SymZ3PcodeArithmetic;
 
 impl SymZ3PcodeArithmetic {

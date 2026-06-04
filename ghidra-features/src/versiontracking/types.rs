@@ -27,8 +27,100 @@ impl fmt::Display for VtAssociationStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f, "{}", self.display_name()) }
 }
 
+/// Bitfield-based association markup status.
+///
+/// Tracks the aggregate status of all markup items within an association.
+/// Each bit represents a different status condition.
+///
+/// Corresponds to Ghidra's `VTAssociationMarkupStatus` Java class.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum VtAssociationMarkupStatus { HasNone, HasAppliedMarkup, HasExaminedMarkup, HasErrors, HasDontCareMarkup, HasDontKnowMarkup, HasUnexaminedMarkup }
+pub struct VtAssociationMarkupStatus {
+    status: i32,
+}
+
+const INITIALIZED: i32 = 0x1;
+const HAS_UNEXAMINED: i32 = 0x2;
+const HAS_APPLIED: i32 = 0x4;
+const HAS_REJECTED: i32 = 0x8;
+const HAS_DONT_CARE: i32 = 0x10;
+const HAS_DONT_KNOW: i32 = 0x20;
+const HAS_ERRORS: i32 = 0x40;
+
+impl VtAssociationMarkupStatus {
+    /// Create a new uninitialized status.
+    pub fn new_none() -> Self { Self { status: 0 } }
+
+    /// Create a status from individual flags.
+    pub fn new(has_unexamined: bool, has_applied: bool, has_rejected: bool,
+               has_dont_care: bool, has_dont_know: bool, has_errors: bool) -> Self {
+        let mut status = INITIALIZED;
+        if has_unexamined { status |= HAS_UNEXAMINED; }
+        if has_applied { status |= HAS_APPLIED; }
+        if has_rejected { status |= HAS_REJECTED; }
+        if has_dont_care { status |= HAS_DONT_CARE; }
+        if has_dont_know { status |= HAS_DONT_KNOW; }
+        if has_errors { status |= HAS_ERRORS; }
+        Self { status }
+    }
+
+    /// Create from raw status value.
+    pub fn from_value(status: i32) -> Self { Self { status } }
+
+    /// Returns the raw status value.
+    pub fn status_value(&self) -> i32 { self.status }
+
+    /// Whether the status has been initialized (set on an accepted association).
+    pub fn is_initialized(&self) -> bool { (self.status & INITIALIZED) != 0 }
+
+    /// Whether there are markup items that have not been examined.
+    pub fn has_unexamined_markups(&self) -> bool { (self.status & HAS_UNEXAMINED) != 0 }
+
+    /// Whether there are applied markup items.
+    pub fn has_applied_markup(&self) -> bool { (self.status & HAS_APPLIED) != 0 }
+
+    /// Whether there are rejected markup items.
+    pub fn has_rejected_markup(&self) -> bool { (self.status & HAS_REJECTED) != 0 }
+
+    /// Whether there are "Don't Care" markup items.
+    pub fn has_dont_care_markup(&self) -> bool { (self.status & HAS_DONT_CARE) != 0 }
+
+    /// Whether there are "Don't Know" markup items.
+    pub fn has_dont_know_markup(&self) -> bool { (self.status & HAS_DONT_KNOW) != 0 }
+
+    /// Whether there are markup items that failed to apply.
+    pub fn has_errors(&self) -> bool { (self.status & HAS_ERRORS) != 0 }
+
+    /// Whether all markup items have been applied.
+    pub fn is_fully_applied(&self) -> bool {
+        self.status == INITIALIZED || self.status == (INITIALIZED | HAS_APPLIED)
+    }
+
+    /// Returns a human-readable description.
+    pub fn description(&self) -> String {
+        let mut parts = Vec::new();
+        if self.has_unexamined_markups() { parts.push("Has one or more unexamined markup items."); }
+        if self.has_applied_markup() { parts.push("Has one or more applied markup items."); }
+        if self.has_errors() { parts.push("Has one or more markup items that failed to apply."); }
+        if self.has_dont_care_markup() { parts.push("Has one or more \"Don't Care\" markup items."); }
+        if self.has_dont_know_markup() { parts.push("Has one or more \"Don't Know\" markup items."); }
+        if self.has_rejected_markup() { parts.push("Has one or more rejected markup items."); }
+        parts.join("\n")
+    }
+}
+
+impl PartialOrd for VtAssociationMarkupStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
+}
+
+impl Ord for VtAssociationMarkupStatus {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering { self.status.cmp(&other.status) }
+}
+
+impl fmt::Display for VtAssociationMarkupStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Markup Status: {}", self.description())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VtMarkupItemStatus { Unapplied, Added, Replaced, FailedApply, DontCare, DontKnow, Rejected, Same, Conflict }

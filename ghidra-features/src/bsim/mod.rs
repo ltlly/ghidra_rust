@@ -35,12 +35,61 @@
 //! }
 //! ```
 
+pub mod client;
 pub mod description;
+pub mod facade;
+pub mod protocol;
+pub mod query;
 
 pub use description::{
     CategoryRecord, CallgraphEntry, CompareSignatures, ComparisonResult,
     DatabaseInformation, DescriptionManager, ExecutableRecord, FunctionDescription,
     RowKey, SignatureRecord, VectorResult,
+};
+
+// Re-export key protocol types.
+pub use protocol::{
+    AdjustVectorIndex, BSimFilter, BSimQueryBase, BSimQueryType, BSimResponseType,
+    ChildAtom, ChildMatchRecord, ClusterNote, CreateDatabase, DropDatabase,
+    ExecutableResultWithDeDuping, ExeSpecifier, FilterAtom, FilterOperator,
+    FunctionEntry, FunctionStaging, InsertOptionalValues, InsertRequest,
+    InstallCategoryRequest, InstallMetadataRequest, InstallTagRequest,
+    NullStaging, PairInput, PairNote, PasswordChange, PreFilter,
+    PrewarmRequest, QueryChildren, QueryCluster, QueryDelete, QueryExeCount,
+    QueryExeInfo, QueryInfo, QueryName, QueryNearest, QueryNearestVector,
+    QueryOptionalExist, QueryOptionalValues, QueryPair, QueryUpdate,
+    QueryVectorId, QueryVectorMatch, ResponseAdjustIndex, ResponseChildren,
+    ResponseCluster, ResponseDelete, ResponseDropDatabase, ResponseError,
+    ResponseExe, ResponseInfo, ResponseInsert, ResponseName, ResponseNearest,
+    ResponseNearestVector, ResponseOptionalExist, ResponseOptionalValues,
+    ResponsePair, ResponsePassword, ResponsePrewarm, ResponseUpdate,
+    ResponseVectorId, ResponseVectorMatch, SimilarityNote, SimilarityResult,
+    SimilarityVectorResult, StagingManager,
+};
+
+// Re-export key client types.
+pub use client::{
+    BSimError, BSimResult, BSimSqlClause, Configuration, ConnectionType,
+    DatabaseStatus, ExecutableComparison, ExecutableScorer, FileScoreCaching,
+    FunctionDatabase, FunctionPair, IdHistogram, IdSqlResolution,
+    RowKeySql, ScoreCaching, SqlEffects, TableScoreCaching,
+    TemporaryScoreCaching,
+};
+
+// Re-export key facade types.
+pub use facade::{
+    DatabaseInfo, DefaultSFQueryServiceFactory, FunctionSymbolIterator,
+    NullSFResultsListener, QueryDatabaseException, SFOverviewInfo,
+    SFQueryInfo, SFQueryResult, SFQueryServiceFactory,
+    SFResultsUpdateListener, SimilarFunctionQueryService,
+};
+
+// Re-export key query-level types.
+pub use query::{
+    BSimDbConnectTaskManager, BSimInitializer, BSimServerInfo,
+    CollectingErrorLogger, DecompileFunctionTask, GenSignatures,
+    LshException, MinimalErrorLogger, NullErrorLogger,
+    ParallelDecompileTask, ServerConfig,
 };
 
 use anyhow::{anyhow, Context, Result};

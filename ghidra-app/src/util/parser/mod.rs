@@ -49,13 +49,23 @@ pub enum BinaryOp {
 }
 
 impl AddressExpression {
-    /// Parse a simple hex literal expression.
-    pub fn parse_hex(s: &str) -> Result<Self, ParseError> {
+    /// Parse a numeric literal expression.
+    ///
+    /// Accepts hex with `0x`/`0X` prefix and plain decimal.
+    pub fn parse_number(s: &str) -> Result<Self, ParseError> {
         let s = s.trim();
-        let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
-        u64::from_str_radix(s, 16)
-            .map(Self::Literal)
-            .map_err(|_| ParseError::InvalidAddress(s.to_string()))
+        if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+            u64::from_str_radix(hex, 16)
+                .map(Self::Literal)
+                .map_err(|_| ParseError::InvalidAddress(s.to_string()))
+        } else if let Ok(v) = s.parse::<u64>() {
+            Ok(Self::Literal(v))
+        } else {
+            // Try without prefix as hex (legacy behavior)
+            u64::from_str_radix(s, 16)
+                .map(Self::Literal)
+                .map_err(|_| ParseError::InvalidAddress(s.to_string()))
+        }
     }
 
     /// Evaluate the expression given a symbol resolver.
@@ -96,17 +106,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_hex_literal() {
+    fn parse_number_literal() {
         assert_eq!(
-            AddressExpression::parse_hex("0xDEAD").unwrap(),
+            AddressExpression::parse_number("0xDEAD").unwrap(),
             AddressExpression::Literal(0xDEAD)
         );
         assert_eq!(
-            AddressExpression::parse_hex("0X1234").unwrap(),
+            AddressExpression::parse_number("0X1234").unwrap(),
             AddressExpression::Literal(0x1234)
         );
         assert_eq!(
-            AddressExpression::parse_hex("256").unwrap(),
+            AddressExpression::parse_number("256").unwrap(),
             AddressExpression::Literal(256)
         );
     }

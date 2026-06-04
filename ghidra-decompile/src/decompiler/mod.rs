@@ -61,6 +61,7 @@
 //! | `ghidra.app.decompiler.component.*` | `component` |
 //! | `ghidra.app.decompiler.util.*` | `util` |
 
+pub mod actions;
 pub mod clang_line;
 pub mod clang_node;
 pub mod component;
@@ -129,9 +130,13 @@ pub use parallel::{
 
 // Component types
 pub use component::{
-    ClangFieldElement, ColorProvider, DecompileData, DecompileResultsListener,
-    DefaultColorProvider, EmptyDecompileData, HighlightToken, NameTokenMatcher, TokenHighlights,
-    TokenKey, UserHighlights,
+    ClangFieldElement, ClangHighlightController, ClangHighlightListener,
+    ClangLayoutController, ClangTextField, ColorProvider,
+    DecompileData, DecompilerPanelData, DecompileResultsListener,
+    DecompilerController, DefaultColorProvider, EmptyDecompileData,
+    HighlightToken, NameTokenMatcher, NullClangHighlightListener,
+    PanelLine, PanelToken, TokenHighlightColors as ComponentTokenHighlightColors,
+    TokenHighlights, TokenKey, UserHighlights,
 };
 
 // Highlighter types
@@ -139,6 +144,20 @@ pub use highlighter::{CTokenHighlightMatcher, DecompilerHighlighter, TokenHighli
 
 // Process factory
 pub use decompile_process::DecompileProcessFactory;
+
+// Action types
+pub use actions::{
+    ActionCategory, ActionMetadata, ConstantFormat, DecompilerActionContext,
+    DecompilerCursorPosition, DecompilerSearchLocation, DecompilerSearchResults,
+    DecompilerSearcher, EquateEntry, HighlightDefinedUse, PCodeCfgGraphType,
+    PCodeDfgDisplayOptions, PCodeDfgGraphType, SliceHighlightColorProvider,
+};
+
+// Utility types
+pub use util::{
+    DataTypeDependencyOrderer, FillOutStructureHelper, StructFieldEntry,
+    find_token_at, line_display_width, to_lines, to_plain_text,
+};
 
 // ============================================================================
 // Tests

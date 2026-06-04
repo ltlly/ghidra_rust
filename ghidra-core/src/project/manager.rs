@@ -9,9 +9,24 @@
 
 use std::collections::HashMap;
 
-use crate::error::GhidraError;
+use super::{ProjectError, ProjectLocator, ProjectResult};
 
-use super::{Project, ProjectLocator, ProjectResult};
+/// A trait for accessing a project through the manager without needing the
+/// concrete `Project` struct.  The Java `Project` interface is extracted here.
+pub trait ProjectHandle: Send + Sync {
+    /// The project name.
+    fn name(&self) -> &str;
+    /// The project locator.
+    fn locator(&self) -> &ProjectLocator;
+    /// Whether the project has unsaved changes.
+    fn is_modified(&self) -> bool;
+    /// The project path on disk.
+    fn project_path(&self) -> std::path::PathBuf;
+    /// Save the project.
+    fn save(&mut self) -> ProjectResult<()>;
+    /// Close the project.
+    fn close(&mut self) -> ProjectResult<()>;
+}
 
 // ============================================================================
 // Stub types for external Ghidra concepts
@@ -234,7 +249,7 @@ pub trait ProjectManager: Send + Sync {
         project_locator: &ProjectLocator,
         rep_adapter: Option<&dyn RepositoryAdapter>,
         remember: bool,
-    ) -> ProjectResult<Box<dyn Project>>;
+    ) -> ProjectResult<Box<dyn ProjectHandle>>;
 
     /// Open a project from the filesystem and add it to the list of known
     /// projects.
@@ -249,7 +264,7 @@ pub trait ProjectManager: Send + Sync {
         project_locator: &ProjectLocator,
         do_restore: bool,
         reset_owner: bool,
-    ) -> ProjectResult<Box<dyn Project>>;
+    ) -> ProjectResult<Box<dyn ProjectHandle>>;
 
     /// Delete the project at the given location.
     ///
@@ -264,7 +279,7 @@ pub trait ProjectManager: Send + Sync {
     // ------------------------------------------------------------------
 
     /// The currently active/open project, or `None` if no project is open.
-    fn active_project(&self) -> Option<&dyn Project>;
+    fn active_project(&self) -> Option<&dyn ProjectHandle>;
 
     /// The [`ProjectLocator`] of the last project opened by the user.
     ///
@@ -336,7 +351,7 @@ pub trait ProjectManager: Send + Sync {
 #[derive(Default)]
 pub struct SimpleProjectManager {
     /// All known projects (open and closed).
-    projects: Vec<Box<dyn Project>>,
+    projects: Vec<Box<dyn ProjectHandle>>,
     /// Index of the active project.
     active_index: Option<usize>,
     /// Recent project locators.
@@ -358,7 +373,7 @@ impl SimpleProjectManager {
     }
 
     /// Register a project in the project list.
-    pub fn register_project(&mut self, project: Box<dyn Project>) {
+    pub fn register_project(&mut self, project: Box<dyn ProjectHandle>) {
         self.projects.push(project);
     }
 
@@ -379,8 +394,8 @@ impl ProjectManager for SimpleProjectManager {
         _project_locator: &ProjectLocator,
         _rep_adapter: Option<&dyn RepositoryAdapter>,
         _remember: bool,
-    ) -> ProjectResult<Box<dyn Project>> {
-        Err(GhidraError::NotSupported(
+    ) -> ProjectResult<Box<dyn ProjectHandle>> {
+        Err(ProjectError::NotAvailable(
             "SimpleProjectManager::create_project: use a full implementation".into(),
         ))
     }
@@ -390,8 +405,8 @@ impl ProjectManager for SimpleProjectManager {
         _project_locator: &ProjectLocator,
         _do_restore: bool,
         _reset_owner: bool,
-    ) -> ProjectResult<Box<dyn Project>> {
-        Err(GhidraError::NotSupported(
+    ) -> ProjectResult<Box<dyn ProjectHandle>> {
+        Err(ProjectError::NotAvailable(
             "SimpleProjectManager::open_project: use a full implementation".into(),
         ))
     }
@@ -404,7 +419,7 @@ impl ProjectManager for SimpleProjectManager {
         project_locator.exists()
     }
 
-    fn active_project(&self) -> Option<&dyn Project> {
+    fn active_project(&self) -> Option<&dyn ProjectHandle> {
         self.active_index
             .and_then(|i| self.projects.get(i))
             .map(|p| p.as_ref())
@@ -444,7 +459,7 @@ impl ProjectManager for SimpleProjectManager {
         _port: u16,
         _force_connect: bool,
     ) -> ProjectResult<Box<dyn RepositoryServerAdapter>> {
-        Err(GhidraError::NotSupported(
+        Err(ProjectError::NotAvailable(
             "SimpleProjectManager: repository server not supported".into(),
         ))
     }
@@ -518,7 +533,7 @@ mod tests {
     #[test]
     fn test_simple_project_manager_project_exists() {
         let mgr = SimpleProjectManager::new();
-        let loc = ProjectLocator::new("/nonexistent/path", "NoProject").unwrap();
+        let loc = ProjectLocator::new("/nonexistent/path", "NoProject");
         assert!(!mgr.project_exists(&loc));
     }
 
