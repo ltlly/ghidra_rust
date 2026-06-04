@@ -133,3 +133,10 @@ pub use lang::{
     FlowType as LangFlowType,
     PrototypeModel as LangPrototypeModel,
 };
+
+// Additional lang types not yet in the main re-export list.
+pub use lang::{
+    InstructionBlock, InstructionBlockFlow, InstructionError, InstructionErrorCode,
+    InstructionSet, LanguageNotFoundException, ParamList, ParamListRegisterOut,
+    ParamPassingConvention, PrototypeModelError, RegisterTranslator,
+};

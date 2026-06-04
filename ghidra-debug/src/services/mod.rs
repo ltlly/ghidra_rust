@@ -20,6 +20,9 @@ pub trait TraceManagerService {
 
     /// Activate (bring to focus) a trace.
     fn activate_trace(&mut self, trace_key: i64) -> Result<(), String>;
+
+    /// Get all open traces.
+    fn open_traces(&self) -> Vec<&dyn TraceInfo>;
 }
 
 /// Minimal info about a trace for service communication.
@@ -82,6 +85,9 @@ pub trait EmulationService {
 
     /// Whether emulation is active for the given trace.
     fn is_emulating(&self, trace_key: i64) -> bool;
+
+    /// Step emulation by one step.
+    fn step_emulation(&mut self, trace_key: i64, num_steps: u64) -> Result<(), String>;
 }
 
 /// Service for platform management.
@@ -136,6 +142,79 @@ pub trait ProgressService {
 
     /// Finish a task.
     fn finish_task(&mut self, task_id: i64);
+}
+
+/// Service for debugger control (connect, disconnect, etc.).
+pub trait DebuggerControlService {
+    /// Get the currently active target.
+    fn active_target(&self) -> Option<i64>;
+
+    /// Connect to a target.
+    fn connect(&mut self, target_key: i64) -> Result<(), String>;
+
+    /// Disconnect from the current target.
+    fn disconnect(&mut self) -> Result<(), String>;
+
+    /// Whether a target is currently connected.
+    fn is_connected(&self) -> bool;
+}
+
+/// Service for managing memory region mapping.
+pub trait AutoMappingService {
+    /// Automatically map a program to a trace.
+    fn auto_map(
+        &mut self,
+        program_url: &str,
+        trace_key: i64,
+        lifespan: Lifespan,
+    ) -> Result<(), String>;
+
+    /// Get the proposed mapping for a program.
+    fn propose_mapping(
+        &self,
+        program_url: &str,
+        trace_key: i64,
+    ) -> Vec<MappingProposal>;
+}
+
+/// A proposed mapping between a program region and a trace region.
+#[derive(Debug, Clone)]
+pub struct MappingProposal {
+    /// Program address range start.
+    pub program_min: u64,
+    /// Program address range end.
+    pub program_max: u64,
+    /// Trace address range start.
+    pub trace_min: u64,
+    /// Trace address range end.
+    pub trace_max: u64,
+    /// Confidence score (0.0 - 1.0).
+    pub confidence: f64,
+}
+
+/// Service for target management.
+pub trait TargetService {
+    /// Get all available targets.
+    fn targets(&self) -> Vec<TargetInfo>;
+
+    /// Launch a target.
+    fn launch(&mut self, target_type: &str, params: &[String]) -> Result<i64, String>;
+
+    /// Attach to an existing process.
+    fn attach(&mut self, target_type: &str, pid: i64) -> Result<i64, String>;
+}
+
+/// Information about a debug target type.
+#[derive(Debug, Clone)]
+pub struct TargetInfo {
+    /// The target type identifier.
+    pub target_type: String,
+    /// Human-readable display name.
+    pub display_name: String,
+    /// Whether this target supports launch.
+    pub supports_launch: bool,
+    /// Whether this target supports attach.
+    pub supports_attach: bool,
 }
 
 #[cfg(test)]
@@ -208,6 +287,69 @@ mod tests {
         }
     }
 
+    struct MockEmulationService {
+        emulating: bool,
+    }
+
+    impl MockEmulationService {
+        fn new() -> Self {
+            Self { emulating: false }
+        }
+    }
+
+    impl EmulationService for MockEmulationService {
+        fn start_emulation(&mut self, _trace_key: i64) -> Result<(), String> {
+            self.emulating = true;
+            Ok(())
+        }
+
+        fn stop_emulation(&mut self, _trace_key: i64) -> Result<(), String> {
+            self.emulating = false;
+            Ok(())
+        }
+
+        fn is_emulating(&self, _trace_key: i64) -> bool {
+            self.emulating
+        }
+
+        fn step_emulation(&mut self, _trace_key: i64, _num_steps: u64) -> Result<(), String> {
+            if !self.emulating {
+                return Err("Not emulating".into());
+            }
+            Ok(())
+        }
+    }
+
+    struct MockControlService {
+        connected: bool,
+    }
+
+    impl MockControlService {
+        fn new() -> Self {
+            Self { connected: false }
+        }
+    }
+
+    impl DebuggerControlService for MockControlService {
+        fn active_target(&self) -> Option<i64> {
+            if self.connected { Some(1) } else { None }
+        }
+
+        fn connect(&mut self, _target_key: i64) -> Result<(), String> {
+            self.connected = true;
+            Ok(())
+        }
+
+        fn disconnect(&mut self) -> Result<(), String> {
+            self.connected = false;
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            self.connected
+        }
+    }
+
     #[test]
     fn test_trace_info() {
         let info = MockTraceInfo {
@@ -234,5 +376,62 @@ mod tests {
 
         svc.delete_breakpoint(0x400000).unwrap();
         assert!(svc.breakpoints().is_empty());
+    }
+
+    #[test]
+    fn test_emulation_service() {
+        let mut svc = MockEmulationService::new();
+        assert!(!svc.is_emulating(0));
+
+        svc.start_emulation(0).unwrap();
+        assert!(svc.is_emulating(0));
+
+        svc.step_emulation(0, 1).unwrap();
+
+        svc.stop_emulation(0).unwrap();
+        assert!(!svc.is_emulating(0));
+    }
+
+    #[test]
+    fn test_emulation_service_step_when_stopped() {
+        let mut svc = MockEmulationService::new();
+        assert!(svc.step_emulation(0, 1).is_err());
+    }
+
+    #[test]
+    fn test_control_service() {
+        let mut svc = MockControlService::new();
+        assert!(!svc.is_connected());
+        assert!(svc.active_target().is_none());
+
+        svc.connect(1).unwrap();
+        assert!(svc.is_connected());
+        assert_eq!(svc.active_target(), Some(1));
+
+        svc.disconnect().unwrap();
+        assert!(!svc.is_connected());
+    }
+
+    #[test]
+    fn test_mapping_proposal() {
+        let proposal = MappingProposal {
+            program_min: 0,
+            program_max: 0x1000,
+            trace_min: 0x400000,
+            trace_max: 0x401000,
+            confidence: 0.95,
+        };
+        assert_eq!(proposal.confidence, 0.95);
+    }
+
+    #[test]
+    fn test_target_info() {
+        let info = TargetInfo {
+            target_type: "gdb".into(),
+            display_name: "GDB".into(),
+            supports_launch: true,
+            supports_attach: true,
+        };
+        assert!(info.supports_launch);
     }
 }

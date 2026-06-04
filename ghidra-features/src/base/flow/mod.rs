@@ -13,8 +13,10 @@
 
 mod follow_flow;
 mod flow_arrow;
+mod flow_arrow_shapes;
 mod select_by_flow;
 
 pub use follow_flow::*;
 pub use flow_arrow::*;
+pub use flow_arrow_shapes::*;
 pub use select_by_flow::*;

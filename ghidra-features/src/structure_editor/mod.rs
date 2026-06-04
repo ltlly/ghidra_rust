@@ -18,17 +18,21 @@
 //! ```
 
 pub mod actions;
+pub mod bitfield_editor;
 pub mod composite_model;
 pub mod model;
 pub mod provider;
 pub mod selection;
+pub mod union_model;
 
 // Re-export the most important public types.
 pub use actions::{
     ApplyResult, ClearResult, CompositeEditorAction, DeleteResult, DuplicateResult,
     MoveDirection, MoveResult, UnpackageResult,
 };
+pub use bitfield_editor::{BitFieldEditorDialog, BitFieldInfo, BitFieldPlacement};
 pub use composite_model::{CompositeEditorModel, EditorColumn};
 pub use model::StructureEditorModel;
 pub use provider::{CompositeEditorProvider, EditorState, StructureEditorProvider};
 pub use selection::EditorSelection;
+pub use union_model::{UnionEditorModel, UnionEditorProvider};

@@ -15,6 +15,7 @@ pub mod help;
 pub mod listing;
 pub mod macro_;
 pub mod mem;
+pub mod pcode;
 pub mod program;
 pub mod project;
 pub mod symbol;
@@ -40,6 +41,21 @@ pub use symbol::{
     ThunkReference, MAX_SYMBOL_NAME_LENGTH, MIN_LABEL_ADDRESS_DIGITS,
 };
 pub use listing::{InstructionMnemonic, ListingRow};
+pub use pcode::{
+    AttributeId, BlockCondition, BlockCopy, BlockDoWhile, BlockEdge, BlockGoto,
+    BlockGraph, BlockIfElse, BlockIfGoto, BlockInfLoop, BlockList, BlockMap,
+    BlockMultiGoto, BlockProperIf, BlockSwitch, BlockType, BlockWhileDo,
+    Decoder, DecoderException, DynamicHash, ElementId, Encoder,
+    EquateSymbol as PcodeEquateSymbol, DataTypeSymbol as PcodeDataTypeSymbol,
+    FunctionPrototype, GlobalSymbolMap, HighCodeSymbol, HighConstant,
+    HighExternalSymbol, HighFunction, HighFunctionSymbol, HighFunctionShellSymbol,
+    HighGlobal, HighLabelSymbol, HighLocal, HighOther, HighParam,
+    HighSymbol as PcodeHighSymbol, HighVariable, HighVariableClass,
+    JumpTable as PcodeJumpTable, LocalSymbolMap, OpCode, PcodeBlock, PcodeBlockBasic,
+    PcodeDataTypeManager,
+    PcodeOp, PcodeOpAST, SequenceNumber, SymbolEntry as PcodeSymbolEntry,
+    Varnode, VarnodeAST,
+};
 pub use program::program::{
     Comment, CommentKind, DomainFile, DomainObject, DomainObjectChangeEvent,
     DomainObjectChangeType, DomainObjectListener, InMemoryDBHandle,

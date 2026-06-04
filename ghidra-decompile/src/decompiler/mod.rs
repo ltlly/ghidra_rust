@@ -62,9 +62,11 @@
 //! | `ghidra.app.decompiler.util.*` | `util` |
 
 pub mod actions;
+pub mod analysis_cmd;
 pub mod clang_line;
 pub mod clang_node;
 pub mod component;
+pub mod highlight_types;
 pub mod decompile_callback;
 pub mod decompile_debug;
 pub mod decompile_exception;
@@ -142,6 +144,12 @@ pub use component::{
 // Highlighter types
 pub use highlighter::{CTokenHighlightMatcher, DecompilerHighlighter, TokenHighlightColors};
 
+// Analysis commands
+pub use analysis_cmd::{
+    AnalysisCommand, DecompilerAnalysisExt, DecompilerParallelConventionAnalysisCmd,
+    DecompilerParameterIdCmd, DecompilerSwitchAnalysisCmd,
+};
+
 // Process factory
 pub use decompile_process::DecompileProcessFactory;
 
@@ -158,6 +166,26 @@ pub use util::{
     DataTypeDependencyOrderer, FillOutStructureHelper, StructFieldEntry,
     find_token_at, line_display_width, to_lines, to_plain_text,
 };
+
+// Highlight types (panel, controller, color provider) -- from highlight_types module
+pub use highlight_types::HighlightToken as HtHighlightToken;
+pub use highlight_types::TokenKey as HtTokenKey;
+pub use highlight_types::TokenHighlights as HtTokenHighlights;
+pub use highlight_types::UserHighlights as HtUserHighlights;
+pub use highlight_types::UserHighlightSelection;
+pub use highlight_types::NameTokenMatcher as HtNameTokenMatcher;
+pub use highlight_types::ClangHighlightController as HtHighlightController;
+pub use highlight_types::NullClangHighlightListener as HtNullHighlightListener;
+pub use highlight_types::ClangLayoutController as HtLayoutController;
+pub use highlight_types::ClangTextField as HtTextField;
+pub use highlight_types::DefaultColorProvider as HtDefaultColorProvider;
+pub use highlight_types::DecompileData as HtDecompileData;
+pub use highlight_types::DecompilerController as HtDecompilerController;
+pub use highlight_types::DecompileResultsListener as HtDecompileResultsListener;
+pub use highlight_types::NullDecompileResultsListener as HtNullDecompileResultsListener;
+pub use highlight_types::ClangFieldElement as HtFieldElement;
+pub use highlight_types::PanelLine as HtPanelLine;
+pub use highlight_types::PanelToken as HtPanelToken;
 
 // ============================================================================
 // Tests

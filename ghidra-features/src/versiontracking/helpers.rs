@@ -4,15 +4,15 @@ use std::collections::HashSet;
 use ghidra_core::addr::Address;
 use ghidra_core::listing::ListingRow;
 use ghidra_core::program::Program;
-use ghidra_core::symbol::{Symbol, SymbolKind};
+use ghidra_core::symbol::{Symbol, SymbolType};
 
 pub fn function_symbol_names(prog: &Program) -> Vec<&Symbol> {
-    prog.symbol_table.iter().filter(|s| s.kind() == SymbolKind::Function).collect()
+    prog.symbol_table.iter().filter(|s| s.kind() == SymbolType::Function).collect()
 }
 
 pub fn function_listing_rows<'a>(prog: &'a Program, entry: Address) -> Vec<&'a ListingRow> {
     let all_func_entries: HashSet<Address> = prog.symbol_table.iter()
-        .filter(|s| s.kind() == SymbolKind::Function).map(|s| *s.address()).collect();
+        .filter(|s| s.kind() == SymbolType::Function).map(|s| *s.address()).collect();
     let max_instructions: usize = 1024;
     let mut rows = Vec::new();
     let mut addr = entry;

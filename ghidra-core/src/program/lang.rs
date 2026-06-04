@@ -4744,6 +4744,418 @@ impl fmt::Display for LangError {
 impl std::error::Error for LangError {}
 
 // ============================================================================
+// LanguageNotFoundException
+// ============================================================================
+
+/// Exception thrown when a language cannot be found.
+///
+/// Corresponds to Ghidra's `LanguageNotFoundException`.
+#[derive(Debug, Clone)]
+pub struct LanguageNotFoundException {
+    /// The language ID that was not found.
+    pub language_id: LanguageID,
+    /// Error message.
+    pub message: String,
+}
+
+impl LanguageNotFoundException {
+    /// Language not found.
+    pub fn new(language_id: LanguageID) -> Self {
+        let message = format!("Language not found: '{}'", language_id);
+        Self { language_id, message }
+    }
+
+    /// Language version required but not available.
+    pub fn version_required(language_id: LanguageID, major: i32, minor: i32) -> Self {
+        let message = format!(
+            "Language version (V{}.{}) or later) required for '{}'",
+            major, minor, language_id
+        );
+        Self { language_id, message }
+    }
+}
+
+impl fmt::Display for LanguageNotFoundException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for LanguageNotFoundException {}
+
+// ============================================================================
+// InstructionBlock -- a block of instructions for disassembly
+// ============================================================================
+
+/// An error that occurred during instruction parsing or disassembly.
+///
+/// Corresponds to Ghidra's `InstructionError`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstructionError {
+    /// The address where the error occurred.
+    pub address: Address,
+    /// Error message.
+    pub message: String,
+    /// The error code.
+    pub code: InstructionErrorCode,
+}
+
+/// Instruction error codes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InstructionErrorCode {
+    /// Insufficient bytes at the address.
+    InsufficientBytes,
+    /// Unknown instruction encoding.
+    UnknownInstruction,
+    /// Unknown context register.
+    UnknownContext,
+    /// Unknown data (not an instruction).
+    UnknownData,
+    /// Nested delay slot detected.
+    NestedDelaySlot,
+    /// Incompatible language.
+    IncompatibleLanguage,
+    /// Other error.
+    Other,
+}
+
+impl InstructionError {
+    /// Create a new instruction error.
+    pub fn new(address: Address, code: InstructionErrorCode, message: impl Into<String>) -> Self {
+        Self {
+            address,
+            message: message.into(),
+            code,
+        }
+    }
+}
+
+impl fmt::Display for InstructionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?} at {}: {}", self.code, self.address, self.message)
+    }
+}
+
+impl std::error::Error for InstructionError {}
+
+/// A flow from one instruction block to another.
+///
+/// Corresponds to Ghidra's `InstructionBlockFlow`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct InstructionBlockFlow {
+    /// Address of the instruction that causes the flow.
+    pub from_address: Address,
+    /// Address of the target instruction.
+    pub to_address: Address,
+    /// The flow type.
+    pub flow_type: FlowType,
+}
+
+impl InstructionBlockFlow {
+    /// Create a new block flow.
+    pub fn new(from_address: Address, to_address: Address, flow_type: FlowType) -> Self {
+        Self {
+            from_address,
+            to_address,
+            flow_type,
+        }
+    }
+}
+
+/// A block of instructions forming a basic block in the disassembly graph.
+///
+/// Corresponds to Ghidra's `InstructionBlock`.
+#[derive(Debug, Clone)]
+pub struct InstructionBlock {
+    /// The start address of this block.
+    pub start_address: Address,
+    /// The end address (last instruction) of this block.
+    pub end_address: Address,
+    /// Whether this block is the start of a flow.
+    pub is_flow_start: bool,
+    /// Address from which flow entered this block (for non-flow-start blocks).
+    pub flow_from_address: Address,
+    /// Outgoing flows from this block.
+    pub flows: Vec<InstructionBlockFlow>,
+    /// Errors that occurred while disassembling this block.
+    pub errors: Vec<InstructionError>,
+    /// Number of instructions in this block.
+    pub instruction_count: usize,
+    /// Whether the block has a delay slot.
+    pub has_delay_slot: bool,
+}
+
+impl InstructionBlock {
+    /// Create a new instruction block at the given start address.
+    pub fn new(start_address: Address) -> Self {
+        Self {
+            start_address,
+            end_address: start_address,
+            is_flow_start: true,
+            flow_from_address: Address::NULL,
+            flows: Vec::new(),
+            errors: Vec::new(),
+            instruction_count: 0,
+            has_delay_slot: false,
+        }
+    }
+
+    /// Returns `true` if the block is empty (no instructions).
+    pub fn is_empty(&self) -> bool {
+        self.instruction_count == 0
+    }
+
+    /// Returns `true` if this block is a flow start.
+    pub fn is_flow_start(&self) -> bool {
+        self.is_flow_start
+    }
+
+    /// Returns the start address.
+    pub fn get_start_address(&self) -> Address {
+        self.start_address
+    }
+
+    /// Returns the address from which flow entered this block.
+    pub fn get_flow_from_address(&self) -> Address {
+        self.flow_from_address
+    }
+
+    /// Add a flow to this block.
+    pub fn add_flow(&mut self, flow: InstructionBlockFlow) {
+        self.flows.push(flow);
+    }
+
+    /// Add an error to this block.
+    pub fn add_error(&mut self, error: InstructionError) {
+        self.errors.push(error);
+    }
+}
+
+/// A set of instruction blocks forming a complete disassembly graph.
+///
+/// Corresponds to Ghidra's `InstructionSet`.
+#[derive(Debug, Clone)]
+pub struct InstructionSet {
+    /// Blocks indexed by start address.
+    block_map: std::collections::HashMap<Address, InstructionBlock>,
+    /// Start addresses of flow-start blocks.
+    start_addresses: std::collections::HashSet<Address>,
+    /// Total instruction count across all blocks.
+    instruction_count: usize,
+}
+
+impl InstructionSet {
+    /// Create a new empty instruction set.
+    pub fn new() -> Self {
+        Self {
+            block_map: std::collections::HashMap::new(),
+            start_addresses: std::collections::HashSet::new(),
+            instruction_count: 0,
+        }
+    }
+
+    /// Add a block to the set.
+    pub fn add_block(&mut self, block: InstructionBlock) {
+        if block.is_empty() {
+            return;
+        }
+        if block.is_flow_start() {
+            self.start_addresses.insert(block.start_address);
+        }
+        self.instruction_count += block.instruction_count;
+        self.block_map.insert(block.start_address, block);
+    }
+
+    /// Look up a block by start address.
+    pub fn get_block(&self, addr: Address) -> Option<&InstructionBlock> {
+        self.block_map.get(&addr)
+    }
+
+    /// Returns the total number of instructions.
+    pub fn get_instruction_count(&self) -> usize {
+        self.instruction_count
+    }
+
+    /// Returns the number of blocks.
+    pub fn num_blocks(&self) -> usize {
+        self.block_map.len()
+    }
+}
+
+impl Default for InstructionSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// ParamList -- parameter location assignment
+// ============================================================================
+
+/// How a parameter is passed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ParamPassingConvention {
+    /// Passed in a register.
+    Register,
+    /// Passed on the stack.
+    Stack,
+    /// Passed in a register or on the stack depending on ordinal.
+    RegisterOrStack,
+    /// Unknown/custom convention.
+    Unknown,
+}
+
+/// A list of parameter storage locations.
+///
+/// Corresponds to Ghidra's `ParamList` / `ParamListStandard`.
+#[derive(Debug, Clone)]
+pub struct ParamList {
+    /// The parameter entries (using the existing ParamEntry type).
+    pub entries: Vec<ParamEntry>,
+    /// Whether this list supports a "this" pointer.
+    pub has_this_pointer: bool,
+    /// Whether the list is for output (return values) or input (parameters).
+    pub is_output: bool,
+}
+
+impl ParamList {
+    /// Create a new empty param list.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            has_this_pointer: false,
+            is_output: false,
+        }
+    }
+
+    /// Add a parameter entry.
+    pub fn add_entry(&mut self, entry: ParamEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Returns the number of entries.
+    pub fn num_entries(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Find the entry for the given ordinal.
+    pub fn find_entry(&self, ordinal: usize) -> Option<&ParamEntry> {
+        self.entries.get(ordinal)
+    }
+}
+
+impl Default for ParamList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A parameter list for register-based output (return values).
+///
+/// Corresponds to Ghidra's `ParamListRegisterOut`.
+#[derive(Debug, Clone)]
+pub struct ParamListRegisterOut {
+    /// The underlying param list.
+    pub list: ParamList,
+}
+
+impl ParamListRegisterOut {
+    /// Create a new register output param list.
+    pub fn new() -> Self {
+        let mut list = ParamList::new();
+        list.is_output = true;
+        Self { list }
+    }
+}
+
+impl Default for ParamListRegisterOut {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// RegisterTranslator -- translating register names across languages
+// ============================================================================
+
+/// Translates register names between different language definitions.
+///
+/// Corresponds to Ghidra's `RegisterTranslator`.
+#[derive(Debug, Clone)]
+pub struct RegisterTranslator {
+    /// Map from old register name to new register name.
+    pub name_map: std::collections::HashMap<String, String>,
+    /// Map from old register address to new register address.
+    pub address_map: std::collections::HashMap<u64, u64>,
+}
+
+impl RegisterTranslator {
+    /// Create a new register translator.
+    pub fn new() -> Self {
+        Self {
+            name_map: std::collections::HashMap::new(),
+            address_map: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Register a name translation.
+    pub fn add_name_mapping(&mut self, old_name: impl Into<String>, new_name: impl Into<String>) {
+        self.name_map.insert(old_name.into(), new_name.into());
+    }
+
+    /// Translate a register name.
+    pub fn translate_name(&self, name: &str) -> Option<&str> {
+        self.name_map.get(name).map(|s| s.as_str())
+    }
+
+    /// Register an address translation.
+    pub fn add_address_mapping(&mut self, old_addr: u64, new_addr: u64) {
+        self.address_map.insert(old_addr, new_addr);
+    }
+
+    /// Translate a register address.
+    pub fn translate_address(&self, addr: u64) -> Option<u64> {
+        self.address_map.get(&addr).copied()
+    }
+}
+
+impl Default for RegisterTranslator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// PrototypeModelError -- error for prototype model problems
+// ============================================================================
+
+/// An error related to prototype model configuration.
+///
+/// Corresponds to Ghidra's `PrototypeModelError`.
+#[derive(Debug, Clone)]
+pub struct PrototypeModelError {
+    /// The error message.
+    pub message: String,
+}
+
+impl PrototypeModelError {
+    /// Create a new prototype model error.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for PrototypeModelError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PrototypeModelError: {}", self.message)
+    }
+}
+
+impl std::error::Error for PrototypeModelError {}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -5973,5 +6385,185 @@ mod tests {
         assert_eq!(ConstantPoolRecord::CLASS_REFERENCE, 2);
         assert_eq!(ConstantPoolRecord::POINTER_METHOD, 3);
         assert_eq!(ConstantPoolRecord::POINTER_FIELD, 4);
+    }
+
+    // ========================================================================
+    // LanguageNotFoundException tests
+    // ========================================================================
+
+    #[test]
+    fn test_language_not_found_exception() {
+        let err = LanguageNotFoundException::new(LanguageID::x86_64());
+        assert!(format!("{}", err).contains("not found"));
+    }
+
+    #[test]
+    fn test_language_not_found_version() {
+        let err = LanguageNotFoundException::version_required(LanguageID::x86_64(), 1, 2);
+        assert!(format!("{}", err).contains("V1.2"));
+    }
+
+    #[test]
+    fn test_language_not_found_is_error() {
+        let err: Box<dyn std::error::Error> =
+            Box::new(LanguageNotFoundException::new(LanguageID::x86_64()));
+        assert!(!err.to_string().is_empty());
+    }
+
+    // ========================================================================
+    // InstructionError tests
+    // ========================================================================
+
+    #[test]
+    fn test_instruction_error() {
+        let err = InstructionError::new(
+            Address::new(0x401000),
+            InstructionErrorCode::UnknownInstruction,
+            "Bad encoding",
+        );
+        assert_eq!(err.address, Address::new(0x401000));
+        assert_eq!(err.code, InstructionErrorCode::UnknownInstruction);
+        assert!(format!("{}", err).contains("UnknownInstruction"));
+        assert!(format!("{}", err).contains("401000"));
+    }
+
+    #[test]
+    fn test_instruction_error_is_error() {
+        let err: Box<dyn std::error::Error> = Box::new(InstructionError::new(
+            Address::new(0),
+            InstructionErrorCode::InsufficientBytes,
+            "test",
+        ));
+        assert!(!err.to_string().is_empty());
+    }
+
+    // ========================================================================
+    // InstructionBlockFlow tests
+    // ========================================================================
+
+    #[test]
+    fn test_instruction_block_flow() {
+        let flow = InstructionBlockFlow::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            FlowType::UnconditionalBranch,
+        );
+        assert_eq!(flow.from_address, Address::new(0x1000));
+        assert_eq!(flow.to_address, Address::new(0x2000));
+    }
+
+    // ========================================================================
+    // InstructionBlock tests
+    // ========================================================================
+
+    #[test]
+    fn test_instruction_block() {
+        let b = InstructionBlock::new(Address::new(0x1000));
+        assert_eq!(b.get_start_address(), Address::new(0x1000));
+        assert!(b.is_empty());
+        assert!(b.is_flow_start());
+    }
+
+    #[test]
+    fn test_instruction_block_flows() {
+        let mut b = InstructionBlock::new(Address::new(0x1000));
+        b.add_flow(InstructionBlockFlow::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            FlowType::UnconditionalBranch,
+        ));
+        assert_eq!(b.flows.len(), 1);
+    }
+
+    #[test]
+    fn test_instruction_block_errors() {
+        let mut b = InstructionBlock::new(Address::new(0x1000));
+        b.add_error(InstructionError::new(
+            Address::new(0x1000),
+            InstructionErrorCode::UnknownInstruction,
+            "test",
+        ));
+        assert_eq!(b.errors.len(), 1);
+    }
+
+    // ========================================================================
+    // InstructionSet tests
+    // ========================================================================
+
+    #[test]
+    fn test_instruction_set() {
+        let mut is = InstructionSet::new();
+        assert_eq!(is.num_blocks(), 0);
+        assert_eq!(is.get_instruction_count(), 0);
+
+        let mut b = InstructionBlock::new(Address::new(0x1000));
+        b.instruction_count = 5;
+        is.add_block(b);
+        assert_eq!(is.num_blocks(), 1);
+        assert_eq!(is.get_instruction_count(), 5);
+        assert!(is.get_block(Address::new(0x1000)).is_some());
+        assert!(is.get_block(Address::new(0x2000)).is_none());
+    }
+
+    // ========================================================================
+    // ParamList tests
+    // ========================================================================
+
+    #[test]
+    fn test_param_list() {
+        let pl = ParamList::new();
+        assert_eq!(pl.num_entries(), 0);
+        assert!(!pl.has_this_pointer);
+        assert!(!pl.is_output);
+    }
+
+    #[test]
+    fn test_param_list_add_entry() {
+        let mut pl = ParamList::new();
+        pl.add_entry(ParamEntry::new(0));
+        assert_eq!(pl.num_entries(), 1);
+    }
+
+    #[test]
+    fn test_param_list_register_out() {
+        let pl = ParamListRegisterOut::new();
+        assert!(pl.list.is_output);
+    }
+
+    // ========================================================================
+    // RegisterTranslator tests
+    // ========================================================================
+
+    #[test]
+    fn test_register_translator() {
+        let mut rt = RegisterTranslator::new();
+        rt.add_name_mapping("EAX", "R0");
+        rt.add_address_mapping(0, 0x100);
+        assert_eq!(rt.translate_name("EAX"), Some("R0"));
+        assert_eq!(rt.translate_name("EBX"), None);
+        assert_eq!(rt.translate_address(0), Some(0x100));
+        assert_eq!(rt.translate_address(1), None);
+    }
+
+    // ========================================================================
+    // ParamPassingConvention tests
+    // ========================================================================
+
+    #[test]
+    fn test_param_passing_convention() {
+        assert_eq!(ParamPassingConvention::Register, ParamPassingConvention::Register);
+        assert_ne!(ParamPassingConvention::Register, ParamPassingConvention::Stack);
+    }
+
+    // ========================================================================
+    // PrototypeModelError tests
+    // ========================================================================
+
+    #[test]
+    fn test_prototype_model_error() {
+        let err = PrototypeModelError::new("bad model");
+        assert!(format!("{}", err).contains("bad model"));
+        let err2: Box<dyn std::error::Error> = Box::new(err);
+        assert!(!err2.to_string().is_empty());
     }
 }

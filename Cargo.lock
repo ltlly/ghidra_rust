@@ -1618,6 +1618,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidra-build"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "lazy_static",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ghidra-core"
 version = "0.1.0"
 dependencies = [
@@ -1782,6 +1796,7 @@ dependencies = [
 name = "ghidra-rust"
 version = "0.1.0"
 dependencies = [
+ "ghidra-build",
  "ghidra-core",
  "ghidra-debug",
  "ghidra-decompile",

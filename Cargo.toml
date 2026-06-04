@@ -5,6 +5,7 @@ edition = "2021"
 description = "Ghidra Rust - Integration test workspace root"
 
 [dependencies]
+ghidra-build = { path = "ghidra-build" }
 ghidra-core = { path = "ghidra-core" }
 ghidra-debug = { path = "ghidra-debug" }
 ghidra-decompile = { path = "ghidra-decompile" }
@@ -16,6 +17,7 @@ ghidra-emulation = { path = "ghidra-emulation" }
 resolver = "2"
 members = [
     "ghidra-app",
+    "ghidra-build",
     "ghidra-core",
     "ghidra-debug",
     "ghidra-decompile",

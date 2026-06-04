@@ -22,6 +22,8 @@ mod call_fixup;
 mod flow_override;
 mod repeat_tracker;
 mod plugin;
+mod auto_table;
+mod static_disassemble;
 
 pub use core::*;
 pub use queue::*;
@@ -32,3 +34,5 @@ pub use call_fixup::*;
 pub use flow_override::*;
 pub use repeat_tracker::*;
 pub use plugin::*;
+pub use auto_table::*;
+pub use static_disassemble::*;

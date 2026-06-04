@@ -45,7 +45,7 @@ impl Ord for AddressSnap {
 }
 
 /// An immutable composite range: an [`Address`] range paired with a [`Lifespan`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TraceAddressSnapRange {
     /// Minimum address offset.
     pub min_offset: u64,

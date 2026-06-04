@@ -62,6 +62,7 @@ pub mod sarif;
 pub mod recognizers;
 pub mod rust;
 pub mod sample;
+pub mod sample_table_plugin;
 pub mod searchtext;
 pub mod structure_editor;
 pub mod swift;

@@ -35,6 +35,61 @@ impl FileFilter {
     }
 }
 
+/// A file filter that matches by extension with display name.
+///
+/// Ports `ghidra.util.filechooser.ExtensionFileFilter`.
+#[derive(Debug, Clone)]
+pub struct ExtensionFileFilter {
+    /// Display name for this filter.
+    pub display_name: String,
+    /// Extensions to accept.
+    pub extensions: Vec<String>,
+}
+
+impl ExtensionFileFilter {
+    /// Create a new extension file filter.
+    pub fn new(display_name: impl Into<String>, extensions: Vec<String>) -> Self {
+        Self {
+            display_name: display_name.into(),
+            extensions,
+        }
+    }
+
+    /// Check if a path matches any of the extensions.
+    pub fn accept(&self, path: &Path) -> bool {
+        if self.extensions.is_empty() {
+            return true;
+        }
+        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            self.extensions.iter().any(|e| e.eq_ignore_ascii_case(ext))
+        } else {
+            false
+        }
+    }
+}
+
+/// Model for providing files/directories to the file chooser.
+///
+/// Ports `ghidra.util.filechooser.GhidraFileChooserModel`.
+pub trait GhidraFileChooserModel: std::fmt::Debug {
+    /// List files in the given directory that match the filter.
+    fn list_files(&self, dir: &Path, filter: Option<&FileFilter>) -> Vec<PathBuf>;
+
+    /// List subdirectories in the given directory.
+    fn list_directories(&self, dir: &Path) -> Vec<PathBuf>;
+
+    /// Get the home directory.
+    fn home_directory(&self) -> PathBuf;
+
+    /// Get the display name for a file.
+    fn display_name(&self, path: &Path) -> String {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string()
+    }
+}
+
 /// Result of a file chooser operation.
 #[derive(Debug, Clone)]
 pub enum FileChooserResult {

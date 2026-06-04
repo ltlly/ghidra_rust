@@ -23,6 +23,12 @@
 //!
 //! - **`gui_event`** -- Mouse and keyboard event bindings. Ports
 //!   `gui.event.MouseBinding`.
+//!
+//! - **`graph`** -- Graph framework: directed graph types, algorithms
+//!   (Tarjan SCC, Dijkstra, DFS sort, Johnson circuits, dominance,
+//!   find-paths, graph-to-tree), service-layer attributed graphs,
+//!   visual graph viewer with layout providers, and graph jobs.
+//!   Ports `ghidra.graph.*`, `ghidra.service.graph.*`.
 
 pub mod actions;
 pub mod app;
@@ -31,6 +37,7 @@ pub mod bytes_view;
 pub mod chooser;
 pub mod decompiler_view;
 pub mod docking;
+pub mod graph;
 pub mod gui_event;
 pub mod gui_util;
 pub mod layout_util;

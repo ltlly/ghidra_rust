@@ -129,6 +129,43 @@ impl DecompileResults {
     pub fn get_signature(&self) -> Option<&str> {
         self.signature.as_deref()
     }
+
+    /// Count the number of switch statements found during decompilation.
+    ///
+    /// Stub implementation; a real decompiler would parse the AST for switch nodes.
+    pub fn count_switch_statements(&self) -> usize {
+        // Look for switch keywords in the C code output
+        self.c_code
+            .as_deref()
+            .map(|code| code.matches("switch").count())
+            .unwrap_or(0)
+    }
+
+    /// Get the number of identified parameters.
+    ///
+    /// Stub implementation; a real decompiler would extract parameter count
+    /// from the function signature.
+    pub fn parameter_count(&self) -> usize {
+        self.signature
+            .as_deref()
+            .map(|sig| {
+                // Count commas in the parameter list + 1 if non-void
+                if sig.contains("void)") || sig.contains("()") {
+                    0
+                } else {
+                    sig.chars().filter(|&c| c == ',').count() + 1
+                }
+            })
+            .unwrap_or(0)
+    }
+
+    /// Check whether calling convention information was recovered.
+    ///
+    /// Stub implementation; returns true if decompilation succeeded and
+    /// a signature was produced.
+    pub fn has_calling_convention_info(&self) -> bool {
+        self.decompile_completed() && self.signature.is_some()
+    }
 }
 
 #[cfg(test)]

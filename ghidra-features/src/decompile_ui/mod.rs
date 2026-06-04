@@ -23,6 +23,7 @@ pub mod actions;
 pub mod clipboard_provider;
 pub mod location_memento;
 pub mod overlay_painter;
+pub mod panel;
 pub mod plugin;
 pub mod provider;
 
@@ -31,5 +32,8 @@ pub use action_context::DecompilerActionContext;
 pub use clipboard_provider::DecompilerClipboardProvider;
 pub use location_memento::DecompilerLocationMemento;
 pub use overlay_painter::OverlayMessagePainter;
+pub use panel::{
+    DecompiledFunction, DecompiledLine, DecompiledToken, DecompiledTokenType, DecompilerPanel,
+};
 pub use plugin::DecompilePlugin;
 pub use provider::{DecompilerProvider, ProviderState};

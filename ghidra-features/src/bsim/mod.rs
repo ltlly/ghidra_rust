@@ -38,8 +38,10 @@
 pub mod client;
 pub mod description;
 pub mod facade;
+pub mod gui;
 pub mod protocol;
 pub mod query;
+pub mod search_results;
 
 pub use description::{
     CategoryRecord, CallgraphEntry, CompareSignatures, ComparisonResult,
@@ -90,6 +92,13 @@ pub use query::{
     CollectingErrorLogger, DecompileFunctionTask, GenSignatures,
     LshException, MinimalErrorLogger, NullErrorLogger,
     ParallelDecompileTask, ServerConfig,
+};
+
+// Re-export search results types.
+pub use search_results::{
+    BSimApplyResult, BSimApplyResults, BSimApplyType, BSimFilterSet,
+    BSimMatchResult, BSimMatchResultsModel, BSimResultStatus,
+    BSimSearchResultsFilter, BSimSearchSettings, ExecutableResult,
 };
 
 use anyhow::{anyhow, Context, Result};
