@@ -265,7 +265,7 @@ impl DemangledGnuSymbol {
         // Split by "::" for namespace qualifiers, respecting angle brackets
         let parts = Self::split_namespace_parts(stripped);
         if parts.len() > 1 {
-            self.base_name = parts.last().unwrap_or(&"").to_string();
+            self.base_name = parts.last().map(|s| s.as_str()).unwrap_or("").to_string();
             self.namespace_parts = parts[..parts.len() - 1]
                 .iter()
                 .map(|s| s.to_string())
@@ -300,6 +300,43 @@ impl DemangledGnuSymbol {
                 self.template_args = Self::split_template_args(args_str);
             }
         }
+    }
+
+    /// Split by `::` respecting nested angle brackets.
+    fn split_namespace_parts(s: &str) -> Vec<String> {
+        let mut result = Vec::new();
+        let mut depth = 0;
+        let mut current = String::new();
+        let mut chars = s.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '<' => {
+                    depth += 1;
+                    current.push(ch);
+                }
+                '>' => {
+                    depth -= 1;
+                    current.push(ch);
+                }
+                ':' if depth == 0 && chars.peek() == Some(&':') => {
+                    chars.next(); // skip second ':'
+                    if !current.is_empty() {
+                        result.push(current.clone());
+                        current.clear();
+                    }
+                }
+                _ => {
+                    current.push(ch);
+                }
+            }
+        }
+
+        if !current.is_empty() {
+            result.push(current);
+        }
+
+        result
     }
 
     /// Split template arguments respecting nested angle brackets.

@@ -32,6 +32,27 @@ pub fn parse_data_type(chars: &[char], index: &mut usize) -> Result<DataType, St
         // Pointer types: P, Q, R, S
         'P' => {
             *index += 1;
+            // After a pointer marker, optionally skip EFGHI prefix (E=__ptr64, F=__unaligned,
+            // I=__restricted) and CV modifier code (A-D only) before the base type.
+            // A-D are exclusively CV modifier codes after pointer markers (never standalone
+            // type codes). E-L are also used as type codes (E=unsigned char, H=int, etc.)
+            // so they cannot be unconditionally skipped.
+            // See Java MDCVMod.parseEFGHI() and parseCV().
+            if *index < chars.len() {
+                let ch = chars[*index];
+                if ch == 'E' || ch == 'F' || ch == 'I' {
+                    // EFGHI prefixes: E=__ptr64, F=__unaligned, I=__restricted
+                    *index += 1;
+                }
+            }
+            if *index < chars.len() {
+                let ch = chars[*index];
+                if matches!(ch, 'A'..='D') {
+                    // CV modifier codes after pointer type (A-D only: A=none, B=const,
+                    // C=volatile, D=const-volatile)
+                    *index += 1;
+                }
+            }
             let inner = parse_data_type(chars, index)?;
             Ok(DataType::Pointer {
                 pointed_to: Box::new(inner),
@@ -40,6 +61,13 @@ pub fn parse_data_type(chars: &[char], index: &mut usize) -> Result<DataType, St
         }
         'Q' => {
             *index += 1;
+            // After a reference marker, optionally skip CV modifier code (A-D only)
+            if *index < chars.len() {
+                let ch = chars[*index];
+                if matches!(ch, 'A'..='D') {
+                    *index += 1;
+                }
+            }
             let inner = parse_data_type(chars, index)?;
             Ok(DataType::Reference {
                 pointed_to: Box::new(inner),
@@ -48,6 +76,13 @@ pub fn parse_data_type(chars: &[char], index: &mut usize) -> Result<DataType, St
         }
         'R' => {
             *index += 1;
+            // After an rvalue reference marker, optionally skip CV modifier code (A-D only)
+            if *index < chars.len() {
+                let ch = chars[*index];
+                if matches!(ch, 'A'..='D') {
+                    *index += 1;
+                }
+            }
             let inner = parse_data_type(chars, index)?;
             Ok(DataType::RightReference {
                 pointed_to: Box::new(inner),
@@ -56,8 +91,20 @@ pub fn parse_data_type(chars: &[char], index: &mut usize) -> Result<DataType, St
         }
         'S' => {
             *index += 1;
+            // After a pointer-to-member marker, optionally skip EFGHI prefix and CV modifier
+            if *index < chars.len() {
+                let ch = chars[*index];
+                if ch == 'E' || ch == 'F' || ch == 'I' {
+                    *index += 1;
+                }
+            }
+            if *index < chars.len() {
+                let ch = chars[*index];
+                if matches!(ch, 'A'..='D') {
+                    *index += 1;
+                }
+            }
             let inner = parse_data_type(chars, index)?;
-            // S is typically a pointer-to-member or similar
             Ok(DataType::Pointer {
                 pointed_to: Box::new(inner),
                 cv_mod: None,
