@@ -21,6 +21,7 @@
 //! by any frontend.
 
 pub mod actions;
+pub mod dialogs;
 pub mod history;
 pub mod operand_label;
 pub mod plugin;
@@ -28,6 +29,10 @@ pub mod plugin;
 pub use actions::{
     is_add_label_enabled, is_edit_label_enabled, is_label_history_enabled,
     is_remove_label_enabled, LabelAction, LabelActionContext,
+};
+pub use dialogs::{
+    EditExternalLabelAction, LabelHistoryInputDialog, LabelHistoryPanel, LabelHistoryTask,
+    SymbolChooserDialog,
 };
 pub use history::{
     LabelHistoryAction, LabelHistoryColumn, LabelHistoryEntry, LabelHistoryListener,

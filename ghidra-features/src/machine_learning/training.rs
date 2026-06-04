@@ -98,12 +98,19 @@ pub struct FeatureVector {
 ///
 /// This is a simplified model structure; the actual training logic
 /// depends on the Tribuo library in the Java version.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RandomForestModel {
     /// Number of trees in the ensemble.
     pub num_trees: usize,
     /// Per-tree predictions (simplified as threshold-based rules).
     pub trees: Vec<DecisionTree>,
+}
+
+impl RandomForestModel {
+    /// Get the number of trees in the ensemble.
+    pub fn num_trees(&self) -> usize {
+        self.num_trees
+    }
 }
 
 /// A single decision tree (simplified).

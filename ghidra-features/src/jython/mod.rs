@@ -19,12 +19,16 @@
 //!
 //! - [`JythonUtils`] -- Utility functions for Jython integration.
 
+pub mod code_completion;
 mod interpreter;
-mod script;
 mod plugin;
+pub mod pydev_utils;
+mod script;
 mod utils;
 
+pub use code_completion::JythonCodeCompletionFactory;
 pub use interpreter::GhidraJythonInterpreter;
-pub use script::{JythonScript, JythonScriptProvider};
 pub use plugin::JythonPlugin;
+pub use pydev_utils::PyDevUtils;
+pub use script::{JythonScript, JythonScriptProvider};
 pub use utils::JythonUtils;

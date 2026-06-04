@@ -26,16 +26,22 @@
 //! - [`ModelTrainingUtils`] -- Utilities for training random forest models,
 //!   including parallel tree training and model evaluation.
 
+pub mod address_task;
+pub mod callback;
 pub mod classifier;
 pub mod ensemble;
 pub mod interpretation;
 pub mod params;
 pub mod random_subset;
+pub mod similar_starts;
 pub mod training;
 
+pub use address_task::AddressGatherConfig;
+pub use callback::FunctionStartCallback;
 pub use classifier::FunctionStartClassifier;
 pub use ensemble::EnsembleEvaluator;
 pub use interpretation::Interpretation;
 pub use params::FunctionStartRfParams;
 pub use random_subset::RandomSubsetUtils;
+pub use similar_starts::SimilarStartsFinder;
 pub use training::{ModelTrainingUtils, TrainingAndTestData};

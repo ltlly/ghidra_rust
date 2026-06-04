@@ -12,6 +12,7 @@
 //!   visualization framework.
 
 pub mod graph;
+pub mod plugins;
 
 /// A minimal Ghidra plugin example.
 ///

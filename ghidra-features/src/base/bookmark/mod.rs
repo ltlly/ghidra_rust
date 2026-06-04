@@ -23,6 +23,7 @@
 
 pub mod actions;
 pub mod commands;
+pub mod mappers;
 pub mod model;
 pub mod provider;
 pub mod navigator;
@@ -31,6 +32,10 @@ pub mod types;
 
 pub use commands::{
     AddressSet, BookmarkCommand, BookmarkDeleteBackgroundCmd, BookmarkDeleteCmd, BookmarkEditCmd,
+};
+pub use mappers::{
+    BookmarkRowObjectToAddressTableRowMapper, BookmarkRowObjectToProgramLocationTableRowMapper,
+    ProgramLocation,
 };
 pub use model::{Bookmark, BookmarkManager, BookmarkRowObject, FilterState};
 pub use navigator::{BookmarkMarkerSet, BookmarkNavigator};

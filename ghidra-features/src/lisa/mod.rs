@@ -52,6 +52,7 @@ pub mod types;
 pub mod pcode_frontend;
 pub mod pcode_features;
 pub mod pcode_branch;
+pub mod pcode_code_member_visitor;
 pub mod work_item;
 
 pub use analyses::PcodeDataflowConstantPropagation;

@@ -35,6 +35,7 @@
 //!   state for paired execution.
 
 pub mod arithmetic;
+pub mod gui;
 pub mod model;
 pub mod state;
 pub mod emulator;
@@ -43,8 +44,10 @@ pub mod preconditions;
 pub mod register_map;
 pub mod memory_map;
 pub mod paired_state;
+pub mod trace;
 
 pub use arithmetic::{Purpose, SymZ3PcodeArithmetic};
+pub use gui::{SymZ3FieldFactory, SymZ3FieldLocation, Z3SummaryInformationPanel, Z3SummaryPcodeLogPanel};
 pub use model::SymValueZ3;
 pub use state::{SymZ3MemorySpace, SymZ3RegisterSpace, SymZ3Space, SymZ3State, SpaceKind};
 pub use emulator::SymZ3PcodeEmulator;
@@ -53,3 +56,4 @@ pub use preconditions::{SymZ3Precondition, SymZ3Preconditions};
 pub use register_map::{RegisterDescriptor, SymZ3RegisterMap};
 pub use memory_map::{MemoryRegion, SymZ3MemoryMap};
 pub use paired_state::{SymZ3PairedPcodeExecutorState, SymZ3ThreadPcodeExecutorState};
+pub use trace::{SymZ3TraceSpace, TraceSpaceKind};

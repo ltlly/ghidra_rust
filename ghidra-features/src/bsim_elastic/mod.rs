@@ -28,8 +28,10 @@ pub mod binner;
 pub mod plugin;
 pub mod script_engine;
 pub mod tokenizer;
+pub mod tokenizer_factory;
 
 pub use binner::{BytesRef, LshBinner};
 pub use plugin::AnalysisLshPlugin;
 pub use script_engine::{BSimScriptEngine, VectorCompareScriptFactory};
 pub use tokenizer::LshTokenizer;
+pub use tokenizer_factory::LshTokenizerFactory;

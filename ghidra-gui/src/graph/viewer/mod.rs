@@ -2,7 +2,17 @@
 //!
 //! Ports Ghidra's `ghidra.graph.viewer` and related packages.
 
+pub mod actions;
+pub mod edge;
+pub mod event;
 pub mod layout;
+pub mod options;
+pub mod picking;
+pub mod popup;
+pub mod renderer;
+pub mod satellite;
+pub mod shape;
+pub mod vertex;
 
 use std::collections::HashMap;
 
@@ -14,6 +24,9 @@ pub struct Point2D {
 }
 
 impl Point2D {
+    /// The origin point (0, 0).
+    pub const ZERO: Point2D = Point2D { x: 0.0, y: 0.0 };
+
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }

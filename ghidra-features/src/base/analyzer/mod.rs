@@ -6,6 +6,7 @@ pub mod priority;
 pub mod r#trait;
 pub mod scheduler;
 pub mod manager;
+pub mod worker;
 pub mod analyzers;
 
 pub use core::*;
@@ -13,6 +14,7 @@ pub use priority::*;
 pub use r#trait::*;
 pub use scheduler::*;
 pub use manager::*;
+pub use worker::*;
 pub use analyzers::*;
 
 #[cfg(test)]

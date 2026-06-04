@@ -38,10 +38,14 @@
 pub mod client;
 pub mod description;
 pub mod facade;
+pub mod file;
 pub mod gui;
+pub mod ingest;
+pub mod postgresql;
 pub mod protocol;
 pub mod query;
 pub mod search_results;
+pub mod tables;
 
 pub use description::{
     CategoryRecord, CallgraphEntry, CompareSignatures, ComparisonResult,

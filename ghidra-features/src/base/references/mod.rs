@@ -27,6 +27,7 @@
 
 pub mod commands;
 pub mod default_ref_action;
+pub mod dialog;
 pub mod edit_model;
 pub mod edit_panels;
 pub mod exceptions;
@@ -41,6 +42,7 @@ pub use commands::{
     ReferenceCommand, RemoveAllReferencesCmd, RemoveReferenceCmd, SetExternalNameCmd,
     SetExternalRefCmd, SetPrimaryRefCmd,
 };
+pub use dialog::{EditPanelType, EditReferenceDialog, InstructionPanel};
 pub use edit_model::{EditReferencesModel, REFERENCE_COLUMNS};
 pub use edit_panels::{
     ExternalRefState, MemoryRefState, RegisterRefState, ReferenceEditPanel, StackRefState,

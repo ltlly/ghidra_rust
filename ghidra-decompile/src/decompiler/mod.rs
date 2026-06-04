@@ -76,6 +76,7 @@ pub mod decompile_results;
 pub mod decompiled_function;
 pub mod decomp_interface;
 pub mod disposer;
+pub mod flatapi;
 pub mod highlighter;
 pub mod location;
 pub mod parallel;

@@ -325,6 +325,21 @@ impl SymValueZ3 {
         let r = that.bitvec_expr_string.as_deref().unwrap_or("bv0");
         SymValueZ3::from_bitvec(format!("(ite (not ({op} {l} {r})) bv1 bv0)"))
     }
+
+    /// Get a simplified human-readable string representation.
+    ///
+    /// Returns the boolean expression if present, otherwise the bit-vector expression.
+    /// Falls back to "?" if neither is present.
+    pub fn simplified_string(&self) -> String {
+        if let Some(ref be) = self.bool_expr_string {
+            return be.clone();
+        }
+        if let Some(ref bv) = self.bitvec_expr_string {
+            // Strip the "V:" prefix if present for display
+            return bv.strip_prefix("V:").unwrap_or(bv).to_string();
+        }
+        "?".to_string()
+    }
 }
 
 impl fmt::Display for SymValueZ3 {
