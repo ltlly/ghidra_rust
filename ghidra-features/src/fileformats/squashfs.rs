@@ -289,7 +289,7 @@ impl SquashBasicDirInode {
 }
 
 /// Basic file inode (additional fields after common header).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct SquashBasicFileInode {
     /// Block number of the start of the data blocks.
     pub blocks_start: u32,

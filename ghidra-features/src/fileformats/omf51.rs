@@ -136,8 +136,9 @@ mod tests {
 
     #[test]
     fn test_parse_record() {
+        // MODHDR record: type=0x02, length = data(1 byte) + checksum(1) = 2
         let mut data = vec![OMF51_MODHDR];
-        data.extend_from_slice(&3u16.to_le_bytes()); // length = 3
+        data.extend_from_slice(&2u16.to_le_bytes()); // length = 2
         data.push(0x55); // data byte
         data.push(0); // checksum
 
@@ -149,12 +150,12 @@ mod tests {
     #[test]
     fn test_parse_multiple() {
         let mut data = Vec::new();
-        // Record 1: MODHDR
+        // Record 1: MODHDR, length = 1(data) + 1(checksum) = 2
         data.push(OMF51_MODHDR);
         data.extend_from_slice(&2u16.to_le_bytes());
         data.push(0x42);
         data.push(0); // checksum
-        // Record 2: MODEND
+        // Record 2: MODEND, length = 1(data) + 1(checksum) = 2
         data.push(OMF51_MODEND);
         data.extend_from_slice(&2u16.to_le_bytes());
         data.push(0x00);

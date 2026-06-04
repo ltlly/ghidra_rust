@@ -29,15 +29,15 @@ pub const CRAMFS_SIGNATURE: &[u8] = b"Compressed ROMFS";
 /// Maximum path component length.
 pub const CRAMFS_MAXPATHLEN: usize = 256;
 
-/// CramFS inode file types.
+/// CramFS inode file types (Unix mode_t encoding, top 4 bits of mode).
+pub const CRAMFS_INODE_FMT_FIFO: u8 = 0o01;
+pub const CRAMFS_INODE_FMT_CHRDEV: u8 = 0o02;
+pub const CRAMFS_INODE_FMT_DIR: u8 = 0o04;
+pub const CRAMFS_INODE_FMT_BLKDEV: u8 = 0o06;
+pub const CRAMFS_INODE_FMT_REGULAR: u8 = 0o10;
+pub const CRAMFS_INODE_FMT_SYMLINK: u8 = 0o12;
+pub const CRAMFS_INODE_FMT_SOCKET: u8 = 0o14;
 pub const CRAMFS_INODE_FMT_UNKNOWN: u8 = 0;
-pub const CRAMFS_INODE_FMT_REGULAR: u8 = 1;
-pub const CRAMFS_INODE_FMT_DIR: u8 = 2;
-pub const CRAMFS_INODE_FMT_SYMLINK: u8 = 3;
-pub const CRAMFS_INODE_FMT_BLKDEV: u8 = 4;
-pub const CRAMFS_INODE_FMT_CHRDEV: u8 = 5;
-pub const CRAMFS_INODE_FMT_FIFO: u8 = 6;
-pub const CRAMFS_INODE_FMT_SOCKET: u8 = 7;
 
 /// Flag: data in inode is zero-filled.
 pub const CRAMFS_FLAG_SPARSE: u32 = 1;

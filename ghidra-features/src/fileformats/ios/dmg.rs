@@ -101,7 +101,7 @@ impl DmgHeader {
 
         let checksum_type = u32::from_be_bytes(data[480..484].try_into().unwrap());
         let checksum_size = u32::from_be_bytes(data[484..488].try_into().unwrap());
-        let checksum: Vec<u8> = data[488..488 + 32].to_vec();
+        let checksum: Vec<u8> = data[484..512].to_vec(); // checksum field extends to end of header
 
         Ok(DmgHeader {
             magic,

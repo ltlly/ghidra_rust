@@ -183,11 +183,12 @@ mod tests {
 
     #[test]
     fn test_parse_record() {
-        // THEADR record: type=0x80, length=5 (1+len_byte+3_data+1_chk), data="AB", checksum=0
+        // THEADR record: type=0x80
+        // length = data + checksum = 1(len_byte) + 2("AB") + 1(checksum) = 4
         let mut data = vec![OMF_THEADR];
-        data.extend_from_slice(&5u16.to_le_bytes()); // length
+        data.extend_from_slice(&4u16.to_le_bytes()); // length = 4
         data.push(2); // name length = 2
-        data.extend_from_slice(b"AB");
+        data.extend_from_slice(b"AB"); // data: 2 bytes
         data.push(0); // checksum
 
         let (_, record) = OmfRecord::parse(&data).unwrap();
@@ -199,14 +200,16 @@ mod tests {
     fn test_parse_multiple_records() {
         let mut data = Vec::new();
         // Record 1: THEADR
+        // length = 1(name_len_byte) + 1("X") + 1(checksum) = 3
         data.push(OMF_THEADR);
-        data.extend_from_slice(&4u16.to_le_bytes());
+        data.extend_from_slice(&3u16.to_le_bytes());
         data.push(1); // name length
         data.push(b'X');
         data.push(0); // checksum
         // Record 2: MODEND
+        // length = 0(data) + 1(checksum) = 1
         data.push(OMF_MODEND);
-        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&1u16.to_le_bytes());
         data.push(0); // checksum
 
         let records = parse_omf_records(&data).unwrap();

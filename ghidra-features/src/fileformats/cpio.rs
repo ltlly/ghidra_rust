@@ -163,7 +163,8 @@ fn parse_newc_entry(input: &[u8], offset: u64) -> IResult<&[u8], CpioEntry> {
     };
 
     // Calculate header size (from start to after name) and align to 4 bytes
-    let consumed = (input.len() - i.len()) + (namesize as usize);
+    // Note: i is already positioned after name (take(namesize) above consumed it)
+    let consumed = input.len() - i.len();
     let header_size = align4(consumed);
     let skip = header_size - consumed;
     let (i, _) = take(skip)(i)?;
@@ -242,22 +243,21 @@ impl CpioArchive {
 
             match parse_newc_entry(remaining, offset) {
                 Ok((i, entry)) => {
-                    let is_trailer = entry.is_trailer();
-
-                    if !is_trailer {
-                        // Advance past data
-                        let data_padded = align4(entry.file_size as usize);
-                        let consumed = remaining.len() - i.len();
-                        let advance = consumed + data_padded;
-                        if advance > remaining.len() {
-                            break;
-                        }
-                        offset += advance as u64;
-                        remaining = &remaining[advance..];
-                        entries.push(entry);
-                    } else {
+                    // Check for trailer BEFORE adding to entries
+                    if entry.is_trailer() {
                         break;
                     }
+
+                    // Advance past data
+                    let data_padded = align4(entry.file_size as usize);
+                    let consumed = remaining.len() - i.len();
+                    let advance = consumed + data_padded;
+                    if advance > remaining.len() {
+                        break;
+                    }
+                    offset += advance as u64;
+                    remaining = &remaining[advance..];
+                    entries.push(entry);
                 }
                 Err(_) => break,
             }
@@ -295,7 +295,7 @@ mod tests {
     fn test_parse_hex_u32() {
         let data = b"000001ed";
         let (_, val) = parse_hex_u32(data, 8).unwrap();
-        assert_eq!(val, 0o775);
+        assert_eq!(val, 0x1ed); // 493
     }
 
     #[test]
@@ -345,7 +345,7 @@ mod tests {
         assert_eq!(archive.entries.len(), 1);
         assert_eq!(archive.entries[0].name, "test.txt");
         assert!(archive.entries[0].is_regular());
-        assert_eq!(archive.entries[0].mode, 0o100644);
+        assert_eq!(archive.entries[0].mode, 0o100644u32);
         assert_eq!(archive.format, CpioFormat::Newc);
     }
 

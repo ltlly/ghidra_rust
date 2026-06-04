@@ -20,6 +20,7 @@
 pub mod loader;
 pub mod exporter;
 pub mod server;
+pub mod util;
 
 use ghidra_core::program::Program;
 use std::net::SocketAddr;
