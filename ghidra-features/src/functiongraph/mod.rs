@@ -3,6 +3,17 @@
 //! Provides widget-level data structures for the function graph viewer,
 //! graph layout algorithms (hierarchical, force-directed, circular, radial),
 //! and edge routing.
+//!
+//! # Submodules
+//!
+//! - [`mvc`] -- MVC data types (options, vertex types, group history, etc.)
+
+pub mod mvc;
+
+pub use mvc::{
+    EdgeColorScheme, FGData, FGVertexType, FunctionGraphOptions, GroupHistoryInfo,
+    NavigationHistoryMode, RelayoutOption, VertexInfo,
+};
 
 use ghidra_core::addr::Address;
 use ghidra_core::program::listing::Function;
@@ -659,6 +670,240 @@ impl FunctionGraph {
             }
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Vertex classification
+    // -----------------------------------------------------------------------
+
+    /// Classify each vertex as Entry, Exit, Body, or Singleton.
+    ///
+    /// A vertex is an **Entry** if it has no incoming edges (or is the first
+    /// vertex by convention).  A vertex is an **Exit** if it has no outgoing
+    /// edges.  A vertex that is both entry and exit is a **Singleton**.
+    /// Everything else is **Body**.
+    pub fn classify_vertices(&self) -> Vec<FGVertexType> {
+        let n = self.vertices.len();
+        if n == 0 {
+            return Vec::new();
+        }
+
+        let mut has_incoming = vec![false; n];
+        let mut has_outgoing = vec![false; n];
+
+        for edge in &self.edges {
+            if edge.from < n {
+                has_outgoing[edge.from] = true;
+            }
+            if edge.to < n {
+                has_incoming[edge.to] = true;
+            }
+        }
+
+        (0..n)
+            .map(|i| {
+                let is_entry = !has_incoming[i] || i == 0;
+                let is_exit = !has_outgoing[i];
+                match (is_entry, is_exit) {
+                    (true, true) => FGVertexType::Singleton,
+                    (true, false) => FGVertexType::Entry,
+                    (false, true) => FGVertexType::Exit,
+                    (false, false) => FGVertexType::Body,
+                }
+            })
+            .collect()
+    }
+
+    /// Return the entry vertex index (first vertex with no incoming edges,
+    /// or vertex 0 as fallback).
+    pub fn entry_vertex(&self) -> Option<usize> {
+        let classifications = self.classify_vertices();
+        classifications
+            .iter()
+            .position(|t| t.is_entry())
+            .or_else(|| {
+                if self.vertices.is_empty() {
+                    None
+                } else {
+                    Some(0)
+                }
+            })
+    }
+
+    /// Return all exit vertex indices.
+    pub fn exit_vertices(&self) -> Vec<usize> {
+        self.classify_vertices()
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.is_exit())
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // Graph queries
+    // -----------------------------------------------------------------------
+
+    /// Get the vertex index for a given address, if it exists.
+    pub fn vertex_at_address(&self, addr: Address) -> Option<usize> {
+        self.vertices.iter().position(|v| v.address == addr)
+    }
+
+    /// Get the successors (outgoing targets) of a vertex.
+    pub fn successors(&self, vertex: usize) -> Vec<usize> {
+        self.edges
+            .iter()
+            .filter(|e| e.from == vertex)
+            .map(|e| e.to)
+            .collect()
+    }
+
+    /// Get the predecessors (incoming sources) of a vertex.
+    pub fn predecessors(&self, vertex: usize) -> Vec<usize> {
+        self.edges
+            .iter()
+            .filter(|e| e.to == vertex)
+            .map(|e| e.from)
+            .collect()
+    }
+
+    /// Find all simple paths from `start` to `end` using DFS.
+    ///
+    /// Returns at most `max_paths` paths.  Each path is a `Vec<usize>` of
+    /// vertex indices.
+    pub fn find_paths(
+        &self,
+        start: usize,
+        end: usize,
+        max_paths: usize,
+    ) -> Vec<Vec<usize>> {
+        let mut results = Vec::new();
+        let mut path = vec![start];
+        let mut visited = HashSet::new();
+        visited.insert(start);
+        self.dfs_paths(start, end, &mut path, &mut visited, &mut results, max_paths);
+        results
+    }
+
+    fn dfs_paths(
+        &self,
+        current: usize,
+        end: usize,
+        path: &mut Vec<usize>,
+        visited: &mut HashSet<usize>,
+        results: &mut Vec<Vec<usize>>,
+        max_paths: usize,
+    ) {
+        if results.len() >= max_paths {
+            return;
+        }
+        if current == end {
+            results.push(path.clone());
+            return;
+        }
+        for &next in &self.successors(current) {
+            if !visited.contains(&next) {
+                visited.insert(next);
+                path.push(next);
+                self.dfs_paths(next, end, path, visited, results, max_paths);
+                path.pop();
+                visited.remove(&next);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Grouping operations
+    // -----------------------------------------------------------------------
+
+    /// Group a set of vertices into a single vertex.
+    ///
+    /// All vertices in `indices` are collapsed into the first index.
+    /// Edges between grouped vertices are removed; external edges are
+    /// re-wired to point at the representative vertex.
+    ///
+    /// Returns the index of the representative vertex.
+    pub fn group_vertices(&mut self, indices: &[usize]) -> Option<usize> {
+        if indices.len() < 2 {
+            return indices.first().copied();
+        }
+
+        let &rep = indices.first()?;
+        let grouped: HashSet<usize> = indices.iter().copied().collect();
+
+        // Collect edges to keep (skip edges between grouped vertices).
+        let mut new_edges = Vec::new();
+        for edge in &self.edges {
+            let from_in = grouped.contains(&edge.from);
+            let to_in = grouped.contains(&edge.to);
+            if from_in && to_in {
+                continue; // internal edge -- drop
+            }
+            let new_from = if edge.from != rep && from_in { rep } else { edge.from };
+            let new_to = if edge.to != rep && to_in { rep } else { edge.to };
+            if new_from == new_to {
+                continue; // self-loop after grouping -- drop
+            }
+            new_edges.push(FGEdge::new(new_from, new_to, edge.edge_type));
+        }
+        self.edges = new_edges;
+
+        // Mark non-representative vertices as removed (clear their label).
+        for &idx in &grouped {
+            if idx != rep && idx < self.vertices.len() {
+                self.vertices[idx].label = String::new();
+                // Move to representative position.
+                self.vertices[idx].x = self.vertices[rep].x;
+                self.vertices[idx].y = self.vertices[rep].y;
+            }
+        }
+
+        Some(rep)
+    }
+
+    /// Remove a vertex by index and re-wire edges.
+    ///
+    /// All incoming edges are reconnected to successors of the removed vertex.
+    /// Returns the list of disconnected edges.
+    pub fn remove_vertex(&mut self, index: usize) {
+        let n = self.vertices.len();
+        if index >= n {
+            return;
+        }
+
+        // Find successors of the removed vertex.
+        let succs: Vec<usize> = self.successors(index);
+        let preds: Vec<usize> = self.predecessors(index);
+
+        // Re-wire: for each pred->index edge, add pred->succ edges.
+        let mut new_edges: Vec<FGEdge> = self
+            .edges
+            .iter()
+            .filter(|e| e.from != index && e.to != index)
+            .cloned()
+            .collect();
+
+        for &pred in &preds {
+            for &succ in &succs {
+                if pred != succ {
+                    new_edges.push(FGEdge::new(pred, succ, CfgEdgeType::Fallthrough));
+                }
+            }
+        }
+
+        self.edges = new_edges;
+    }
+
+    /// Collect saved [`VertexInfo`] for every vertex (for serialization).
+    pub fn save_vertex_info(&self, types: &[FGVertexType]) -> Vec<VertexInfo> {
+        self.vertices
+            .iter()
+            .enumerate()
+            .map(|(i, v)| {
+                let vt = types.get(i).copied().unwrap_or(FGVertexType::Body);
+                VertexInfo::new(v.address, vt, v.x, v.y)
+            })
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -855,5 +1100,196 @@ mod tests {
         g.layout.direction = LayoutDirection::TopToBottom;
         g.route_edges_orthogonal();
         assert_eq!(g.edges[0].points.len(), 4);
+    }
+
+    // ---- Vertex classification tests ---------------------------------------
+
+    #[test]
+    fn classify_diamond_graph() {
+        // A -> B, A -> C, B -> D, C -> D
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+                FGVertex::new(Address::new(0x1020), "C".into(), vec![]),
+                FGVertex::new(Address::new(0x1030), "D".into(), vec![]),
+            ],
+            vec![
+                FGEdge::new(0, 1, CfgEdgeType::Fallthrough),
+                FGEdge::new(0, 2, CfgEdgeType::Branch),
+                FGEdge::new(1, 3, CfgEdgeType::Fallthrough),
+                FGEdge::new(2, 3, CfgEdgeType::Fallthrough),
+            ],
+        );
+        let types = g.classify_vertices();
+        assert_eq!(types[0], super::mvc::FGVertexType::Entry);
+        assert_eq!(types[1], super::mvc::FGVertexType::Body);
+        assert_eq!(types[2], super::mvc::FGVertexType::Body);
+        assert_eq!(types[3], super::mvc::FGVertexType::Exit);
+    }
+
+    #[test]
+    fn classify_singleton() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![FGVertex::new(Address::new(0x1000), "S".into(), vec![])],
+            vec![],
+        );
+        let types = g.classify_vertices();
+        assert_eq!(types[0], super::mvc::FGVertexType::Singleton);
+    }
+
+    #[test]
+    fn entry_vertex_test() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+            ],
+            vec![FGEdge::new(0, 1, CfgEdgeType::Fallthrough)],
+        );
+        assert_eq!(g.entry_vertex(), Some(0));
+        assert_eq!(g.exit_vertices(), vec![1]);
+    }
+
+    #[test]
+    fn vertex_at_address_test() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+            ],
+            vec![],
+        );
+        assert_eq!(g.vertex_at_address(Address::new(0x1000)), Some(0));
+        assert_eq!(g.vertex_at_address(Address::new(0x1010)), Some(1));
+        assert_eq!(g.vertex_at_address(Address::new(0x9999)), None);
+    }
+
+    // ---- Graph query tests -------------------------------------------------
+
+    #[test]
+    fn successors_and_predecessors() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+                FGVertex::new(Address::new(0x1020), "C".into(), vec![]),
+            ],
+            vec![
+                FGEdge::new(0, 1, CfgEdgeType::Fallthrough),
+                FGEdge::new(0, 2, CfgEdgeType::Branch),
+            ],
+        );
+        assert_eq!(g.successors(0), vec![1, 2]);
+        assert!(g.successors(1).is_empty());
+        assert_eq!(g.predecessors(1), vec![0]);
+        assert_eq!(g.predecessors(2), vec![0]);
+        assert!(g.predecessors(0).is_empty());
+    }
+
+    #[test]
+    fn find_paths_diamond() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+                FGVertex::new(Address::new(0x1020), "C".into(), vec![]),
+                FGVertex::new(Address::new(0x1030), "D".into(), vec![]),
+            ],
+            vec![
+                FGEdge::new(0, 1, CfgEdgeType::Fallthrough),
+                FGEdge::new(0, 2, CfgEdgeType::Branch),
+                FGEdge::new(1, 3, CfgEdgeType::Fallthrough),
+                FGEdge::new(2, 3, CfgEdgeType::Fallthrough),
+            ],
+        );
+        let paths = g.find_paths(0, 3, 10);
+        assert_eq!(paths.len(), 2);
+        assert!(paths.contains(&vec![0, 1, 3]));
+        assert!(paths.contains(&vec![0, 2, 3]));
+    }
+
+    #[test]
+    fn find_paths_no_path() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+            ],
+            vec![FGEdge::new(0, 1, CfgEdgeType::Fallthrough)],
+        );
+        let paths = g.find_paths(1, 0, 10);
+        assert!(paths.is_empty());
+    }
+
+    // ---- Grouping tests ----------------------------------------------------
+
+    #[test]
+    fn group_vertices_collapses() {
+        let mut g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+                FGVertex::new(Address::new(0x1020), "C".into(), vec![]),
+            ],
+            vec![
+                FGEdge::new(0, 1, CfgEdgeType::Fallthrough),
+                FGEdge::new(1, 2, CfgEdgeType::Fallthrough),
+            ],
+        );
+        let rep = g.group_vertices(&[1, 2]);
+        assert_eq!(rep, Some(1));
+        // Edge A->B survives, edge B->C (internal) is removed.
+        assert_eq!(g.edges.len(), 1);
+        assert_eq!(g.edges[0].from, 0);
+        assert_eq!(g.edges[0].to, 1);
+    }
+
+    #[test]
+    fn group_single_vertex_is_noop() {
+        let mut g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![FGVertex::new(Address::new(0x1000), "A".into(), vec![])],
+            vec![],
+        );
+        let rep = g.group_vertices(&[0]);
+        assert_eq!(rep, Some(0));
+    }
+
+    // ---- Serialization helpers tests ---------------------------------------
+
+    #[test]
+    fn save_vertex_info_round_trip() {
+        let g = FunctionGraph::from_parts(
+            dummy_function(),
+            vec![
+                FGVertex::new(Address::new(0x1000), "A".into(), vec![]),
+                FGVertex::new(Address::new(0x1010), "B".into(), vec![]),
+            ],
+            vec![],
+        );
+        let types = g.classify_vertices();
+        let info = g.save_vertex_info(&types);
+        assert_eq!(info.len(), 2);
+        assert_eq!(info[0].address, Address::new(0x1000));
+        assert_eq!(info[1].address, Address::new(0x1010));
+    }
+
+    // ---- MVC types tests (inline) ------------------------------------------
+
+    #[test]
+    fn fgvertex_type_from_mvc() {
+        use super::mvc::FGVertexType;
+        assert!(FGVertexType::Entry.is_entry());
+        assert!(FGVertexType::Singleton.is_exit());
+        assert!(!FGVertexType::Body.is_entry());
     }
 }

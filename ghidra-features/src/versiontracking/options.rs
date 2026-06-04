@@ -28,7 +28,7 @@ impl VtOptions {
     pub fn set_double(&mut self, key: impl Into<String>, value: f64) { self.double_options.insert(key.into(), value); }
     pub fn get_double(&self, key: &str, default: f64) -> f64 { self.double_options.get(key).copied().unwrap_or(default) }
     pub fn register_option(&mut self, key: impl Into<String>, description: impl Into<String>) { self.descriptions.insert(key.into(), description.into()); }
-    pub fn description(&self, key: &str) -> &str { self.descriptions.get(key).map(|s| s.as_str()).unwrap_or(key) }
+    pub fn description<'a>(&'a self, key: &'a str) -> &'a str { self.descriptions.get(key).map(|s| s.as_str()).unwrap_or(key) }
     pub fn validate(&self) -> bool { true }
     pub fn copy(&self) -> Self { self.clone() }
 }

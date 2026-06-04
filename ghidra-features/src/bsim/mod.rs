@@ -35,6 +35,14 @@
 //! }
 //! ```
 
+pub mod description;
+
+pub use description::{
+    CategoryRecord, CallgraphEntry, CompareSignatures, ComparisonResult,
+    DatabaseInformation, DescriptionManager, ExecutableRecord, FunctionDescription,
+    RowKey, SignatureRecord, VectorResult,
+};
+
 use anyhow::{anyhow, Context, Result};
 use ghidra_core::addr::{Address, AddressRange};
 use ghidra_core::database::Database;

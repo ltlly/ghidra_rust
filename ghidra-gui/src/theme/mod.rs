@@ -1,0 +1,34 @@
+//! Theme system for managing application colors, fonts, and icons.
+//!
+//! Ports the `generic.theme` package which provides theme value types,
+//! a theme manager, and look-and-feel abstractions.
+//!
+//! # Architecture
+//!
+//! - [`ThemeValue`] -- generic base for values with id, direct value, or reference.
+//! - [`ColorValue`], [`FontValue`], [`IconValue`] -- concrete theme value types.
+//! - [`GThemeValueMap`] -- map of all theme values (colors, fonts, icons).
+//! - [`GTheme`] -- a complete theme with name, LAF type, and values.
+//! - [`LafType`] -- supported look-and-feel enumerations.
+//! - [`ThemeManager`] -- singleton managing the active theme.
+//! - [`ThemeEvent`] -- notification when theme values change.
+
+pub mod color_value;
+pub mod font_value;
+pub mod g_theme;
+pub mod g_theme_value_map;
+pub mod icon_value;
+pub mod laf_type;
+pub mod theme_event;
+pub mod theme_manager;
+pub mod theme_value;
+
+pub use color_value::ColorValue;
+pub use font_value::FontValue;
+pub use g_theme::GTheme;
+pub use g_theme_value_map::GThemeValueMap;
+pub use icon_value::IconValue;
+pub use laf_type::LafType;
+pub use theme_event::ThemeEvent;
+pub use theme_manager::ThemeManager;
+pub use theme_value::ThemeValue;

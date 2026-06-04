@@ -16,6 +16,7 @@
 
 pub mod base;
 pub mod bsim;
+pub mod debug;
 pub mod dex;
 pub mod dwarf;
 pub mod fileformats;
@@ -24,7 +25,7 @@ pub mod objc;
 pub mod pdb;
 pub mod rust;
 pub mod swift;
-// pub mod versiontracking; // Incomplete port -- temporarily disabled
+pub mod versiontracking;
 
 pub use base::analyzer::*;
 pub use dwarf::*;

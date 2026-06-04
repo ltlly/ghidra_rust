@@ -16,17 +16,17 @@
 //! - [`markuptype`] - Markup type definitions
 //! - [`helpers`] - Utility functions
 
-// pub mod association;
-// pub mod correlator;
-// pub mod error;
-// pub mod helpers;
-// pub mod markup;
-// pub mod match_set;
-// pub mod markuptype;
-// pub mod options;
-// pub mod session;
-// pub mod stringable;
-// pub mod types;
+pub mod association;
+pub mod correlator;
+pub mod error;
+pub mod helpers;
+pub mod markup;
+pub mod match_set;
+pub mod markuptype;
+pub mod options;
+pub mod session;
+pub mod stringable;
+pub mod types;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1014,6 +1014,6 @@ mod tests {
         let a = vec!["push".to_string(), "mov".to_string()];
         let b = vec!["push".to_string(), "add".to_string()];
         let sim = jaccard_mnemonic_similarity(&a, &b);
-        assert!((sim - 0.5).abs() < 0.01);
+        assert!((sim - 1.0/3.0).abs() < 0.01);
     }
 }
