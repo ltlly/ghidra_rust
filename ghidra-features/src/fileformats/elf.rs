@@ -1038,6 +1038,54 @@ pub const R_RISCV_COPY: u32 = 4;
 pub const R_RISCV_JUMP_SLOT: u32 = 5;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
+// Relocation Types: RELR (R_RISCV / generic compressed relocations)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+/// SHT_RELR section type for packed relative relocations (DT_RELR).
+pub const SHT_RELR: u32 = 19;
+
+/// DT_RELR dynamic tag for packed relative relocations.
+pub const DT_RELR: u64 = 36;
+/// Size of DT_RELR relocation table.
+pub const DT_RELRSZ: u64 = 35;
+/// Entry size of DT_RELR table.
+pub const DT_RELRENT: u64 = 37;
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// GNU Versioning Constants (for SHT_GNU_VERSYM, SHT_GNU_VERDEF, SHT_GNU_VERNEED)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+/// Current version of the version structure.
+pub const VER_NDX_GLOBAL: u16 = 1;
+/// Symbol is hidden (local scope).
+pub const VER_NDX_LOCAL: u16 = 0;
+/// Version is weak (default if no other version applies).
+pub const VER_NDX_LORESERVE: u16 = 0xFF00;
+
+/// Version definition flags.
+pub const VER_FLG_BASE: u32 = 0x1;
+pub const VER_FLG_WEAK: u32 = 0x2;
+
+/// Version definition / need structure version.
+pub const VER_NEED_CURRENT: u16 = 1;
+pub const VER_DEF_CURRENT: u16 = 1;
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// Compressed Section Constants (ELF32_Chdr / ELF64_Chdr)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+/// ZLIB/DEFLATE compression.
+pub const ELFCOMPRESS_ZLIB: u32 = 1;
+/// OS-specific compression range start.
+pub const ELFCOMPRESS_LOOS: u32 = 0x60000000;
+/// OS-specific compression range end.
+pub const ELFCOMPRESS_HIOS: u32 = 0x6FFFFFFF;
+/// Processor-specific compression range start.
+pub const ELFCOMPRESS_LOPROC: u32 = 0x70000000;
+/// Processor-specific compression range end.
+pub const ELFCOMPRESS_HIPROC: u32 = 0x7FFFFFFF;
+
+// ═══════════════════════════════════════════════════════════════════════════════════
 // Note Types (Elf64_Nhdr n_type)
 // ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -1493,6 +1541,292 @@ impl DynamicEntry {
     /// Returns the dynamic tag name.
     pub fn tag_name(&self) -> &'static str { dynamic_tag_name(self.d_tag) }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// Compressed Section Header (Elf32_Chdr / Elf64_Chdr)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+/// ELF compressed section header (Elf32_Chdr / Elf64_Chdr, unified to 64-bit).
+///
+/// Present at the start of a section whose `SHF_COMPRESSED` flag is set.
+///
+/// Layout:
+/// - ELF32: ch_type(u32), ch_size(u32), ch_addralign(u32) = 12 bytes
+/// - ELF64: ch_type(u32), ch_reserved(u32), ch_size(u64), ch_addralign(u64) = 24 bytes
+#[derive(Debug, Clone)]
+pub struct CompressedSectionHeader {
+    /// Compression algorithm (ELFCOMPRESS_ZLIB, etc.).
+    pub ch_type: u32,
+    /// Size of the uncompressed data in bytes.
+    pub ch_size: u64,
+    /// Alignment of the uncompressed data.
+    pub ch_addralign: u64,
+}
+
+impl CompressedSectionHeader {
+    /// Returns true if this uses ZLIB compression.
+    pub fn is_zlib(&self) -> bool {
+        self.ch_type == ELFCOMPRESS_ZLIB
+    }
+
+    /// Parse from raw bytes.
+    /// `is_64bit` selects ELF32 vs ELF64 layout.
+    pub fn parse(data: &[u8], is_64bit: bool, is_le: bool) -> Option<Self> {
+        if is_64bit {
+            if data.len() < 24 {
+                return None;
+            }
+            let ch_type = if is_le {
+                u32::from_le_bytes(data[0..4].try_into().unwrap())
+            } else {
+                u32::from_be_bytes(data[0..4].try_into().unwrap())
+            };
+            // Skip ch_reserved (4 bytes at offset 4)
+            let ch_size = if is_le {
+                u64::from_le_bytes(data[8..16].try_into().unwrap())
+            } else {
+                u64::from_be_bytes(data[8..16].try_into().unwrap())
+            };
+            let ch_addralign = if is_le {
+                u64::from_le_bytes(data[16..24].try_into().unwrap())
+            } else {
+                u64::from_be_bytes(data[16..24].try_into().unwrap())
+            };
+            Some(CompressedSectionHeader { ch_type, ch_size, ch_addralign })
+        } else {
+            if data.len() < 12 {
+                return None;
+            }
+            let (ch_type, ch_size, ch_addralign);
+            if is_le {
+                ch_type = u32::from_le_bytes(data[0..4].try_into().unwrap());
+                ch_size = u32::from_le_bytes(data[4..8].try_into().unwrap()) as u64;
+                ch_addralign = u32::from_le_bytes(data[8..12].try_into().unwrap()) as u64;
+            } else {
+                ch_type = u32::from_be_bytes(data[0..4].try_into().unwrap());
+                ch_size = u32::from_be_bytes(data[4..8].try_into().unwrap()) as u64;
+                ch_addralign = u32::from_be_bytes(data[8..12].try_into().unwrap()) as u64;
+            }
+            Some(CompressedSectionHeader { ch_type, ch_size, ch_addralign })
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
+// GNU Versioning Structures (SHT_GNU_VERDEF, SHT_GNU_VERNEED, SHT_GNU_VERSYM)
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+/// ELF version definition entry (Elf_Verdef).
+///
+/// Found in SHT_GNU_VERDEF sections. Each entry defines a version
+/// and references one or more `GnuVerdaux` auxiliary entries.
+///
+/// Layout (same for ELF32 and ELF64):
+/// ```text
+/// vd_version: u16   // Version revision (VER_DEF_CURRENT)
+/// vd_flags:   u16   // Version information (VER_FLG_BASE, VER_FLG_WEAK)
+/// vd_ndx:     u16   // Version index (used in versym table)
+/// vd_cnt:     u16   // Number of associated verdaux entries
+/// vd_hash:    u32   // Version name hash value
+/// vd_aux:     u32   // Offset in bytes to verdaux array
+/// vd_next:    u32   // Offset in bytes to next verdef entry
+/// ```
+#[derive(Debug, Clone)]
+pub struct GnuVerdef {
+    pub vd_version: u16,
+    pub vd_flags: u16,
+    pub vd_ndx: u16,
+    pub vd_cnt: u16,
+    pub vd_hash: u32,
+    pub vd_aux: u32,
+    pub vd_next: u32,
+}
+
+impl GnuVerdef {
+    /// Returns true if this is the base (global) version definition.
+    pub fn is_base(&self) -> bool {
+        self.vd_flags & VER_FLG_BASE as u16 != 0
+    }
+
+    /// Returns true if this is a weak version definition.
+    pub fn is_weak(&self) -> bool {
+        self.vd_flags & VER_FLG_WEAK as u16 != 0
+    }
+
+    /// Parse a GnuVerdef from a byte slice.
+    /// Returns (entry, bytes_consumed).
+    pub fn parse_from(data: &[u8], is_le: bool) -> Option<(Self, usize)> {
+        if data.len() < 20 {
+            return None;
+        }
+        let rd16 = |off: usize| -> u16 {
+            if is_le { u16::from_le_bytes(data[off..off+2].try_into().unwrap()) }
+            else { u16::from_be_bytes(data[off..off+2].try_into().unwrap()) }
+        };
+        let rd32 = |off: usize| -> u32 {
+            if is_le { u32::from_le_bytes(data[off..off+4].try_into().unwrap()) }
+            else { u32::from_be_bytes(data[off..off+4].try_into().unwrap()) }
+        };
+        let entry = GnuVerdef {
+            vd_version: rd16(0),
+            vd_flags: rd16(2),
+            vd_ndx: rd16(4),
+            vd_cnt: rd16(6),
+            vd_hash: rd32(8),
+            vd_aux: rd32(12),
+            vd_next: rd32(16),
+        };
+        Some((entry, 20))
+    }
+}
+
+/// ELF version definition auxiliary entry (Elf_Verdaux).
+///
+/// Each `GnuVerdef` has one or more `GnuVerdaux` entries providing
+/// the version name(s) via string table offsets.
+///
+/// Layout:
+/// ```text
+/// vda_name: u32  // Version or dependency name string table offset
+/// vda_next: u32  // Offset in bytes to next verdaux entry (0 = last)
+/// ```
+#[derive(Debug, Clone)]
+pub struct GnuVerdaux {
+    pub vda_name: u32,
+    pub vda_next: u32,
+}
+
+impl GnuVerdaux {
+    /// Parse a GnuVerdaux from a byte slice.
+    pub fn parse(data: &[u8], is_le: bool) -> Option<Self> {
+        if data.len() < 8 {
+            return None;
+        }
+        let rd32 = |off: usize| -> u32 {
+            if is_le { u32::from_le_bytes(data[off..off+4].try_into().unwrap()) }
+            else { u32::from_be_bytes(data[off..off+4].try_into().unwrap()) }
+        };
+        Some(GnuVerdaux {
+            vda_name: rd32(0),
+            vda_next: rd32(4),
+        })
+    }
+
+    /// Get the version name from a string table.
+    pub fn get_name<'a>(&self, strtab: &'a [u8]) -> Option<&'a str> {
+        get_string(strtab, self.vda_name as usize)
+    }
+}
+
+/// ELF version needed entry (Elf_Verneed).
+///
+/// Found in SHT_GNU_VERNEED sections. Each entry represents a
+/// version dependency on a shared library and references one or more
+/// `GnuVernaux` auxiliary entries.
+///
+/// Layout:
+/// ```text
+/// vn_version: u16 // Version of structure (VER_NEED_CURRENT)
+/// vn_cnt:     u16 // Number of associated vernaux entries
+/// vn_file:    u32 // Offset of filename for this dependency
+/// vn_aux:     u32 // Offset in bytes to vernaux array
+/// vn_next:    u32 // Offset in bytes to next verneed entry
+/// ```
+#[derive(Debug, Clone)]
+pub struct GnuVerneed {
+    pub vn_version: u16,
+    pub vn_cnt: u16,
+    pub vn_file: u32,
+    pub vn_aux: u32,
+    pub vn_next: u32,
+}
+
+impl GnuVerneed {
+    /// Parse a GnuVerneed from a byte slice.
+    /// Returns (entry, bytes_consumed).
+    pub fn parse_from(data: &[u8], is_le: bool) -> Option<(Self, usize)> {
+        if data.len() < 16 {
+            return None;
+        }
+        let rd16 = |off: usize| -> u16 {
+            if is_le { u16::from_le_bytes(data[off..off+2].try_into().unwrap()) }
+            else { u16::from_be_bytes(data[off..off+2].try_into().unwrap()) }
+        };
+        let rd32 = |off: usize| -> u32 {
+            if is_le { u32::from_le_bytes(data[off..off+4].try_into().unwrap()) }
+            else { u32::from_be_bytes(data[off..off+4].try_into().unwrap()) }
+        };
+        let entry = GnuVerneed {
+            vn_version: rd16(0),
+            vn_cnt: rd16(2),
+            vn_file: rd32(4),
+            vn_aux: rd32(8),
+            vn_next: rd32(12),
+        };
+        Some((entry, 16))
+    }
+
+    /// Get the dependency file name from a string table.
+    pub fn get_file_name<'a>(&self, strtab: &'a [u8]) -> Option<&'a str> {
+        get_string(strtab, self.vn_file as usize)
+    }
+}
+
+/// ELF version needed auxiliary entry (Elf_Vernaux).
+///
+/// Each `GnuVerneed` has one or more `GnuVernaux` entries providing
+/// the version name(s) the dependency requires.
+///
+/// Layout:
+/// ```text
+/// vna_hash:  u32 // Hash value of dependency name
+/// vna_flags: u16 // Dependency specific information
+/// vna_other: u16 // Version index for this dependency
+/// vna_name:  u32 // Dependency name string offset
+/// vna_next:  u32 // Offset in bytes to next vernaux entry (0 = last)
+/// ```
+#[derive(Debug, Clone)]
+pub struct GnuVernaux {
+    pub vna_hash: u32,
+    pub vna_flags: u16,
+    pub vna_other: u16,
+    pub vna_name: u32,
+    pub vna_next: u32,
+}
+
+impl GnuVernaux {
+    /// Parse a GnuVernaux from a byte slice.
+    pub fn parse(data: &[u8], is_le: bool) -> Option<Self> {
+        if data.len() < 16 {
+            return None;
+        }
+        let rd16 = |off: usize| -> u16 {
+            if is_le { u16::from_le_bytes(data[off..off+2].try_into().unwrap()) }
+            else { u16::from_be_bytes(data[off..off+2].try_into().unwrap()) }
+        };
+        let rd32 = |off: usize| -> u32 {
+            if is_le { u32::from_le_bytes(data[off..off+4].try_into().unwrap()) }
+            else { u32::from_be_bytes(data[off..off+4].try_into().unwrap()) }
+        };
+        Some(GnuVernaux {
+            vna_hash: rd32(0),
+            vna_flags: rd16(4),
+            vna_other: rd16(6),
+            vna_name: rd32(8),
+            vna_next: rd32(12),
+        })
+    }
+
+    /// Get the version name from a string table.
+    pub fn get_name<'a>(&self, strtab: &'a [u8]) -> Option<&'a str> {
+        get_string(strtab, self.vna_name as usize)
+    }
+}
+
+/// Type alias for the version symbol table (SHT_GNU_VERSYM).
+///
+/// Each entry is a u16 index into the version definition/need tables.
+pub type GnuVersym = u16;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // GNU Hash Table (.gnu.hash)
@@ -3206,6 +3540,7 @@ impl crate::BinaryLoader for ElfLoader {
                     is_thunk: false,
                     is_inline: false,
                     has_noreturn: false,
+                    call_fixup: None,
                 };
                 program
                     .function_manager
@@ -3231,6 +3566,7 @@ impl crate::BinaryLoader for ElfLoader {
                             is_thunk: false,
                             is_inline: false,
                             has_noreturn: false,
+                    call_fixup: None,
                         };
                         // Use a synthetic address for external functions
                         let ext_addr = Address::in_space(Address::EXTERNAL_SPACE, sym.st_name as u64);

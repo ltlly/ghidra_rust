@@ -1,0 +1,56 @@
+//! Analysis scheduler, task list, and scheduled task types.
+
+use super::core::*;
+use super::priority::*;
+use super::r#trait::*;
+
+#[derive(Debug, Clone)]
+pub struct AnalysisResults { pub tasks_executed: usize, pub was_cancelled: bool, pub total_time_ms: u64, pub task_times: Vec<(String, u64)> }
+impl AnalysisResults { pub fn has_changes(&self) -> bool { self.tasks_executed > 0 && !self.was_cancelled } }
+
+pub(crate) struct AnalysisSchedulerState { pub analyzer: Box<dyn Analyzer>, pub enabled: bool, pub default_enablement: bool, pub add_set: AddressSet, pub remove_set: AddressSet, pub scheduled: bool }
+impl AnalysisSchedulerState {
+    pub(crate) fn new(analyzer: Box<dyn Analyzer>, program: &Program) -> Self {
+        let default_enablement = analyzer.default_enablement(program);
+        let lang = program.get_language();
+        let enabled = if lang.has_property("DisableAllAnalyzers") { lang.get_property_as_bool(&format!("Analyzers.{}", analyzer.name()), default_enablement) } else { default_enablement };
+        Self { analyzer, enabled, default_enablement, add_set: AddressSet::new(), remove_set: AddressSet::new(), scheduled: false }
+    }
+    pub(crate) fn priority(&self) -> i32 { self.analyzer.priority().priority() }
+    pub(crate) fn notify_added(&mut self, addr: Address) { if !self.enabled { return; } self.add_set.add(addr); }
+    pub(crate) fn notify_added_set(&mut self, set: &AddressSet) { if !self.enabled { return; } self.add_set.add_all(set); }
+    pub(crate) fn notify_removed(&mut self, addr: Address) { if !self.enabled { return; } self.remove_set.add(addr); }
+    pub(crate) fn notify_removed_set(&mut self, set: &AddressSet) { if !self.enabled { return; } self.remove_set.add_all(set); }
+    pub(crate) fn get_added(&mut self) -> AddressSet { std::mem::take(&mut self.add_set) }
+    pub(crate) fn get_removed(&mut self) -> AddressSet { std::mem::take(&mut self.remove_set) }
+    pub(crate) fn has_pending_work(&self) -> bool { !self.add_set.is_empty() || !self.remove_set.is_empty() }
+    pub(crate) fn run(&mut self, program: &mut Program, monitor: &dyn TaskMonitor, log: &mut MessageLog) -> Result<bool, CancelledError> {
+        let add_set = self.get_added(); let remove_set = self.get_removed(); self.scheduled = false;
+        monitor.set_message(self.analyzer.name()); monitor.set_progress(0);
+        let mut result = false;
+        if !add_set.is_empty() { result |= self.analyzer.added(program, &add_set, monitor, log)?; }
+        if !remove_set.is_empty() { result |= self.analyzer.removed(program, &remove_set, monitor, log)?; }
+        Ok(result)
+    }
+    pub(crate) fn run_cancelled(&mut self) { self.get_added(); self.get_removed(); self.scheduled = false; }
+}
+
+pub(crate) struct AnalysisTaskList { pub(crate) analyzer_type: AnalyzerType, pub(crate) schedulers: Vec<AnalysisSchedulerState> }
+impl AnalysisTaskList {
+    pub(crate) fn new(analyzer_type: AnalyzerType) -> Self { Self { analyzer_type, schedulers: Vec::new() } }
+    pub(crate) fn add_analyzer(&mut self, analyzer: Box<dyn Analyzer>, program: &Program) { assert!(!analyzer.name().contains('.'), "Analyzer name may not contain a period: {}", analyzer.name()); self.schedulers.push(AnalysisSchedulerState::new(analyzer, program)); }
+    pub(crate) fn notify_added(&mut self, addr: Address) { for s in &mut self.schedulers { s.notify_added(addr); } }
+    pub(crate) fn notify_added_set(&mut self, set: &AddressSet) { for s in &mut self.schedulers { s.notify_added_set(set); } }
+    pub(crate) fn notify_removed(&mut self, addr: Address) { for s in &mut self.schedulers { s.notify_removed(addr); } }
+    pub(crate) fn notify_analysis_ended(&self, program: &Program) { for s in &self.schedulers { s.analyzer.analysis_ended(program); } }
+    pub(crate) fn clear(&mut self) { for s in &mut self.schedulers { s.run_cancelled(); } }
+    pub(crate) fn get_pending_schedulers(&mut self) -> Vec<(i32, usize)> { let mut p: Vec<(i32, usize)> = self.schedulers.iter().enumerate().filter(|(_, s)| s.has_pending_work() && !s.scheduled).map(|(i, s)| (s.priority(), i)).collect(); p.sort_by_key(|(p, _)| *p); p }
+    pub(crate) fn len(&self) -> usize { self.schedulers.len() }
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut AnalysisSchedulerState> { self.schedulers.iter_mut() }
+}
+
+pub(crate) struct ScheduledTask { pub priority: i32, pub scheduler_index: usize, pub task_list_index: usize, pub seq: u64 }
+impl PartialEq for ScheduledTask { fn eq(&self, other: &Self) -> bool { self.seq == other.seq } }
+impl Eq for ScheduledTask {}
+impl PartialOrd for ScheduledTask { fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) } }
+impl Ord for ScheduledTask { fn cmp(&self, other: &Self) -> std::cmp::Ordering { other.priority.cmp(&self.priority).then_with(|| other.seq.cmp(&self.seq)) } }

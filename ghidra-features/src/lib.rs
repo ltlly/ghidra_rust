@@ -24,6 +24,7 @@ pub mod objc;
 pub mod pdb;
 pub mod rust;
 pub mod swift;
+// pub mod versiontracking; // Incomplete port -- temporarily disabled
 
 pub use base::analyzer::*;
 pub use dwarf::*;

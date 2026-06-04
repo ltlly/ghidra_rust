@@ -614,6 +614,166 @@ pub const COMIMAGE_FLAGS_NATIVE_ENTRYPOINT: u32 = 0x0000_0010;
 pub const COMIMAGE_FLAGS_TRACKDEBUGDATA: u32 = 0x0001_0000;
 pub const COMIMAGE_FLAGS_32BITPREFERRED: u32 = 0x0002_0000;
 
+// --- WinCertificate revision constants ------------------------------------
+
+pub const WIN_CERT_REVISION_1_0: u16 = 0x0100;
+pub const WIN_CERT_REVISION_2_0: u16 = 0x0200;
+
+// --- WinCertificate type constants ----------------------------------------
+
+/// bCertificate contains an X.509 Certificate.
+pub const WIN_CERT_TYPE_X509: u16 = 0x0001;
+/// bCertificate contains a PKCS SignedData structure.
+pub const WIN_CERT_TYPE_PKCS_SIGNED_DATA: u16 = 0x0002;
+/// Reserved.
+pub const WIN_CERT_TYPE_RESERVED_1: u16 = 0x0003;
+/// bCertificate contains PKCS1_MODULE_SIGN fields.
+pub const WIN_CERT_TYPE_PKCS1_SIGN: u16 = 0x0009;
+
+// --- Control Flow Guard (GuardFlags) constants ----------------------------
+
+pub const IMAGE_GUARD_CF_INSTRUMENTED: u32 = 0x0000_0100;
+pub const IMAGE_GUARD_CFW_INSTRUMENTED: u32 = 0x0000_0200;
+pub const IMAGE_GUARD_CF_FUNCTION_TABLE_PRESENT: u32 = 0x0000_0400;
+pub const IMAGE_GUARD_SECURITY_COOKIE_UNUSED: u32 = 0x0000_0800;
+pub const IMAGE_GUARD_PROTECT_DELAYLOAD_IAT: u32 = 0x0000_1000;
+pub const IMAGE_GUARD_DELAYLOAD_IAT_IN_ITS_OWN_SECTION: u32 = 0x0000_2000;
+pub const IMAGE_GUARD_CF_EXPORT_SUPPRESSION_INFO_PRESENT: u32 = 0x0000_4000;
+pub const IMAGE_GUARD_CF_ENABLE_EXPORT_SUPPRESSION: u32 = 0x0000_8000;
+pub const IMAGE_GUARD_CF_LONGJUMP_TABLE_PRESENT: u32 = 0x0001_0000;
+pub const IMAGE_GUARD_RF_INSTRUMENTED: u32 = 0x0002_0000;
+pub const IMAGE_GUARD_RF_ENABLE: u32 = 0x0004_0000;
+pub const IMAGE_GUARD_RF_STRICT: u32 = 0x0008_0000;
+pub const IMAGE_GUARD_CF_FUNCTION_TABLE_SIZE_MASK: u32 = 0xF000_0000;
+pub const IMAGE_GUARD_CF_FUNCTION_TABLE_SIZE_SHIFT: u32 = 28;
+
+// --- Separate debug signature ---------------------------------------------
+
+pub const IMAGE_SEPARATE_DEBUG_SIGNATURE: u16 = 0x4944; // "ID"
+pub const IMAGE_SEPARATE_DEBUG_SIGNATURE_MAC: u16 = 0x4449; // "DI"
+
+// --- COFF symbol storage class constants ----------------------------------
+
+pub const IMAGE_SYM_CLASS_END_OF_FUNCTION: u8 = 0xFF;
+pub const IMAGE_SYM_CLASS_NULL: u8 = 0;
+pub const IMAGE_SYM_CLASS_AUTOMATIC: u8 = 1;
+pub const IMAGE_SYM_CLASS_EXTERNAL: u8 = 2;
+pub const IMAGE_SYM_CLASS_STATIC: u8 = 3;
+pub const IMAGE_SYM_CLASS_REGISTER: u8 = 4;
+pub const IMAGE_SYM_CLASS_EXTERNAL_DEF: u8 = 5;
+pub const IMAGE_SYM_CLASS_LABEL: u8 = 6;
+pub const IMAGE_SYM_CLASS_UNDEFINED_LABEL: u8 = 7;
+pub const IMAGE_SYM_CLASS_MEMBER_OF_STRUCT: u8 = 8;
+pub const IMAGE_SYM_CLASS_ARGUMENT: u8 = 9;
+pub const IMAGE_SYM_CLASS_STRUCT_TAG: u8 = 10;
+pub const IMAGE_SYM_CLASS_MEMBER_OF_UNION: u8 = 11;
+pub const IMAGE_SYM_CLASS_UNION_TAG: u8 = 12;
+pub const IMAGE_SYM_CLASS_TYPE_DEFINITION: u8 = 13;
+pub const IMAGE_SYM_CLASS_UNDEFINED_STATIC: u8 = 14;
+pub const IMAGE_SYM_CLASS_ENUM_TAG: u8 = 15;
+pub const IMAGE_SYM_CLASS_MEMBER_OF_ENUM: u8 = 16;
+pub const IMAGE_SYM_CLASS_REGISTER_PARAM: u8 = 17;
+pub const IMAGE_SYM_CLASS_BIT_FIELD: u8 = 18;
+pub const IMAGE_SYM_CLASS_BLOCK: u8 = 100;
+pub const IMAGE_SYM_CLASS_FUNCTION: u8 = 101;
+pub const IMAGE_SYM_CLASS_END_OF_STRUCT: u8 = 102;
+pub const IMAGE_SYM_CLASS_FILE: u8 = 103;
+pub const IMAGE_SYM_CLASS_SECTION: u8 = 104;
+pub const IMAGE_SYM_CLASS_WEAK_EXTERNAL: u8 = 105;
+pub const IMAGE_SYM_CLASS_CLR_TOKEN: u8 = 107;
+
+// --- COFF symbol type base/derived constants ------------------------------
+
+pub const IMAGE_SYM_TYPE_NULL: u16 = 0;
+pub const IMAGE_SYM_TYPE_VOID: u16 = 1;
+pub const IMAGE_SYM_TYPE_CHAR: u16 = 2;
+pub const IMAGE_SYM_TYPE_SHORT: u16 = 3;
+pub const IMAGE_SYM_TYPE_INT: u16 = 4;
+pub const IMAGE_SYM_TYPE_LONG: u16 = 5;
+pub const IMAGE_SYM_TYPE_FLOAT: u16 = 6;
+pub const IMAGE_SYM_TYPE_DOUBLE: u16 = 7;
+pub const IMAGE_SYM_TYPE_STRUCT: u16 = 8;
+pub const IMAGE_SYM_TYPE_UNION: u16 = 9;
+pub const IMAGE_SYM_TYPE_ENUM: u16 = 10;
+pub const IMAGE_SYM_TYPE_MOE: u16 = 11;
+pub const IMAGE_SYM_TYPE_BYTE: u16 = 12;
+pub const IMAGE_SYM_TYPE_WORD: u16 = 13;
+pub const IMAGE_SYM_TYPE_UINT: u16 = 14;
+pub const IMAGE_SYM_TYPE_DWORD: u16 = 15;
+
+pub const IMAGE_SYM_DTYPE_NULL: u16 = 0;
+pub const IMAGE_SYM_DTYPE_POINTER: u16 = 1;
+pub const IMAGE_SYM_DTYPE_FUNCTION: u16 = 2;
+pub const IMAGE_SYM_DTYPE_ARRAY: u16 = 3;
+
+/// Return a human-readable name for a COFF symbol storage class.
+pub fn coff_sym_class_name(class: u8) -> &'static str {
+    match class {
+        IMAGE_SYM_CLASS_NULL => "NULL",
+        IMAGE_SYM_CLASS_AUTOMATIC => "AUTOMATIC",
+        IMAGE_SYM_CLASS_EXTERNAL => "EXTERNAL",
+        IMAGE_SYM_CLASS_STATIC => "STATIC",
+        IMAGE_SYM_CLASS_REGISTER => "REGISTER",
+        IMAGE_SYM_CLASS_EXTERNAL_DEF => "EXTERNAL_DEF",
+        IMAGE_SYM_CLASS_LABEL => "LABEL",
+        IMAGE_SYM_CLASS_UNDEFINED_LABEL => "UNDEFINED_LABEL",
+        IMAGE_SYM_CLASS_MEMBER_OF_STRUCT => "MEMBER_OF_STRUCT",
+        IMAGE_SYM_CLASS_ARGUMENT => "ARGUMENT",
+        IMAGE_SYM_CLASS_STRUCT_TAG => "STRUCT_TAG",
+        IMAGE_SYM_CLASS_MEMBER_OF_UNION => "MEMBER_OF_UNION",
+        12 => "UNION_TAG",
+        13 => "TYPE_DEFINITION",
+        14 => "UNDEFINED_STATIC",
+        15 => "ENUM_TAG",
+        16 => "MEMBER_OF_ENUM",
+        17 => "REGISTER_PARAM",
+        18 => "BIT_FIELD",
+        100 => "BLOCK",
+        101 => "FUNCTION",
+        102 => "END_OF_STRUCT",
+        103 => "FILE",
+        104 => "SECTION",
+        105 => "WEAK_EXTERNAL",
+        107 => "CLR_TOKEN",
+        0xFF => "END_OF_FUNCTION",
+        _ => "UNKNOWN",
+    }
+}
+
+/// Return a human-readable name for a WinCertificate type.
+pub fn win_cert_type_name(ty: u16) -> &'static str {
+    match ty {
+        WIN_CERT_TYPE_X509 => "X.509",
+        WIN_CERT_TYPE_PKCS_SIGNED_DATA => "PKCS SignedData",
+        WIN_CERT_TYPE_RESERVED_1 => "Reserved",
+        WIN_CERT_TYPE_PKCS1_SIGN => "PKCS1 Module Sign",
+        _ => "Unknown",
+    }
+}
+
+/// Return a human-readable name for a COFF symbol type base.
+pub fn coff_sym_type_base_name(base: u16) -> &'static str {
+    match base {
+        IMAGE_SYM_TYPE_NULL => "NULL",
+        IMAGE_SYM_TYPE_VOID => "VOID",
+        IMAGE_SYM_TYPE_CHAR => "CHAR",
+        IMAGE_SYM_TYPE_SHORT => "SHORT",
+        IMAGE_SYM_TYPE_INT => "INT",
+        IMAGE_SYM_TYPE_LONG => "LONG",
+        IMAGE_SYM_TYPE_FLOAT => "FLOAT",
+        IMAGE_SYM_TYPE_DOUBLE => "DOUBLE",
+        IMAGE_SYM_TYPE_STRUCT => "STRUCT",
+        IMAGE_SYM_TYPE_UNION => "UNION",
+        IMAGE_SYM_TYPE_ENUM => "ENUM",
+        IMAGE_SYM_TYPE_MOE => "MOE",
+        IMAGE_SYM_TYPE_BYTE => "BYTE",
+        IMAGE_SYM_TYPE_WORD => "WORD",
+        IMAGE_SYM_TYPE_UINT => "UINT",
+        IMAGE_SYM_TYPE_DWORD => "DWORD",
+        _ => "UNKNOWN",
+    }
+}
+
 // ===========================================================================
 // Data Structures
 // ===========================================================================
@@ -1094,6 +1254,326 @@ pub struct ClrHeader {
     pub managed_native_header: DataDirectory,
 }
 
+/// IMAGE_SECURITY_DIRECTORY / WIN_CERTIFICATE.
+///
+/// Encapsulates a signature used in verifying executables.
+///
+/// ```text
+/// typedef struct _WIN_CERTIFICATE {
+///     DWORD       dwLength;
+///     WORD        wRevision;
+///     WORD        wCertificateType;   // WIN_CERT_TYPE_xxx
+///     BYTE        bCertificate[ANYSIZE_ARRAY];
+/// } WIN_CERTIFICATE, *LPWIN_CERTIFICATE;
+/// ```
+///
+/// Entries are located via the SECURITY data directory and are
+/// always aligned on an 8-byte boundary in the file.
+#[derive(Debug, Clone)]
+pub struct WinCertificate {
+    /// Length of the certificate in bytes (including the header).
+    pub dw_length: u32,
+    /// Certificate revision (currently only WIN_CERT_REVISION_1_0 or 2_0).
+    pub w_revision: u16,
+    /// Certificate type (WIN_CERT_TYPE_X509, WIN_CERT_TYPE_PKCS_SIGNED_DATA, etc.).
+    pub w_certificate_type: u16,
+    /// Raw certificate bytes (dw_length - 8 bytes).
+    pub b_certificate: Vec<u8>,
+}
+
+impl WinCertificate {
+    /// Returns the number of bytes consumed, aligned to an 8-byte boundary.
+    pub fn aligned_size(&self) -> usize {
+        ((self.dw_length as usize) + 7) & !7
+    }
+
+    /// Returns a human-readable string for the certificate type.
+    pub fn type_name(&self) -> &'static str {
+        win_cert_type_name(self.w_certificate_type)
+    }
+
+    /// Parse a WinCertificate from raw bytes.
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.len() < 8 {
+            return None;
+        }
+        let dw_length = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        let w_revision = u16::from_le_bytes(data[4..6].try_into().unwrap());
+        let w_certificate_type = u16::from_le_bytes(data[6..8].try_into().unwrap());
+
+        if dw_length < 8 || (dw_length as usize) > data.len() {
+            return None;
+        }
+
+        let cert_byte_count = dw_length as usize - 8;
+        let b_certificate = data[8..8 + cert_byte_count].to_vec();
+
+        Some(WinCertificate {
+            dw_length,
+            w_revision,
+            w_certificate_type,
+            b_certificate,
+        })
+    }
+}
+
+/// IMAGE_SEPARATE_DEBUG_HEADER.
+///
+/// Header for separate debug files (.dbg / .pdb sidecar files).
+///
+/// ```text
+/// typedef struct _IMAGE_SEPARATE_DEBUG_HEADER {
+///     WORD        Signature;
+///     WORD        Flags;
+///     WORD        Machine;
+///     WORD        Characteristics;
+///     DWORD       TimeDateStamp;
+///     DWORD       CheckSum;
+///     DWORD       ImageBase;
+///     DWORD       SizeOfImage;
+///     DWORD       NumberOfSections;
+///     DWORD       ExportedNamesSize;
+///     DWORD       DebugDirectorySize;
+///     DWORD       SectionAlignment;
+///     DWORD       Reserved[2];
+/// } IMAGE_SEPARATE_DEBUG_HEADER;
+/// ```
+#[derive(Debug, Clone)]
+pub struct SeparateDebugHeader {
+    /// Must be IMAGE_SEPARATE_DEBUG_SIGNATURE (0x4944).
+    pub signature: u16,
+    pub flags: u16,
+    /// Machine type (same values as FileHeader.machine).
+    pub machine: u16,
+    pub characteristics: u16,
+    pub time_date_stamp: u32,
+    pub check_sum: u32,
+    pub image_base: u32,
+    pub size_of_image: u32,
+    pub number_of_sections: u32,
+    pub exported_names_size: u32,
+    pub debug_directory_size: u32,
+    pub section_alignment: u32,
+    pub reserved: [u32; 2],
+}
+
+impl SeparateDebugHeader {
+    /// Returns true if the signature matches IMAGE_SEPARATE_DEBUG_SIGNATURE.
+    pub fn is_valid(&self) -> bool {
+        self.signature == IMAGE_SEPARATE_DEBUG_SIGNATURE
+    }
+
+    /// Returns the machine name.
+    pub fn machine_name(&self) -> &'static str {
+        machine_name(self.machine)
+    }
+
+    /// Parse from raw bytes (always little-endian).
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.len() < 48 {
+            return None;
+        }
+        let signature = u16::from_le_bytes(data[0..2].try_into().unwrap());
+        if signature != IMAGE_SEPARATE_DEBUG_SIGNATURE {
+            return None;
+        }
+        Some(SeparateDebugHeader {
+            signature,
+            flags: u16::from_le_bytes(data[2..4].try_into().unwrap()),
+            machine: u16::from_le_bytes(data[4..6].try_into().unwrap()),
+            characteristics: u16::from_le_bytes(data[6..8].try_into().unwrap()),
+            time_date_stamp: u32::from_le_bytes(data[8..12].try_into().unwrap()),
+            check_sum: u32::from_le_bytes(data[12..16].try_into().unwrap()),
+            image_base: u32::from_le_bytes(data[16..20].try_into().unwrap()),
+            size_of_image: u32::from_le_bytes(data[20..24].try_into().unwrap()),
+            number_of_sections: u32::from_le_bytes(data[24..28].try_into().unwrap()),
+            exported_names_size: u32::from_le_bytes(data[28..32].try_into().unwrap()),
+            debug_directory_size: u32::from_le_bytes(data[32..36].try_into().unwrap()),
+            section_alignment: u32::from_le_bytes(data[36..40].try_into().unwrap()),
+            reserved: [
+                u32::from_le_bytes(data[40..44].try_into().unwrap()),
+                u32::from_le_bytes(data[44..48].try_into().unwrap()),
+            ],
+        })
+    }
+}
+
+/// IMAGE_SYMBOL -- COFF Symbol Table Entry (18 bytes).
+///
+/// This is the standard COFF symbol entry found via
+/// FileHeader.pointer_to_symbol_table.
+///
+/// ```text
+/// typedef struct _IMAGE_SYMBOL {
+///     union {
+///         BYTE    ShortName[8];
+///         struct {
+///             DWORD   Short;      // if 0, use LongName
+///             DWORD   Long;       // offset into string table
+///         } Name;
+///         DWORD   LongName[2];    // [0]=0, [1]=offset into string table
+///     } N;
+///     DWORD   Value;
+///     SHORT   SectionNumber;
+///     WORD    Type;
+///     BYTE    StorageClass;
+///     BYTE    NumberOfAuxSymbols;
+/// } IMAGE_SYMBOL;
+/// ```
+#[derive(Debug, Clone)]
+pub struct CoffSymbol {
+    /// 8-byte short name, or first 4 bytes of the union.
+    pub name_bytes: [u8; 8],
+    /// Value field (meaning depends on storage class).
+    pub value: u32,
+    /// Section number (1-based; 0 = undefined, -1 = absolute, -2 = debug).
+    pub section_number: i16,
+    /// Symbol type: low byte is base type, high byte is derived type.
+    pub sym_type: u16,
+    /// Storage class (IMAGE_SYM_CLASS_*).
+    pub storage_class: u8,
+    /// Number of auxiliary symbol entries following this one.
+    pub number_of_aux_symbols: u8,
+}
+
+impl CoffSymbol {
+    /// Returns the symbol name.
+    ///
+    /// If the first 4 bytes are zero, the name is in the string table at the
+    /// offset given by bytes 4..8. Otherwise, the name is the null-terminated
+    /// 8-byte field.
+    pub fn get_name(&self, string_table: &[u8]) -> Option<String> {
+        if self.name_bytes[0..4] == [0, 0, 0, 0] {
+            // Long name: offset is in bytes 4..8
+            let offset = u32::from_le_bytes(self.name_bytes[4..8].try_into().unwrap()) as usize;
+            if offset >= string_table.len() {
+                return None;
+            }
+            let end = string_table[offset..]
+                .iter()
+                .position(|&b| b == 0)
+                .map(|p| offset + p)
+                .unwrap_or(string_table.len());
+            std::str::from_utf8(&string_table[offset..end]).ok().map(|s| s.to_string())
+        } else {
+            // Short name: up to 8 bytes, null-terminated
+            let end = self.name_bytes.iter().position(|&b| b == 0).unwrap_or(8);
+            std::str::from_utf8(&self.name_bytes[..end]).ok().map(|s| s.to_string())
+        }
+    }
+
+    /// Returns the derived type (high byte of sym_type).
+    pub fn derived_type(&self) -> u16 {
+        (self.sym_type >> 8) & 0xF
+    }
+
+    /// Returns the base type (low byte of sym_type).
+    pub fn base_type(&self) -> u16 {
+        self.sym_type & 0xFF
+    }
+
+    /// Returns the storage class name.
+    pub fn class_name(&self) -> &'static str {
+        coff_sym_class_name(self.storage_class)
+    }
+
+    /// Returns true if the symbol is undefined (section_number == 0).
+    pub fn is_undefined(&self) -> bool {
+        self.section_number == 0
+    }
+
+    /// Returns true if the symbol is an absolute value.
+    pub fn is_absolute(&self) -> bool {
+        self.section_number == -1
+    }
+
+    /// Returns true if the symbol is a debug symbol.
+    pub fn is_debug(&self) -> bool {
+        self.section_number == -2
+    }
+
+    /// Parse a single IMAGE_SYMBOL from raw bytes (18 bytes).
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.len() < 18 {
+            return None;
+        }
+        let mut name_bytes = [0u8; 8];
+        name_bytes.copy_from_slice(&data[0..8]);
+        Some(CoffSymbol {
+            name_bytes,
+            value: u32::from_le_bytes(data[8..12].try_into().unwrap()),
+            section_number: i16::from_le_bytes(data[12..14].try_into().unwrap()),
+            sym_type: u16::from_le_bytes(data[14..16].try_into().unwrap()),
+            storage_class: data[16],
+            number_of_aux_symbols: data[17],
+        })
+    }
+
+    /// Parse all COFF symbols from a symbol table.
+    ///
+    /// `data` is the full file, `offset` is the file offset of the symbol table,
+    /// `count` is the number of symbol entries from FileHeader.
+    pub fn parse_all(file_data: &[u8], offset: usize, count: u32) -> Vec<Self> {
+        let mut symbols = Vec::new();
+        let mut pos = offset;
+        let count = count.min(0x10000); // Sanity cap
+        for _ in 0..count {
+            if pos + 18 > file_data.len() {
+                break;
+            }
+            if let Some(sym) = CoffSymbol::parse(&file_data[pos..pos + 18]) {
+                let skip = 1 + sym.number_of_aux_symbols as usize;
+                symbols.push(sym);
+                pos += skip * 18;
+            } else {
+                break;
+            }
+        }
+        symbols
+    }
+}
+
+/// GuardFlags -- helper to extract CFG/RFG bits from LoadConfigDirectory.guard_flags.
+#[derive(Debug, Clone, Copy)]
+pub struct GuardFlags(pub u32);
+
+impl GuardFlags {
+    /// Returns the number of extra bytes per CFG function table entry.
+    pub fn cf_function_table_entry_size(&self) -> u32 {
+        (self.0 & IMAGE_GUARD_CF_FUNCTION_TABLE_SIZE_MASK) >> IMAGE_GUARD_CF_FUNCTION_TABLE_SIZE_SHIFT
+    }
+
+    /// Returns true if the binary is CFG-instrumented.
+    pub fn is_cf_instrumented(&self) -> bool {
+        self.0 & IMAGE_GUARD_CF_INSTRUMENTED != 0
+    }
+
+    /// Returns true if the CFG function table is present.
+    pub fn cf_function_table_present(&self) -> bool {
+        self.0 & IMAGE_GUARD_CF_FUNCTION_TABLE_PRESENT != 0
+    }
+
+    /// Returns true if RFG-instrumented.
+    pub fn is_rf_instrumented(&self) -> bool {
+        self.0 & IMAGE_GUARD_RF_INSTRUMENTED != 0
+    }
+
+    /// Returns true if RFG is enabled.
+    pub fn is_rf_enabled(&self) -> bool {
+        self.0 & IMAGE_GUARD_RF_ENABLE != 0
+    }
+
+    /// Returns true if RFG is in strict mode.
+    pub fn is_rf_strict(&self) -> bool {
+        self.0 & IMAGE_GUARD_RF_STRICT != 0
+    }
+
+    /// Returns true if long jump table is present.
+    pub fn cf_longjump_table_present(&self) -> bool {
+        self.0 & IMAGE_GUARD_CF_LONGJUMP_TABLE_PRESENT != 0
+    }
+}
+
 /// The fully parsed PE file.
 #[derive(Debug, Clone)]
 pub struct PeFile {
@@ -1117,6 +1597,10 @@ pub struct PeFile {
     pub load_config: Option<LoadConfigDirectory>,
     pub debug_info: Vec<DebugInfo>,
     pub clr_header: Option<ClrHeader>,
+    /// Authenticode / security certificates from the SECURITY data directory.
+    pub security_certificates: Vec<WinCertificate>,
+    /// Parsed COFF symbol table entries (from FileHeader.pointer_to_symbol_table).
+    pub coff_symbols: Vec<CoffSymbol>,
 }
 
 impl PeFile {
@@ -1176,6 +1660,43 @@ impl PeFile {
 
     pub fn entry_point(&self) -> u32 {
         self.optional_header.entry_point
+    }
+
+    /// Returns a GuardFlags wrapper for the load config guard_flags field.
+    pub fn guard_flags(&self) -> Option<GuardFlags> {
+        self.load_config.as_ref().map(|lc| GuardFlags(lc.guard_flags))
+    }
+
+    /// Returns true if this PE has Control Flow Guard enabled.
+    pub fn has_cfg(&self) -> bool {
+        self.guard_flags().map_or(false, |gf| gf.is_cf_instrumented())
+    }
+
+    /// Returns true if this PE has Return Flow Guard enabled.
+    pub fn has_rfg(&self) -> bool {
+        self.guard_flags().map_or(false, |gf| gf.is_rf_enabled())
+    }
+
+    /// Returns true if this PE has security certificates (Authenticode).
+    pub fn has_certificates(&self) -> bool {
+        !self.security_certificates.is_empty()
+    }
+
+    /// Returns the machine name from the file header.
+    pub fn machine_name(&self) -> &'static str {
+        machine_name(self.file_header.machine)
+    }
+
+    /// Returns true if the PE has a COFF symbol table.
+    pub fn has_coff_symbols(&self) -> bool {
+        !self.coff_symbols.is_empty()
+    }
+
+    /// Find a COFF symbol by name using the string table.
+    pub fn coff_symbol_by_name(&self, string_table: &[u8], name: &str) -> Option<&CoffSymbol> {
+        self.coff_symbols.iter().find(|sym| {
+            sym.get_name(string_table).map_or(false, |n| n == name)
+        })
     }
 }
 
@@ -1245,6 +1766,8 @@ fn parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
         load_config: None,
         debug_info: Vec::new(),
         clr_header: None,
+        security_certificates: Vec::new(),
+        coff_symbols: Vec::new(),
     };
 
     // Read section raw data
@@ -1262,6 +1785,8 @@ fn parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
     pe.load_config = parse_load_config_directory(input, &pe, is_64bit);
     pe.debug_info = parse_debug_directory(input, &pe);
     pe.clr_header = parse_clr_header(input, &pe);
+    pe.security_certificates = parse_security_certificates(input, &pe);
+    pe.coff_symbols = parse_coff_symbols(input, &pe);
 
     Ok((input, pe))
 }
@@ -2675,6 +3200,53 @@ fn parse_clr_header(data: &[u8], pe: &PeFile) -> Option<ClrHeader> {
 }
 
 // ===========================================================================
+// Security Certificates (WIN_CERTIFICATE)
+// ===========================================================================
+
+fn parse_security_certificates(data: &[u8], pe: &PeFile) -> Vec<WinCertificate> {
+    let dd = match pe.data_directories.get(IMAGE_DIRECTORY_ENTRY_SECURITY) {
+        Some(d) if d.is_present() => d,
+        _ => return Vec::new(),
+    };
+
+    // SECURITY directory virtual_address is a file offset, not an RVA.
+    let mut result = Vec::new();
+    let mut off = dd.virtual_address as usize;
+    let end = off + dd.size as usize;
+
+    while off + 8 <= end && off + 8 <= data.len() {
+        let dw_length = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
+        if dw_length < 8 {
+            break;
+        }
+        let aligned = ((dw_length as usize) + 7) & !7;
+        let cert_end = off + dw_length as usize;
+        if cert_end > data.len() || off + aligned > end {
+            break;
+        }
+        if let Some(cert) = WinCertificate::parse(&data[off..cert_end]) {
+            result.push(cert);
+        }
+        off += aligned;
+    }
+
+    result
+}
+
+// ===========================================================================
+// COFF Symbol Table
+// ===========================================================================
+
+fn parse_coff_symbols(data: &[u8], pe: &PeFile) -> Vec<CoffSymbol> {
+    let ptr = pe.file_header.pointer_to_symbol_table;
+    let count = pe.file_header.number_of_symbols;
+    if ptr == 0 || count == 0 {
+        return Vec::new();
+    }
+    CoffSymbol::parse_all(data, ptr as usize, count)
+}
+
+// ===========================================================================
 // Little-endian read helpers (for byte-slice, non-nom operations)
 // ===========================================================================
 
@@ -2837,6 +3409,7 @@ impl crate::BinaryLoader for PeLoader {
                 is_thunk: false,
                 is_inline: false,
                 has_noreturn: false,
+                    call_fixup: None,
             };
             program
                 .function_manager
@@ -2864,6 +3437,7 @@ impl crate::BinaryLoader for PeLoader {
                     is_thunk: false,
                     is_inline: false,
                     has_noreturn: false,
+                    call_fixup: None,
                 };
                 program
                     .function_manager
@@ -2894,6 +3468,7 @@ impl crate::BinaryLoader for PeLoader {
                         is_thunk: false,
                         is_inline: false,
                         has_noreturn: false,
+                    call_fixup: None,
                     };
                     let ext_addr = Address::in_space(
                         Address::EXTERNAL_SPACE,
