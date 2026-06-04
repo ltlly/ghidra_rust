@@ -12,11 +12,13 @@
 //! model and logic, deferring any actual rendering to the `ghidra-gui`
 //! crate.  The types here are therefore backend-agnostic.
 
+pub mod actions;
 pub mod category;
 pub mod provider;
 pub mod service;
 pub mod plugin;
 
+pub use actions::*;
 pub use category::*;
 pub use provider::*;
 pub use service::*;

@@ -15,6 +15,7 @@
 //! Swing-specific UI code (actions, menus) is simplified to the
 //! logical dispatch only.
 
+pub mod actions;
 pub mod program_locator;
 pub mod program_cache;
 pub mod multi_program_manager;
@@ -22,6 +23,7 @@ pub mod transaction_monitor;
 pub mod save_manager;
 pub mod plugin;
 
+pub use actions::{ProgramAction, ProgramActionKind, ProgramActionContext};
 pub use program_locator::ProgramLocator;
 pub use program_cache::ProgramCache;
 pub use multi_program_manager::MultiProgramManager;

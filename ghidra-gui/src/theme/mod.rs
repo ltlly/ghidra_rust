@@ -20,6 +20,7 @@ pub mod g_theme;
 pub mod g_theme_value_map;
 pub mod icon_modifier;
 pub mod icon_value;
+pub mod laf_managers;
 pub mod laf_type;
 pub mod property_value;
 pub mod theme_defaults;

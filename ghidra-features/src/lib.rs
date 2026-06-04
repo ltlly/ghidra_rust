@@ -66,7 +66,9 @@ pub mod sample_table_plugin;
 pub mod searchtext;
 pub mod structure_editor;
 pub mod swift;
+pub mod symbolic_z3;
 pub mod system_emulation;
+pub mod symtable;
 pub mod table;
 pub mod versiontracking;
 

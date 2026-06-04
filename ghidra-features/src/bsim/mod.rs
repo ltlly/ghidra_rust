@@ -36,6 +36,7 @@
 //! ```
 
 pub mod client;
+pub mod client_factory;
 pub mod description;
 pub mod facade;
 pub mod file;
@@ -80,6 +81,13 @@ pub use client::{
     FunctionDatabase, FunctionPair, IdHistogram, IdSqlResolution,
     RowKeySql, ScoreCaching, SqlEffects, TableScoreCaching,
     TemporaryScoreCaching,
+};
+
+// Re-export client factory types.
+pub use client_factory::{
+    BSimClientFactory, BSimControlLaunchable, BSimJdbcDataSource, BSimPostgresConnectionManager,
+    BSimProtocol, BSimUrl, BsimPluginPackage, DatabaseType, SqlFunctionDatabase,
+    DEFAULT_ELASTIC_PORT, DEFAULT_POSTGRES_PORT, H2_FILE_EXTENSION,
 };
 
 // Re-export key facade types.

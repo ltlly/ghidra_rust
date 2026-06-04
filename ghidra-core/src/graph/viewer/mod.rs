@@ -3,6 +3,19 @@
 //! Provides non-GUI types for graph visualization: layout, picking, options,
 //! satellite view parameters, and shape routing.
 
+pub mod layout_provider;
+pub mod visual_types;
+
+pub use layout_provider::{
+    Column, GridBounds, GridLocationMap, GridPoint, LayoutPositions, LayoutProvider, RelayoutOption,
+    Row, ViewRestoreOption,
+};
+pub use visual_types::{
+    EdgeRendererConfig, EdgeRenderingStyle, GraphDirection, LayoutChangeType, LayoutListener,
+    Point2d, Rect2d, RgbaColor, VertexRendererConfig, VisualEdge, VisualEdgeRenderer,
+    VisualGraphLayout, VisualVertex, VisualVertexRenderer,
+};
+
 /// How vertices are picked (selected) in the graph viewer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PickingMode {

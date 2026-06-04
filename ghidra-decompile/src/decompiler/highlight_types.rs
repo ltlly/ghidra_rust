@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use ghidra_core::addr::Address;
 
-use super::clang_node::{ClangNodeId, ClangNodeArena, SyntaxType};
+use super::clang_node::{ClangNodeId, ClangNodeArena, ClangNodeKind, ClangTokenGroupData, SyntaxType};
 
 // ============================================================================
 // HighlightToken
@@ -969,7 +969,7 @@ mod tests {
         assert!(!dd.has_results());
         assert_eq!(dd.function_entry, 0x1000);
 
-        let arena = ClangNodeArena::new();
+        let mut arena = ClangNodeArena::new();
         let root = arena.alloc(ClangNodeKind::TokenGroup(ClangTokenGroupData::default()));
         dd.set_results(arena, root, Some("main".to_string()));
         assert!(dd.has_results());

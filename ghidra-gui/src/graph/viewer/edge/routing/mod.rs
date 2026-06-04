@@ -204,29 +204,26 @@ mod tests {
 
     #[test]
     fn articulated_router_cleans_points() {
+        // Default threshold is 15 degrees.
+        // angle_between measures the angle between the two vectors at the midpoint.
+        // For collinear points (same direction), the angle is 0 degrees (vectors point same way).
+        // A right-angle bend gives 90 degrees.
         let router = ArticulatedEdgeRouter::new();
         let src = Point2D::new(0.0, 0.0);
         let dst = Point2D::new(100.0, 0.0);
-        // Collinear point: angle is 180 degrees which passes the 15-degree threshold
+        // Collinear: angle = 0, which is < 15, so point is removed
         let cleaned = router.clean_articulations(&src, &dst, &[Point2D::new(50.0, 0.0)]);
-        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned.len(), 0);
     }
 
     #[test]
-    fn articulated_router_removes_bad_angles() {
-        let router = ArticulatedEdgeRouter {
-            min_angle_degrees: 170.0,  // Very high threshold
-            max_articulations: 10,
-        };
+    fn articulated_router_keeps_right_angle_bends() {
+        let router = ArticulatedEdgeRouter::new();
         let src = Point2D::new(0.0, 0.0);
-        let dst = Point2D::new(100.0, 0.0);
-        // Collinear point has angle 180 >= 170, so it stays
-        let cleaned = router.clean_articulations(&src, &dst, &[Point2D::new(50.0, 0.0)]);
+        let dst = Point2D::new(100.0, 100.0);
+        // Right-angle bend: vectors point in different directions, angle = 90 >= 15
+        let cleaned = router.clean_articulations(&src, &dst, &[Point2D::new(100.0, 0.0)]);
         assert_eq!(cleaned.len(), 1);
-        // But a point with a sharp turn would be removed with high threshold
-        let cleaned2 = router.clean_articulations(&src, &dst, &[Point2D::new(50.0, 0.01)]);
-        // Very small deviation from straight line - angle is ~179.9 degrees, still >= 170
-        assert_eq!(cleaned2.len(), 1);
     }
 
     #[test]
@@ -239,13 +236,24 @@ mod tests {
     }
 
     #[test]
-    fn angle_between_straight_line() {
+    fn angle_between_collinear() {
         let a = Point2D::new(0.0, 0.0);
         let b = Point2D::new(50.0, 0.0);
         let c = Point2D::new(100.0, 0.0);
+        // For collinear points in the same direction, the angle between the
+        // two vectors (B-A) and (C-B) is 0 degrees (they point the same way)
         let angle = angle_between(&a, &b, &c);
-        // Collinear points form a 180-degree angle
-        assert!(angle > 170.0, "Expected angle > 170, got {}", angle);
+        assert!(angle < 1.0, "Expected angle near 0, got {}", angle);
+    }
+
+    #[test]
+    fn angle_between_opposite_direction() {
+        let a = Point2D::new(0.0, 0.0);
+        let b = Point2D::new(50.0, 0.0);
+        let c = Point2D::new(0.0, 0.0);  // back to start
+        // Vectors are in opposite directions, angle = 180
+        let angle = angle_between(&a, &b, &c);
+        assert!((angle - 180.0).abs() < 0.01);
     }
 
     #[test]

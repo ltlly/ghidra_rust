@@ -3,6 +3,7 @@
 //! Ports `ghidra.features.bsim.gui` and sub-packages.
 
 pub mod filters;
+pub mod filter_types;
 
 /// BSim search settings.
 #[derive(Debug, Clone)]

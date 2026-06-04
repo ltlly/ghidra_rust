@@ -35,10 +35,15 @@
 
 pub mod actions;
 pub mod archive;
+pub mod dialog;
 pub mod sync;
 pub mod handler;
+pub mod plugin;
+pub mod property_manager;
+pub mod provider;
 pub mod editor;
 pub mod tree;
+pub mod util;
 
 // Re-export the most-used public types at the datamgr level.
 pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArchive,
@@ -46,4 +51,9 @@ pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArch
 pub use sync::{DataTypeSyncState, DataTypeSyncInfo, DataTypeSynchronizer};
 pub use handler::DataTypeManagerHandler;
 pub use editor::{DataTypeEditorManager, EditorProvider, EditorState, EditorListener};
+pub use plugin::DataTypeManagerPlugin;
+pub use property_manager::DataTypePropertyManager;
+pub use provider::{DataTypesProvider, DataTypesConfig};
+pub use dialog::{DataTypeSyncDialog, DataTypeSyncTableModel, SyncDialogLayout};
+pub use util::{RecentArchiveTracker, DataTypeSelection, AllowedDataTypes};
 pub use tree::{TreeNodeKind, ArchiveRootNode, ArchiveNode, CategoryNode, DataTypeNode};
