@@ -13,17 +13,30 @@
 //! The "operand" sub-module lives at `crate::base::operand` and covers
 //! `OperandType` flags and `OperandFieldLocation`.
 
+pub mod actions;
 pub mod commands;
 pub mod format;
 pub mod manager;
+pub mod plugin;
+pub mod table;
 
 // Re-export key types at module level for convenience.
+pub use actions::{
+    ApplyEnumAction, ConvertAction, ConvertActionKind, EquateActionSet, ListingActionContext,
+    RemoveEquateAction, RenameEquateAction, RenameEquatesAction, SetEquateAction,
+};
 pub use commands::{
     ConvertCommand, CreateEquateCmd, CreateEnumEquateCommand, RemoveEquateCmd, RenameEquateCmd,
     RenameEquatesCmd,
 };
 pub use format::{format_scalar, FormatChoice};
-pub use manager::EquateManager;
+pub use manager::{EquateManager, EquateTable};
+pub use plugin::{EquateInfo, EquatePlugin, EquateTablePluginState, SelectionType};
+pub use table::{
+    EquateColumnDef, EquateNameColumn, EquateRefCountColumn, EquateTableModel, EquateValueColumn,
+    IsEnumBasedColumn, ReferenceAddressColumn, ReferenceColumnDef, ReferenceOpIndexColumn,
+    EquateReferenceTableModel, SortOrder,
+};
 
 use ghidra_core::Address;
 use serde::{Deserialize, Serialize};

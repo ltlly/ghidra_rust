@@ -24,6 +24,7 @@
 pub mod base;
 pub mod bsim;
 pub mod codebrowser;
+pub mod external;
 pub mod bsim_elastic;
 pub mod byte_patterns;
 pub mod datamgr;
@@ -46,6 +47,8 @@ pub mod microsoft_code_analyzer;
 pub mod objc;
 pub mod pdb;
 pub mod programdiff;
+pub mod programtree;
+pub mod progmgr;
 pub mod pyghidra;
 pub mod sarif;
 pub mod recognizers;
