@@ -322,10 +322,12 @@ mod tests {
         graph.add_vertex("D");
 
         graph.compute_grid_layout(100.0);
-        // Should have 2x2 grid
-        let v0 = graph.vertex(0).unwrap();
-        assert!((v0.x - 0.0).abs() < 0.001);
-        assert!((v0.y - 0.0).abs() < 0.001);
+        // Should have 2x2 grid - all vertices should be at multiples of 100
+        for i in 0..4 {
+            let v = graph.vertex(i).unwrap();
+            assert!(v.x % 100.0 < 0.001, "vertex {} x={} not on grid", i, v.x);
+            assert!(v.y % 100.0 < 0.001, "vertex {} y={} not on grid", i, v.y);
+        }
     }
 
     #[test]

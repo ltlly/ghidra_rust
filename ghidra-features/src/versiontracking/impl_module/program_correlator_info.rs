@@ -2,11 +2,8 @@
 
 use std::fmt;
 
-use ghidra_core::addr::Address;
-use ghidra_core::program::Program;
-
 use crate::versiontracking::options::VtOptions;
-use crate::versiontracking::types::{VtProgramCorrelatorAddressRestrictionPreference, VtScore};
+use crate::versiontracking::types::VtProgramCorrelatorAddressRestrictionPreference;
 
 /// Implementation of program correlator metadata.
 ///

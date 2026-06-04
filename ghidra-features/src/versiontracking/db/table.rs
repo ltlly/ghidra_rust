@@ -179,11 +179,10 @@ impl TableDescriptor {
     /// Generate a CREATE TABLE SQL statement.
     pub fn create_table_sql(&self) -> String {
         let mut sql = format!("CREATE TABLE IF NOT EXISTS {} (", self.table_name);
-        let mut first = true;
 
         // Primary key column (always ID as INTEGER)
         sql.push_str("id INTEGER PRIMARY KEY");
-        first = false;
+        let mut first = false;
 
         for col in &self.columns {
             if !first {

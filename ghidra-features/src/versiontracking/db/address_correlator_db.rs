@@ -51,12 +51,12 @@ impl AddressCorrelatorDB {
         Self {
             key,
             correlator_class_name: correlator_class_name.into(),
-            source_entry: correlation.source_entry.offset(),
-            destination_entry: correlation.destination_entry.offset(),
+            source_entry: correlation.source_entry.get_offset(),
+            destination_entry: correlation.destination_entry.get_offset(),
             mappings: correlation
                 .mappings
                 .iter()
-                .map(|m| (m.source.offset(), m.destination.offset()))
+                .map(|m| (m.source.get_offset(), m.destination.get_offset()))
                 .collect(),
             confidence: correlation.confidence,
         }
@@ -169,7 +169,7 @@ mod tests {
         let db = AddressCorrelatorDB::from_correlation(1, "Test", &corr);
         let restored = db.to_correlation();
         assert_eq!(restored.mappings.len(), 2);
-        assert_eq!(restored.source_entry.offset(), 0x1000);
+        assert_eq!(restored.source_entry.get_offset(), 0x1000);
         assert!((restored.confidence - 0.85).abs() < f64::EPSILON);
     }
 

@@ -3,7 +3,7 @@
 use ghidra_core::addr::Address;
 
 use crate::versiontracking::association::VtAssociation;
-use crate::versiontracking::types::{VtAssociationMarkupStatus, VtAssociationStatus, VtAssociationType};
+use crate::versiontracking::types::{VtAssociationStatus, VtAssociationType};
 
 /// Database-backed association record.
 ///
@@ -45,8 +45,8 @@ impl VtAssociationDB {
                 VtAssociationType::Function => 0,
                 VtAssociationType::Data => 1,
             },
-            source_address: assoc.source_address().offset(),
-            destination_address: assoc.destination_address().offset(),
+            source_address: assoc.source_address().get_offset(),
+            destination_address: assoc.destination_address().get_offset(),
             status: match assoc.status() {
                 VtAssociationStatus::Available => 0,
                 VtAssociationStatus::Accepted => 1,

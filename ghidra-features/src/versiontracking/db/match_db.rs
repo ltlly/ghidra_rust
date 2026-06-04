@@ -61,8 +61,8 @@ impl VtMatchDB {
             key,
             association_id: vt_match.association_id as i64,
             match_set_id: vt_match.match_set_id as i64,
-            source_address: vt_match.source_address.offset(),
-            destination_address: vt_match.destination_address.offset(),
+            source_address: vt_match.source_address.get_offset(),
+            destination_address: vt_match.destination_address.get_offset(),
             association_type: match vt_match.association_type {
                 VtAssociationType::Function => 0,
                 VtAssociationType::Data => 1,

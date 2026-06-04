@@ -131,8 +131,8 @@ impl fmt::Display for VTRelatedMatchImpl {
             "RelatedMatch({}, {}, src=0x{:x}, dst=0x{:x})",
             self.correlation_type,
             self.match_data.association_type,
-            self.match_data.source_address.offset(),
-            self.match_data.destination_address.offset()
+            self.match_data.source_address.get_offset(),
+            self.match_data.destination_address.get_offset()
         )
     }
 }
@@ -169,8 +169,8 @@ mod tests {
         let rm = make_related_match();
         assert_eq!(rm.correlation_type(), VTRelatedMatchCorrelationType::SameSource);
         assert_eq!(rm.description(), "shares source address");
-        assert_eq!(rm.source_address().offset(), 0x1000);
-        assert_eq!(rm.destination_address().offset(), 0x2000);
+        assert_eq!(rm.source_address().get_offset(), 0x1000);
+        assert_eq!(rm.destination_address().get_offset(), 0x2000);
     }
 
     #[test]

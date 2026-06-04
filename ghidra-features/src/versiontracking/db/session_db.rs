@@ -285,13 +285,15 @@ impl VtSessionDB {
 
     /// Delete a match tag.
     pub fn delete_match_tag(&mut self, tag: &VtMatchTag) -> VtResult<()> {
+        // Remove from DB first
+        {
+            let conn = self.conn.lock().unwrap();
+            conn.execute(
+                "DELETE FROM vt_match_tag WHERE name = ?1",
+                params![tag.name()],
+            ).map_err(VtError::DatabaseError)?;
+        }
         self.tags.retain(|t| t.name() != tag.name());
-        // Remove from DB
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "DELETE FROM vt_match_tag WHERE name = ?1",
-            params![tag.name()],
-        ).map_err(VtError::DatabaseError)?;
         self.dirty = true;
         self.emit_event(VTEvent::TagRemoved);
         Ok(())

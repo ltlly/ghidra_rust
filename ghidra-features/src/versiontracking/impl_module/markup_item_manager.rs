@@ -4,12 +4,11 @@ use std::collections::HashMap;
 use std::fmt;
 
 use ghidra_core::addr::Address;
-
 use crate::versiontracking::error::{VtError, VtResult};
 use crate::versiontracking::impl_module::markup_item_impl::MarkupItemImpl;
-use crate::versiontracking::markup::{MarkupType, Stringable};
+use crate::versiontracking::markup::MarkupType;
 use crate::versiontracking::types::{
-    VtAssociationMarkupStatus, VtAssociationType, VtMarkupItemApplyActionType,
+    VtAssociationMarkupStatus, VtMarkupItemApplyActionType,
     VtMarkupItemConsideredStatus, VtMarkupItemStatus,
 };
 
@@ -67,16 +66,9 @@ impl MarkupItemManagerImpl {
             .collect()
     }
 
-    /// Get all mutable markup items.
+    /// Get all mutable markup items (order not guaranteed).
     pub fn items_mut(&mut self) -> Vec<&mut MarkupItemImpl> {
-        let keys: Vec<MarkupType> = self.ordered_items.clone();
-        let mut result = Vec::new();
-        for key in keys {
-            if let Some(item) = self.items.get_mut(&key) {
-                result.push(item);
-            }
-        }
-        result
+        self.items.values_mut().collect()
     }
 
     /// Number of markup items.
@@ -209,6 +201,7 @@ impl fmt::Display for MarkupItemManagerImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
     use crate::versiontracking::markup::{MarkupType, Stringable};
 
     fn make_manager_with_items() -> MarkupItemManagerImpl {
