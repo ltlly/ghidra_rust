@@ -1126,10 +1126,10 @@ mod tests {
         for i in 0..8 {
             let dw = bank.get(&format!("D{}.W", i)).unwrap();
             assert_eq!(dw.bit_size, 16);
-            assert_eq!(dw.parent.as_deref(), Some(&format!("D{}", i)));
+            assert_eq!(dw.parent.as_deref(), Some(format!("D{}", i).as_str()));
             let db = bank.get(&format!("D{}.B", i)).unwrap();
             assert_eq!(db.bit_size, 8);
-            assert_eq!(db.parent.as_deref(), Some(&format!("D{}", i)));
+            assert_eq!(db.parent.as_deref(), Some(format!("D{}", i).as_str()));
         }
     }
 

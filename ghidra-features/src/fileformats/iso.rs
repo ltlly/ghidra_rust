@@ -1286,6 +1286,73 @@ pub fn is_iso(data: &[u8]) -> bool {
 }
 
 // ===========================================================================
+// BinaryLoader Implementation
+// ===========================================================================
+
+/// ISO 9660 image loader — loads CD/DVD filesystem images for analysis.
+pub struct IsoLoader;
+
+impl crate::BinaryLoader for IsoLoader {
+    fn name(&self) -> &str {
+        "ISO 9660"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        is_iso(data)
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        let iso = parse_iso(data)?;
+        let lang = crate::base::analyzer::Language {
+            processor: "DATA".into(),
+            variant: "LE".into(),
+            size: 8,
+        };
+
+        let base = options.base_address;
+        let mut program = Program::new(&format!("iso_{}", iso.volume_id), lang);
+        program.image_base = base;
+
+        // Create a memory block for the whole ISO image.
+        let block = MemoryBlock {
+            name: "ISO_IMAGE".into(),
+            start: Address::new(base),
+            size: data.len() as u64,
+            is_read: true,
+            is_write: false,
+            is_execute: false,
+            is_initialized: true,
+        };
+        program.memory_blocks.push(block);
+
+        // Create memory blocks for each file entry.
+        for file in &iso.files {
+            if file.is_directory || file.size == 0 {
+                continue;
+            }
+            let block = MemoryBlock {
+                name: file.name.clone(),
+                start: Address::new(base + file.offset),
+                size: file.size,
+                is_read: true,
+                is_write: false,
+                is_execute: false,
+                is_initialized: true,
+            };
+            program.memory_blocks.push(block);
+        }
+
+        Ok(program)
+    }
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -1482,24 +1549,26 @@ mod tests {
     #[test]
     fn test_parse_directory_record() {
         let mut sector = vec![0u8; SECTOR_SIZE];
+        let name = b"README.TXT;1";
+        let record_len = 33 + name.len(); // 33 fixed bytes + name
         // Build a simple file record
-        sector[0] = 34u8; // length
+        sector[0] = record_len as u8; // length
         sector[2..6].copy_from_slice(&100u32.to_le_bytes()); // extent loc
         sector[10..14].copy_from_slice(&512u32.to_le_bytes()); // extent size
         // recording date at 18-25 (all zeros)
         sector[25] = 0x00; // file flags: plain file
         sector[28..30].copy_from_slice(&1u16.to_le_bytes()); // vol seq
-        sector[32] = 11u8; // name length
-        sector[33..44].copy_from_slice(b"README.TXT;1");
+        sector[32] = name.len() as u8; // name length
+        sector[33..33 + name.len()].copy_from_slice(name);
 
         let result = parse_directory_record(&sector, 0);
         assert!(result.is_some());
         let (rec, next) = result.unwrap();
         assert_eq!(rec.extent_location, 100);
         assert_eq!(rec.extent_size, 512);
-        assert_eq!(rec.name_len, 11);
-        assert_eq!(&rec.name, b"README.TXT;1");
-        assert_eq!(next, 34);
+        assert_eq!(rec.name_len, name.len() as u8);
+        assert_eq!(&rec.name, name);
+        assert_eq!(next, record_len);
     }
 
     #[test]
@@ -1511,14 +1580,15 @@ mod tests {
 
     #[test]
     fn test_has_rock_ridge_susp() {
-        // SUSP "SP" signature
-        let su = b"\x07SP\x01\x01\x01";
+        // SUSP "SP" signature (need at least 7 bytes for valid SUSP entry)
+        let su = b"\x07SP\x01\x01\x01\x00";
         assert!(has_rock_ridge_susp(su));
 
-        let su2 = b"\x05ER\x01";
+        // ER extension reference: length(1) + sig(2) + ver(1) + len_id(1) + len_des(1) + len_src(1) = 7 min
+        let su2 = b"\x07ER\x01\x01\x01\x01";
         assert!(has_rock_ridge_susp(su2));
 
-        let no_rr = b"\x00\x00\x00\x00";
+        let no_rr = b"\x00\x00\x00\x00\x00\x00\x00";
         assert!(!has_rock_ridge_susp(no_rr));
     }
 

@@ -1225,13 +1225,13 @@ fn next_version(base: &Varnode, counters: &mut HashMap<Varnode, u64>) -> Varnode
     let c = counters.entry(base.clone()).or_insert(0);
     *c += 1;
     Varnode::new(
-        AddressSpace::new("unique", 8, false),
+        AddressSpace::new("unique", 8, false, AddrSpaceType::Unique, 4),
         (base.offset << 4) | *c,
         base.size,
     )
 }
 
-use ghidra_core::addr::AddressSpace;
+use ghidra_core::addr::{AddressSpace, AddrSpaceType};
 
 // ---------------------------------------------------------------------------
 // ConstantPropagation
@@ -1732,121 +1732,13 @@ impl ExpressionSimplifier {
         }
 
         // Algebraic identities.
+        // Use const_inputs (indexed by position) so we can match when exactly
+        // one operand is a known constant and the other is a register/memory.
+        let ci0 = const_inputs.first().copied().flatten();
+        let ci1 = const_inputs.get(1).copied().flatten();
+
         match op.opcode {
-            // x + 0 => x
-            OpCode::INT_ADD if consts.len() >= 2 && consts[1] == 0 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[0].clone()],
-                ))
-            }
-
-            // 0 + x => x
-            OpCode::INT_ADD if consts.len() >= 2 && consts[0] == 0 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[1].clone()],
-                ))
-            }
-
-            // x - 0 => x
-            OpCode::INT_SUB if consts.len() >= 2 && consts[1] == 0 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[0].clone()],
-                ))
-            }
-
-            // x * 1 => x
-            OpCode::INT_MUL if consts.len() >= 2 && consts[1] == 1 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[0].clone()],
-                ))
-            }
-
-            // 1 * x => x
-            OpCode::INT_MUL if consts.len() >= 2 && consts[0] == 1 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[1].clone()],
-                ))
-            }
-
-            // x * 0 => 0
-            OpCode::INT_MUL if consts.len() >= 2 && consts[0] == 0 || consts.len() >= 2 && consts.get(1) == Some(&0) => {
-                let out = op.output.clone()?;
-                let out_size = out.size;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![Varnode::constant(0, out_size)],
-                ))
-            }
-
-            // x & 0 => 0
-            OpCode::INT_AND if consts.len() >= 2 && (consts[0] == 0 || consts.get(1) == Some(&0)) => {
-                let out = op.output.clone()?;
-                let out_size = out.size;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![Varnode::constant(0, out_size)],
-                ))
-            }
-
-            // x & -1 (all ones) => x
-            OpCode::INT_AND if consts.len() >= 2 && consts[1] == u64::MAX => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[0].clone()],
-                ))
-            }
-
-            // x | 0 => x
-            OpCode::INT_OR if consts.len() >= 2 && consts[1] == 0 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[0].clone()],
-                ))
-            }
-
-            // x | -1 => -1
-            OpCode::INT_OR if consts.len() >= 2 && consts[1] == u64::MAX => {
-                let out = op.output.clone()?;
-                let out_size = out.size;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![Varnode::constant(u64::MAX, out_size)],
-                ))
-            }
-
-            // x ^ 0 => x
-            OpCode::INT_XOR if consts.len() >= 2 && consts[1] == 0 => {
-                let out = op.output.clone()?;
-                Some(PcodeOperation::new_unannotated(
-                    OpCode::COPY,
-                    Some(out),
-                    vec![op.inputs[0].clone()],
-                ))
-            }
-
-            // x ^ x => 0
+            // x ^ x => 0  (check before other identity rules)
             OpCode::INT_XOR if op.inputs.len() >= 2 && op.inputs[0] == op.inputs[1] => {
                 let out = op.output.clone()?;
                 let out_size = out.size;
@@ -1855,6 +1747,83 @@ impl ExpressionSimplifier {
                     Some(out),
                     vec![Varnode::constant(0, out_size)],
                 ))
+            }
+
+            // x + 0 => x   or   0 + x => x
+            OpCode::INT_ADD if ci1 == Some(0) && ci0.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[0].clone()]))
+            }
+            OpCode::INT_ADD if ci0 == Some(0) && ci1.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[1].clone()]))
+            }
+
+            // x - 0 => x
+            OpCode::INT_SUB if ci1 == Some(0) && ci0.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[0].clone()]))
+            }
+
+            // x * 1 => x   or   1 * x => x
+            OpCode::INT_MUL if ci1 == Some(1) && ci0.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[0].clone()]))
+            }
+            OpCode::INT_MUL if ci0 == Some(1) && ci1.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[1].clone()]))
+            }
+
+            // x * 0 => 0   or   0 * x => 0
+            OpCode::INT_MUL if ci0 == Some(0) || ci1 == Some(0) => {
+                let out = op.output.clone()?;
+                let out_size = out.size;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![Varnode::constant(0, out_size)]))
+            }
+
+            // x & 0 => 0
+            OpCode::INT_AND if ci0 == Some(0) || ci1 == Some(0) => {
+                let out = op.output.clone()?;
+                let out_size = out.size;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![Varnode::constant(0, out_size)]))
+            }
+
+            // x & -1 (all ones) => x
+            OpCode::INT_AND if ci1 == Some(u64::MAX) && ci0.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[0].clone()]))
+            }
+            OpCode::INT_AND if ci0 == Some(u64::MAX) && ci1.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[1].clone()]))
+            }
+
+            // x | 0 => x
+            OpCode::INT_OR if ci1 == Some(0) && ci0.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[0].clone()]))
+            }
+            OpCode::INT_OR if ci0 == Some(0) && ci1.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[1].clone()]))
+            }
+
+            // x | -1 => -1
+            OpCode::INT_OR if ci1 == Some(u64::MAX) || ci0 == Some(u64::MAX) => {
+                let out = op.output.clone()?;
+                let out_size = out.size;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![Varnode::constant(u64::MAX, out_size)]))
+            }
+
+            // x ^ 0 => x
+            OpCode::INT_XOR if ci1 == Some(0) && ci0.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[0].clone()]))
+            }
+            OpCode::INT_XOR if ci0 == Some(0) && ci1.is_none() => {
+                let out = op.output.clone()?;
+                Some(PcodeOperation::new_unannotated(OpCode::COPY, Some(out), vec![op.inputs[1].clone()]))
             }
 
             // x << 0 => x
@@ -1940,11 +1909,11 @@ mod tests {
     use crate::pcode::OpCode;
 
     fn mem(offset: u64, size: u32) -> Varnode {
-        Varnode::new(AddressSpace::new("ram", 8, false), offset, size)
+        Varnode::new(AddressSpace::new("ram", 8, false, AddrSpaceType::Ram, 1), offset, size)
     }
 
     fn reg(offset: u64, size: u32) -> Varnode {
-        Varnode::new(AddressSpace::new("register", 8, false), offset, size)
+        Varnode::new(AddressSpace::new("register", 8, false, AddrSpaceType::Register, 2), offset, size)
     }
 
     fn cnst(val: u64, size: u32) -> Varnode {

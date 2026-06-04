@@ -1322,8 +1322,16 @@ impl FsUtils {
         if fsrls.is_empty() {
             return true;
         }
-        let fs_root = fsrls[0].get_fs();
-        fsrls.iter().all(|f| f.get_fs() == fs_root)
+        // Walk each FSRL to its root ancestor and compare roots
+        fn root_path(f: &FSRL) -> &str {
+            let mut cur = f;
+            while let Some(ref p) = cur.parent {
+                cur = p.as_ref();
+            }
+            &cur.path
+        }
+        let first = root_path(&fsrls[0]);
+        fsrls.iter().all(|f| root_path(f) == first)
     }
 
     // ------------------------------------------------------------------
@@ -1599,7 +1607,7 @@ mod tests {
     struct DummyFs {
         name: String,
         fsrl_root: FSRLRoot,
-        ref_mgr: FileSystemRefManager,
+        ref_mgr: std::sync::OnceLock<FileSystemRefManager>,
         closed: bool,
     }
 
@@ -1620,7 +1628,7 @@ mod tests {
             self.closed
         }
         fn ref_manager(&self) -> &FileSystemRefManager {
-            &self.ref_mgr
+            self.ref_mgr.get_or_init(|| FileSystemRefManager::default())
         }
         fn lookup(
             &self,
@@ -1656,12 +1664,18 @@ mod tests {
     }
 
     fn make_dummy_fs() -> Arc<DummyFs> {
-        Arc::new(DummyFs {
+        let ref_mgr_slot = std::sync::OnceLock::new();
+        let fs = Arc::new(DummyFs {
             name: "dummy".into(),
             fsrl_root: FSRLRoot::make_root("dummyfs"),
-            ref_mgr: FileSystemRefManager::default(),
+            ref_mgr: ref_mgr_slot,
             closed: false,
-        })
+        });
+        // Initialize the ref manager with a proper reference to this filesystem
+        fs.ref_mgr.get_or_init(|| {
+            FileSystemRefManager::new(fs.clone() as Arc<dyn FileSystem>)
+        });
+        fs
     }
 
     #[test]

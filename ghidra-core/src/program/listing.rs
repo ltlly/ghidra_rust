@@ -27,6 +27,7 @@ pub use crate::listing::{InstructionMnemonic, ListingColumns, ListingRow};
 use crate::addr::{Address, AddressRange};
 use crate::data::DataType;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt;
 use std::sync::Arc;
 
 // ============================================================================
@@ -3760,4 +3761,149 @@ mod tests {
             Some(Address::new(0x1000))
         );
     }
+}
+
+
+// ============================================================================
+// Additional listing types (port of Java Ghidra listing/lang model)
+// ============================================================================
+
+/// An equate (named constant) at a specific operand position.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
+pub struct Equate { pub name: String, pub value: i64, pub references: Vec<(Address, i32)> }
+#[allow(dead_code)]
+impl Equate {
+    pub fn new(name: impl Into<String>, value: i64) -> Self { Self { name: name.into(), value, references: Vec::new() } }
+    pub fn add_reference(&mut self, addr: Address, op_index: i32) { self.references.push((addr, op_index)); }
+    pub fn remove_reference(&mut self, addr: &Address, op_index: i32) -> bool {
+        let b = self.references.len(); self.references.retain(|(a,o)| a!=addr||*o!=op_index); self.references.len()<b }
+    pub fn get_reference_addresses(&self) -> Vec<Address> { self.references.iter().map(|(a,_)| *a).collect() }
+    pub fn reference_count(&self) -> usize { self.references.len() }
+}
+
+/// Manages equates (named constants).
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct EquateTable { equates: HashMap<String, Equate> }
+#[allow(dead_code)]
+impl EquateTable {
+    pub fn new() -> Self { Self::default() }
+    pub fn create_equate(&mut self, name: impl Into<String>, value: i64) -> Result<&Equate, String> {
+        let n=name.into(); if self.equates.contains_key(&n){return Err(format!("exists: {}",n));}
+        self.equates.insert(n.clone(), Equate::new(&n,value)); Ok(self.equates.get(&n).unwrap()) }
+    pub fn remove_equate(&mut self, name: &str) -> bool { self.equates.remove(name).is_some() }
+    pub fn get_equate(&self, name: &str) -> Option<&Equate> { self.equates.get(name) }
+    pub fn num_equates(&self) -> usize { self.equates.len() }
+    pub fn is_empty(&self) -> bool { self.equates.is_empty() }
+}
+
+/// An external library referenced by the program.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ExternalLibrary { pub name: String, pub path: Option<String>, pub resolved: bool }
+
+/// An external symbol from an external library.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ExternalSymbol { pub name: String, pub library_name: String, pub external_address: Option<Address>,
+    pub label: Option<String>, pub is_function: bool, pub data_type: Option<Arc<dyn DataType>> }
+
+/// Manages external symbols (functions/data from external libraries).
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct ExternalManager { libraries: HashMap<String, ExternalLibrary>, symbols: HashMap<(String,String), ExternalSymbol>, locations: HashMap<Address,(String,String)> }
+#[allow(dead_code)]
+impl ExternalManager {
+    pub fn new() -> Self { Self::default() }
+    pub fn add_external_library(&mut self, name: impl Into<String>, path: Option<String>) {
+        let n=name.into(); self.libraries.entry(n.clone()).or_insert_with(|| ExternalLibrary{name:n,path,resolved:false}); }
+    pub fn add_external_function(&mut self, sn: impl Into<String>, ln: impl Into<String>, addr: Option<Address>) {
+        let s=sn.into(); let l=ln.into();
+        self.symbols.insert((l.clone(),s.clone()), ExternalSymbol{name:s,library_name:l,external_address:addr,label:None,is_function:true,data_type:None}); }
+    pub fn get_external_library_names(&self) -> Vec<&str> { self.libraries.keys().map(|s|s.as_str()).collect() }
+    pub fn get_external_symbols(&self) -> Vec<&ExternalSymbol> { self.symbols.values().collect() }
+    pub fn get_external_functions(&self) -> Vec<&ExternalSymbol> { self.symbols.values().filter(|s|s.is_function).collect() }
+    pub fn library_count(&self) -> usize { self.libraries.len() }
+    pub fn symbol_count(&self) -> usize { self.symbols.len() }
+    pub fn is_empty(&self) -> bool { self.symbols.is_empty() && self.libraries.is_empty() }
+}
+
+/// A prototype model describes how parameters are passed for a calling convention.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct PrototypeModel { pub name: String, pub description: String,
+    pub integer_param_registers: Vec<String>, pub float_param_registers: Vec<String>,
+    pub integer_return_register: Option<String>, pub float_return_register: Option<String>,
+    pub stack_pointer: Option<String>, pub stack_grows_negative: bool, pub stack_alignment: u32,
+    pub shadow_space: u32, pub caller_cleanup: bool, pub max_register_bytes: usize,
+    pub is_unknown: bool, pub is_default: bool, pub affected_registers: Vec<String> }
+#[allow(dead_code)]
+impl PrototypeModel {
+    pub fn new(name: impl Into<String>) -> Self { Self {
+        name:name.into(), description:String::new(), integer_param_registers:Vec::new(),
+        float_param_registers:Vec::new(), integer_return_register:None, float_return_register:None,
+        stack_pointer:None, stack_grows_negative:true, stack_alignment:16, shadow_space:0,
+        caller_cleanup:true, max_register_bytes:0, is_unknown:false, is_default:false,
+        affected_registers:Vec::new() } }
+    pub fn with_description(mut self, d: impl Into<String>) -> Self { self.description=d.into(); self }
+    pub fn with_integer_params(mut self, r: Vec<impl Into<String>>) -> Self { self.integer_param_registers=r.into_iter().map(|x|x.into()).collect(); self }
+    pub fn with_integer_return(mut self, r: impl Into<String>) -> Self { self.integer_return_register=Some(r.into()); self }
+    pub fn with_float_return(mut self, r: impl Into<String>) -> Self { self.float_return_register=Some(r.into()); self }
+    pub fn with_stack_pointer(mut self, r: impl Into<String>) -> Self { self.stack_pointer=Some(r.into()); self }
+    pub fn with_stack_alignment(mut self, a: u32) -> Self { self.stack_alignment=a; self }
+    pub fn with_shadow_space(mut self, s: u32) -> Self { self.shadow_space=s; self }
+    pub fn with_caller_cleanup(mut self) -> Self { self.caller_cleanup=true; self }
+    pub fn with_callee_cleanup(mut self) -> Self { self.caller_cleanup=false; self }
+    pub fn with_default(mut self) -> Self { self.is_default=true; self }
+    pub fn with_unknown(mut self) -> Self { self.is_unknown=true; self }
+    pub fn total_register_params(&self) -> usize { self.integer_param_registers.len()+self.float_param_registers.len() }
+    pub fn sysv_amd64() -> Self { Self::new("__sysv64").with_description("System V AMD64 ABI")
+        .with_integer_params(vec!["RDI","RSI","RDX","RCX","R8","R9"])
+        .with_integer_return("RAX").with_float_return("XMM0").with_stack_pointer("RSP")
+        .with_stack_alignment(16).with_caller_cleanup().with_default() }
+    pub fn win64() -> Self { Self::new("__win64").with_description("Microsoft x64 ABI")
+        .with_integer_params(vec!["RCX","RDX","R8","R9"])
+        .with_integer_return("RAX").with_float_return("XMM0").with_stack_pointer("RSP")
+        .with_stack_alignment(16).with_shadow_space(32).with_caller_cleanup() }
+    pub fn cdecl() -> Self { Self::new("__cdecl").with_integer_return("EAX").with_stack_alignment(4).with_caller_cleanup().with_default() }
+    pub fn stdcall() -> Self { Self::new("__stdcall").with_integer_return("EAX").with_stack_alignment(4).with_callee_cleanup() }
+    pub fn unknown() -> Self { Self::new("unknown").with_unknown() }
+}
+impl fmt::Display for PrototypeModel { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { write!(f,"PrototypeModel({})",self.name) } }
+
+/// Manages function tags.
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct FunctionTagManager { tags: HashMap<String, FunctionTag> }
+#[allow(dead_code)]
+impl FunctionTagManager {
+    pub fn new() -> Self { Self::default() }
+    pub fn create_tag(&mut self, name: impl Into<String>, comment: Option<String>) -> Result<&FunctionTag, String> {
+        let n=name.into(); if self.tags.contains_key(&n){return Err(format!("exists: {}",n));}
+        self.tags.insert(n.clone(), FunctionTag{name:n.clone(),comment}); Ok(self.tags.get(&n).unwrap()) }
+    pub fn get_tag(&self, name: &str) -> Option<&FunctionTag> { self.tags.get(name) }
+    pub fn get_all_tags(&self) -> Vec<&FunctionTag> { self.tags.values().collect() }
+    pub fn remove_tag(&mut self, name: &str) -> bool { self.tags.remove(name).is_some() }
+    pub fn tag_count(&self) -> usize { self.tags.len() }
+}
+
+/// Tracks register values at specific addresses (for disassembler context).
+#[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
+pub struct ProgramContext { defaults: HashMap<String, Vec<u8>>, values: HashMap<Address, HashMap<String, Vec<u8>>>, flow_overrides: HashMap<Address, FlowOverride> }
+#[allow(dead_code)]
+impl ProgramContext {
+    pub fn new() -> Self { Self::default() }
+    pub fn set_default(&mut self, r: impl Into<String>, v: Vec<u8>) { self.defaults.insert(r.into(),v); }
+    pub fn get_default(&self, r: &str) -> Option<&Vec<u8>> { self.defaults.get(r) }
+    pub fn get_defaults(&self) -> &HashMap<String, Vec<u8>> { &self.defaults }
+    pub fn set_value(&mut self, a: Address, r: impl Into<String>, v: Vec<u8>) { self.values.entry(a).or_default().insert(r.into(),v); }
+    pub fn get_value(&self, a: &Address, r: &str) -> Option<&Vec<u8>> { self.values.get(a).and_then(|m| m.get(r)) }
+    pub fn get_values_at(&self, a: &Address) -> Option<&HashMap<String, Vec<u8>>> { self.values.get(a) }
+    pub fn set_flow_override(&mut self, a: Address, f: FlowOverride) { self.flow_overrides.insert(a,f); }
+    pub fn get_flow_override(&self, a: &Address) -> Option<FlowOverride> { self.flow_overrides.get(a).copied() }
+    pub fn get_flow_override_addresses(&self) -> Vec<Address> { self.flow_overrides.keys().copied().collect() }
+    pub fn has_defaults(&self) -> bool { !self.defaults.is_empty() }
+    pub fn has_values(&self) -> bool { !self.values.is_empty() }
 }

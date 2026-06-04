@@ -19,8 +19,9 @@ pub mod transaction;
 
 pub use buffer::{Buffer, ChainedBuffer as LegacyChainedBuffer};
 pub use db::{
-    convert_db_error, BufferFile, ChainedBuffer, DBHandle, DBRecord, Database, DbError, DbResult,
-    Field, FieldType, FieldValue, Index, IndexType, LruCache, PooledConnection, Schema, Table,
+    convert_db_error, BufferFile, ChainedBuffer, DBHandle, DBListener, DBRecord, Database,
+    DbError, DbResult, Field, FieldType, FieldValue, GhidraTransaction, Index, IndexType,
+    LruCache, NoopDbListener, PooledConnection, Schema, Table, UndoEntry,
 };
 pub use transaction::{
     NoopTransactionListener, SavepointGuard, Transaction, TransactionListener, TransactionOpenMode,

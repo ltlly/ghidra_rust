@@ -8,7 +8,7 @@
 //! - [`ContextBit`], [`ContextField`], [`TrackedContext`] definitions
 //! - [`ContextOp`] and [`OperandVal`] creation and display
 
-use ghidra_decompile::pcode::{OpCode, PcodeOp, Varnode};
+use ghidra_decompile::sleigh::pcode::{OpCode, PcodeOp, Varnode};
 use ghidra_decompile::sleigh::construct::{
     ConstructTpl, Constructor, ContextOp, OperandSymbol, OperandVal, PatternEquation, TokenField,
 };

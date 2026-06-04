@@ -430,9 +430,9 @@ mod tests {
         let lhs = Varnode::register("eax", 0, 4);
         let rhs = Varnode::constant(1, 4);
 
-        let seq = SequenceBuilder::new(addr, 4)
-            .int_add(out.clone(), lhs.clone(), rhs)
-            .build();
+        let mut builder = SequenceBuilder::new(addr, 4);
+        builder.int_add(out.clone(), lhs.clone(), rhs);
+        let seq = builder.build();
 
         assert_eq!(seq.len(), 1);
         assert_eq!(seq.instruction_address, addr);
@@ -445,9 +445,9 @@ mod tests {
         let addr = Address::new(0x1000);
         let target = Address::new(0x2000);
 
-        let seq = SequenceBuilder::new(addr, 4)
-            .branch(target)
-            .build();
+        let mut builder = SequenceBuilder::new(addr, 4);
+        builder.branch(target);
+        let seq = builder.build();
 
         assert_eq!(seq.len(), 1);
         assert_eq!(seq.operations[0].opcode, OpCode::BRANCH);
@@ -462,11 +462,11 @@ mod tests {
         let y = Varnode::register("ebx", 0, 4);
         let one = Varnode::constant(1, 4);
 
-        let seq = SequenceBuilder::new(addr, 4)
-            .copy(out.clone(), x)
-            .int_add(out.clone(), out.clone(), one)
-            .int_mul(out.clone(), out.clone(), y.clone())
-            .build();
+        let mut builder = SequenceBuilder::new(addr, 4);
+        builder.copy(out.clone(), x);
+        builder.int_add(out.clone(), out.clone(), one);
+        builder.int_mul(out.clone(), out.clone(), y.clone());
+        let seq = builder.build();
 
         assert_eq!(seq.len(), 3);
         assert_eq!(seq.operations[0].opcode, OpCode::COPY);
@@ -488,9 +488,9 @@ mod tests {
         let x = Varnode::register("eax", 0, 4);
         let y = Varnode::register("ebx", 0, 4);
 
-        let seq = SequenceBuilder::new(addr, 4)
-            .int_add(Varnode::unique(0, 4), x, y)
-            .build();
+        let mut builder = SequenceBuilder::new(addr, 4);
+        builder.int_add(Varnode::unique(0, 4), x, y);
+        let seq = builder.build();
 
         let flat = seq.flatten();
         assert_eq!(flat.len(), 1);
@@ -504,9 +504,9 @@ mod tests {
         let x = Varnode::register("eax", 0, 4);
         let y = Varnode::register("ebx", 0, 4);
 
-        let seq = SequenceBuilder::new(addr, 4)
-            .int_add(out.clone(), x.clone(), y.clone())
-            .build();
+        let mut builder = SequenceBuilder::new(addr, 4);
+        builder.int_add(out.clone(), x.clone(), y.clone());
+        let seq = builder.build();
 
         let defs = seq.defined_varnodes();
         assert_eq!(defs.len(), 1);

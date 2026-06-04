@@ -37,10 +37,10 @@ use petgraph::visit::EdgeRef;
 use petgraph::Direction;
 
 use ghidra_core::addr::Address;
-use ghidra_core::data::DataType;
+use ghidra_core::data::{BuiltInDataType, DataType, PointerDataType};
 use ghidra_core::error::{GhidraError, Result};
 
-use crate::sleigh::pcode::{OpCode, PcodeOp, Varnode};
+use crate::pcode::{OpCode, PcodeOperation, Varnode};
 
 // ============================================================================
 // DataTypeRef — an owned reference to a DataType in the type-recovery context.
@@ -131,7 +131,7 @@ fn make_pointer_type(pointee: &DataTypeRef) -> DataTypeRef {
 #[derive(Debug, Clone)]
 pub struct PcodeSequence {
     /// The P-code operations in sequential order.
-    pub ops: Vec<PcodeOp>,
+    pub ops: Vec<PcodeOperation>,
     /// Start address of the sequence (inclusive).
     pub start_address: Address,
     /// End address of the sequence (inclusive).
@@ -140,7 +140,7 @@ pub struct PcodeSequence {
 
 impl PcodeSequence {
     /// Create a new P-code sequence spanning the given address range.
-    pub fn new(ops: Vec<PcodeOp>, start: Address, end: Address) -> Self {
+    pub fn new(ops: Vec<PcodeOperation>, start: Address, end: Address) -> Self {
         Self {
             ops,
             start_address: start,
@@ -159,7 +159,7 @@ impl PcodeSequence {
     }
 
     /// Returns an iterator over the operations.
-    pub fn iter(&self) -> std::slice::Iter<'_, PcodeOp> {
+    pub fn iter(&self) -> std::slice::Iter<'_, PcodeOperation> {
         self.ops.iter()
     }
 }
@@ -382,12 +382,12 @@ impl Comparison {
     /// comparison.
     pub fn from_opcode(op: OpCode) -> Option<Self> {
         match op {
-            OpCode::IntEqual | OpCode::FloatEqual => Some(Comparison::EQ),
-            OpCode::IntNotEqual | OpCode::FloatNotEqual => Some(Comparison::NE),
-            OpCode::IntLess | OpCode::FloatLess => Some(Comparison::LT),
-            OpCode::IntLessEqual | OpCode::FloatLessEqual => Some(Comparison::LE),
-            OpCode::IntSless => Some(Comparison::SLT),
-            OpCode::IntSlessEqual => Some(Comparison::SLE),
+            OpCode::INT_EQUAL | OpCode::FLOAT_EQUAL => Some(Comparison::EQ),
+            OpCode::INT_NOTEQUAL | OpCode::FLOAT_NOTEQUAL => Some(Comparison::NE),
+            OpCode::INT_LESS | OpCode::FLOAT_LESS => Some(Comparison::LT),
+            OpCode::INT_LESSEQUAL | OpCode::FLOAT_LESSEQUAL => Some(Comparison::LE),
+            OpCode::INT_SLESS => Some(Comparison::SLT),
+            OpCode::INT_SLESSEQUAL => Some(Comparison::SLE),
             _ => None,
         }
     }
@@ -702,17 +702,17 @@ impl TypeRecoveryEngine {
     }
 
     /// Process a single P-code operation and emit constraints.
-    fn process_operation(&mut self, op: &PcodeOp) {
+    fn process_operation(&mut self, op: &PcodeOperation) {
         match op.opcode {
             // -- data movement -------------------------------------------------
-            OpCode::Copy => {
+            OpCode::COPY => {
                 if let (Some(ref out), Some(inp)) = (op.output.as_ref(), op.inputs.first()) {
                     // Copy implies type equivalence.
                     self.type_propagator.unify(out, inp);
                     self.type_propagator.add_flow(inp, out);
                 }
             }
-            OpCode::Load => {
+            OpCode::LOAD => {
                 if let (Some(ref dest), Some(ptr)) = (op.output.as_ref(), op.inputs.first()) {
                     let size = dest.size as u32;
                     self.constraints.push(TypeConstraint::LoadOf {
@@ -723,7 +723,7 @@ impl TypeRecoveryEngine {
                     self.type_propagator.add_flow(ptr, dest);
                 }
             }
-            OpCode::Store => {
+            OpCode::STORE => {
                 if op.inputs.len() >= 2 {
                     let ptr = &op.inputs[0];
                     let src = &op.inputs[1];
@@ -737,16 +737,16 @@ impl TypeRecoveryEngine {
             }
 
             // -- integer arithmetic --------------------------------------------
-            OpCode::IntAdd
-            | OpCode::IntSub
-            | OpCode::IntMul
-            | OpCode::IntDiv
-            | OpCode::IntSdiv
-            | OpCode::IntRem
-            | OpCode::IntSrem
-            | OpCode::IntAnd
-            | OpCode::IntOr
-            | OpCode::IntXor => {
+            OpCode::INT_ADD
+            | OpCode::INT_SUB
+            | OpCode::INT_MUL
+            | OpCode::INT_DIV
+            | OpCode::INT_SDIV
+            | OpCode::INT_REM
+            | OpCode::INT_SREM
+            | OpCode::INT_AND
+            | OpCode::INT_OR
+            | OpCode::INT_XOR => {
                 if let (Some(ref dest), Some(a), Some(b)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -761,7 +761,7 @@ impl TypeRecoveryEngine {
                 }
             }
 
-            OpCode::IntNegate | OpCode::IntZext | OpCode::IntSext => {
+            OpCode::INT_NEGATE | OpCode::INT_ZEXT | OpCode::INT_SEXT => {
                 if let (Some(ref dest), Some(src)) = (op.output.as_ref(), op.inputs.first()) {
                     let opc = op.opcode;
                     self.constraints.push(TypeConstraint::Size {
@@ -770,13 +770,13 @@ impl TypeRecoveryEngine {
                     });
                     self.type_propagator.add_flow(src, dest);
                     // SEXT/ZEXT imply source signedness.
-                    if opc == OpCode::IntSext {
+                    if opc == OpCode::INT_SEXT {
                         // Source is a signed narrower type.
-                        let signed_src = make_int_type(src.size);
+                        let signed_src = make_int_type(src.size as usize);
                         let recovered = RecoveredType::inferred(signed_src, "sext-source");
                         self.type_propagator.propagate(src, &recovered);
-                    } else if opc == OpCode::IntZext {
-                        let unsigned_src = make_uint_type(src.size);
+                    } else if opc == OpCode::INT_ZEXT {
+                        let unsigned_src = make_uint_type(src.size as usize);
                         let recovered = RecoveredType::inferred(unsigned_src, "zext-source");
                         self.type_propagator.propagate(src, &recovered);
                     }
@@ -784,12 +784,12 @@ impl TypeRecoveryEngine {
             }
 
             // -- integer comparisons -------------------------------------------
-            OpCode::IntEqual
-            | OpCode::IntNotEqual
-            | OpCode::IntLess
-            | OpCode::IntLessEqual
-            | OpCode::IntSless
-            | OpCode::IntSlessEqual => {
+            OpCode::INT_EQUAL
+            | OpCode::INT_NOTEQUAL
+            | OpCode::INT_LESS
+            | OpCode::INT_LESSEQUAL
+            | OpCode::INT_SLESS
+            | OpCode::INT_SLESSEQUAL => {
                 if let (Some(ref dest), Some(a), Some(b)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -810,7 +810,7 @@ impl TypeRecoveryEngine {
             }
 
             // -- boolean operations --------------------------------------------
-            OpCode::BoolAnd | OpCode::BoolOr | OpCode::BoolXor => {
+            OpCode::BOOL_AND | OpCode::BOOL_OR | OpCode::BOOL_XOR => {
                 if let (Some(ref dest), Some(_a), Some(_b)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -821,7 +821,7 @@ impl TypeRecoveryEngine {
                     self.type_propagator.propagate(dest, &recovered);
                 }
             }
-            OpCode::BoolNeg => {
+            OpCode::BOOL_NEGATE => {
                 if let (Some(ref dest), Some(_src)) = (op.output.as_ref(), op.inputs.first()) {
                     let bool_type = make_bool_type();
                     let recovered = RecoveredType::known(bool_type, "bool-negate");
@@ -830,23 +830,23 @@ impl TypeRecoveryEngine {
             }
 
             // -- floating-point arithmetic -------------------------------------
-            OpCode::FloatAdd
-            | OpCode::FloatSub
-            | OpCode::FloatMult
-            | OpCode::FloatDiv
-            | OpCode::FloatNeg => {
+            OpCode::FLOAT_ADD
+            | OpCode::FLOAT_SUB
+            | OpCode::FLOAT_MUL
+            | OpCode::FLOAT_DIV
+            | OpCode::FLOAT_NEG => {
                 if let Some(ref dest) = op.output {
                     let float_type = match dest.size {
                         4 => make_float_type(),
                         8 => make_double_type(),
-                        s => make_uint_type(s),
+                        s => make_uint_type(s as usize),
                     };
                     let recovered = RecoveredType::inferred(float_type, "float-arithmetic");
                     self.type_propagator.propagate(dest, &recovered);
                 }
             }
 
-            OpCode::Float2Float | OpCode::Float2Int | OpCode::Int2Float => {
+            OpCode::FLOAT_INT2FLOAT | OpCode::FLOAT_FLOAT2INT | OpCode::FLOAT_INT2FLOAT => {
                 if let Some(ref dest) = op.output {
                     if let Some(ref src) = op.inputs.first() {
                         self.type_propagator.add_flow(src, dest);
@@ -855,10 +855,10 @@ impl TypeRecoveryEngine {
             }
 
             // -- floating-point comparisons ------------------------------------
-            OpCode::FloatEqual
-            | OpCode::FloatNotEqual
-            | OpCode::FloatLess
-            | OpCode::FloatLessEqual => {
+            OpCode::FLOAT_EQUAL
+            | OpCode::FLOAT_NOTEQUAL
+            | OpCode::FLOAT_LESS
+            | OpCode::FLOAT_LESSEQUAL => {
                 if let (Some(ref dest), Some(a), Some(b)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -878,7 +878,7 @@ impl TypeRecoveryEngine {
             }
 
             // -- control flow --------------------------------------------------
-            OpCode::Call | OpCode::CallInd => {
+            OpCode::CALL | OpCode::CALLIND => {
                 // First input is the call target (for CALL, it's a constant
                 // address; for CALLIND, it's a register/memory location).
                 let func_addr = op.inputs.first().map(|v| Address::new(v.offset));
@@ -906,7 +906,7 @@ impl TypeRecoveryEngine {
                 }
             }
 
-            OpCode::Return => {
+            OpCode::RETURN => {
                 // Return value (if any) constrains the function's return type.
                 if let Some(ref ret_val) = op.inputs.first() {
                     self.constraints.push(TypeConstraint::Size {
@@ -917,7 +917,7 @@ impl TypeRecoveryEngine {
             }
 
             // -- pointer arithmetic --------------------------------------------
-            OpCode::PtrAdd => {
+            OpCode::PTRADD => {
                 if let (Some(ref dest), Some(base), Some(index)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -941,7 +941,7 @@ impl TypeRecoveryEngine {
                     self.type_propagator.unify(base, dest);
                 }
             }
-            OpCode::PtrSub => {
+            OpCode::PTRSUB => {
                 if let (Some(ref dest), Some(a), Some(b)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -953,7 +953,7 @@ impl TypeRecoveryEngine {
             }
 
             // -- extension / composition ---------------------------------------
-            OpCode::Piece => {
+            OpCode::PIECE => {
                 if let (Some(ref dest), Some(hi), Some(lo)) = (
                     op.output.as_ref(),
                     op.inputs.first(),
@@ -964,20 +964,20 @@ impl TypeRecoveryEngine {
                     self.type_propagator.add_flow(lo, dest);
                 }
             }
-            OpCode::Subpiece => {
+            OpCode::SUBPIECE => {
                 if let (Some(ref dest), Some(src)) = (op.output.as_ref(), op.inputs.first()) {
                     // dest is a sub-range of src.
                     self.type_propagator.add_flow(src, dest);
                 }
             }
-            OpCode::Cast => {
+            OpCode::CAST => {
                 if let (Some(ref dest), Some(src)) = (op.output.as_ref(), op.inputs.first()) {
                     self.type_propagator.add_flow(src, dest);
                 }
             }
 
             // -- heap allocation -----------------------------------------------
-            OpCode::New => {
+            OpCode::NEW => {
                 if let Some(ref dest) = op.output {
                     // NEW returns a pointer (void*).
                     let void_ptr = make_void_ptr_type();
@@ -987,7 +987,7 @@ impl TypeRecoveryEngine {
             }
 
             // -- sentinel / other ----------------------------------------------
-            OpCode::MultiEqual | OpCode::Indirect => {
+            OpCode::MULTIEQUAL | OpCode::INDIRECT => {
                 // MUXIEQUAL / INDIRECT: all operands share the same type.
                 if let Some(ref out) = op.output {
                     for inp in &op.inputs {
@@ -996,7 +996,7 @@ impl TypeRecoveryEngine {
                 }
             }
 
-            OpCode::CpoolRef | OpCode::SegmentOp => {
+            OpCode::CPOOLREF | OpCode::SEGMENTOP => {
                 if let Some(ref dest) = op.output {
                     // Output is typically a pointer.
                     let ptr_type = make_void_ptr_type();
@@ -1317,7 +1317,7 @@ impl TypeRecoveryEngine {
                 .cloned()
                 .unwrap_or_else(|| {
                     RecoveredType::inferred(
-                        size_to_primitive(vn.size),
+                        size_to_primitive(vn.size as usize),
                         "unknown-return",
                     )
                 })
@@ -1335,14 +1335,14 @@ impl TypeRecoveryEngine {
                 if let Some(vn) = vns.first() {
                     let data_type = self.get_type(vn).cloned().unwrap_or_else(|| {
                         RecoveredType::inferred(
-                            size_to_primitive(vn.size),
+                            size_to_primitive(vn.size as usize),
                             "unknown-param",
                         )
                     });
 
                     let location = if vn.is_register() {
                         ParamLocation::Register(format!("reg_0x{:x}", vn.offset))
-                    } else if vn.is_ram() || vn.is_address() {
+                    } else if vn.is_ram() {
                         ParamLocation::Stack {
                             offset: vn.offset as i32,
                         }
@@ -1385,7 +1385,7 @@ fn size_to_primitive(size: usize) -> DataTypeRef {
         2 => make_uint_type(2),
         4 => make_uint_type(4),
         8 => make_uint_type(8),
-        s => make_uint_type(s),
+        s => make_uint_type(s as usize),
     }
 }
 
@@ -1404,6 +1404,45 @@ fn align_to(value: u32, alignment: u32) -> u32 {
         return value;
     }
     ((value + alignment - 1) / alignment) * alignment
+}
+
+// ============================================================================
+// C type name helper
+// ============================================================================
+
+/// Convert a `DataType` to a C-style type name string.
+fn c_type_name(dt: &dyn DataType) -> String {
+    // Check for pointer type first.
+    if dt.is_pointer() {
+        if let Some(ptr) = dt.as_any().downcast_ref::<PointerDataType>() {
+            return format!("{}*", c_type_name(ptr.pointed_to.as_ref()));
+        }
+        return "void*".to_string();
+    }
+    // Map built-in types to C-style names.
+    if let Some(wrapper) = dt.as_any().downcast_ref::<BuiltInDataTypeWrapper>() {
+        return match wrapper.inner {
+            BuiltInDataType::Undefined1 => "u8".to_string(),
+            BuiltInDataType::Undefined2 => "u16".to_string(),
+            BuiltInDataType::Undefined4 => "u32".to_string(),
+            BuiltInDataType::Undefined8 => "u64".to_string(),
+            BuiltInDataType::Bool => "bool".to_string(),
+            BuiltInDataType::Char => "i8".to_string(),
+            BuiltInDataType::Short => "i16".to_string(),
+            BuiltInDataType::UShort => "u16".to_string(),
+            BuiltInDataType::Int => "i32".to_string(),
+            BuiltInDataType::UInt => "u32".to_string(),
+            BuiltInDataType::Long => "i64".to_string(),
+            BuiltInDataType::ULong => "u64".to_string(),
+            BuiltInDataType::LongLong => "i64".to_string(),
+            BuiltInDataType::ULongLong => "u64".to_string(),
+            BuiltInDataType::Float => "float".to_string(),
+            BuiltInDataType::Double => "double".to_string(),
+            BuiltInDataType::Void => "void".to_string(),
+            _ => dt.name().to_string(),
+        };
+    }
+    dt.name().to_string()
 }
 
 // ============================================================================
@@ -1432,7 +1471,7 @@ impl InferredStruct {
             s.push_str(&format!(
                 "    /* 0x{:04x} */ {} {};\n",
                 field.offset,
-                field.data_type.data_type.name(),
+                c_type_name(field.data_type.data_type.as_ref()),
                 field.name.as_deref().unwrap_or("field"),
             ));
         }
@@ -1479,12 +1518,12 @@ pub struct FunctionSignature {
 impl FunctionSignature {
     /// Return a formatted C-like prototype string.
     pub fn to_c_prototype(&self, func_name: &str) -> String {
-        let mut s = format!("{} {}(", self.return_type.data_type.name(), func_name);
+        let mut s = format!("{} {}(", c_type_name(self.return_type.data_type.as_ref()), func_name);
         for (i, param) in self.parameters.iter().enumerate() {
             if i > 0 {
                 s.push_str(", ");
             }
-            s.push_str(&param.data_type.data_type.name());
+            s.push_str(&c_type_name(param.data_type.data_type.as_ref()));
             if let Some(ref name) = param.name {
                 s.push(' ');
                 s.push_str(name);
@@ -1591,7 +1630,7 @@ impl HeapStructAnalyzer {
 
         for seq in sequences {
             for op in &seq.ops {
-                if op.opcode == OpCode::New {
+                if op.opcode == OpCode::NEW {
                     if let Some(ref out) = op.output {
                         let size = op
                             .inputs
@@ -1618,7 +1657,7 @@ impl HeapStructAnalyzer {
             for seq in sequences {
                 for op in &seq.ops {
                     match op.opcode {
-                        OpCode::Load => {
+                        OpCode::LOAD => {
                             if let Some(ptr) = op.inputs.first() {
                                 if ptr == &site.output_varnode {
                                     if let Some(ref dest) = op.output {
@@ -1627,7 +1666,7 @@ impl HeapStructAnalyzer {
                                 }
                             }
                         }
-                        OpCode::Store => {
+                        OpCode::STORE => {
                             if op.inputs.len() >= 2 {
                                 let ptr = &op.inputs[0];
                                 if ptr == &site.output_varnode {
@@ -1645,7 +1684,7 @@ impl HeapStructAnalyzer {
             // This gives us actual field offsets.
             for seq in sequences {
                 for op in &seq.ops {
-                    if op.opcode == OpCode::PtrAdd {
+                    if op.opcode == OpCode::PTRADD {
                         if let (Some(ref derived), Some(base)) =
                             (op.output.as_ref(), op.inputs.first())
                         {
@@ -1660,7 +1699,7 @@ impl HeapStructAnalyzer {
 
                                 for seq2 in sequences {
                                     for op2 in &seq2.ops {
-                                        if op2.opcode == OpCode::Load
+                                        if op2.opcode == OpCode::LOAD
                                             && op2.inputs.first() == Some(derived)
                                         {
                                             if let Some(ref dest) = op2.output {
@@ -1670,7 +1709,7 @@ impl HeapStructAnalyzer {
                                                 ));
                                             }
                                         }
-                                        if op2.opcode == OpCode::Store
+                                        if op2.opcode == OpCode::STORE
                                             && op2.inputs.len() >= 2
                                             && op2.inputs[0] == **derived
                                         {
@@ -1750,7 +1789,7 @@ fn is_derived_from(a: &Varnode, base: &Varnode, sequences: &[PcodeSequence]) -> 
     // Check one level of PTRADD: if a = PTRADD(base, ...).
     for seq in sequences {
         for op in &seq.ops {
-            if op.opcode == OpCode::PtrAdd {
+            if op.opcode == OpCode::PTRADD {
                 if let (Some(ref out), Some(b)) = (op.output.as_ref(), op.inputs.first()) {
                     if *out == a && b == base {
                         return true;
@@ -1851,30 +1890,30 @@ mod tests {
         Address::new(offset)
     }
 
-    fn test_varnode_reg(offset: u64, size: usize) -> Varnode {
-        Varnode::register(offset, size)
+    fn test_varnode_reg(offset: u64, size: u32) -> Varnode {
+        Varnode::register("r", offset, size)
     }
 
-    fn test_varnode_const(val: u64, size: usize) -> Varnode {
+    fn test_varnode_const(val: u64, size: u32) -> Varnode {
         Varnode::constant(val, size)
     }
 
-    fn test_varnode_unique(idx: u64, size: usize) -> Varnode {
+    fn test_varnode_unique(idx: u64, size: u32) -> Varnode {
         Varnode::unique(idx, size)
     }
 
-    fn make_load_op(dest: Varnode, ptr: Varnode) -> PcodeOp {
-        PcodeOp::new(OpCode::Load, Some(dest), vec![ptr])
+    fn make_load_op(dest: Varnode, ptr: Varnode) -> PcodeOperation {
+        PcodeOperation::new_unannotated(OpCode::LOAD, Some(dest), vec![ptr])
     }
 
-    fn make_store_op(ptr: Varnode, value: Varnode) -> PcodeOp {
-        PcodeOp::new(OpCode::Store, None, vec![ptr, value])
+    fn make_store_op(ptr: Varnode, value: Varnode) -> PcodeOperation {
+        PcodeOperation::new_unannotated(OpCode::STORE, None, vec![ptr, value])
     }
 
-    fn make_call_op(target: u64, args: &[Varnode], output: Option<Varnode>) -> PcodeOp {
+    fn make_call_op(target: u64, args: &[Varnode], output: Option<Varnode>) -> PcodeOperation {
         let mut inputs = vec![Varnode::constant(target, 8)];
         inputs.extend_from_slice(args);
-        PcodeOp::new(OpCode::Call, output, inputs)
+        PcodeOperation::new_unannotated(OpCode::CALL, output, inputs)
     }
 
     #[test]
@@ -1895,10 +1934,10 @@ mod tests {
 
     #[test]
     fn test_comparison_from_opcode() {
-        assert_eq!(Comparison::from_opcode(OpCode::IntEqual), Some(Comparison::EQ));
-        assert_eq!(Comparison::from_opcode(OpCode::IntSless), Some(Comparison::SLT));
-        assert_eq!(Comparison::from_opcode(OpCode::IntLess), Some(Comparison::LT));
-        assert_eq!(Comparison::from_opcode(OpCode::IntAdd), None);
+        assert_eq!(Comparison::from_opcode(OpCode::INT_EQUAL), Some(Comparison::EQ));
+        assert_eq!(Comparison::from_opcode(OpCode::INT_SLESS), Some(Comparison::SLT));
+        assert_eq!(Comparison::from_opcode(OpCode::INT_LESS), Some(Comparison::LT));
+        assert_eq!(Comparison::from_opcode(OpCode::INT_ADD), None);
     }
 
     #[test]
@@ -2026,8 +2065,8 @@ mod tests {
         let analyzer = HeapStructAnalyzer;
 
         // NEW(size=16, dest=unique:0:8)
-        let new_op = PcodeOp::new(
-            OpCode::New,
+        let new_op = PcodeOperation::new_unannotated(
+            OpCode::NEW,
             Some(test_varnode_unique(0, 8)),
             vec![test_varnode_const(16, 4)],
         );

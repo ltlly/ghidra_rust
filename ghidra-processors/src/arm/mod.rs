@@ -166,33 +166,167 @@ impl ProcessorModule for ArmModule {
 
     fn languages() -> Vec<Language> {
         vec![
-            Language::new(
-                "ARM:LE:32:v7",
-                "ARM v7 - Little Endian",
-                "v7",
-                Endian::Little,
-                32,
-            ),
-            Language::new("ARM:BE:32:v7", "ARM v7 - Big Endian", "v7", Endian::Big, 32),
+            // --- v8 (ARMv8-A AArch32 execution state) ---
             Language::new(
                 "ARM:LE:32:v8",
-                "ARM v8 (AArch32) - Little Endian",
+                "Generic ARM/Thumb v8 little endian",
                 "v8",
                 Endian::Little,
                 32,
             ),
             Language::new(
-                "ARM:LE:32:Thumb",
-                "ARM Thumb - Little Endian",
-                "Thumb",
+                "ARM:LE:32:v8T",
+                "Generic ARM/Thumb v8 little endian (Thumb is default)",
+                "v8T",
                 Endian::Little,
                 32,
             ),
             Language::new(
-                "ARM:LE:32:CortexM",
-                "ARM Cortex-M - Little Endian",
-                "v7-M",
+                "ARM:BE:32:v8",
+                "Generic ARM/Thumb v8 big endian",
+                "v8",
+                Endian::Big,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v8T",
+                "Generic ARM/Thumb v8 big endian (Thumb is default)",
+                "v8T",
+                Endian::Big,
+                32,
+            ),
+            Language::new(
+                "ARM:LEBE:32:v8LEInstruction",
+                "Generic ARM/Thumb v8 little endian instructions and big endian data",
+                "v8LEInstruction",
+                Endian::Big,
+                32,
+            ),
+            // --- v7 ---
+            Language::new(
+                "ARM:LE:32:v7",
+                "Generic ARM/Thumb v7 little endian",
+                "v7",
                 Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v7",
+                "Generic ARM/Thumb v7 big endian",
+                "v7",
+                Endian::Big,
+                32,
+            ),
+            Language::new(
+                "ARM:LEBE:32:v7LEInstruction",
+                "Generic ARM/Thumb v7 little endian instructions and big endian data",
+                "v7LEInstruction",
+                Endian::Big,
+                32,
+            ),
+            // --- Cortex (ARMv7-M profile) ---
+            Language::new(
+                "ARM:LE:32:Cortex",
+                "ARM Cortex / Thumb little endian",
+                "Cortex",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:Cortex",
+                "ARM Cortex / Thumb big endian",
+                "Cortex",
+                Endian::Big,
+                32,
+            ),
+            // --- v8-m (ARMv8-M microcontroller) ---
+            Language::new(
+                "ARM:LE:32:v8-m",
+                "ARM Cortex v8-m little endian",
+                "v8-m",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v8-m",
+                "ARM Cortex v8-m big endian",
+                "v8-m",
+                Endian::Big,
+                32,
+            ),
+            // --- v6 ---
+            Language::new(
+                "ARM:LE:32:v6",
+                "Generic ARM/Thumb v6 little endian",
+                "v6",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v6",
+                "Generic ARM/Thumb v6 big endian",
+                "v6",
+                Endian::Big,
+                32,
+            ),
+            // --- v5t ---
+            Language::new(
+                "ARM:LE:32:v5t",
+                "Generic ARM/Thumb v5 little endian (T-variant)",
+                "v5t",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v5t",
+                "Generic ARM/Thumb v5 big endian (T-variant)",
+                "v5t",
+                Endian::Big,
+                32,
+            ),
+            // --- v5 (no Thumb) ---
+            Language::new(
+                "ARM:LE:32:v5",
+                "Generic ARM v5 little endian",
+                "v5",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v5",
+                "Generic ARM v5 big endian",
+                "v5",
+                Endian::Big,
+                32,
+            ),
+            // --- v4t (Thumb-capable) ---
+            Language::new(
+                "ARM:LE:32:v4t",
+                "Generic ARM/Thumb v4 little endian (T-variant)",
+                "v4t",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v4t",
+                "Generic ARM/Thumb v4 big endian (T-variant)",
+                "v4t",
+                Endian::Big,
+                32,
+            ),
+            // --- v4 (no Thumb) ---
+            Language::new(
+                "ARM:LE:32:v4",
+                "Generic ARM v4 little endian",
+                "v4",
+                Endian::Little,
+                32,
+            ),
+            Language::new(
+                "ARM:BE:32:v4",
+                "Generic ARM v4 big endian",
+                "v4",
+                Endian::Big,
                 32,
             ),
         ]
@@ -229,7 +363,7 @@ mod tests {
         assert!(!regs.is_empty());
 
         let langs = ArmModule::languages();
-        assert!(langs.len() >= 4);
+        assert!(langs.len() >= 18, "Expected >= 18 ARM language variants, got {}", langs.len());
 
         let insts = ArmModule::instructions();
         assert!(insts.len() >= 200);

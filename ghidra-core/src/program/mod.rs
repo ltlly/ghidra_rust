@@ -42,12 +42,15 @@ pub use program::{
 pub use listing::{
     AutoParameterType, Bookmark, BookmarkManager, BookmarkType,
     CodeUnitComments, CodeUnitData as CodeUnitStorage, CodeUnitFormat,
-    CodeUnitFormatOptions, CommentType, Data, FlowOverride, FlowType,
+    CodeUnitFormatOptions, CommentType, Data, Equate, EquateTable,
+    ExternalLibrary, ExternalManager, ExternalSymbol, FlowOverride, FlowType,
     Function, FunctionData, FunctionManager, FunctionParameter,
-    FunctionSignature, FunctionTag, FunctionUpdateType, FunctionVariable,
+    FunctionSignature, FunctionTag, FunctionTagManager, FunctionUpdateType,
+    FunctionVariable,
     Group, InMemoryFunctionManager, InMemoryListing, Instruction, Listing,
     LocalVariable, LocalVariableImpl, Operand, Parameter, ParameterImpl,
-    ProgramFragment, ProgramModule, SourceType as ListingSourceType,
+    ProgramContext, ProgramFragment, ProgramModule, PrototypeModel,
+    SourceType as ListingSourceType,
     StackFrame, Variable, VariableStorage,
 };
 

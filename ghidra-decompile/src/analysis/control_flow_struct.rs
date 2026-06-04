@@ -112,6 +112,11 @@ pub enum Expression {
         base: Box<Expression>,
         field: String,
     },
+    /// A string literal: `"hello"`.
+    StringLiteral {
+        /// The string content (without quotes).
+        value: String,
+    },
     /// A raw P-code operation (fallback for opcodes that cannot be lifted
     /// into a higher-level expression).
     PcodeOp {
@@ -188,6 +193,7 @@ impl Expression {
             Expression::Ternary { true_expr, .. } => true_expr.size_hint(),
             Expression::Cast { .. } => None,
             Expression::Assignment { lhs, .. } => lhs.size_hint(),
+            Expression::StringLiteral { .. } => None,
             Expression::PcodeOp { output, .. } => output.as_ref().map(|v| v.size),
             Expression::AddressOf { .. } => {
                 // A pointer is typically 8 bytes on 64-bit.

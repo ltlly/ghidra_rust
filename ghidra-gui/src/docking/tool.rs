@@ -1,13 +1,101 @@
 //! The top-level docking tool abstraction.
 //!
 //! A [`DockingTool`] represents a Ghidra-style tool window.  It owns the
-//! layout, the action registry, and the plugin manager, and ties them all
-//! together.
+//! layout, the action registry, the plugin manager, and the event system,
+//! and ties them all together.
 
-use super::action::{find_action, find_action_mut, DockingAction, Key, Modifiers};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use super::action::{
+    find_action, find_action_mut, ActionContextInfo, DockingAction, GuiActionManager, Key,
+    Modifiers,
+};
 use super::component::{ComponentMap, ComponentProvider};
 use super::layout::DockingLayout;
 use super::plugin::{Plugin, PluginError, PluginManager};
+
+// ---------------------------------------------------------------------------
+// ToolEvent — events emitted by the tool
+// ---------------------------------------------------------------------------
+
+/// Events that a tool can emit to notify interested observers.
+///
+/// In Ghidra, the tool fires `ToolEvent` instances through a `Service`
+/// when significant state changes occur.  This enum models the most
+/// common events.
+#[derive(Debug, Clone)]
+pub enum ToolEvent {
+    /// The active program changed.
+    ProgramActivated {
+        program_name: String,
+    },
+    /// The active program was closed.
+    ProgramClosed {
+        program_name: String,
+    },
+    /// The active project changed.
+    ProjectChanged {
+        project_name: Option<String>,
+    },
+    /// A component was added to the tool.
+    ComponentAdded {
+        provider: ComponentProvider,
+        name: String,
+    },
+    /// A component was removed from the tool.
+    ComponentRemoved {
+        provider: ComponentProvider,
+        name: String,
+    },
+    /// A component gained focus.
+    ComponentFocused {
+        provider: ComponentProvider,
+        name: String,
+    },
+    /// The layout was changed (e.g. window moved, split ratio changed).
+    LayoutChanged,
+    /// The layout was loaded from a saved state.
+    LayoutLoaded,
+    /// A plugin was loaded.
+    PluginLoaded {
+        plugin_name: String,
+    },
+    /// A plugin was unloaded.
+    PluginUnloaded {
+        plugin_name: String,
+    },
+    /// An action was triggered.
+    ActionTriggered {
+        action_name: String,
+        context: ActionContextInfo,
+    },
+    /// A custom tool event (for extensibility).
+    Custom {
+        event_type: String,
+        data: HashMap<String, String>,
+    },
+}
+
+/// A callback that receives tool events.
+pub type ToolEventCallback = Arc<dyn Fn(&ToolEvent) + Send + Sync>;
+
+// ---------------------------------------------------------------------------
+// ToolService — service interface for inter-component communication
+// ---------------------------------------------------------------------------
+
+/// A named service provided by the tool.
+///
+/// In Ghidra, plugins communicate through services (interfaces) that
+/// the tool brokers.  A plugin can `addService(MyTrait)`, and another
+/// can `getService(MyTrait)` without a direct dependency.
+#[derive(Debug)]
+pub struct ToolService {
+    /// Service name (typically the trait or interface name).
+    pub name: String,
+    /// Opaque service data (type-erased).
+    pub data: String,
+}
 
 // ---------------------------------------------------------------------------
 // DockingTool
@@ -26,10 +114,20 @@ pub struct DockingTool {
     pub layout: DockingLayout,
     /// All registered actions (global + contextual + toggles + menus).
     pub actions: Vec<DockingAction>,
+    /// The action manager provides undo/redo and centralized dispatch.
+    pub action_manager: GuiActionManager,
     /// The plugin manager handles plugin lifecycle.
     pub plugin_manager: PluginManager,
     /// Active dockable components, keyed by (provider, name).
     pub components: ComponentMap,
+    /// Registered event listeners.
+    event_listeners: Vec<ToolEventCallback>,
+    /// Named services provided by the tool.
+    services: HashMap<String, ToolService>,
+    /// The component that currently has focus, if any.
+    focused_component: Option<(ComponentProvider, String)>,
+    /// Tool-wide properties (arbitrary key-value settings).
+    properties: HashMap<String, String>,
 }
 
 impl DockingTool {
@@ -40,8 +138,13 @@ impl DockingTool {
             active_program: None,
             layout: DockingLayout::default_layout(),
             actions: Vec::new(),
+            action_manager: GuiActionManager::new(),
             plugin_manager: PluginManager::default(),
             components: ComponentMap::new(),
+            event_listeners: Vec::new(),
+            services: HashMap::new(),
+            focused_component: None,
+            properties: HashMap::new(),
         }
     }
 
@@ -59,27 +162,47 @@ impl DockingTool {
 
     /// Set the active project.
     pub fn set_project(&mut self, project: impl Into<String>) {
-        self.active_project = Some(project.into());
+        let name = project.into();
+        self.active_project = Some(name.clone());
+        self.emit_event(&ToolEvent::ProjectChanged {
+            project_name: Some(name),
+        });
     }
 
     /// Clear the active project.
     pub fn clear_project(&mut self) {
         self.active_project = None;
-        self.active_program = None;
+        let old = self.active_program.take();
+        if let Some(prog) = old {
+            self.emit_event(&ToolEvent::ProgramClosed {
+                program_name: prog,
+            });
+        }
+        self.emit_event(&ToolEvent::ProjectChanged {
+            project_name: None,
+        });
     }
 
     /// Set the active program (will also set the project to `Some` if it
     /// is currently `None`).
     pub fn set_program(&mut self, program: impl Into<String>) {
-        self.active_program = Some(program.into());
+        let name = program.into();
+        self.active_program = Some(name.clone());
         if self.active_project.is_none() {
             self.active_project = Some("<unknown>".to_owned());
         }
+        self.emit_event(&ToolEvent::ProgramActivated {
+            program_name: name,
+        });
     }
 
     /// Clear the active program (leaves the project set).
     pub fn clear_program(&mut self) {
-        self.active_program = None;
+        if let Some(prog) = self.active_program.take() {
+            self.emit_event(&ToolEvent::ProgramClosed {
+                program_name: prog,
+            });
+        }
     }
 
     // ---------------------------------------------------------------
@@ -218,7 +341,12 @@ impl DockingTool {
                 ),
             );
         }
+        let name = key.1.clone();
         self.components.insert(key, component);
+        self.emit_event(&ToolEvent::ComponentAdded {
+            provider,
+            name,
+        });
     }
 
     /// Remove a docking component by its provider and name.
@@ -227,7 +355,14 @@ impl DockingTool {
         provider: ComponentProvider,
         name: &str,
     ) -> Option<Box<dyn super::component::DockingComponent>> {
-        self.components.remove(&(provider, name.to_owned()))
+        let result = self.components.remove(&(provider, name.to_owned()));
+        if result.is_some() {
+            self.emit_event(&ToolEvent::ComponentRemoved {
+                provider,
+                name: name.to_owned(),
+            });
+        }
+        result
     }
 
     /// Get a reference to a docking component.
@@ -292,6 +427,155 @@ impl DockingTool {
     /// Reset to the default Ghidra-style layout.
     pub fn reset_layout(&mut self) {
         self.layout.reset_to_default();
+        self.emit_event(&ToolEvent::LayoutChanged);
+    }
+
+    // ---------------------------------------------------------------
+    // Event system
+    // ---------------------------------------------------------------
+
+    /// Register an event listener.
+    pub fn add_event_listener(&mut self, callback: ToolEventCallback) {
+        self.event_listeners.push(callback);
+    }
+
+    /// Emit an event to all registered listeners.
+    fn emit_event(&self, event: &ToolEvent) {
+        for listener in &self.event_listeners {
+            listener(event);
+        }
+    }
+
+    /// Number of registered event listeners.
+    pub fn event_listener_count(&self) -> usize {
+        self.event_listeners.len()
+    }
+
+    /// Clear all event listeners.
+    pub fn clear_event_listeners(&mut self) {
+        self.event_listeners.clear();
+    }
+
+    // ---------------------------------------------------------------
+    // Action manager integration
+    // ---------------------------------------------------------------
+
+    /// Register an action in both the tool's action list and the action
+    /// manager (for undo/redo support).
+    pub fn register_action(&mut self, action: DockingAction) {
+        self.action_manager.register(action.clone());
+        self.actions.push(action);
+    }
+
+    /// Trigger an action with context through the action manager.
+    pub fn trigger_action(&self, name: &str, ctx: &ActionContextInfo) -> bool {
+        let triggered = self.action_manager.trigger_with_context(name, ctx);
+        if triggered {
+            self.emit_event(&ToolEvent::ActionTriggered {
+                action_name: name.to_owned(),
+                context: ctx.clone(),
+            });
+        }
+        triggered
+    }
+
+    /// Perform undo via the action manager.
+    pub fn undo(&mut self) -> Option<String> {
+        self.action_manager.undo()
+    }
+
+    /// Perform redo via the action manager.
+    pub fn redo(&mut self) -> Option<String> {
+        self.action_manager.redo()
+    }
+
+    /// Whether undo is available.
+    pub fn can_undo(&self) -> bool {
+        self.action_manager.can_undo()
+    }
+
+    /// Whether redo is available.
+    pub fn can_redo(&self) -> bool {
+        self.action_manager.can_redo()
+    }
+
+    // ---------------------------------------------------------------
+    // Focus management
+    // ---------------------------------------------------------------
+
+    /// Set focus to a specific component.
+    pub fn set_focus(&mut self, provider: ComponentProvider, name: impl Into<String>) {
+        let name = name.into();
+        self.focused_component = Some((provider, name.clone()));
+        self.emit_event(&ToolEvent::ComponentFocused {
+            provider,
+            name,
+        });
+    }
+
+    /// Get the currently focused component, if any.
+    pub fn get_focused(&self) -> Option<&(ComponentProvider, String)> {
+        self.focused_component.as_ref()
+    }
+
+    /// Clear focus (no component focused).
+    pub fn clear_focus(&mut self) {
+        self.focused_component = None;
+    }
+
+    // ---------------------------------------------------------------
+    // Service registry
+    // ---------------------------------------------------------------
+
+    /// Register a service with the tool.
+    pub fn add_service(&mut self, name: impl Into<String>, data: impl Into<String>) {
+        let name = name.into();
+        self.services.insert(
+            name.clone(),
+            ToolService {
+                name,
+                data: data.into(),
+            },
+        );
+    }
+
+    /// Get a service by name.
+    pub fn get_service(&self, name: &str) -> Option<&ToolService> {
+        self.services.get(name)
+    }
+
+    /// Remove a service by name.
+    pub fn remove_service(&mut self, name: &str) -> Option<ToolService> {
+        self.services.remove(name)
+    }
+
+    /// All registered service names.
+    pub fn service_names(&self) -> Vec<&str> {
+        self.services.keys().map(|k| k.as_str()).collect()
+    }
+
+    // ---------------------------------------------------------------
+    // Tool properties
+    // ---------------------------------------------------------------
+
+    /// Set a tool-wide property.
+    pub fn set_property(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.properties.insert(key.into(), value.into());
+    }
+
+    /// Get a tool-wide property.
+    pub fn get_property(&self, key: &str) -> Option<&str> {
+        self.properties.get(key).map(|v| v.as_str())
+    }
+
+    /// Remove a tool-wide property.
+    pub fn remove_property(&mut self, key: &str) -> Option<String> {
+        self.properties.remove(key)
+    }
+
+    /// Get all properties.
+    pub fn properties(&self) -> &HashMap<String, String> {
+        &self.properties
     }
 }
 
@@ -476,5 +760,212 @@ mod tests {
             .layout
             .get_window(&ComponentProvider::Console)
             .is_some());
+    }
+
+    // --- New: event system tests ---
+
+    #[test]
+    fn test_event_listener() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let count = Arc::new(AtomicU32::new(0));
+        let count2 = count.clone();
+
+        let mut tool = DockingTool::new();
+        tool.add_event_listener(Arc::new(move |_event| {
+            count2.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        assert_eq!(tool.event_listener_count(), 1);
+
+        tool.set_project("test-project");
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+
+        tool.set_program("test.exe");
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn test_event_program_lifecycle() {
+        use std::sync::Mutex;
+
+        let events = Arc::new(Mutex::new(Vec::<String>::new()));
+        let events2 = events.clone();
+
+        let mut tool = DockingTool::new();
+        tool.add_event_listener(Arc::new(move |event| {
+            let name = match event {
+                ToolEvent::ProgramActivated { program_name } => {
+                    format!("activated:{}", program_name)
+                }
+                ToolEvent::ProgramClosed { program_name } => {
+                    format!("closed:{}", program_name)
+                }
+                _ => format!("other:{:?}", event),
+            };
+            events2.lock().unwrap().push(name);
+        }));
+
+        tool.set_program("test.exe");
+        tool.clear_program();
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[0], "activated:test.exe");
+        assert_eq!(captured[1], "closed:test.exe");
+    }
+
+    #[test]
+    fn test_event_project_changed() {
+        use std::sync::Mutex;
+
+        let events = Arc::new(Mutex::new(Vec::<String>::new()));
+        let events2 = events.clone();
+
+        let mut tool = DockingTool::new();
+        tool.add_event_listener(Arc::new(move |event| {
+            if let ToolEvent::ProjectChanged { project_name } = event {
+                events2
+                    .lock()
+                    .unwrap()
+                    .push(project_name.clone().unwrap_or_default());
+            }
+        }));
+
+        tool.set_project("my-project");
+        assert_eq!(events.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_event_component_added_removed() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let count = Arc::new(AtomicU32::new(0));
+        let count2 = count.clone();
+
+        let mut tool = DockingTool::new();
+        tool.add_event_listener(Arc::new(move |_event| {
+            count2.fetch_add(1, Ordering::SeqCst);
+        }));
+
+        let comp = SimpleComponent::new(ComponentProvider::Console, "Console", "console");
+        tool.add_component(Box::new(comp));
+        assert_eq!(count.load(Ordering::SeqCst), 1); // ComponentAdded
+
+        tool.remove_component(ComponentProvider::Console, "console");
+        assert_eq!(count.load(Ordering::SeqCst), 2); // ComponentRemoved
+    }
+
+    #[test]
+    fn test_clear_event_listeners() {
+        let mut tool = DockingTool::new();
+        tool.add_event_listener(Arc::new(|_| {}));
+        assert_eq!(tool.event_listener_count(), 1);
+        tool.clear_event_listeners();
+        assert_eq!(tool.event_listener_count(), 0);
+    }
+
+    // --- Focus management ---
+
+    #[test]
+    fn test_focus_management() {
+        let mut tool = DockingTool::new();
+
+        assert!(tool.get_focused().is_none());
+
+        tool.set_focus(ComponentProvider::ListingView, "listing");
+        let focused = tool.get_focused().unwrap();
+        assert_eq!(focused.0, ComponentProvider::ListingView);
+        assert_eq!(focused.1, "listing");
+
+        tool.clear_focus();
+        assert!(tool.get_focused().is_none());
+    }
+
+    // --- Service registry ---
+
+    #[test]
+    fn test_service_registry() {
+        let mut tool = DockingTool::new();
+
+        tool.add_service("GoToService", "goto-handler");
+        tool.add_service("SearchService", "search-handler");
+
+        assert_eq!(tool.service_names().len(), 2);
+        assert!(tool.get_service("GoToService").is_some());
+        assert_eq!(
+            tool.get_service("GoToService").unwrap().data,
+            "goto-handler"
+        );
+        assert!(tool.get_service("NonExistent").is_none());
+
+        tool.remove_service("GoToService");
+        assert!(tool.get_service("GoToService").is_none());
+        assert_eq!(tool.service_names().len(), 1);
+    }
+
+    // --- Tool properties ---
+
+    #[test]
+    fn test_tool_properties() {
+        let mut tool = DockingTool::new();
+
+        tool.set_property("theme", "dark");
+        tool.set_property("font-size", "14");
+
+        assert_eq!(tool.get_property("theme"), Some("dark"));
+        assert_eq!(tool.get_property("font-size"), Some("14"));
+        assert_eq!(tool.get_property("missing"), None);
+        assert_eq!(tool.properties().len(), 2);
+
+        tool.remove_property("theme");
+        assert_eq!(tool.get_property("theme"), None);
+        assert_eq!(tool.properties().len(), 1);
+    }
+
+    // --- Action manager integration ---
+
+    #[test]
+    fn test_register_action_and_trigger() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called2 = called.clone();
+
+        let mut tool = DockingTool::new();
+        let action = DockingAction::new("test-action", "Test Action")
+            .with_callback(super::super::action::ActionCallback::new(move || {
+                called2.store(true, Ordering::SeqCst);
+            }));
+        tool.register_action(action);
+
+        assert!(tool.find_action("test-action").is_some());
+
+        let ctx = ActionContextInfo::empty();
+        assert!(tool.trigger_action("test-action", &ctx));
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_undo_redo_integration() {
+        let mut tool = DockingTool::new();
+
+        assert!(!tool.can_undo());
+        assert!(!tool.can_redo());
+        assert!(tool.undo().is_none());
+
+        use super::super::action::{ActionCallback, UndoEntry};
+        let noop = || {};
+        tool.action_manager.push_undo(UndoEntry {
+            description: "test-undo".to_owned(),
+            undo: ActionCallback::new(noop),
+            redo: ActionCallback::new(noop),
+        });
+
+        assert!(tool.can_undo());
+        assert_eq!(tool.undo().as_deref(), Some("test-undo"));
+        assert!(tool.can_redo());
+        assert_eq!(tool.redo().as_deref(), Some("test-undo"));
+        assert!(!tool.can_redo());
     }
 }

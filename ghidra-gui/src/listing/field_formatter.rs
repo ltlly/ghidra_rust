@@ -106,7 +106,7 @@ impl NumberFormat {
             NumberFormat::Char => {
                 let u = value as u32;
                 if let Some(c) = char::from_u32(u) {
-                    if c.is_ascii_graphic() {
+                    if c.is_ascii_graphic() || c == ' ' {
                         format!("'{}'", c)
                     } else {
                         format!("'\\x{:02X}'", u & 0xFF)

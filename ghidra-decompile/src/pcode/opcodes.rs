@@ -195,7 +195,7 @@ pub enum OpCode {
 
 impl OpCode {
     /// Number of distinct opcodes.
-    pub const COUNT: usize = 70;
+    pub const COUNT: usize = 72;
 
     /// Human-readable name of this opcode (e.g., `"INT_ADD"`).
     pub fn name(self) -> &'static str {
@@ -570,6 +570,7 @@ impl FromStr for OpCode {
             "INT_NEGATE" => Ok(OpCode::INT_NEGATE),
             "INT_CARRY" => Ok(OpCode::INT_CARRY),
             "INT_SCARRY" => Ok(OpCode::INT_SCARRY),
+            "INT_SBORROW" => Ok(OpCode::INT_SBORROW),
             "INT_SEXT" => Ok(OpCode::INT_SEXT),
             "INT_ZEXT" => Ok(OpCode::INT_ZEXT),
             "INT_AND" => Ok(OpCode::INT_AND),
@@ -605,6 +606,7 @@ impl FromStr for OpCode {
             "BRANCHIND" => Ok(OpCode::BRANCHIND),
             "CALL" => Ok(OpCode::CALL),
             "CALLIND" => Ok(OpCode::CALLIND),
+            "CALLOTHER" => Ok(OpCode::CALLOTHER),
             "RETURN" => Ok(OpCode::RETURN),
             "INT_EQUAL" => Ok(OpCode::INT_EQUAL),
             "INT_NOTEQUAL" => Ok(OpCode::INT_NOTEQUAL),
@@ -792,8 +794,8 @@ impl From<OpCode> for u8 {
             OpCode::EXTRACT => 67,
             OpCode::POPCOUNT => 68,
             OpCode::LZCOUNT => 69,
-            OpCode::CALLOTHER => 72,
-            OpCode::INT_SBORROW => 71,
+            OpCode::CALLOTHER => 71,
+            OpCode::INT_SBORROW => 72,
             OpCode::UNIMPLEMENTED => 70,
         }
     }
@@ -830,14 +832,14 @@ impl Iterator for OpCodeIter {
             self.idx += 1;
             match OpCode::try_from(v) {
                 Ok(op) => return Some(op),
-                Err(_) if v > 70 => return None,
+                Err(_) if v > 72 => return None,
                 Err(_) => continue,
             }
         }
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let remaining = 70usize.saturating_sub(self.idx as usize).min(OpCode::COUNT);
+        let remaining = 72usize.saturating_sub(self.idx as usize).min(OpCode::COUNT);
         (0, Some(remaining))
     }
 }

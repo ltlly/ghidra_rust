@@ -1247,7 +1247,6 @@ pub fn format_operands(operands: &[RenderedOperand]) -> String {
                 && this_start != ']'
                 && this_start != ')'
                 && this_start != ':'
-                && prev_end != ','
                 && prev_end != ':'
             {
                 result.push(' ');

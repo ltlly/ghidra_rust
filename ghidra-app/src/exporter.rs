@@ -1708,6 +1708,12 @@ if __name__ == "__main__":
         if hex_str.contains(' ') {
             let mut bytes = Vec::new();
             for part in hex_str.split_whitespace() {
+                if part.len() != 2 || !part.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        format!("Invalid hex byte '{}': expected exactly 2 hex digits", part),
+                    ));
+                }
                 let b = u8::from_str_radix(part, 16).map_err(|e| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -1759,6 +1765,7 @@ mod tests {
                 range: AddressRange::new(Address::new(0x400000), Address::new(0x4000ff)),
                 permissions: MemoryPermissions::RX,
                 initialized: true,
+                data: Vec::new(),
             },
         );
         prog.memory_blocks.insert(
@@ -1768,6 +1775,7 @@ mod tests {
                 range: AddressRange::new(Address::new(0x600000), Address::new(0x6000ff)),
                 permissions: MemoryPermissions::RW,
                 initialized: true,
+                data: Vec::new(),
             },
         );
 
@@ -1807,7 +1815,7 @@ mod tests {
 
         // Data types
         prog.data_types
-            .insert(Address::new(0x400000), DataType::i32());
+            .insert(Address::new(0x400000), SimpleDataType::i32());
 
         prog
     }

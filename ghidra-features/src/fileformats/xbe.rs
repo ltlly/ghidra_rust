@@ -612,8 +612,8 @@ struct XbeHeaderRaw {
 // Section Header Parsing
 // ===========================================================================
 
-/// XBE section header (56 bytes each).
-const XBE_SECTION_HEADER_SIZE: usize = 56;
+/// XBE section header (60 bytes each: 28 bytes fields + 8 name + 4 ref_count + 20 digest).
+const XBE_SECTION_HEADER_SIZE: usize = 60;
 
 /// Parse XBE section headers from the file.
 fn parse_section_headers(
@@ -1318,24 +1318,22 @@ mod tests {
         );
         xbe[sec_base + 4..sec_base + 8].copy_from_slice(&0x1000u32.to_le_bytes()); // VA
         xbe[sec_base + 8..sec_base + 12].copy_from_slice(&512u32.to_le_bytes()); // virtual size
-        xbe[sec_base + 12..sec_base + 16].copy_from_slice(
-            &(sec_addr + 128 * 2 + 128).to_le_bytes() as u32,
-        ); // raw addr
+        // Raw data starts right after the section headers
+        let raw_data_start = sec_addr + (XBE_SECTION_HEADER_SIZE as u32) * 2;
+        xbe[sec_base + 12..sec_base + 16].copy_from_slice(&raw_data_start.to_le_bytes()); // raw addr
         xbe[sec_base + 16..sec_base + 20].copy_from_slice(&512u32.to_le_bytes()); // raw size
         // Section name at offset 20
         xbe[sec_base + 20..sec_base + 28].copy_from_slice(b"CODE    ");
 
         // Section 1: .data (DATA)
-        let sec1_off = sec_base + 128;
+        let sec1_off = sec_base + XBE_SECTION_HEADER_SIZE;
         xbe[sec1_off..sec1_off + 4].copy_from_slice(
             &(SECTION_FLAG_READABLE | SECTION_FLAG_WRITABLE | SECTION_FLAG_INITIALIZED)
                 .to_le_bytes(),
         );
         xbe[sec1_off + 4..sec1_off + 8].copy_from_slice(&0x2000u32.to_le_bytes());
         xbe[sec1_off + 8..sec1_off + 12].copy_from_slice(&256u32.to_le_bytes());
-        xbe[sec1_off + 12..sec1_off + 16].copy_from_slice(
-            &(sec_addr + 128 * 2 + 128 + 512).to_le_bytes() as u32,
-        );
+        xbe[sec1_off + 12..sec1_off + 16].copy_from_slice(&(raw_data_start + 512).to_le_bytes());
         xbe[sec1_off + 16..sec1_off + 20].copy_from_slice(&256u32.to_le_bytes());
         xbe[sec1_off + 20..sec1_off + 28].copy_from_slice(b"DATA    ");
 

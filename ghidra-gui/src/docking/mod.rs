@@ -9,25 +9,31 @@
 //! - **[`action`]** — The action system: named, key-bound operations that can
 //!   appear in menus, toolbars, and context menus.  Actions can be global,
 //!   contextual (depending on the program element under focus), toggleable, or
-//!   nested sub-menus.
+//!   nested sub-menus.  Includes [`action::GuiActionManager`] with undo/redo
+//!   support and [`action::ContextActionCallback`] for context-aware actions.
 //!
 //! - **[`component`]** — Dockable component abstractions.  The
 //!   [`component::DockingComponent`] trait is implemented by every view /
 //!   window, and [`component::ComponentProvider`] enumerates the well-known
-//!   provider types (Listing, Decompiler, Symbol Tree, etc.).
+//!   provider types (Listing, Decompiler, Symbol Tree, etc.).  The
+//!   [`component::ComponentProviderInfo`] trait provides rich metadata
+//!   (tool name, owner, menu groups, default size/position).
 //!
 //! - **[`layout`]** — Layout management.  [`layout::DockingLayout`] describes
 //!   where every window sits, which tab groups exist, and how toolbars are
-//!   configured.  Layouts can be serialized / deserialized via JSON for
-//!   persistence across sessions.
+//!   configured.  Includes [`layout::SplitNode`] for recursive split-pane
+//!   trees and docking operations (`dock`, `float`, `tab_with`, `split_with`).
+//!   Layouts can be serialized / deserialized via JSON for persistence.
 //!
 //! - **[`tool`]** — The top-level [`tool::DockingTool`].  It owns the layout,
-//!   the action registry, the plugin manager, and the set of active dockable
-//!   components.
+//!   the action registry, the plugin manager, the event system
+//!   ([`tool::ToolEvent`]), the service registry, and the set of active
+//!   dockable components.
 //!
 //! - **[`plugin`]** — The plugin system.  Plugins implement the
 //!   [`plugin::Plugin`] trait and are managed by
-//!   [`plugin::PluginManager`].
+//!   [`plugin::PluginManager`].  Supports dependency resolution,
+//!   lifecycle phases ([`plugin::PluginLifecycle`]), and bulk loading.
 //!
 //! # Usage
 //!
@@ -57,9 +63,17 @@ pub mod tool;
 // Re-export the most commonly-used types at the docking module level for
 // convenience.
 pub use action::{
-    ActionCallback, ActionContext, ActionType, DockingAction, Key, KeyBinding, Modifiers,
+    ActionCallback, ActionContext, ActionContextInfo, ActionType, ContextActionCallback,
+    DockingAction, GuiActionManager, Key, KeyBinding, Modifiers, UndoEntry,
 };
-pub use component::{ComponentProvider, DockingComponent, SimpleComponent, WindowPosition};
-pub use layout::{DockingLayout, DockingWindowPlacement, TabGroup, ToolbarConfig};
-pub use plugin::{Plugin, PluginConfig, PluginError, PluginInfo, PluginManager};
-pub use tool::DockingTool;
+pub use component::{
+    ComponentProvider, ComponentProviderInfo, DockingComponent, SimpleComponent, WindowPosition,
+};
+pub use layout::{
+    DockArea, DockingLayout, DockingWindowPlacement, SplitDirection, SplitNode, TabGroup,
+    ToolbarConfig,
+};
+pub use plugin::{
+    Plugin, PluginConfig, PluginDependency, PluginError, PluginInfo, PluginLifecycle, PluginManager,
+};
+pub use tool::{DockingTool, ToolEvent, ToolEventCallback, ToolService};

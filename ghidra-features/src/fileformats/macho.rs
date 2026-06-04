@@ -2145,10 +2145,18 @@ pub fn parse_fat(data: &[u8]) -> MachResult<FatBinary> {
     // otherwise try reading in little-endian to see if it matches FAT_CIGAM.
     fn read_magic(data: &[u8]) -> (u32, bool) {
         let be = u32::from_be_bytes(data[0..4].try_into().unwrap());
-        if be == FAT_MAGIC || is_fat_magic(be) {
+        if be == FAT_MAGIC {
             return (be, true);
         }
+        // Check if LE read gives FAT_MAGIC (which means the file is LE, signaled by CIGAM in BE)
         let le = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        if le == FAT_MAGIC {
+            return (le, false);
+        }
+        // Fallback: check if either read matches any known fat magic
+        if is_fat_magic(be) {
+            return (be, true);
+        }
         (le, false)
     }
 
@@ -3275,6 +3283,176 @@ pub fn parse_requirements(superblob: &[u8]) -> MachResult<Vec<CodeSignatureRequi
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════════
+// BinaryLoader Implementation
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
+/// Convenience: returns true if `data` starts with any Mach-O or FAT magic.
+pub fn is_macho(data: &[u8]) -> bool {
+    if data.len() < 4 {
+        return false;
+    }
+    let magic = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    if is_macho_magic(magic) {
+        return true;
+    }
+    let magic_be = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+    is_macho_magic(magic_be) || is_fat_magic(magic) || is_fat_magic(magic_be)
+}
+
+/// Map a Mach-O CPU type to a Ghidra processor language.
+fn cpu_type_to_language(cputype: i32, cpusubtype: i32) -> crate::base::analyzer::Language {
+    use crate::base::analyzer::Language;
+    match cputype {
+        CPU_TYPE_X86 => Language {
+            processor: "x86".into(),
+            variant: "LE".into(),
+            size: 32,
+        },
+        CPU_TYPE_X86_64 => Language {
+            processor: "x86".into(),
+            variant: "LE".into(),
+            size: 64,
+        },
+        CPU_TYPE_ARM => Language {
+            processor: "ARM".into(),
+            variant: if (cpusubtype & N_ARM_THUMB_DEF as i32) != 0 {
+                "LE:THUMB".into()
+            } else {
+                "LE".into()
+            },
+            size: 32,
+        },
+        CPU_TYPE_ARM64 | CPU_TYPE_ARM64_32 => Language {
+            processor: "AARCH64".into(),
+            variant: "LE".into(),
+            size: 64,
+        },
+        CPU_TYPE_POWERPC => Language {
+            processor: "PowerPC".into(),
+            variant: "BE".into(),
+            size: 32,
+        },
+        CPU_TYPE_POWERPC64 => Language {
+            processor: "PowerPC".into(),
+            variant: "BE".into(),
+            size: 64,
+        },
+        CPU_TYPE_SPARC => Language {
+            processor: "SPARC".into(),
+            variant: "BE".into(),
+            size: 32,
+        },
+        _ => Language {
+            processor: "unknown".into(),
+            variant: "LE".into(),
+            size: 32,
+        },
+    }
+}
+
+/// Mach-O binary loader.
+///
+/// Loads Mach-O and FAT/Universal binaries into a `Program` by parsing
+/// headers, segments, sections, and symbols.
+pub struct MachOLoader;
+
+impl crate::BinaryLoader for MachOLoader {
+    fn name(&self) -> &str {
+        "Mach-O"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        is_macho(data)
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        // If this is a FAT binary, pick the first architecture slice.
+        let (macho_data, _cputype, _cpusubtype) = if data.len() >= 4 {
+            let magic_le = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+            let magic_be = u32::from_be_bytes([data[0], data[1], data[2], data[3]]);
+            if is_fat_magic(magic_le) || is_fat_magic(magic_be) {
+                let fat = parse_fat(data)?;
+                let arch = fat.arches.into_iter().next()
+                    .ok_or_else(|| anyhow::anyhow!("FAT binary has no architectures"))?;
+                let end = (arch.offset as usize)
+                    .checked_add(arch.size as usize)
+                    .ok_or_else(|| anyhow::anyhow!("FAT arch offset overflow"))?;
+                if end > data.len() {
+                    anyhow::bail!("FAT arch slice extends beyond file");
+                }
+                (&data[arch.offset as usize..end], arch.cputype, arch.cpusubtype)
+            } else {
+                (data, 0i32, 0i32)
+            }
+        } else {
+            anyhow::bail!("Data too short to be a Mach-O binary");
+        };
+
+        let macho = parse_macho(macho_data)?;
+        let lang = cpu_type_to_language(macho.header.cputype, macho.header.cpusubtype);
+
+        let prog_name = format!(
+            "macho_{}_{}",
+            cpu_type_name(macho.header.cputype),
+            cpu_subtype_name(macho.header.cputype, macho.header.cpusubtype)
+        );
+
+        let mut program = Program::new(&prog_name, lang);
+        let base = if options.base_address != 0 {
+            options.base_address
+        } else {
+            macho.segments()
+                .first()
+                .map(|s| s.vmaddr)
+                .unwrap_or(0)
+        };
+        program.image_base = base;
+
+        // Create memory blocks for each segment.
+        for seg in macho.segments() {
+            if seg.filesize == 0 && seg.vmsize == 0 {
+                continue;
+            }
+            let block = MemoryBlock {
+                name: seg.segname.clone(),
+                start: Address::new(seg.vmaddr),
+                size: std::cmp::max(seg.filesize, seg.vmsize),
+                is_read: (seg.initprot & VM_PROT_READ) != 0,
+                is_write: (seg.initprot & VM_PROT_WRITE) != 0,
+                is_execute: (seg.initprot & VM_PROT_EXECUTE) != 0,
+                is_initialized: seg.filesize > 0,
+            };
+            program.memory_blocks.push(block);
+        }
+
+        // Create memory blocks for each section.
+        for sect in &macho.sections {
+            if sect.size == 0 || sect.is_zerofill() {
+                continue;
+            }
+            let block = MemoryBlock {
+                name: format!("{}.{}", sect.segname, sect.sectname),
+                start: Address::new(sect.addr),
+                size: sect.size,
+                is_read: true,
+                is_write: sect.segname == "__DATA",
+                is_execute: sect.is_execute(),
+                is_initialized: true,
+            };
+            program.memory_blocks.push(block);
+        }
+
+        Ok(program)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 
@@ -3557,7 +3735,7 @@ mod tests {
     #[test]
     fn test_fat_binary_le() {
         let mut data = Vec::new();
-        data.extend_from_slice(&FAT_CIGAM.to_le_bytes());
+        data.extend_from_slice(&FAT_CIGAM.to_be_bytes()); // CIGAM in BE signals LE data
         data.extend_from_slice(&2u32.to_le_bytes()); // 2 arches
 
         // Arch 1: x86_64
@@ -3589,9 +3767,9 @@ mod tests {
         assert!(arm.is_some());
         assert_eq!(arm.unwrap().cpusubtype, CPU_SUBTYPE_ARM64E);
 
-        // cpu_types
+        // cpu_types (sorted by value: X86_64=0x01000007 < ARM64=0x0100000C)
         let types = fat.cpu_types();
-        assert_eq!(types, vec![CPU_TYPE_ARM64, CPU_TYPE_X86_64]);
+        assert_eq!(types, vec![CPU_TYPE_X86_64, CPU_TYPE_ARM64]);
     }
 
     #[test]
@@ -3701,8 +3879,8 @@ mod tests {
         assert!(sym.is_weak_def());
         assert!(!sym.is_undefined());
         assert!(!sym.is_stab());
-        assert_eq!(sym.entry_size(true), 16);
-        assert_eq!(sym.entry_size(false), 12);
+        assert_eq!(NList::entry_size(true), 16);
+        assert_eq!(NList::entry_size(false), 12);
     }
 
     #[test]

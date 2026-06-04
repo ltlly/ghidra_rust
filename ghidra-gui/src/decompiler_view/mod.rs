@@ -2204,7 +2204,7 @@ mod tests {
             .iter()
             .filter(|p| matches!(p.kind, BracketKind::Paren))
             .collect();
-        assert_eq!(paren_pairs.len(), 2);
+        assert_eq!(paren_pairs.len(), 3); // includes f() parens
 
         let brace_pairs: Vec<&BracketPair> = state
             .bracket_pairs

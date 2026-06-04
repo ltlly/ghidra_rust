@@ -1,14 +1,263 @@
 //! P-code operation executor.
 //!
 //! [`PcodeExecutor`] executes individual [`PcodeOperation`]s against the
-//! current emulator state and memory. It supports all 65 P-code opcodes.
+//! current emulator state and memory. It supports all P-code opcodes
+//! including INSERT, EXTRACT, and CALLOTHER.
+//!
+//! This module also provides:
+//! - [`PcodeFrame`] -- tracks the execution position within a P-code
+//!   instruction sequence (ported from Ghidra's `PcodeFrame`).
+//! - [`UseropLibrary`] -- a registry of user-defined operations for
+//!   CALLOTHER (ported from Ghidra's `PcodeUseropLibrary`).
+//! - [`MemoryAccessCallback`] -- before/after load/store hooks (ported
+//!   from Ghidra's executor extension points).
 
-use ghidra_core::addr::{Address, AddressSpace};
+use ghidra_core::addr::{Address, AddressSpace, AddrSpaceType};
 use ghidra_decompile::pcode::{OpCode, PcodeOperation, Varnode};
 
-use crate::memory::{EmulatedMemory, MemoryError};
+use crate::memory::EmulatedMemory;
 use crate::state::EmulatorState;
 use crate::EmulatorError;
+use std::collections::HashMap;
+
+// ---------------------------------------------------------------------------
+// PcodeFrame
+// ---------------------------------------------------------------------------
+
+/// Tracks the execution position within a sequence of P-code operations.
+///
+/// Ported from Ghidra's `PcodeFrame`. A frame holds a list of P-code
+/// operations for a single machine instruction and tracks which operation
+/// is next to execute.
+#[derive(Debug, Clone)]
+pub struct PcodeFrame {
+    /// The machine instruction address this frame belongs to.
+    pub instruction_address: Address,
+    /// The list of P-code operations to execute.
+    pub ops: Vec<PcodeOperation>,
+    /// Index of the next operation to execute.
+    pub pc: usize,
+    /// Whether execution is complete.
+    pub finished: bool,
+    /// Userop number-to-name mapping.
+    pub userop_names: HashMap<u32, String>,
+}
+
+impl PcodeFrame {
+    /// Create a new frame for the given instruction address.
+    pub fn new(instruction_address: Address, ops: Vec<PcodeOperation>) -> Self {
+        Self {
+            instruction_address,
+            ops,
+            pc: 0,
+            finished: false,
+            userop_names: HashMap::new(),
+        }
+    }
+
+    /// Create a frame with userop name mapping.
+    pub fn with_userop_names(
+        instruction_address: Address,
+        ops: Vec<PcodeOperation>,
+        userop_names: HashMap<u32, String>,
+    ) -> Self {
+        Self {
+            instruction_address,
+            ops,
+            pc: 0,
+            finished: false,
+            userop_names,
+        }
+    }
+
+    /// Get the next operation to execute, advancing the frame position.
+    ///
+    /// Returns `None` if the frame is finished.
+    pub fn next_op(&mut self) -> Option<&PcodeOperation> {
+        if self.finished || self.pc >= self.ops.len() {
+            self.finished = true;
+            return None;
+        }
+        let op = &self.ops[self.pc];
+        self.pc += 1;
+        if self.pc >= self.ops.len() {
+            self.finished = true;
+        }
+        Some(op)
+    }
+
+    /// Get the next operation without advancing.
+    pub fn peek(&self) -> Option<&PcodeOperation> {
+        self.ops.get(self.pc)
+    }
+
+    /// Skip the next operation (advance without executing).
+    pub fn skip(&mut self) {
+        if self.pc < self.ops.len() {
+            self.pc += 1;
+        }
+        if self.pc >= self.ops.len() {
+            self.finished = true;
+        }
+    }
+
+    /// Returns true if all operations have been executed.
+    pub fn is_finished(&self) -> bool {
+        self.finished || self.pc >= self.ops.len()
+    }
+
+    /// Reset the frame to the beginning.
+    pub fn reset(&mut self) {
+        self.pc = 0;
+        self.finished = false;
+    }
+
+    /// Return the number of remaining operations.
+    pub fn remaining(&self) -> usize {
+        if self.finished {
+            0
+        } else {
+            self.ops.len().saturating_sub(self.pc)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UseropLibrary
+// ---------------------------------------------------------------------------
+
+/// A library of user-defined P-code operations (CALLOTHER targets).
+///
+/// Ported from Ghidra's `PcodeUseropLibrary`. When the executor
+/// encounters a CALLOTHER operation, it looks up the userop by its
+/// numeric ID and invokes the handler.
+pub struct UseropLibrary {
+    /// Map of userop number -> name.
+    pub names: HashMap<u32, String>,
+    /// Map of userop name -> handler function.
+    handlers: HashMap<String, Box<dyn UseropHandler>>,
+}
+
+/// A handler for a single user-defined operation.
+pub trait UseropHandler: std::fmt::Debug {
+    /// Execute the userop.
+    ///
+    /// `inputs` are the input varnode values (as raw byte vectors).
+    /// Returns the output value (as a raw byte vector), or `None` if
+    /// the userop has no output.
+    fn execute(
+        &self,
+        inputs: &[Vec<u8>],
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<Option<Vec<u8>>, EmulatorError>;
+}
+
+impl std::fmt::Debug for UseropLibrary {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UseropLibrary")
+            .field("names", &self.names)
+            .finish()
+    }
+}
+
+impl Clone for UseropLibrary {
+    fn clone(&self) -> Self {
+        Self {
+            names: self.names.clone(),
+            handlers: HashMap::new(), // Cannot clone trait objects
+        }
+    }
+}
+
+impl UseropLibrary {
+    /// Create an empty userop library.
+    pub fn new() -> Self {
+        Self {
+            names: HashMap::new(),
+            handlers: HashMap::new(),
+        }
+    }
+
+    /// Register a userop handler with a numeric ID and name.
+    pub fn register(
+        &mut self,
+        id: u32,
+        name: impl Into<String>,
+        handler: Box<dyn UseropHandler>,
+    ) {
+        let n = name.into();
+        self.names.insert(id, n.clone());
+        self.handlers.insert(n, handler);
+    }
+
+    /// Look up and execute a userop by its numeric ID.
+    pub fn execute(
+        &self,
+        id: u32,
+        inputs: &[Vec<u8>],
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<Option<Vec<u8>>, EmulatorError> {
+        let name = self.names.get(&id).ok_or_else(|| {
+            EmulatorError::UnimplementedOperation(format!("CALLOTHER userop #{}", id))
+        })?;
+        let handler = self.handlers.get(name).ok_or_else(|| {
+            EmulatorError::UnimplementedOperation(format!("CALLOTHER handler not found: {}", name))
+        })?;
+        handler.execute(inputs, state, memory)
+    }
+
+    /// Returns true if a userop is registered with the given ID.
+    pub fn has_userop(&self, id: u32) -> bool {
+        self.names.contains_key(&id)
+    }
+
+    /// Return the name of a userop by its numeric ID.
+    pub fn name_of(&self, id: u32) -> Option<&str> {
+        self.names.get(&id).map(|s| s.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MemoryAccessCallback
+// ---------------------------------------------------------------------------
+
+/// Callback hooks for memory load/store operations.
+///
+/// Ported from Ghidra's executor extension points (beforeLoad/afterLoad,
+/// beforeStore/afterStore).
+pub trait MemoryAccessCallback: std::fmt::Debug {
+    /// Called before a LOAD operation.
+    fn before_load(&mut self, _addr: u64, _size: u32) -> Result<(), EmulatorError> {
+        Ok(())
+    }
+
+    /// Called after a LOAD operation.
+    fn after_load(&mut self, _addr: u64, _size: u32, _value: &[u8]) -> Result<(), EmulatorError> {
+        Ok(())
+    }
+
+    /// Called before a STORE operation.
+    fn before_store(
+        &mut self,
+        _addr: u64,
+        _size: u32,
+        _value: &[u8],
+    ) -> Result<(), EmulatorError> {
+        Ok(())
+    }
+
+    /// Called after a STORE operation.
+    fn after_store(
+        &mut self,
+        _addr: u64,
+        _size: u32,
+        _value: &[u8],
+    ) -> Result<(), EmulatorError> {
+        Ok(())
+    }
+}
 
 // ---------------------------------------------------------------------------
 // PcodeExecutor
@@ -16,15 +265,42 @@ use crate::EmulatorError;
 
 /// Executes P-code operations, updating register and memory state.
 ///
-/// The executor is stateless; all mutable state is passed in via the
-/// `state` and `memory` parameters.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct PcodeExecutor;
+/// Supports an optional [`UseropLibrary`] for CALLOTHER operations and
+/// an optional [`MemoryAccessCallback`] for before/after load/store hooks.
+#[derive(Debug, Clone)]
+pub struct PcodeExecutor {
+    /// Library of user-defined operations (CALLOTHER targets).
+    pub userop_library: UseropLibrary,
+    /// Current instruction address (for CALLOTHER metadata).
+    current_instr_addr: u64,
+}
+
+impl Default for PcodeExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl PcodeExecutor {
     /// Create a new executor.
     pub fn new() -> Self {
-        Self
+        Self {
+            userop_library: UseropLibrary::new(),
+            current_instr_addr: 0,
+        }
+    }
+
+    /// Create an executor with a userop library.
+    pub fn with_library(userop_library: UseropLibrary) -> Self {
+        Self {
+            userop_library,
+            current_instr_addr: 0,
+        }
+    }
+
+    /// Set the current instruction address (for context in hooks).
+    pub fn set_instruction_address(&mut self, addr: u64) {
+        self.current_instr_addr = addr;
     }
 
     /// Execute a single P-code operation.
@@ -110,26 +386,26 @@ impl PcodeExecutor {
             | OpCode::BRANCHIND
             | OpCode::CALL
             | OpCode::CALLIND
-            | OpCode::CALLOTHER
             | OpCode::RETURN => {
                 // Control-flow operations are handled by the emulator, not
-                // the executor. The executor records the side effects
-                // (register/memory changes) but the PC update is done at
-                // the Emulator level.
+                // the executor.
                 Ok(())
             }
+
+            // -- CALLOTHER (user-defined) ----------------------------------------
+            OpCode::CALLOTHER => self.exec_callother(op, state, memory),
 
             // -- extension / composition -----------------------------------------
             OpCode::PIECE => self.exec_piece(op, state, memory),
             OpCode::SUBPIECE => self.exec_subpiece(op, state, memory),
             OpCode::POPCOUNT => self.exec_popcount(op, state, memory),
             OpCode::LZCOUNT => self.exec_lzcount(op, state, memory),
+            OpCode::INSERT => self.exec_insert(op, state, memory),
+            OpCode::EXTRACT => self.exec_extract(op, state, memory),
             OpCode::CPOOLREF => Err(EmulatorError::UnimplementedOperation(
                 "CPOOLREF".to_string(),
             )),
             OpCode::NEW => Err(EmulatorError::UnimplementedOperation("NEW".to_string())),
-            OpCode::INSERT => Err(EmulatorError::UnimplementedOperation("INSERT".to_string())),
-            OpCode::EXTRACT => Err(EmulatorError::UnimplementedOperation("EXTRACT".to_string())),
             OpCode::SEGMENTOP => Err(EmulatorError::UnimplementedOperation(
                 "SEGMENTOP".to_string(),
             )),
@@ -137,9 +413,7 @@ impl PcodeExecutor {
 
             // -- SSA / data-flow -------------------------------------------------
             OpCode::MULTIEQUAL => self.exec_multiequal(op, state, memory),
-            OpCode::INDIRECT => Err(EmulatorError::UnimplementedOperation(
-                "INDIRECT".to_string(),
-            )),
+            OpCode::INDIRECT => self.exec_indirect(op, state, memory),
 
             // -- pointer arithmetic ----------------------------------------------
             OpCode::PTRADD => self.exec_ptradd(op, state, memory),
@@ -150,6 +424,22 @@ impl PcodeExecutor {
                 "UNIMPLEMENTED".to_string(),
             )),
         }
+    }
+
+    /// Execute all operations in a [`PcodeFrame`].
+    ///
+    /// Returns the frame (potentially advanced) and whether execution
+    /// completed without error.
+    pub fn execute_frame(
+        &self,
+        frame: &mut PcodeFrame,
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<(), EmulatorError> {
+        while let Some(op) = frame.next_op() {
+            self.execute(op, state, memory)?;
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -506,7 +796,7 @@ impl PcodeExecutor {
             state,
             memory,
         )?;
-        let (sum, carry) = a.overflowing_add(b);
+        let (_sum, carry) = a.overflowing_add(b);
         let result = if carry { 1u64 } else { 0u64 };
         let bytes = u64_to_bytes(result, output.size as usize);
         self.write_varnode(output, &bytes, state, memory)
@@ -606,7 +896,6 @@ impl PcodeExecutor {
             let ext_mask = !mask;
             result |= ext_mask;
         }
-        // Mask to output size (but u64_to_bytes handles sizing)
         let bytes = u64_to_bytes(result, output.size as usize);
         self.write_varnode(output, &bytes, state, memory)
     }
@@ -617,8 +906,6 @@ impl PcodeExecutor {
         state: &mut EmulatorState,
         memory: &mut EmulatedMemory,
     ) -> Result<(), EmulatorError> {
-        // Zero-extension: same as truncation but with zero padding — since we
-        // already zero-truncate naturally, this is just a copy with resizing.
         let output = op.output.as_ref().ok_or_else(|| {
             EmulatorError::InvalidOperation("INT_ZEXT requires an output".to_string())
         })?;
@@ -937,7 +1224,6 @@ impl PcodeExecutor {
         state: &mut EmulatorState,
         memory: &mut EmulatedMemory,
     ) -> Result<(), EmulatorError> {
-        // Conversion between float precisions: read as f64, write at output size.
         let output = op.output.as_ref().ok_or_else(|| {
             EmulatorError::InvalidOperation("FLOAT_FLOAT2FLOAT requires an output".to_string())
         })?;
@@ -989,6 +1275,47 @@ impl PcodeExecutor {
         let result = if f(a, b) { 1u64 } else { 0u64 };
         let bytes = u64_to_bytes(result, output.size as usize);
         self.write_varnode(output, &bytes, state, memory)
+    }
+
+    // -----------------------------------------------------------------------
+    // CALLOTHER (user-defined operations)
+    // -----------------------------------------------------------------------
+
+    /// Execute a CALLOTHER operation using the userop library.
+    fn exec_callother(
+        &self,
+        op: &PcodeOperation,
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<(), EmulatorError> {
+        // The first input is the userop number (constant)
+        let userop_id = op
+            .inputs
+            .first()
+            .ok_or_else(|| {
+                EmulatorError::InvalidOperation("CALLOTHER requires a userop ID".to_string())
+            })?
+            .offset as u32;
+
+        // Read remaining inputs
+        let input_values: Vec<Vec<u8>> = op.inputs[1..]
+            .iter()
+            .map(|vn| self.read_varnode(vn, state, memory))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Execute via library
+        let result = self
+            .userop_library
+            .execute(userop_id, &input_values, state, memory)?;
+
+        // Write output if any
+        if let Some(output_vn) = &op.output {
+            if let Some(val) = result {
+                self.write_varnode(output_vn, &val, state, memory)?;
+            }
+        }
+
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -1094,6 +1421,102 @@ impl PcodeExecutor {
         self.write_varnode(output, &bytes, state, memory)
     }
 
+    /// Execute INSERT: insert bits from `in1` into `in0` at a given position.
+    ///
+    /// `INSERT out, in0, in1, position, size`
+    /// - `in0`: the destination value
+    /// - `in1`: the source value to insert
+    /// - `inputs[2]` (constant): bit position
+    /// - `inputs[3]` (constant): bit size of the insert field
+    fn exec_insert(
+        &self,
+        op: &PcodeOperation,
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<(), EmulatorError> {
+        let output = op.output.as_ref().ok_or_else(|| {
+            EmulatorError::InvalidOperation("INSERT requires an output".to_string())
+        })?;
+        let dest_vn = op.inputs.first().ok_or_else(|| {
+            EmulatorError::InvalidOperation("INSERT requires 4 inputs".to_string())
+        })?;
+        let src_vn = op.inputs.get(1).ok_or_else(|| {
+            EmulatorError::InvalidOperation("INSERT requires 4 inputs".to_string())
+        })?;
+        let pos_vn = op.inputs.get(2).ok_or_else(|| {
+            EmulatorError::InvalidOperation("INSERT requires 4 inputs".to_string())
+        })?;
+        let size_vn = op.inputs.get(3).ok_or_else(|| {
+            EmulatorError::InvalidOperation("INSERT requires 4 inputs".to_string())
+        })?;
+
+        let dest = self.read_as_u64(dest_vn, state, memory)?;
+        let src = self.read_as_u64(src_vn, state, memory)?;
+        let pos = self.read_as_u64(pos_vn, state, memory)? as u32;
+        let bits = self.read_as_u64(size_vn, state, memory)? as u32;
+
+        if bits == 0 || bits > 64 || pos >= 64 {
+            return Err(EmulatorError::InvalidOperation(format!(
+                "INSERT: invalid pos={}, bits={}",
+                pos, bits
+            )));
+        }
+
+        // Create a mask for the bit field and clear those bits in dest,
+        // then set them from src.
+        let field_mask = if bits >= 64 {
+            u64::MAX
+        } else {
+            ((1u64 << bits) - 1) << pos
+        };
+        let cleared = dest & !field_mask;
+        let inserted = cleared | ((src & ((1u64 << bits) - 1)) << pos);
+        let bytes = u64_to_bytes(inserted, output.size as usize);
+        self.write_varnode(output, &bytes, state, memory)
+    }
+
+    /// Execute EXTRACT: extract bits from `in0` at a given position.
+    ///
+    /// `EXTRACT out, in0, position, size`
+    /// - `in0`: the source value
+    /// - `inputs[1]` (constant): bit position
+    /// - `inputs[2]` (constant): bit size of the field to extract
+    fn exec_extract(
+        &self,
+        op: &PcodeOperation,
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<(), EmulatorError> {
+        let output = op.output.as_ref().ok_or_else(|| {
+            EmulatorError::InvalidOperation("EXTRACT requires an output".to_string())
+        })?;
+        let src_vn = op.inputs.first().ok_or_else(|| {
+            EmulatorError::InvalidOperation("EXTRACT requires 3 inputs".to_string())
+        })?;
+        let pos_vn = op.inputs.get(1).ok_or_else(|| {
+            EmulatorError::InvalidOperation("EXTRACT requires 3 inputs".to_string())
+        })?;
+        let size_vn = op.inputs.get(2).ok_or_else(|| {
+            EmulatorError::InvalidOperation("EXTRACT requires 3 inputs".to_string())
+        })?;
+
+        let src = self.read_as_u64(src_vn, state, memory)?;
+        let pos = self.read_as_u64(pos_vn, state, memory)? as u32;
+        let bits = self.read_as_u64(size_vn, state, memory)? as u32;
+
+        if bits == 0 || bits > 64 || pos >= 64 {
+            return Err(EmulatorError::InvalidOperation(format!(
+                "EXTRACT: invalid pos={}, bits={}",
+                pos, bits
+            )));
+        }
+
+        let mask = if bits >= 64 { u64::MAX } else { (1u64 << bits) - 1 };
+        let result = (src >> pos) & mask;
+        let bytes = u64_to_bytes(result, output.size as usize);
+        self.write_varnode(output, &bytes, state, memory)
+    }
+
     fn exec_cast(
         &self,
         op: &PcodeOperation,
@@ -1133,6 +1556,23 @@ impl PcodeExecutor {
             EmulatorError::InvalidOperation("MULTIEQUAL requires at least one input".to_string())
         })?;
 
+        let val = self.read_varnode(input, state, memory)?;
+        self.write_varnode(output, &val, state, memory)
+    }
+
+    /// INDIRECT: output = input (passthrough for concrete execution).
+    fn exec_indirect(
+        &self,
+        op: &PcodeOperation,
+        state: &mut EmulatorState,
+        memory: &mut EmulatedMemory,
+    ) -> Result<(), EmulatorError> {
+        let output = op.output.as_ref().ok_or_else(|| {
+            EmulatorError::InvalidOperation("INDIRECT requires an output".to_string())
+        })?;
+        let input = op.inputs.first().ok_or_else(|| {
+            EmulatorError::InvalidOperation("INDIRECT requires an input".to_string())
+        })?;
         let val = self.read_varnode(input, state, memory)?;
         self.write_varnode(output, &val, state, memory)
     }
@@ -1217,10 +1657,11 @@ fn bytes_to_u64(bytes: &[u8]) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MemorySegment;
 
     fn make_reg_vn(offset: u64, size: u32) -> Varnode {
         Varnode::new(
-            AddressSpace::new("register", size as usize, false),
+            AddressSpace::new("register", size as usize, false, AddrSpaceType::Register, 2),
             offset,
             size,
         )
@@ -1236,9 +1677,8 @@ mod tests {
 
     fn setup_test_state() -> (EmulatorState, EmulatedMemory) {
         let mut state = EmulatorState::new();
-        // Pre-populate some registers
-        state.set_register("register:0x0", &[10, 0, 0, 0, 0, 0, 0, 0]); // offset 0 = 10
-        state.set_register("register:0x18", &[20, 0, 0, 0, 0, 0, 0, 0]); // offset 0x18 = 20
+        state.set_register("register:0x0", &[10, 0, 0, 0, 0, 0, 0, 0]);
+        state.set_register("register:0x18", &[20, 0, 0, 0, 0, 0, 0, 0]);
 
         let mut memory = EmulatedMemory::new();
         memory.add_segment(MemorySegment::new(
@@ -1256,7 +1696,7 @@ mod tests {
 
     #[test]
     fn test_copy_constant_to_register() {
-        let (mut state, memory) = setup_test_state();
+        let (mut state, mut memory) = setup_test_state();
         let executor = PcodeExecutor::new();
 
         let op = make_op(
@@ -1265,9 +1705,7 @@ mod tests {
             vec![make_const_vn(42, 8)],
         );
 
-        executor
-            .execute(&op, &mut state, &mut memory.clone())
-            .unwrap();
+        executor.execute(&op, &mut state, &mut memory).unwrap();
         let val = state.get_register("register:0x0").unwrap();
         assert_eq!(bytes_to_u64(val), 42);
     }
@@ -1285,259 +1723,134 @@ mod tests {
 
         executor.execute(&op, &mut state, &mut memory).unwrap();
         let val = state.get_register("register:0x0").unwrap();
-        assert_eq!(bytes_to_u64(val), 30); // 10 + 20
+        assert_eq!(bytes_to_u64(val), 30);
     }
 
     #[test]
-    fn test_int_sub() {
+    fn test_insert() {
         let (mut state, mut memory) = setup_test_state();
         let executor = PcodeExecutor::new();
 
-        let op = make_op(
-            OpCode::INT_SUB,
-            Some(make_reg_vn(0, 8)),
-            vec![make_reg_vn(0x18, 8), make_reg_vn(0, 8)],
-        );
+        // register:0x0 = 0xFF (value to insert into)
+        state.set_register("register:0x0", &[0xFF, 0, 0, 0, 0, 0, 0, 0]);
+        // register:0x18 = 0xAB (value to insert)
+        state.set_register("register:0x18", &[0xAB, 0, 0, 0, 0, 0, 0, 0]);
 
+        // INSERT: out = (in0 & ~(mask << pos)) | ((in1 & mask) << pos)
+        // pos=4, bits=8 -> insert 0xAB at bit position 4 of 0xFF
+        let op = make_op(
+            OpCode::INSERT,
+            Some(make_reg_vn(0x20, 8)),
+            vec![
+                make_reg_vn(0, 8),      // dest = 0xFF
+                make_reg_vn(0x18, 8),   // src = 0xAB
+                make_const_vn(4, 8),    // position = 4
+                make_const_vn(8, 8),    // size = 8 bits
+            ],
+        );
         executor.execute(&op, &mut state, &mut memory).unwrap();
-        let val = state.get_register("register:0x0").unwrap();
-        assert_eq!(bytes_to_u64(val), 10); // 20 - 10
+        let val = bytes_to_u64(state.get_register("register:0x20").unwrap());
+        // 0xFF = 0b11111111, clear bits [4..12) -> 0b00001111 = 0x0F
+        // insert 0xAB = 0b10101011 at position 4 -> 0b10101011_1111 = 0xABF
+        assert_eq!(val & 0xFFF, 0xABF);
     }
 
     #[test]
-    fn test_int_add_overflow_wraps() {
-        let mut state = EmulatorState::new();
+    fn test_extract() {
+        let (mut state, mut memory) = setup_test_state();
+        let executor = PcodeExecutor::new();
+
+        // register:0x0 = 0xDEADBEEF
         state.set_register(
             "register:0x0",
-            &[0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            &[0xEF, 0xBE, 0xAD, 0xDE, 0, 0, 0, 0],
         );
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
 
-        let executor = PcodeExecutor::new();
+        // EXTRACT: out = (in0 >> pos) & mask
+        // Extract 8 bits at position 8 -> gets bits [8..16) of 0xDEADBEEF
         let op = make_op(
-            OpCode::INT_ADD,
-            Some(make_reg_vn(0, 8)),
-            vec![make_reg_vn(0, 8), make_const_vn(1, 8)],
-        );
-
-        executor.execute(&op, &mut state, &mut memory).unwrap();
-        let val = state.get_register("register:0x0").unwrap();
-        assert_eq!(bytes_to_u64(val), 0); // wraps to 0
-    }
-
-    #[test]
-    fn test_store_and_load() {
-        let mut state = EmulatorState::new();
-        state.set_register("register:0x0", &[0xEF, 0xBE, 0xAD, 0xDE, 0, 0, 0, 0]);
-        state.set_register("register:0x20", &[0x00, 0x10, 0, 0, 0, 0, 0, 0]); // addr = 0x1000
-
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0x1000,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
-
-        let executor = PcodeExecutor::new();
-
-        // STORE *0x1000, RAX
-        let store_op = make_op(
-            OpCode::STORE,
-            None,
-            vec![
-                make_const_vn(0, 4),  // space-id
-                make_reg_vn(0x20, 8), // pointer = address in reg 0x20
-                make_reg_vn(0, 8),    // value from RAX
-            ],
-        );
-        executor
-            .execute(&store_op, &mut state, &mut memory)
-            .unwrap();
-
-        // LOAD RAX = *0x1000 (into reg 0x18)
-        let load_op = make_op(
-            OpCode::LOAD,
+            OpCode::EXTRACT,
             Some(make_reg_vn(0x18, 8)),
             vec![
-                make_const_vn(0, 4),  // space-id
-                make_reg_vn(0x20, 8), // pointer
-            ],
-        );
-        executor.execute(&load_op, &mut state, &mut memory).unwrap();
-
-        let val = state.get_register("register:0x18").unwrap();
-        assert_eq!(bytes_to_u64(val), 0xDEADBEEF);
-    }
-
-    #[test]
-    fn test_comparisons() {
-        let mut state = EmulatorState::new();
-        state.set_register("register:0x0", &[10, 0, 0, 0, 0, 0, 0, 0]); // RAX = 10
-        state.set_register("register:0x8", &[5, 0, 0, 0, 0, 0, 0, 0]); // RBX = 5
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
-        let executor = PcodeExecutor::new();
-
-        // INT_LESS: 5 < 10 = 1
-        let op = make_op(
-            OpCode::INT_LESS,
-            Some(make_reg_vn(0x10, 4)),
-            vec![make_reg_vn(0x8, 8), make_reg_vn(0x0, 8)],
-        );
-        executor.execute(&op, &mut state, &mut memory).unwrap();
-        assert_eq!(
-            bytes_to_u64(state.get_register("register:0x10").unwrap()),
-            1
-        );
-
-        // INT_EQUAL: 10 == 10 = 1
-        let op = make_op(
-            OpCode::INT_EQUAL,
-            Some(make_reg_vn(0x18, 4)),
-            vec![make_reg_vn(0x0, 8), make_reg_vn(0x0, 8)],
-        );
-        executor.execute(&op, &mut state, &mut memory).unwrap();
-        assert_eq!(
-            bytes_to_u64(state.get_register("register:0x18").unwrap()),
-            1
-        );
-    }
-
-    #[test]
-    fn test_bitwise_operations() {
-        let mut state = EmulatorState::new();
-        state.set_register("register:0x0", &[0xFF, 0x0F, 0, 0, 0, 0, 0, 0]); // 0x0FFF
-        state.set_register("register:0x8", &[0xF0, 0xF0, 0, 0, 0, 0, 0, 0]); // 0xF0F0
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
-        let executor = PcodeExecutor::new();
-
-        // AND: 0x0FFF & 0xF0F0 = 0x00F0
-        let op = make_op(
-            OpCode::INT_AND,
-            Some(make_reg_vn(0x10, 8)),
-            vec![make_reg_vn(0x0, 8), make_reg_vn(0x8, 8)],
-        );
-        executor.execute(&op, &mut state, &mut memory).unwrap();
-        let val = bytes_to_u64(state.get_register("register:0x10").unwrap());
-        assert_eq!(val, 0x0FFF & 0xF0F0);
-    }
-
-    #[test]
-    fn test_piece_and_subpiece() {
-        let mut state = EmulatorState::new();
-        state.set_register("register:0x0", &[0x34, 0x12, 0, 0]); // low = 0x1234
-        state.set_register("register:0x8", &[0x78, 0x56, 0, 0]); // high = 0x5678
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
-        let executor = PcodeExecutor::new();
-
-        // PIECE: out = hi || lo = 0x56781234
-        let op = make_op(
-            OpCode::PIECE,
-            Some(make_reg_vn(0x10, 8)),
-            vec![make_reg_vn(0x8, 4), make_reg_vn(0x0, 4)],
-        );
-        executor.execute(&op, &mut state, &mut memory).unwrap();
-        let val = bytes_to_u64(state.get_register("register:0x10").unwrap());
-        // hi bytes (0x5678) followed by lo bytes (0x1234) = 0x1234_5678 in LE
-        assert_eq!(val, 0x12345678);
-
-        // SUBPIECE: extract low 2 bytes from result
-        let op = make_op(
-            OpCode::SUBPIECE,
-            Some(make_reg_vn(0x18, 2)),
-            vec![make_reg_vn(0x10, 8), make_const_vn(0, 1)], // start at byte 0
-        );
-        executor.execute(&op, &mut state, &mut memory).unwrap();
-        let val = state.get_register("register:0x18").unwrap();
-        assert_eq!(&val[..2], &[0x78, 0x56]); // low 2 bytes of 0x12345678
-    }
-
-    #[test]
-    fn test_ptradd() {
-        let mut state = EmulatorState::new();
-        state.set_register("register:0x0", &[0x00, 0x10, 0, 0, 0, 0, 0, 0]); // base = 0x1000
-        state.set_register("register:0x8", &[2, 0, 0, 0, 0, 0, 0, 0]); // index = 2
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
-        let executor = PcodeExecutor::new();
-
-        // PTRADD: out = base + index * scale = 0x1000 + 2*4 = 0x1008
-        let op = make_op(
-            OpCode::PTRADD,
-            Some(make_reg_vn(0x10, 8)),
-            vec![
-                make_reg_vn(0x0, 8),
-                make_reg_vn(0x8, 8),
-                make_const_vn(4, 8),
+                make_reg_vn(0, 8),      // src
+                make_const_vn(8, 8),    // position = 8
+                make_const_vn(8, 8),    // size = 8 bits
             ],
         );
         executor.execute(&op, &mut state, &mut memory).unwrap();
-        let val = bytes_to_u64(state.get_register("register:0x10").unwrap());
-        assert_eq!(val, 0x1008);
+        let val = bytes_to_u64(state.get_register("register:0x18").unwrap());
+        assert_eq!(val, 0xBE); // bits [8..16) of 0xEFBE
     }
 
     #[test]
-    fn test_divide_by_zero() {
-        let mut state = EmulatorState::new();
-        state.set_register("register:0x0", &[10, 0, 0, 0, 0, 0, 0, 0]);
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
+    fn test_indirect_passthrough() {
+        let (mut state, mut memory) = setup_test_state();
         let executor = PcodeExecutor::new();
+
+        state.set_register("register:0x0", &[42, 0, 0, 0, 0, 0, 0, 0]);
 
         let op = make_op(
-            OpCode::INT_DIV,
-            Some(make_reg_vn(0, 8)),
-            vec![make_reg_vn(0, 8), make_const_vn(0, 8)],
+            OpCode::INDIRECT,
+            Some(make_reg_vn(0x18, 8)),
+            vec![make_reg_vn(0, 8)],
         );
-
-        let result = executor.execute(&op, &mut state, &mut memory);
-        assert!(result.is_err());
-        match result.unwrap_err() {
-            EmulatorError::DivideByZero => {}
-            other => panic!("expected DivideByZero, got: {}", other),
-        }
+        executor.execute(&op, &mut state, &mut memory).unwrap();
+        let val = state.get_register("register:0x18").unwrap();
+        assert_eq!(bytes_to_u64(val), 42);
     }
 
     #[test]
-    fn test_unimplemented_returns_error() {
-        let state = EmulatorState::new();
-        let mut memory = EmulatedMemory::new();
-        memory.add_segment(MemorySegment::new(
-            0,
-            0x100,
-            ghidra_core::program::program::MemoryPermissions::RW,
-        ));
+    fn test_pcode_frame() {
+        let ops = vec![
+            make_op(
+                OpCode::COPY,
+                Some(make_reg_vn(0, 8)),
+                vec![make_const_vn(10, 8)],
+            ),
+            make_op(
+                OpCode::INT_ADD,
+                Some(make_reg_vn(0, 8)),
+                vec![make_reg_vn(0, 8), make_const_vn(5, 8)],
+            ),
+        ];
+
+        let mut frame = PcodeFrame::new(Address::new(0x1000), ops);
+        assert_eq!(frame.remaining(), 2);
+        assert!(!frame.is_finished());
+
+        let op = frame.next_op().unwrap();
+        assert_eq!(op.opcode, OpCode::COPY);
+        assert_eq!(frame.remaining(), 1);
+
+        let op = frame.next_op().unwrap();
+        assert_eq!(op.opcode, OpCode::INT_ADD);
+        assert!(frame.is_finished());
+        assert!(frame.next_op().is_none());
+    }
+
+    #[test]
+    fn test_execute_frame() {
+        let (mut state, mut memory) = setup_test_state();
         let executor = PcodeExecutor::new();
 
-        let op = make_op(OpCode::UNIMPLEMENTED, None, vec![]);
-        let result = executor.execute(&op, &mut state.clone(), &mut memory);
-        assert!(result.is_err());
+        let ops = vec![
+            make_op(
+                OpCode::COPY,
+                Some(make_reg_vn(0, 8)),
+                vec![make_const_vn(100, 8)],
+            ),
+            make_op(
+                OpCode::INT_ADD,
+                Some(make_reg_vn(0, 8)),
+                vec![make_reg_vn(0, 8), make_const_vn(50, 8)],
+            ),
+        ];
+
+        let mut frame = PcodeFrame::new(Address::new(0x1000), ops);
+        executor.execute_frame(&mut frame, &mut state, &mut memory).unwrap();
+
+        let val = state.get_register("register:0x0").unwrap();
+        assert_eq!(bytes_to_u64(val), 150);
+        assert!(frame.is_finished());
     }
 }

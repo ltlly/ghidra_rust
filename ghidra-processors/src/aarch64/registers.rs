@@ -519,7 +519,7 @@ mod tests {
         for i in 0..=30 {
             let w_name = format!("W{}", i);
             let w = bank.get(&w_name).expect(&format!("Missing {}", w_name));
-            assert_eq!(w.parent.as_deref(), Some(&format!("X{}", i)));
+            assert_eq!(w.parent.as_deref(), Some(format!("X{}", i).as_str()));
             assert_eq!(w.bit_size, 32);
         }
         let wzr = bank.get("WZR").unwrap();

@@ -467,16 +467,22 @@ impl fmt::Display for BinaryOperator {
 
 /// Skip whitespace and line comments (`#` to end of line).
 fn ws(input: &str) -> IResult<&str, ()> {
-    let (input, _) = many0(alt((
-        // Whitespace
-        map(multispace0, |_| ()),
-        // Line comment: `#` to newline or EOF
-        map(
-            preceded(char('#'), take_while(|c: char| c != '\n' && c != '\r')),
-            |_| (),
-        ),
-    )))(input)?;
-    Ok((input, ()))
+    let mut remaining = input;
+    loop {
+        let before = remaining;
+        // Skip whitespace
+        let (r, _) = multispace0(remaining)?;
+        remaining = r;
+        // Skip line comment: `#` to newline or EOF
+        if remaining.starts_with('#') {
+            let (r, _) = preceded(char('#'), take_while(|c: char| c != '\n' && c != '\r'))(remaining)?;
+            remaining = r;
+        }
+        if remaining.len() == before.len() {
+            break;
+        }
+    }
+    Ok((remaining, ()))
 }
 
 /// Parse something surrounded by optional whitespace.
@@ -506,6 +512,7 @@ fn identifier(input: &str) -> IResult<&str, String> {
         || kw == "unique_space"
         || kw == "register"
         || kw == "token"
+        || kw == "is"
         || kw == "context"
         || kw == "macro"
         || kw == "pcodeop"
@@ -632,7 +639,7 @@ fn parse_alignment(input: &str) -> IResult<&str, u32> {
 fn parse_space(input: &str) -> IResult<&str, SpaceDefinition> {
     let (input, _) = token(tag("define"))(input)?;
     let (input, _) = token(tag("space"))(input)?;
-    let (input, name) = token(identifier)(input)?;
+    let (input, name) = token(identifier_or_keyword)(input)?;
     let (input, _) = token(tag("type"))(input)?;
     let (input, _) = token(char('='))(input)?;
     let (input, space_type) = token(alt((
@@ -1046,21 +1053,62 @@ fn pattern_factor(input: &str) -> IResult<&str, PatternExpr> {
     ))(input)
 }
 
-/// Parse a pattern term (factors joined by `&`).
+/// Parse a pattern term (factors joined by `&`, with optional implicit AND).
 fn pattern_term(input: &str) -> IResult<&str, PatternExpr> {
     let (mut input, mut first) = pattern_factor(input)?;
+    // When an ellipsis (`...`) is encountered before an explicit `&`, it is
+    // deferred and combined with the *right* side of the `&`.  This produces
+    // `op=0x90 ... & REL` => `And(FieldValue{op}, And(Ellipsis, TableRef))`
+    // rather than `And(And(FieldValue{op}, Ellipsis), TableRef)`.
+    let mut pending_ellipsis = false;
+
     loop {
-        let (rest, _) = opt(token(char('&')))(input)?;
-        if rest.len() == input.len() {
-            break; // no & found
+        // Skip whitespace first, then check for `...`, explicit `&`, or implicit AND.
+        let (after_ws, _) = multispace0(input)?;
+
+        // Consume a standalone `...` and defer it.
+        if let Ok((rest, _)) = tag::<&str, &str, nom::error::Error<&str>>("...")(after_ws) {
+            input = rest;
+            pending_ellipsis = true;
+            continue;
         }
-        input = rest;
-        let (rest, next) = pattern_factor(input)?;
-        input = rest;
-        // Flatten: combine with AND
-        let combined = PatternExpr::And(Box::new(first), Box::new(next));
-        // For multiple & in a row, left-associate
-        first = combined;
+
+        // Try explicit `&` first.
+        let amp: IResult<&str, char> = char('&')(after_ws);
+        if let Ok((rest, _)) = amp {
+            input = rest;
+            let (rest, next) = pattern_factor(input)?;
+            input = rest;
+            if pending_ellipsis {
+                // Wrap the deferred ellipsis with the right operand: ... AND next
+                let right = PatternExpr::And(Box::new(PatternExpr::Ellipsis), Box::new(next));
+                first = PatternExpr::And(Box::new(first), Box::new(right));
+                pending_ellipsis = false;
+            } else {
+                first = PatternExpr::And(Box::new(first), Box::new(next));
+            }
+            continue;
+        }
+        // Try implicit AND: the next token is a pattern factor (not `{` or end of input).
+        if !after_ws.is_empty() && !after_ws.starts_with('{') && !after_ws.starts_with('}') {
+            if let Ok((rest, next)) = pattern_factor(after_ws) {
+                input = rest;
+                if pending_ellipsis {
+                    let right = PatternExpr::And(Box::new(PatternExpr::Ellipsis), Box::new(next));
+                    first = PatternExpr::And(Box::new(first), Box::new(right));
+                    pending_ellipsis = false;
+                } else {
+                    first = PatternExpr::And(Box::new(first), Box::new(next));
+                }
+                continue;
+            }
+        }
+        break;
+    }
+    // If `...` appeared but was never followed by another factor, combine it
+    // with the left side (normal left-associative grouping).
+    if pending_ellipsis {
+        first = PatternExpr::And(Box::new(first), Box::new(PatternExpr::Ellipsis));
     }
     Ok((input, first))
 }
@@ -1069,14 +1117,16 @@ fn pattern_term(input: &str) -> IResult<&str, PatternExpr> {
 fn parse_pattern_expression(input: &str) -> IResult<&str, PatternExpr> {
     let (mut input, mut first) = pattern_term(input)?;
     loop {
-        let (rest, _) = opt(token(char('|')))(input)?;
-        if rest.len() == input.len() {
-            break;
+        let (after_ws, _) = multispace0(input)?;
+        match char::<&str, nom::error::Error<&str>>('|')(after_ws) {
+            Ok((rest, _)) => {
+                input = rest;
+                let (rest, next) = pattern_term(input)?;
+                input = rest;
+                first = PatternExpr::Or(Box::new(first), Box::new(next));
+            }
+            Err(_) => break,
         }
-        input = rest;
-        let (rest, next) = pattern_term(input)?;
-        input = rest;
-        first = PatternExpr::Or(Box::new(first), Box::new(next));
     }
     Ok((input, first))
 }
@@ -1127,7 +1177,7 @@ fn parse_primary(input: &str) -> IResult<&str, Expression> {
         // Varnode dereference: *:size expr or *[space]:size expr
         map(parse_varnode, Expression::Varnode),
         // Address-of: &expr
-        map(preceded(token(char('&')), parse_primary), |e| {
+        map(preceded(token(char::<&str, nom::error::Error<&str>>('&')), parse_primary), |e| {
             Expression::AddressOf(Box::new(e))
         }),
         // Function call: name(args)
@@ -1301,7 +1351,7 @@ fn parse_comparison(input: &str) -> IResult<&str, Expression> {
 fn parse_bitwise_and(input: &str) -> IResult<&str, Expression> {
     let (mut input, mut left) = parse_comparison(input)?;
     loop {
-        let res: IResult<&str, _> = token(char('&'))(input);
+        let res: IResult<&str, _> = token(char::<&str, nom::error::Error<&str>>('&'))(input);
         match res {
             Ok((rest, _)) => {
                 let (rest, right) = parse_comparison(rest)?;
@@ -1343,7 +1393,7 @@ fn parse_bitwise_xor(input: &str) -> IResult<&str, Expression> {
 fn parse_bitwise_or(input: &str) -> IResult<&str, Expression> {
     let (mut input, mut left) = parse_bitwise_xor(input)?;
     loop {
-        let res: IResult<&str, _> = token(char('|'))(input);
+        let res: IResult<&str, _> = token(char::<&str, nom::error::Error<&str>>('|'))(input);
         match res {
             Ok((rest, _)) => {
                 let (rest, right) = parse_bitwise_xor(rest)?;
@@ -1605,10 +1655,20 @@ fn parse_semantic_block(input: &str) -> IResult<&str, Vec<SemanticStatement>> {
 // ===========================================================================
 
 /// Parse a comma-separated list of operand patterns.
+/// Parse an operand pattern name: an identifier or a numeric size constraint.
+/// Unlike `identifier`, this allows pure numeric operands (e.g., `2` for size).
+/// Unlike `identifier_or_keyword`, this excludes structural keywords like "is".
+fn operand_name(input: &str) -> IResult<&str, String> {
+    alt((
+        map(token(identifier), |s| s),
+        map(token(integer), |n| n.to_string()),
+    ))(input)
+}
+
 fn parse_operand_list(input: &str) -> IResult<&str, Vec<OperandPattern>> {
     separated_list0(
         token(char(',')),
-        map(token(identifier_or_keyword), |name| OperandPattern {
+        map(operand_name, |name| OperandPattern {
             name,
             constraint: OperandConstraint::Any,
         }),

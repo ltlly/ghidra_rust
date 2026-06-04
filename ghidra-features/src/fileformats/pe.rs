@@ -1460,10 +1460,8 @@ fn parse_optional_header(
     let (i, loader_flags) = le_u32(i)?;
     let (i, number_of_rva_and_sizes) = le_u32(i)?;
 
-    // Consume any remaining optional-header bytes
-    let consumed: usize = if plus { 112 } else { 96 };
-    let pad = size as usize - consumed;
-    let (i, _) = take(pad)(i)?;
+    // Note: data directories follow the fixed optional header fields and are
+    // consumed separately by the caller. We do NOT consume padding here.
 
     Ok((i, OptionalHeader {
         magic,
@@ -2710,6 +2708,204 @@ fn read_null_terminated_string(data: &[u8], off: usize) -> Option<String> {
     let slice = data.get(off..)?;
     let end = slice.iter().position(|&b| b == 0).unwrap_or(slice.len());
     Some(String::from_utf8_lossy(&slice[..end]).to_string())
+}
+
+// ===========================================================================
+// BinaryLoader Implementation
+// ===========================================================================
+
+use crate::base::analyzer::{
+    Address, AddressRange, AddressSet, Function, FunctionManager, Language,
+    Listing, MemoryBlock, Program,
+};
+
+/// PE machine code to Ghidra processor name mapping.
+fn pe_machine_to_processor(machine: u16) -> (&'static str, &'static str, u32) {
+    match machine {
+        IMAGE_FILE_MACHINE_I386 => ("x86", "LE", 32),
+        IMAGE_FILE_MACHINE_AMD64 => ("x86", "LE", 64),
+        IMAGE_FILE_MACHINE_ARM => ("ARM", "LE", 32),
+        IMAGE_FILE_MACHINE_ARMNT => ("ARM", "LE", 32),
+        IMAGE_FILE_MACHINE_ARM64 => ("AARCH64", "LE", 64),
+        IMAGE_FILE_MACHINE_R4000 => ("MIPS", "LE", 32),
+        IMAGE_FILE_MACHINE_POWERPC => ("PowerPC", "BE", 32),
+        IMAGE_FILE_MACHINE_RISCV32 => ("RISCV", "LE", 32),
+        IMAGE_FILE_MACHINE_RISCV64 => ("RISCV", "LE", 64),
+        IMAGE_FILE_MACHINE_RISCV128 => ("RISCV", "LE", 128),
+        IMAGE_FILE_MACHINE_SH3 => ("SuperH", "LE", 32),
+        IMAGE_FILE_MACHINE_SH4 => ("SuperH", "LE", 32),
+        IMAGE_FILE_MACHINE_IA64 => ("IA64", "LE", 64),
+        _ => ("unknown", "LE", 32),
+    }
+}
+
+/// PE/COFF binary loader — implements the [`crate::BinaryLoader`] trait.
+///
+/// Loads a PE file into a [`Program`] by:
+/// 1. Parsing headers and data directories via [`parse_pe`]
+/// 2. Creating memory blocks for each section
+/// 3. Populating the function manager from exports and debug info
+/// 4. Setting the image base from the optional header
+///
+/// Supports PE32 and PE32+, all standard architectures.
+pub struct PeLoader;
+
+impl crate::BinaryLoader for PeLoader {
+    fn name(&self) -> &str {
+        "PE"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        // Check for MZ magic at offset 0
+        if data.len() < 64 || data[0] != b'M' || data[1] != b'Z' {
+            return false;
+        }
+        // Check for PE signature at e_lfanew
+        if data.len() >= 68 {
+            let e_lfanew = u32::from_le_bytes([data[60], data[61], data[62], data[63]]) as usize;
+            if e_lfanew + 4 <= data.len() {
+                return &data[e_lfanew..e_lfanew + 4] == b"PE\0\0";
+            }
+        }
+        false
+    }
+
+    fn load(&self, data: &[u8], options: &crate::LoadOptions) -> anyhow::Result<Program> {
+        let pe = parse_pe(data)
+            .map_err(|e| anyhow::anyhow!("PE parse error: {}", e))?;
+
+        let (processor, variant, size) = pe_machine_to_processor(pe.file_header.machine);
+        let architecture = options.architecture.clone().unwrap_or_else(|| {
+            format!("{}:{}:{}", processor, variant, size)
+        });
+
+        let lang = {
+            let parts: Vec<&str> = architecture.split(':').collect();
+            Language {
+                processor: parts.first().unwrap_or(&processor).to_string(),
+                variant: parts.get(1).unwrap_or(&variant).to_string(),
+                size: parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(size),
+            }
+        };
+
+        let image_base = if options.base_address != 0 {
+            options.base_address
+        } else {
+            pe.image_base()
+        };
+
+        let mut program = Program::new("pe_binary", lang);
+        program.image_base = image_base;
+
+        // Create memory blocks from PE sections
+        for (i, section) in pe.sections.iter().enumerate() {
+            let vaddr = image_base + section.virtual_address as u64;
+            let mem_size = section.virtual_size.max(section.size_of_raw_data) as u64;
+            if mem_size == 0 {
+                continue;
+            }
+            let name = section.name();
+            let block = MemoryBlock {
+                name: if name.is_empty() {
+                    format!("section_{}", i)
+                } else {
+                    name
+                },
+                start: Address::new(vaddr),
+                size: mem_size,
+                is_read: section.is_readable(),
+                is_write: section.is_writable(),
+                is_execute: section.is_executable(),
+                is_initialized: section.size_of_raw_data > 0,
+            };
+            program.memory.add_range(AddressRange {
+                start: Address::new(vaddr),
+                end: Address::new(vaddr + mem_size - 1),
+            });
+            program.memory_blocks.push(block);
+        }
+
+        // Add entry point as a function
+        let entry_rva = pe.entry_point();
+        if entry_rva != 0 {
+            let entry_va = image_base + entry_rva as u64;
+            let func = Function {
+                entry_point: Address::new(entry_va),
+                body: AddressSet::from_address(Address::new(entry_va)),
+                name: Some("entry".to_string()),
+                is_external: false,
+                is_thunk: false,
+                is_inline: false,
+                has_noreturn: false,
+            };
+            program
+                .function_manager
+                .functions
+                .insert(Address::new(entry_va), func);
+        }
+
+        // Add exported functions
+        if let Some(ref exports) = pe.exports {
+            for export in &exports.export_entries {
+                if export.forwarder.is_some() {
+                    continue; // Skip forwarder entries
+                }
+                let rva = export.rva;
+                if rva == 0 {
+                    continue;
+                }
+                let va = image_base + rva as u64;
+                let name = export.name.clone();
+                let func = Function {
+                    entry_point: Address::new(va),
+                    body: AddressSet::from_address(Address::new(va)),
+                    name,
+                    is_external: false,
+                    is_thunk: false,
+                    is_inline: false,
+                    has_noreturn: false,
+                };
+                program
+                    .function_manager
+                    .functions
+                    .insert(Address::new(va), func);
+            }
+        }
+
+        // Add imported functions as external symbols
+        for import_dir in &pe.imports {
+            for entry in &import_dir.import_entries {
+                let name = if entry.is_ordinal {
+                    Some(format!("{}#{}", import_dir.dll_name, entry.ordinal))
+                } else if !entry.name.is_empty() {
+                    Some(entry.name.clone())
+                } else {
+                    continue;
+                };
+                if let Some(n) = name {
+                    let func = Function {
+                        entry_point: Address::in_space(Address::EXTERNAL_SPACE, 0),
+                        body: AddressSet::from_address(Address::in_space(
+                            Address::EXTERNAL_SPACE,
+                            0,
+                        )),
+                        name: Some(n),
+                        is_external: true,
+                        is_thunk: false,
+                        is_inline: false,
+                        has_noreturn: false,
+                    };
+                    let ext_addr = Address::in_space(
+                        Address::EXTERNAL_SPACE,
+                        entry.ordinal as u64,
+                    );
+                    program.function_manager.functions.insert(ext_addr, func);
+                }
+            }
+        }
+
+        Ok(program)
+    }
 }
 
 // ===========================================================================

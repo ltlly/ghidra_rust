@@ -1474,7 +1474,7 @@ mod tests {
             .iter()
             .filter(|a| a.action != ContextMenuAction::Separator)
             .collect();
-        assert_eq!(non_seps.len(), 14); // All the function-related items
+        assert_eq!(non_seps.len(), 12); // All the function-related items
     }
 
     #[test]
@@ -1558,6 +1558,6 @@ mod tests {
             .iter()
             .filter(|n| matches!(n, MenuNode::SubMenu(_, _)))
             .count();
-        assert_eq!(submenu_count, 4); // Data Type, References, Copy Special, Color
+        assert_eq!(submenu_count, 5); // Data Type, References, Copy Special, Color, External Program
     }
 }

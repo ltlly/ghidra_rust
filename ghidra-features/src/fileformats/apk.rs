@@ -509,8 +509,11 @@ fn read_i32_le(data: &[u8], offset: usize) -> Option<i32> {
 
 /// Scan backwards from the end of data to locate the End of Central Directory record.
 fn find_eocd(data: &[u8]) -> Option<usize> {
+    if data.len() < 22 {
+        return None;
+    }
     let search_start = if data.len() > 65557 { data.len() - 65557 } else { 0 };
-    for i in (search_start..data.len().saturating_sub(22)).rev() {
+    for i in (search_start..=data.len() - 22).rev() {
         let sig = u32::from_le_bytes([data[i], data[i + 1], data[i + 2], data[i + 3]]);
         if sig == EOCD_SIG {
             return Some(i);
@@ -808,7 +811,7 @@ fn parse_xml_start_element(
     let attr_base = offset + attr_start;
     for i in 0..attr_count {
         let aoff = attr_base + i * attr_size;
-        if aoff + 24 > data.len() {
+        if aoff + 20 > data.len() {
             break;
         }
         let _ns = read_i32_le(data, aoff)?;
@@ -816,8 +819,9 @@ fn parse_xml_start_element(
         let value_i = read_i32_le(data, aoff + 8)?;
         let _flags = read_u16_le(data, aoff + 12)?;
         let _val_size = read_u16_le(data, aoff + 14)?;
-        let dt = data.get(aoff + 17).copied().unwrap_or(0);
-        let rd = read_u32_le(data, aoff + 18)?;
+        let dt = data.get(aoff + 16).copied().unwrap_or(0);
+        let _res0 = data.get(aoff + 17).copied().unwrap_or(0);
+        let rd = read_u16_le(data, aoff + 18).unwrap_or(0) as u32;
 
         let attr_name = if name_i >= 0 && (name_i as usize) < string_pool.len() {
             string_pool[name_i as usize].clone()
@@ -1392,6 +1396,60 @@ pub fn is_apk(data: &[u8]) -> bool {
 }
 
 // ============================================================================
+// BinaryLoader Implementation
+// ============================================================================
+
+/// APK loader — loads Android APK packages for analysis of manifest,
+/// DEX bytecode, native libraries, and resources.
+pub struct ApkLoader;
+
+impl crate::BinaryLoader for ApkLoader {
+    fn name(&self) -> &str {
+        "APK"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        is_apk(data)
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        let apk = parse_apk(data)?;
+        let lang = crate::base::analyzer::Language {
+            processor: "Dalvik".into(),
+            variant: "LE".into(),
+            size: 32,
+        };
+
+        let mut program = Program::new(
+            &format!("apk_{}", apk.package_name),
+            lang,
+        );
+        let base = options.base_address;
+        program.image_base = base;
+
+        // Create a memory block for the raw APK data.
+        let block = MemoryBlock {
+            name: "APK_DATA".into(),
+            start: Address::new(base),
+            size: data.len() as u64,
+            is_read: true,
+            is_write: false,
+            is_execute: false,
+            is_initialized: true,
+        };
+        program.memory_blocks.push(block);
+
+        Ok(program)
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1427,13 +1485,14 @@ mod tests {
         let header_size: u16 = 28;
         let count = strings.len() as u32;
 
-        // Compute offsets and string data
+        // Compute offsets and string data (each string has a 2-byte length prefix)
         let mut offsets: Vec<u32> = vec![0u32];
         let mut string_bytes = Vec::new();
         for s in &strings {
             let utf16: Vec<u16> =
                 s.encode_utf16().chain(std::iter::once(0)).collect();
-            offsets.push(offsets.last().unwrap() + (utf16.len() as u32 * 2));
+            offsets.push(offsets.last().unwrap() + 2 + (utf16.len() as u32 * 2));
+            string_bytes.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
             for cu in utf16 {
                 string_bytes.extend_from_slice(&cu.to_le_bytes());
             }
@@ -1454,19 +1513,16 @@ mod tests {
         ); // strings offset
         xml.extend_from_slice(&0u32.to_le_bytes()); // styles offset
         for off in &offsets[..offsets.len() - 1] {
-            xml.extend_from_slice(&(off + 2).to_le_bytes());
+            xml.extend_from_slice(&off.to_le_bytes());
         }
-        for s in &strings {
-            let utf16: Vec<u16> =
-                s.encode_utf16().chain(std::iter::once(0)).collect();
-            xml.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
-            for cu in utf16 {
-                xml.extend_from_slice(&cu.to_le_bytes());
-            }
-        }
+        xml.extend_from_slice(&string_bytes);
 
         // Start element chunk for <manifest>
         let se_start = xml.len();
+        // Header layout: chunk_type(2) + header_size(2) + chunk_size(4) + line(4) + comment(4) = 16
+        // Then: ns(4) + name(4) + attr_start(2) + attr_size(2) + attr_count(2) + id(2) + class(2) + style(2) = 20
+        // Total header before attrs = 36
+        let attr_start_val: u16 = 36;
         xml.extend_from_slice(&CHUNK_XML_START_ELEMENT.to_le_bytes());
         xml.extend_from_slice(&0x0010u16.to_le_bytes()); // header size
         xml.extend_from_slice(&0u32.to_le_bytes()); // chunk size placeholder
@@ -1474,22 +1530,22 @@ mod tests {
         xml.extend_from_slice(&(-1i32).to_le_bytes()); // comment
         xml.extend_from_slice(&(-1i32).to_le_bytes()); // ns index
         xml.extend_from_slice(&0i32.to_le_bytes()); // name: "manifest"
-        xml.extend_from_slice(&0x0034u16.to_le_bytes()); // attr start
-        xml.extend_from_slice(&0x0014u16.to_le_bytes()); // attr size
+        xml.extend_from_slice(&attr_start_val.to_le_bytes()); // attr start = 36
+        xml.extend_from_slice(&0x0014u16.to_le_bytes()); // attr size = 20
         xml.extend_from_slice(&1u16.to_le_bytes()); // attr count
         xml.extend_from_slice(&0u16.to_le_bytes()); // id index
         xml.extend_from_slice(&0u16.to_le_bytes()); // class index
         xml.extend_from_slice(&0u16.to_le_bytes()); // style index
 
-        // Attribute: package="com.example.app"
+        // Attribute (20 bytes): package="com.example.app"
         xml.extend_from_slice(&(-1i32).to_le_bytes()); // ns
         xml.extend_from_slice(&1i32.to_le_bytes()); // name idx
         xml.extend_from_slice(&2i32.to_le_bytes()); // value idx
-        xml.extend_from_slice(&0u16.to_le_bytes()); // flags
-        xml.extend_from_slice(&0u16.to_le_bytes()); // value size
-        xml.extend_from_slice(&0u8.to_le_bytes()); // reserved0
-        xml.extend_from_slice(&ATTR_TYPE_STRING.to_le_bytes()); // type = string
-        xml.extend_from_slice(&0u32.to_le_bytes()); // raw data
+        xml.extend_from_slice(&0u16.to_le_bytes()); // typed_value_size
+        xml.extend_from_slice(&0u16.to_le_bytes()); // res0
+        xml.extend_from_slice(&ATTR_TYPE_STRING.to_le_bytes()); // data_type (byte 16)
+        xml.extend_from_slice(&0u8.to_le_bytes()); // data (byte 17)
+        xml.extend_from_slice(&0u16.to_le_bytes()); // res1 (bytes 18-19)
 
         // Patch chunk size
         let se_chunk_size = xml.len() - se_start;
@@ -1770,7 +1826,7 @@ mod tests {
 
     #[test]
     fn test_decode_res_value_dimension() {
-        let data: u32 = ((16.0f32 * 256.0f32) as u32) << 8 | DIMENSION_UNIT_DIP as u32;
+        let data: u32 = ((16.0f32 * 256.0f32) as u32) | DIMENSION_UNIT_DIP as u32;
         let v = decode_res_value(data, RES_TYPE_DIMENSION);
         match v {
             ResValue::Dimension { value, unit } => {
@@ -1853,7 +1909,9 @@ mod tests {
         let mut string_bytes = Vec::new();
         for s in strings {
             let utf16: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-            offsets.push(offsets.last().unwrap() + (utf16.len() as u32 * 2));
+            // 2 bytes for length prefix + utf16 data
+            offsets.push(offsets.last().unwrap() + 2 + (utf16.len() as u32 * 2));
+            string_bytes.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
             for cu in utf16 {
                 string_bytes.extend_from_slice(&cu.to_le_bytes());
             }
@@ -1871,15 +1929,9 @@ mod tests {
         data.extend_from_slice(&(header_size as u32 + count * 4).to_le_bytes());
         data.extend_from_slice(&0u32.to_le_bytes());
         for off in &offsets[..offsets.len() - 1] {
-            data.extend_from_slice(&(off + 2).to_le_bytes());
+            data.extend_from_slice(&off.to_le_bytes());
         }
-        for s in strings {
-            let utf16: Vec<u16> = s.encode_utf16().chain(std::iter::once(0)).collect();
-            data.extend_from_slice(&(utf16.len() as u16).to_le_bytes());
-            for cu in utf16 {
-                data.extend_from_slice(&cu.to_le_bytes());
-            }
-        }
+        data.extend_from_slice(&string_bytes);
         data
     }
 

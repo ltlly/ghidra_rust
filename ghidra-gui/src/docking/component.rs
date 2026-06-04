@@ -214,6 +214,86 @@ pub trait DockingComponent {
 }
 
 // ---------------------------------------------------------------------------
+// ComponentProviderInfo — rich metadata for a component provider
+// ---------------------------------------------------------------------------
+
+/// Extended metadata for a component provider.
+///
+/// In Ghidra, `ComponentProvider` (the class, not the enum) carries rich
+/// metadata about a dockable window: the tool it belongs to, its owner,
+/// how it handles focus, its menu groups, etc.  This trait provides the
+/// same metadata for Rust-side providers.
+pub trait ComponentProviderInfo {
+    /// The unique component identity (provider + default component).
+    fn component_id(&self) -> (ComponentProvider, String);
+
+    /// The title displayed in the window chrome.
+    fn window_title(&self) -> &str;
+
+    /// The name of the tool this provider belongs to (e.g. "CodeBrowser").
+    fn tool_name(&self) -> &str {
+        ""
+    }
+
+    /// An optional owner (e.g. the plugin that created this provider).
+    fn owner(&self) -> &str {
+        ""
+    }
+
+    /// Sub-title (for providers with multiple instances, e.g. listing
+    /// views showing different programs).
+    fn sub_title(&self) -> &str {
+        ""
+    }
+
+    /// The menu group used when this provider's items appear in the
+    /// Window menu (e.g. "Views").
+    fn window_menu_group(&self) -> &str {
+        "Views"
+    }
+
+    /// Priority for the Window menu ordering (lower = earlier).
+    fn window_menu_priority(&self) -> u32 {
+        100
+    }
+
+    /// Whether this provider supports temporary (transient) windows.
+    fn supports_temporary_window(&self) -> bool {
+        true
+    }
+
+    /// Whether this provider handles its own focus management.
+    fn manages_own_focus(&self) -> bool {
+        false
+    }
+
+    /// The preferred default position when first docked.
+    fn default_position(&self) -> WindowPosition {
+        WindowPosition::Center
+    }
+
+    /// The preferred default size (width, height) when first shown.
+    fn default_size(&self) -> (f32, f32) {
+        (400.0, 300.0)
+    }
+
+    /// Whether this provider has a custom context menu.
+    fn has_context_menu(&self) -> bool {
+        false
+    }
+
+    /// Whether this provider should be shown by default in new tools.
+    fn is_default_provider(&self) -> bool {
+        false
+    }
+
+    /// Help location identifier for the help system.
+    fn help_location(&self) -> Option<&str> {
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Basic component implementations for testing / factory purposes
 // ---------------------------------------------------------------------------
 
@@ -226,6 +306,22 @@ pub struct SimpleComponent {
     icon: Option<String>,
     visible: bool,
     actions: Vec<DockingAction>,
+    /// The tool this component belongs to.
+    tool_name: String,
+    /// Owner plugin or creator.
+    owner: String,
+    /// Sub-title for multi-instance windows.
+    sub_title: String,
+    /// Window menu group.
+    window_menu_group: String,
+    /// Window menu priority.
+    window_menu_priority: u32,
+    /// Default docking position.
+    default_position: WindowPosition,
+    /// Default window size.
+    default_size: (f32, f32),
+    /// Whether this provider is a default (shown on new tool creation).
+    is_default: bool,
 }
 
 impl SimpleComponent {
@@ -241,6 +337,14 @@ impl SimpleComponent {
             icon: None,
             visible: true,
             actions: Vec::new(),
+            tool_name: String::new(),
+            owner: String::new(),
+            sub_title: String::new(),
+            window_menu_group: "Views".to_owned(),
+            window_menu_priority: 100,
+            default_position: WindowPosition::Center,
+            default_size: (400.0, 300.0),
+            is_default: false,
         }
     }
 
@@ -257,6 +361,94 @@ impl SimpleComponent {
     pub fn with_visibility(mut self, visible: bool) -> Self {
         self.visible = visible;
         self
+    }
+
+    /// Set the tool this component belongs to.
+    pub fn with_tool_name(mut self, name: impl Into<String>) -> Self {
+        self.tool_name = name.into();
+        self
+    }
+
+    /// Set the owner (plugin name) of this component.
+    pub fn with_owner(mut self, owner: impl Into<String>) -> Self {
+        self.owner = owner.into();
+        self
+    }
+
+    /// Set the sub-title (for multi-instance providers).
+    pub fn with_sub_title(mut self, sub_title: impl Into<String>) -> Self {
+        self.sub_title = sub_title.into();
+        self
+    }
+
+    /// Set the window menu group.
+    pub fn with_window_menu_group(mut self, group: impl Into<String>) -> Self {
+        self.window_menu_group = group.into();
+        self
+    }
+
+    /// Set the window menu priority (lower = earlier in menu).
+    pub fn with_window_menu_priority(mut self, priority: u32) -> Self {
+        self.window_menu_priority = priority;
+        self
+    }
+
+    /// Set the default docking position.
+    pub fn with_default_position(mut self, position: WindowPosition) -> Self {
+        self.default_position = position;
+        self
+    }
+
+    /// Set the default window size.
+    pub fn with_default_size(mut self, width: f32, height: f32) -> Self {
+        self.default_size = (width, height);
+        self
+    }
+
+    /// Mark this as a default provider (shown when a new tool is created).
+    pub fn as_default_provider(mut self) -> Self {
+        self.is_default = true;
+        self
+    }
+
+    /// Get the tool name.
+    pub fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    /// Get the owner.
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// Get the sub-title.
+    pub fn sub_title(&self) -> &str {
+        &self.sub_title
+    }
+
+    /// Get the window menu group.
+    pub fn window_menu_group(&self) -> &str {
+        &self.window_menu_group
+    }
+
+    /// Get the window menu priority.
+    pub fn window_menu_priority(&self) -> u32 {
+        self.window_menu_priority
+    }
+
+    /// Get the default position.
+    pub fn default_position(&self) -> &WindowPosition {
+        &self.default_position
+    }
+
+    /// Get the default size.
+    pub fn default_size(&self) -> (f32, f32) {
+        self.default_size
+    }
+
+    /// Whether this is a default provider.
+    pub fn is_default_provider_flag(&self) -> bool {
+        self.is_default
     }
 }
 
@@ -287,6 +479,48 @@ impl DockingComponent for SimpleComponent {
 
     fn get_default_component(&self) -> &str {
         &self.default_name
+    }
+}
+
+impl ComponentProviderInfo for SimpleComponent {
+    fn component_id(&self) -> (ComponentProvider, String) {
+        (self.provider, self.default_name.clone())
+    }
+
+    fn window_title(&self) -> &str {
+        &self.title
+    }
+
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    fn sub_title(&self) -> &str {
+        &self.sub_title
+    }
+
+    fn window_menu_group(&self) -> &str {
+        &self.window_menu_group
+    }
+
+    fn window_menu_priority(&self) -> u32 {
+        self.window_menu_priority
+    }
+
+    fn default_position(&self) -> WindowPosition {
+        self.default_position.clone()
+    }
+
+    fn default_size(&self) -> (f32, f32) {
+        self.default_size
+    }
+
+    fn is_default_provider(&self) -> bool {
+        self.is_default
     }
 }
 
@@ -351,5 +585,45 @@ mod tests {
         assert!(comp.is_visible());
         comp.set_visible(false);
         assert!(!comp.is_visible());
+    }
+
+    #[test]
+    fn test_simple_component_provider_info() {
+        let comp = SimpleComponent::new(ComponentProvider::DecompilerView, "Decompile", "decompile")
+            .with_tool_name("CodeBrowser")
+            .with_owner("DecompilerPlugin")
+            .with_sub_title("test.exe")
+            .with_window_menu_group("Analysis")
+            .with_window_menu_priority(10)
+            .with_default_position(WindowPosition::Right)
+            .with_default_size(600.0, 500.0)
+            .as_default_provider();
+
+        assert_eq!(comp.tool_name(), "CodeBrowser");
+        assert_eq!(comp.owner(), "DecompilerPlugin");
+        assert_eq!(comp.sub_title(), "test.exe");
+        assert_eq!(comp.window_menu_group(), "Analysis");
+        assert_eq!(comp.window_menu_priority(), 10);
+        assert_eq!(comp.default_position(), &WindowPosition::Right);
+        assert_eq!(comp.default_size(), (600.0, 500.0));
+        assert!(comp.is_default_provider_flag());
+    }
+
+    #[test]
+    fn test_component_provider_info_trait() {
+        let comp = SimpleComponent::new(ComponentProvider::Console, "Console", "console")
+            .with_tool_name("TestTool")
+            .with_owner("ConsolePlugin");
+
+        let info: &dyn ComponentProviderInfo = &comp;
+        assert_eq!(info.window_title(), "Console");
+        assert_eq!(info.tool_name(), "TestTool");
+        assert_eq!(info.owner(), "ConsolePlugin");
+        assert_eq!(info.window_menu_group(), "Views"); // default
+        assert_eq!(info.window_menu_priority(), 100); // default
+        assert!(info.supports_temporary_window());
+        assert!(!info.manages_own_focus());
+        assert!(!info.is_default_provider());
+        assert!(!info.has_context_menu());
     }
 }

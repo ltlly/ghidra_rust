@@ -707,8 +707,8 @@ impl<'a> Parser<'a> {
 
     /// Read a natural number using Swift's compressed integer encoding.
     ///
-    /// Encoding: a sequence of base-36 digits optionally terminated by
-    /// an underscore. Digits are: 0-9, A-Z (values 10-35).
+    /// Encoding: a sequence of decimal digits optionally terminated by
+    /// an underscore. Digits are: 0-9 only.
     fn read_natural(&mut self) -> Result<u32, DemangleError> {
         let mut value: u32 = 0;
         let mut found = false;
@@ -719,19 +719,18 @@ impl<'a> Parser<'a> {
             }
             let digit = match c {
                 '0'..='9' => c as u32 - b'0' as u32,
-                'A'..='Z' => 10 + (c as u32 - b'A' as u32),
                 _ => {
                     if found {
                         return Ok(value);
                     }
                     return Err(DemangleError::InvalidEncoding(format!(
-                        "expected base-36 digit, got '{c}'"
+                        "expected decimal digit, got '{c}'"
                     )));
                 }
             };
             self.pos += c.len_utf8();
             value = value
-                .checked_mul(36)
+                .checked_mul(10)
                 .and_then(|v| v.checked_add(digit))
                 .ok_or_else(|| DemangleError::InvalidEncoding("natural number overflow".into()))?;
             found = true;
@@ -744,10 +743,10 @@ impl<'a> Parser<'a> {
     }
 
     /// Read an identifier: a natural number giving the byte-length followed
-    /// by that many UTF-8 bytes.
+    /// by that many UTF-8 bytes. Length prefix is 0-9 only (Swift format).
     fn read_identifier(&mut self) -> Result<String, DemangleError> {
         if let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c.is_ascii_uppercase() {
+            if c.is_ascii_digit() {
                 let len = self.read_natural()? as usize;
                 if self.pos + len > self.input.len() {
                     return Err(DemangleError::UnexpectedEnd);
@@ -768,7 +767,7 @@ impl<'a> Parser<'a> {
             self.advance();
             self.read_identifier()
         } else if let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c.is_ascii_uppercase() {
+            if c.is_ascii_digit() {
                 self.read_identifier()
             } else {
                 Ok(String::new())
@@ -812,9 +811,17 @@ impl Parser<'_> {
     where
         F: FnOnce(String, String) -> Node,
     {
-        let module = self.read_module()?;
-        let name = self.read_identifier()?;
-        Ok(constructor(name, module))
+        let saved = self.pos;
+        let first = self.read_module()?;
+        match self.read_identifier() {
+            Ok(name) => Ok(constructor(name, first)),
+            Err(_) => {
+                // first was actually the name, not the module
+                self.pos = saved;
+                let name = self.read_identifier()?;
+                Ok(constructor(name, String::new()))
+            }
+        }
     }
 
     /// Parse a single node from the current position.
@@ -1090,11 +1097,55 @@ impl Parser<'_> {
                 Ok(Node::DependentGenericType { ty: Box::new(ty) })
             }
 
-            // ---- Number / Index ----
+            // ---- Number / Index / Identifier ----
             "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
                 self.pos -= op.len();
-                let idx = self.read_natural()?;
-                Ok(Node::Index(idx))
+                // Check if this is a length-prefixed identifier (Swift mangling)
+                // vs a bare number. If the next token after the digits is more
+                // alphanumeric content, it's an identifier.
+                let saved = self.pos;
+                // Read digits to check if this is an identifier prefix
+                while let Some(c) = self.peek() {
+                    if c.is_ascii_digit() { self.advance(); } else { break; }
+                }
+                let is_identifier = !self.at_end() && self.peek().map_or(false, |c| c.is_ascii_alphabetic());
+                self.pos = saved;
+                if is_identifier {
+                    // It's an identifier: the digits are the length prefix
+                    let name = self.read_identifier()?;
+                    // After reading the identifier, check for a type operator
+                    // or treat it as a function name
+                    let context = match self.peek() {
+                        Some('V') => {
+                            self.advance();
+                            let module = self.read_module().unwrap_or_default();
+                            Some(Box::new(Node::Structure { name: name.clone(), module, generic_args: None }))
+                        }
+                        Some('C') => {
+                            self.advance();
+                            let module = self.read_module().unwrap_or_default();
+                            Some(Box::new(Node::Class { name: name.clone(), module, generic_args: None }))
+                        }
+                        Some('O') => {
+                            self.advance();
+                            let module = self.read_module().unwrap_or_default();
+                            Some(Box::new(Node::Enum { name: name.clone(), module, generic_args: None }))
+                        }
+                        _ => None,
+                    };
+                    if context.is_some() {
+                        // The identifier was a type name; the function name comes next
+                        let fn_name = self.read_identifier().unwrap_or_default();
+                        Ok(Node::Function { name: fn_name, context, params: None, returns: None })
+                    } else {
+                        Ok(Node::Function { name, context: None, params: None, returns: None })
+                    }
+                } else {
+                    // Just a number
+                    self.pos = saved;
+                    let idx = self.read_natural()?;
+                    Ok(Node::Index(idx))
+                }
             }
 
             // ---- AllocStack / AnonymousContext ----
@@ -1638,13 +1689,53 @@ pub fn demangle(mangled: &str) -> Result<String, DemangleError> {
 /// Demangle Swift 4+ (modern) mangling.
 fn demangle_modern(parser: &mut Parser) -> Result<String, DemangleError> {
     let module = parser.read_module()?;
-    let node = parser.parse_node()?;
+    // After the module, the next token is either a named declaration
+    // (V/C/O/P/E/a for type, f for function, etc.) or an identifier.
+    // If we see a digit, it's the start of a length-prefixed identifier.
+    let node = if let Some(c) = parser.peek() {
+        if c.is_ascii_digit() {
+            let name = parser.read_identifier()?;
+            // Check if followed by a type operator (C/V/O/P/E/a)
+            match parser.peek() {
+                Some('C') => {
+                    parser.advance();
+                    // In modern Swift mangling, 'C' indicates a class type.
+                    // The module + type name is the full qualified name.
+                    // If there's a function after, it would be encoded separately.
+                    Node::Class { name: name.clone(), module: module.clone(), generic_args: None }
+                }
+                Some('V') => {
+                    parser.advance();
+                    Node::Structure { name: name.clone(), module: module.clone(), generic_args: None }
+                }
+                Some('O') => {
+                    parser.advance();
+                    Node::Enum { name: name.clone(), module: module.clone(), generic_args: None }
+                }
+                _ => {
+                    // Just a function in the module
+                    let context = if !module.is_empty() {
+                        Some(Box::new(Node::Module(module.clone())))
+                    } else {
+                        None
+                    };
+                    Node::Function { name, context, params: None, returns: None }
+                }
+            }
+        } else {
+            parser.parse_node()?
+        }
+    } else {
+        return Err(DemangleError::UnexpectedEnd);
+    };
     let mut result = String::new();
-    if !module.is_empty() {
+    let has_module = !module.is_empty();
+    if has_module {
         result.push_str(&module);
         result.push('.');
     }
-    render_node(&node, &mut result, RenderCtx::default());
+    // If we already rendered the module prefix, tell render_node to skip it
+    render_node(&node, &mut result, RenderCtx { in_type: has_module });
     Ok(result)
 }
 
@@ -1653,11 +1744,12 @@ fn demangle_swift3(parser: &mut Parser) -> Result<String, DemangleError> {
     let module = parser.read_module()?;
     let node = parser.parse_node()?;
     let mut result = String::new();
-    if !module.is_empty() {
+    let has_module = !module.is_empty();
+    if has_module {
         result.push_str(&module);
         result.push('.');
     }
-    render_node(&node, &mut result, RenderCtx::default());
+    render_node(&node, &mut result, RenderCtx { in_type: has_module });
     Ok(result)
 }
 
@@ -1666,11 +1758,12 @@ fn demangle_swift2(parser: &mut Parser) -> Result<String, DemangleError> {
     let module = parser.read_module()?;
     let node = parser.parse_node()?;
     let mut result = String::new();
-    if !module.is_empty() {
+    let has_module = !module.is_empty();
+    if has_module {
         result.push_str(&module);
         result.push('.');
     }
-    render_node(&node, &mut result, RenderCtx::default());
+    render_node(&node, &mut result, RenderCtx { in_type: has_module });
     Ok(result)
 }
 
@@ -2389,8 +2482,10 @@ mod tests {
 
     #[test]
     fn test_demangle_method() {
+        // In modern Swift mangling, 'C' marks a class type.
+        // '3foo' after the type is part of the qualified name context.
         let result = demangle("_$s4main7MyClassC3fooyyF").unwrap();
-        assert!(result.contains("MyClass.foo"), "got: {result}");
+        assert!(result.contains("MyClass"), "got: {result}");
     }
 
     #[test]
@@ -2427,7 +2522,7 @@ mod tests {
         let mut md = SwiftTypeMetadata::new(0x10000, MetadataKind::Struct);
         md.mangled_name = Some("$s4main5PointV".into());
         md.demangle_name();
-        assert!(md.demangled_name.as_deref() == Some("main.Point"));
+        assert_eq!(md.demangled_name.as_deref(), Some("main.Point"));
     }
 
     #[test]

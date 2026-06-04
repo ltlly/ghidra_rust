@@ -1056,6 +1056,10 @@ impl COutputFormatter {
                 }
             }
 
+            Expression::StringLiteral { value } => {
+                format!("\"{}\"", value)
+            }
+
             Expression::Nop => String::new(),
         }
     }
@@ -2068,9 +2072,11 @@ mod tests {
     #[test]
     fn test_format_type() {
         let fmt = COutputFormatter::new();
-        let ty = ghidra_core::data::DataType::u32();
+        let ty = ghidra_core::data::BuiltInDataTypeWrapper::new(
+            ghidra_core::data::BuiltInDataType::UInt,
+        );
         let out = fmt.format_type(&ty);
-        assert_eq!(out, "u32");
+        assert_eq!(out, "uint");
     }
 
     #[test]

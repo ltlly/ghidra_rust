@@ -1580,16 +1580,39 @@ impl ProcessorModule for MipsModule {
 
     fn languages() -> Vec<Language> {
         vec![
-            Language::new("MIPS:BE:32:default", "MIPS 32-bit Big Endian", "MIPS32", Endian::Big, 32),
-            Language::new("MIPS:LE:32:default", "MIPS 32-bit Little Endian", "MIPS32", Endian::Little, 32),
-            Language::new("MIPS:BE:64:default", "MIPS 64-bit Big Endian", "MIPS64", Endian::Big, 64),
-            Language::new("MIPS:LE:64:default", "MIPS 64-bit Little Endian", "MIPS64", Endian::Little, 64),
-            Language::new("MIPS:BE:32:micro", "microMIPS Big Endian", "microMIPS", Endian::Big, 32),
-            Language::new("MIPS:LE:32:micro", "microMIPS Little Endian", "microMIPS", Endian::Little, 32),
-            Language::new("MIPS:BE:32:r6", "MIPS32 Release 6 Big Endian", "R6", Endian::Big, 32),
-            Language::new("MIPS:BE:64:r6", "MIPS64 Release 6 Big Endian", "R6", Endian::Big, 64),
-            Language::new("MIPS:LE:64:r6", "MIPS64 Release 6 Little Endian", "R6", Endian::Little, 64),
-            Language::new("MIPS:BE:64:64-32addr", "MIPS 64-bit with 32-bit addresses", "MIPS64-32", Endian::Big, 32),
+            // -- 32-bit default (mips16e mode) --
+            Language::new("MIPS:BE:32:default", "MIPS32 32-bit addresses, big endian, with mips16e", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:32:default", "MIPS32 32-bit addresses, little endian, with mips16e", "1.9", Endian::Little, 32),
+            // -- 32-bit mips16e --
+            Language::new("MIPS:BE:32:16e", "MIPS32 32-bit addresses, big endian, in mips16e mode", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:32:16e", "MIPS32 32-bit addresses, little endian, in mips16e mode", "1.9", Endian::Little, 32),
+            // -- 32-bit microMIPS --
+            Language::new("MIPS:BE:32:micro", "MIPS32 32-bit addresses, big endian, with microMIPS", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:32:micro", "MIPS32 32-bit addresses, little endian, with microMIPS", "1.9", Endian::Little, 32),
+            // -- 32-bit R6 --
+            Language::new("MIPS:BE:32:R6", "MIPS32 Release-6 32-bit addresses, big endian, with microMIPS", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:32:R6", "MIPS32 Release-6 32-bit addresses, little endian, with microMIPS", "1.9", Endian::Little, 32),
+            // -- 64-bit default (mips16e mode) --
+            Language::new("MIPS:BE:64:default", "MIPS64 64-bit addresses, big endian, with mips16e", "1.9", Endian::Big, 64),
+            Language::new("MIPS:LE:64:default", "MIPS64 64-bit addresses, little endian, with mips16e", "1.9", Endian::Little, 64),
+            // -- 64-bit mips16e --
+            Language::new("MIPS:BE:64:16e", "MIPS64 64-bit addresses, big endian, in mips16e mode", "1.9", Endian::Big, 64),
+            Language::new("MIPS:LE:64:16e", "MIPS64 64-bit addresses, little endian, in mips16e mode", "1.9", Endian::Little, 64),
+            // -- 64-bit microMIPS --
+            Language::new("MIPS:BE:64:micro", "MIPS64 64-bit addresses, big endian, with microMIPS", "1.9", Endian::Big, 64),
+            Language::new("MIPS:LE:64:micro", "MIPS64 64-bit addresses, little endian, with microMIPS", "1.9", Endian::Little, 64),
+            // -- 64-bit R6 --
+            Language::new("MIPS:BE:64:R6", "MIPS64 Release-6 64-bit addresses, big endian, with microMIPS", "1.9", Endian::Big, 64),
+            Language::new("MIPS:LE:64:R6", "MIPS64 Release-6 64-bit addresses, little endian, with microMIPS", "1.9", Endian::Little, 64),
+            // -- 64-bit with 32-bit addressing --
+            Language::new("MIPS:BE:64:64-32addr", "MIPS64 32-bit addresses, big endian, with mips16e", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:64:64-32addr", "MIPS64 32-bit addresses, little endian, with mips16e", "1.9", Endian::Little, 32),
+            // -- 64-bit microMIPS with 32-bit addressing --
+            Language::new("MIPS:BE:64:micro64-32addr", "MIPS64 32-bit addresses, big endian, with microMIPS", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:64:micro64-32addr", "MIPS64 32-bit addresses, little endian, with microMIPS", "1.9", Endian::Little, 32),
+            // -- 64-bit R6 with 32-bit addressing --
+            Language::new("MIPS:BE:64:64-32R6addr", "MIPS64 Release-6 big endian with 32 bit addressing and microMIPS", "1.9", Endian::Big, 32),
+            Language::new("MIPS:LE:64:64-32R6addr", "MIPS64 Release-6 with 32-bit addresses, little endian, with microMIPS", "1.9", Endian::Little, 32),
         ]
     }
 
@@ -1728,7 +1751,7 @@ mod tests {
         let regs = MipsModule::registers();
         assert!(!regs.is_empty());
         let langs = MipsModule::languages();
-        assert!(langs.len() >= 5);
+        assert!(langs.len() >= 20, "Expected >= 20 MIPS language variants, got {}", langs.len());
         let insts = MipsModule::instructions();
         assert!(insts.len() >= 250);
     }

@@ -95,8 +95,8 @@ impl fmt::Display for DecompileError {
             DecompileError::UnknownInstruction { address, bytes } => {
                 write!(
                     f,
-                    "unknown instruction at {}: {:02x?}",
-                    address,
+                    "unknown instruction at 0x{:x}: {:02x?}",
+                    address.offset,
                     &bytes[..bytes.len().min(16)]
                 )
             }
@@ -565,22 +565,20 @@ fn convert_sleigh_pcode_op(op: &sleigh::pcode::PcodeOp) -> pcode_mod::PcodeOpera
 
 /// Convert a SLEIGH-level Varnode to an analysis-level Varnode.
 fn convert_sleigh_varnode(vn: &sleigh::pcode::Varnode) -> pcode_mod::Varnode {
-    let space_name = match vn.space {
-        sleigh::pcode::SpaceType::Register => "register",
-        sleigh::pcode::SpaceType::Ram => "ram",
-        sleigh::pcode::SpaceType::Constant => "const",
-        sleigh::pcode::SpaceType::Unique => "unique",
+    let (space_name, space_type) = match vn.space {
+        sleigh::pcode::SpaceType::Register => ("register", ghidra_core::addr::AddrSpaceType::Register),
+        sleigh::pcode::SpaceType::Ram => ("ram", ghidra_core::addr::AddrSpaceType::Ram),
+        sleigh::pcode::SpaceType::Constant => ("const", ghidra_core::addr::AddrSpaceType::Constant),
+        sleigh::pcode::SpaceType::Unique => ("unique", ghidra_core::addr::AddrSpaceType::Unique),
         sleigh::pcode::SpaceType::Other(i) => match i {
-            4 => "stack",
-            5 => "join",
-            6 => "fs",
-            7 => "gs",
-            _ => "other",
+            4 => ("stack", ghidra_core::addr::AddrSpaceType::Stack),
+            5 => ("join", ghidra_core::addr::AddrSpaceType::Join),
+            _ => ("other", ghidra_core::addr::AddrSpaceType::Other),
         },
     };
 
     pcode_mod::Varnode::new(
-        ghidra_core::addr::AddressSpace::new(space_name, vn.size, false),
+        ghidra_core::addr::AddressSpace::new(space_name, vn.size as usize, false, space_type, 4),
         vn.offset,
         vn.size as u32,
     )

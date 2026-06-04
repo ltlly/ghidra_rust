@@ -8,8 +8,11 @@ pub mod system;
 pub mod task;
 
 pub use system::SystemInfo;
-pub use task::{CancelledError, ProgressMonitor as TaskProgressMonitor, Worker};
-pub use task::TaskMonitor as Monitor;
+pub use task::{
+    CancelledError, ConcurrentQ, ConcurrentQBuilder, FutureTaskMonitor, Job,
+    ProgressMonitor as TaskProgressMonitor, ProgressTracker, QCallback, QResult,
+    ReentryGuard, TaskMonitor as Monitor, TaskMonitorSplitter, TimeoutTaskMonitor, Worker,
+};
 
 use std::fmt;
 use std::fs;
@@ -338,6 +341,13 @@ pub mod numeric {
         BigInt::from(i64::MAX)
     }
 
+    pub fn max_unsigned_int() -> BigInt {
+        BigInt::from(u32::MAX)
+    }
+
+    /// Max unsigned 32-bit value as a signed `i64` (0xFFFFFFFF = 4294967295).
+    pub const MAX_UNSIGNED_INT32_AS_LONG: i64 = 0xFFFF_FFFFi64;
+
     pub const HEX_PREFIX: &str = "0x";
     pub const BIN_PREFIX: &str = "0b";
     pub const OCT_PREFIX: &str = "0";
@@ -464,6 +474,88 @@ pub mod numeric {
                     .map_err(|e| format!("Invalid hex: {}", e))
             })
             .collect()
+    }
+
+    // ------------------------------------------------------------------
+    // Bit manipulation helpers
+    // ------------------------------------------------------------------
+
+    /// Returns the number of set (1) bits in `value`.
+    pub fn popcount(value: u64) -> u32 {
+        value.count_ones()
+    }
+
+    /// Returns the number of trailing zero bits in `value`.
+    pub fn trailing_zeros(value: u64) -> u32 {
+        value.trailing_zeros()
+    }
+
+    /// Returns the number of leading zero bits in `value`.
+    pub fn leading_zeros(value: u64) -> u32 {
+        value.leading_zeros()
+    }
+
+    /// Returns the index (0-based) of the highest set bit, or `None` if
+    /// `value` is zero.
+    pub fn highest_bit(value: u64) -> Option<u32> {
+        if value == 0 {
+            None
+        } else {
+            Some(63 - value.leading_zeros())
+        }
+    }
+
+    /// Returns the index (0-based) of the lowest set bit, or `None` if
+    /// `value` is zero.
+    pub fn lowest_bit(value: u64) -> Option<u32> {
+        if value == 0 {
+            None
+        } else {
+            Some(value.trailing_zeros())
+        }
+    }
+
+    /// Round `value` up to the next multiple of `alignment`.
+    ///
+    /// `alignment` must be a power of two.
+    pub fn round_up(value: u64, alignment: u64) -> u64 {
+        debug_assert!(alignment.is_power_of_two());
+        (value + alignment - 1) & !(alignment - 1)
+    }
+
+    /// Extract a bit-field from `value` spanning `[low_bit, high_bit]`
+    /// (inclusive). Returns zero-extended result.
+    pub fn bits(value: u64, low_bit: u32, high_bit: u32) -> u64 {
+        let width = high_bit - low_bit + 1;
+        let mask = if width >= 64 { u64::MAX } else { (1u64 << width) - 1 };
+        (value >> low_bit) & mask
+    }
+
+    /// Sign-extend a `bit_count`-wide signed value stored in the low bits of
+    /// `value` to a full `i64`.
+    pub fn sign_extend(value: u64, bit_count: u32) -> i64 {
+        if bit_count == 0 || bit_count >= 64 {
+            return value as i64;
+        }
+        let shift = 64 - bit_count;
+        ((value as i64) << shift) >> shift
+    }
+
+    /// Parse a `u8` from a hex string of exactly 2 hex digits.
+    pub fn parse_hex_byte(s: &str) -> Result<u8, String> {
+        let s = s.trim();
+        let s = s.strip_prefix("0x").or(s.strip_prefix("0X")).unwrap_or(s);
+        u8::from_str_radix(s, 16).map_err(|e| format!("Invalid hex byte '{}': {}", s, e))
+    }
+
+    /// Format a `u32` as "0x{:08x}" (zero-padded 8 hex digits).
+    pub fn to_padded_hex_string(value: u32) -> String {
+        format!("0x{:08x}", value)
+    }
+
+    /// Format a `u64` as "0x{:016x}" (zero-padded 16 hex digits).
+    pub fn to_padded_hex_string_u64(value: u64) -> String {
+        format!("0x{:016x}", value)
     }
 }
 
@@ -1312,6 +1404,58 @@ pub mod date_utils {
 }
 
 // ======================================================================
+// Hash utilities
+// ======================================================================
+
+/// Cryptographic and non-cryptographic hash helpers (Ghidra `Hash` class).
+pub mod hash_utils {
+    use sha2::{Digest, Sha256};
+
+    /// Compute a SHA-256 hash of `data` and return it as a lowercase hex string.
+    pub fn sha256_hex(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    }
+
+    /// Compute a SHA-256 hash and return the raw 32 bytes.
+    pub fn sha256_bytes(data: &[u8]) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        let result = hasher.finalize();
+        let mut out = [0u8; 32];
+        out.copy_from_slice(&result);
+        out
+    }
+
+    /// Compute the SHA-256 of a file.
+    pub fn sha256_file(path: &std::path::Path) -> std::io::Result<String> {
+        let data = std::fs::read(path)?;
+        Ok(sha256_hex(&data))
+    }
+
+    /// FNV-1a 64-bit non-cryptographic hash.
+    pub fn fnv1a_64(data: &[u8]) -> u64 {
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for &byte in data {
+            hash ^= byte as u64;
+            hash = hash.wrapping_mul(0x00000100000001B3);
+        }
+        hash
+    }
+
+    /// XOR-fold a 64-bit hash into a 32-bit value.
+    pub fn fold_to_32(hash64: u64) -> u32 {
+        ((hash64 >> 32) as u32) ^ (hash64 as u32)
+    }
+
+    /// Compute a simple hash of a byte slice (FNV-1a).
+    pub fn hash_bytes(data: &[u8]) -> u64 {
+        fnv1a_64(data)
+    }
+}
+
+// ======================================================================
 // TaskMonitor trait
 // ======================================================================
 
@@ -1911,6 +2055,10 @@ pub struct MessageLog {
     /// Maximum number of entries to retain (oldest entries are dropped).
     /// A value of 0 means unbounded.
     max_entries: usize,
+    /// Total number of messages ever added (including those that were truncated).
+    total_count: Arc<Mutex<usize>>,
+    /// A primary status message for reporting to the user.
+    status_msg: Arc<Mutex<String>>,
 }
 
 /// A single log entry with level, message text, and timestamp.
@@ -1934,6 +2082,8 @@ impl MessageLog {
         Self {
             messages: Arc::new(Mutex::new(Vec::new())),
             max_entries,
+            total_count: Arc::new(Mutex::new(0)),
+            status_msg: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -1945,12 +2095,16 @@ impl MessageLog {
     /// Add a message to the log.
     ///
     /// If the log has a size limit and is full, the oldest entry is removed.
+    /// The total count always increments regardless of truncation.
     pub fn add(&self, level: MessageType, message: impl Into<String>) {
         let entry = LogEntry {
             level,
             message: message.into(),
             timestamp: chrono::Local::now(),
         };
+        if let Ok(mut count) = self.total_count.lock() {
+            *count += 1;
+        }
         if let Ok(mut msgs) = self.messages.lock() {
             msgs.push(entry);
             if self.max_entries > 0 {
@@ -1959,6 +2113,58 @@ impl MessageLog {
                 }
             }
         }
+    }
+
+    /// Copy all entries from another log into this one.
+    pub fn copy_from(&self, other: &MessageLog) {
+        let other_msgs = other.get_messages();
+        for entry in other_msgs {
+            self.add(entry.level, entry.message);
+        }
+    }
+
+    /// Append an exception's stack trace to the log.
+    pub fn append_exception(&self, err: &(dyn std::error::Error + 'static)) {
+        self.add(MessageType::Error, format!("{:#}", err));
+    }
+
+    /// Append a message with a line number.
+    pub fn append_line_message(&self, line_num: usize, message: impl Into<String>) {
+        self.add(
+            MessageType::Error,
+            format!("Line #{} - {}", line_num, message.into()),
+        );
+    }
+
+    /// Set the primary status message.
+    pub fn set_status(&self, msg: impl Into<String>) {
+        if let Ok(mut s) = self.status_msg.lock() {
+            *s = msg.into();
+        }
+    }
+
+    /// Get the primary status message.
+    pub fn get_status(&self) -> String {
+        self.status_msg.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    /// Total number of messages ever added (including truncated ones).
+    pub fn total_count(&self) -> usize {
+        self.total_count.lock().map(|c| *c).unwrap_or(0)
+    }
+
+    /// Returns `true` if messages were truncated due to the max size limit.
+    pub fn has_truncated_messages(&self) -> bool {
+        let total = self.total_count.lock().map(|c| *c).unwrap_or(0);
+        let current = self.messages.lock().map(|m| m.len()).unwrap_or(0);
+        total > current
+    }
+
+    /// Number of truncated messages.
+    pub fn truncated_count(&self) -> usize {
+        let total = self.total_count.lock().map(|c| *c).unwrap_or(0);
+        let current = self.messages.lock().map(|m| m.len()).unwrap_or(0);
+        total.saturating_sub(current)
     }
 
     /// Add an info-level message.
@@ -2644,5 +2850,149 @@ mod tests {
         assert!(s.contains("hmm"));
         assert!(s.contains("bad"));
         assert!(!s.contains("ok"));
+    }
+
+    // ------------------------------------------------------------------
+    // New numeric utilities tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_bit_manipulation_popcount() {
+        assert_eq!(numeric::popcount(0xFF), 8);
+        assert_eq!(numeric::popcount(0), 0);
+        assert_eq!(numeric::popcount(1), 1);
+    }
+
+    #[test]
+    fn test_bit_manipulation_highest_lowest_bit() {
+        assert_eq!(numeric::highest_bit(0b1010).unwrap(), 3);
+        assert_eq!(numeric::lowest_bit(0b1010).unwrap(), 1);
+        assert!(numeric::highest_bit(0).is_none());
+        assert!(numeric::lowest_bit(0).is_none());
+    }
+
+    #[test]
+    fn test_round_up() {
+        assert_eq!(numeric::round_up(5, 4), 8);
+        assert_eq!(numeric::round_up(8, 4), 8);
+        assert_eq!(numeric::round_up(0, 4), 0);
+        assert_eq!(numeric::round_up(17, 16), 32);
+    }
+
+    #[test]
+    fn test_bits_extract() {
+        // Extract bits [2,5] from 0b11110100 = 0xF4
+        // Bits 2..=5 of 0xF4 (1111_0100): bits 2,3,4,5 = 1101 = 0xD = 13
+        assert_eq!(numeric::bits(0xF4, 2, 5), 0xD);
+    }
+
+    #[test]
+    fn test_sign_extend() {
+        // 5-bit signed: 0b11111 = 31 unsigned, -1 signed
+        assert_eq!(numeric::sign_extend(0b11111, 5), -1);
+        // 5-bit signed: 0b01111 = 15 unsigned, 15 signed
+        assert_eq!(numeric::sign_extend(0b01111, 5), 15);
+    }
+
+    #[test]
+    fn test_parse_hex_byte() {
+        assert_eq!(numeric::parse_hex_byte("FF").unwrap(), 0xFF);
+        assert_eq!(numeric::parse_hex_byte("0xAB").unwrap(), 0xAB);
+    }
+
+    #[test]
+    fn test_to_padded_hex_string() {
+        assert_eq!(numeric::to_padded_hex_string(0x1A), "0x0000001a");
+        assert_eq!(numeric::to_padded_hex_string_u64(0x1A), "0x000000000000001a");
+    }
+
+    #[test]
+    fn test_max_unsigned_int() {
+        assert_eq!(numeric::max_unsigned_int(), num::bigint::BigInt::from(u32::MAX));
+        assert_eq!(numeric::MAX_UNSIGNED_INT32_AS_LONG, 0xFFFF_FFFFi64);
+    }
+
+    // ------------------------------------------------------------------
+    // MessageLog enhanced tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_message_log_copy_from() {
+        let log1 = MessageLog::new(100);
+        log1.info("msg1");
+        log1.warn("msg2");
+
+        let log2 = MessageLog::new(100);
+        log2.copy_from(&log1);
+        assert_eq!(log2.len(), 2);
+        assert_eq!(log2.get_messages()[0].message, "msg1");
+        assert_eq!(log2.get_messages()[1].message, "msg2");
+    }
+
+    #[test]
+    fn test_message_log_status() {
+        let log = MessageLog::new(100);
+        assert!(log.get_status().is_empty());
+        log.set_status("Import completed with warnings");
+        assert_eq!(log.get_status(), "Import completed with warnings");
+    }
+
+    #[test]
+    fn test_message_log_total_count_and_truncation() {
+        let log = MessageLog::new(3);
+        log.info("a");
+        log.info("b");
+        log.info("c");
+        log.info("d"); // truncates "a"
+        assert_eq!(log.total_count(), 4);
+        assert!(log.has_truncated_messages());
+        assert_eq!(log.truncated_count(), 1);
+    }
+
+    #[test]
+    fn test_message_log_append_line_message() {
+        let log = MessageLog::new(100);
+        log.append_line_message(42, "unexpected token");
+        let msgs = log.get_messages();
+        assert!(msgs[0].message.contains("Line #42"));
+        assert!(msgs[0].message.contains("unexpected token"));
+    }
+
+    // ------------------------------------------------------------------
+    // Hash utility tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_hash_sha256_hex() {
+        let hash = hash_utils::sha256_hex(b"hello");
+        assert_eq!(hash.len(), 64); // 32 bytes = 64 hex chars
+        // Known value
+        assert_eq!(
+            hash,
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+    }
+
+    #[test]
+    fn test_hash_sha256_bytes() {
+        let bytes = hash_utils::sha256_bytes(b"hello");
+        assert_eq!(bytes.len(), 32);
+    }
+
+    #[test]
+    fn test_hash_fnv1a() {
+        let h = hash_utils::fnv1a_64(b"hello");
+        assert_ne!(h, 0);
+        // Deterministic
+        assert_eq!(h, hash_utils::fnv1a_64(b"hello"));
+        // Different inputs produce different hashes
+        assert_ne!(h, hash_utils::fnv1a_64(b"world"));
+    }
+
+    #[test]
+    fn test_hash_fold_to_32() {
+        let h64 = hash_utils::fnv1a_64(b"test");
+        let h32 = hash_utils::fold_to_32(h64);
+        assert_ne!(h32, 0);
     }
 }

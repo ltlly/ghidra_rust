@@ -621,6 +621,7 @@ fn test_map_elf_segments_to_memory_blocks() {
             ),
             permissions: perms,
             initialized: seg.filesz > 0,
+            data: Vec::new(),
         });
     }
 

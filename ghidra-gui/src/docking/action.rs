@@ -422,6 +422,9 @@ pub struct DockingAction {
     pub action_type: ActionType,
     /// Optional callback invoked when the action is triggered.
     pub callback: Option<ActionCallback>,
+    /// Optional context-aware callback (receives current address,
+    /// selection, function, etc.).
+    pub context_callback: Option<ContextActionCallback>,
 }
 
 // PartialEq must be implemented manually because ActionCallback is not
@@ -456,6 +459,7 @@ impl DockingAction {
             enabled: true,
             action_type: ActionType::Global,
             callback: None,
+            context_callback: None,
         }
     }
 
@@ -535,6 +539,15 @@ impl DockingAction {
     /// keyboard shortcut), the callback is invoked.
     pub fn with_callback(mut self, callback: ActionCallback) -> Self {
         self.callback = Some(callback);
+        self
+    }
+
+    /// Attach a context-aware callback.
+    ///
+    /// When triggered via [`GuiActionManager::trigger_with_context`], the
+    /// context callback is preferred over the simple callback.
+    pub fn with_context_callback(mut self, callback: ContextActionCallback) -> Self {
+        self.context_callback = Some(callback);
         self
     }
 
@@ -659,6 +672,366 @@ pub fn find_action_mut<'a>(
 }
 
 // ---------------------------------------------------------------------------
+// ActionContextInfo — structured context passed to context-aware actions
+// ---------------------------------------------------------------------------
+
+/// Structured context information passed to context-aware action callbacks.
+///
+/// Ghidra's `ActionContext` carries the address, program, function, and
+/// selection state that an action needs to operate.  This Rust equivalent
+/// provides the same information in a serializable struct.
+#[derive(Debug, Clone)]
+pub struct ActionContextInfo {
+    /// The address under the cursor, if any.
+    pub address: Option<String>,
+    /// The name/path of the currently active program.
+    pub program: Option<String>,
+    /// The name of the currently active function, if any.
+    pub function: Option<String>,
+    /// The selected address range (start, end), if a selection is active.
+    pub selection: Option<(String, String)>,
+    /// The component provider that initiated the action.
+    pub source_provider: Option<String>,
+}
+
+impl ActionContextInfo {
+    /// Create an empty context.
+    pub fn empty() -> Self {
+        Self {
+            address: None,
+            program: None,
+            function: None,
+            selection: None,
+            source_provider: None,
+        }
+    }
+
+    /// Create a context with an address.
+    pub fn with_address(addr: impl Into<String>) -> Self {
+        Self {
+            address: Some(addr.into()),
+            ..Self::empty()
+        }
+    }
+
+    /// Whether there is an active program.
+    pub fn has_program(&self) -> bool {
+        self.program.is_some()
+    }
+
+    /// Whether there is an active function context.
+    pub fn has_function(&self) -> bool {
+        self.function.is_some()
+    }
+
+    /// Whether there is a selection.
+    pub fn has_selection(&self) -> bool {
+        self.selection.is_some()
+    }
+
+    /// Whether there is an address context.
+    pub fn has_address(&self) -> bool {
+        self.address.is_some()
+    }
+
+    /// Build a builder for this context.
+    pub fn builder() -> ActionContextInfoBuilder {
+        ActionContextInfoBuilder::default()
+    }
+}
+
+impl Default for ActionContextInfo {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+/// Builder for [`ActionContextInfo`].
+#[derive(Debug, Default)]
+pub struct ActionContextInfoBuilder {
+    inner: ActionContextInfo,
+}
+
+impl ActionContextInfoBuilder {
+    pub fn address(mut self, addr: impl Into<String>) -> Self {
+        self.inner.address = Some(addr.into());
+        self
+    }
+
+    pub fn program(mut self, program: impl Into<String>) -> Self {
+        self.inner.program = Some(program.into());
+        self
+    }
+
+    pub fn function(mut self, function: impl Into<String>) -> Self {
+        self.inner.function = Some(function.into());
+        self
+    }
+
+    pub fn selection(mut self, start: impl Into<String>, end: impl Into<String>) -> Self {
+        self.inner.selection = Some((start.into(), end.into()));
+        self
+    }
+
+    pub fn source_provider(mut self, provider: impl Into<String>) -> Self {
+        self.inner.source_provider = Some(provider.into());
+        self
+    }
+
+    pub fn build(self) -> ActionContextInfo {
+        self.inner
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContextActionCallback — context-aware closure for actions
+// ---------------------------------------------------------------------------
+
+/// A context-aware callback that receives [`ActionContextInfo`].
+///
+/// This complements the simple [`ActionCallback`] for actions that need
+/// to know the current address, selection, function, etc.
+pub struct ContextActionCallback(Arc<dyn Fn(&ActionContextInfo) + Send + Sync>);
+
+impl ContextActionCallback {
+    /// Wrap a context-aware closure.
+    pub fn new<F: Fn(&ActionContextInfo) + Send + Sync + 'static>(f: F) -> Self {
+        Self(Arc::new(f))
+    }
+
+    /// Invoke with the given context.
+    pub fn invoke(&self, ctx: &ActionContextInfo) {
+        (self.0)(ctx)
+    }
+}
+
+impl fmt::Debug for ContextActionCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContextActionCallback").finish()
+    }
+}
+
+impl Clone for ContextActionCallback {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GuiActionManager — action registry with undo/redo support
+// ---------------------------------------------------------------------------
+
+/// An entry in the undo stack.
+#[derive(Clone)]
+pub struct UndoEntry {
+    /// Human-readable description (e.g. "Rename function").
+    pub description: String,
+    /// Closure that performs the undo operation.
+    pub undo: ActionCallback,
+    /// Closure that re-applies the operation (used for redo).
+    pub redo: ActionCallback,
+}
+
+impl fmt::Debug for UndoEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UndoEntry")
+            .field("description", &self.description)
+            .finish()
+    }
+}
+
+/// Action manager with undo/redo support and an action registry.
+///
+/// Ghidra's `ActionManager` owns the set of registered actions, handles
+/// keyboard dispatch, and provides undo/redo through the tool's
+/// transaction system.  This Rust equivalent provides the same core
+/// functionality.
+#[derive(Debug, Default)]
+pub struct GuiActionManager {
+    /// All registered actions.
+    actions: Vec<DockingAction>,
+    /// Undo stack (last entry = most recent).
+    undo_stack: Vec<UndoEntry>,
+    /// Redo stack.
+    redo_stack: Vec<UndoEntry>,
+    /// Maximum undo depth (0 = unlimited).
+    max_undo_depth: usize,
+}
+
+impl GuiActionManager {
+    /// Create a new, empty action manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of undo entries kept.
+    pub fn with_max_undo_depth(mut self, depth: usize) -> Self {
+        self.max_undo_depth = depth;
+        self
+    }
+
+    // ---------------------------------------------------------------
+    // Action registration
+    // ---------------------------------------------------------------
+
+    /// Register an action.
+    pub fn register(&mut self, action: DockingAction) {
+        self.actions.push(action);
+    }
+
+    /// Register multiple actions.
+    pub fn register_all(&mut self, actions: Vec<DockingAction>) {
+        self.actions.extend(actions);
+    }
+
+    /// Remove an action by name.
+    pub fn unregister(&mut self, name: &str) -> Option<DockingAction> {
+        let pos = self.actions.iter().position(|a| a.name == name);
+        pos.map(|idx| self.actions.remove(idx))
+    }
+
+    /// Look up an action by name.
+    pub fn get(&self, name: &str) -> Option<&DockingAction> {
+        self.actions.iter().find(|a| a.name == name)
+    }
+
+    /// Look up a mutable action by name.
+    pub fn get_mut(&mut self, name: &str) -> Option<&mut DockingAction> {
+        self.actions.iter_mut().find(|a| a.name == name)
+    }
+
+    /// All registered actions.
+    pub fn actions(&self) -> &[DockingAction] {
+        &self.actions
+    }
+
+    /// Number of registered actions.
+    pub fn len(&self) -> usize {
+        self.actions.len()
+    }
+
+    /// Whether no actions are registered.
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
+
+    /// Return all actions applicable in the given context.
+    pub fn applicable_actions(&self, context: &ActionContext) -> Vec<&DockingAction> {
+        self.actions
+            .iter()
+            .filter(|a| a.is_applicable(context))
+            .collect()
+    }
+
+    // ---------------------------------------------------------------
+    // Keyboard dispatch
+    // ---------------------------------------------------------------
+
+    /// Find and return the action matching a key-stroke.
+    pub fn action_for_key(&self, modifiers: &Modifiers, key: &Key) -> Option<&DockingAction> {
+        self.actions
+            .iter()
+            .find(|a| a.matches_key(modifiers, key) && a.enabled)
+    }
+
+    /// Trigger an action by name, invoking its callback if present.
+    /// Returns `true` if the action was found and invoked.
+    pub fn trigger(&self, name: &str) -> bool {
+        if let Some(action) = self.get(name) {
+            if action.enabled {
+                if let Some(cb) = &action.callback {
+                    cb.call();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    /// Trigger an action with context, using the context-aware callback
+    /// if available, falling back to the simple callback.
+    pub fn trigger_with_context(&self, name: &str, ctx: &ActionContextInfo) -> bool {
+        if let Some(action) = self.get(name) {
+            if action.enabled {
+                // Try context-aware callback first.
+                if let Some(cb) = &action.context_callback {
+                    cb.invoke(ctx);
+                    return true;
+                }
+                // Fall back to simple callback.
+                if let Some(cb) = &action.callback {
+                    cb.call();
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // ---------------------------------------------------------------
+    // Undo / redo
+    // ---------------------------------------------------------------
+
+    /// Push an undo entry onto the undo stack.  Clears the redo stack.
+    pub fn push_undo(&mut self, entry: UndoEntry) {
+        self.undo_stack.push(entry);
+        self.redo_stack.clear();
+        // Enforce max depth.
+        if self.max_undo_depth > 0 && self.undo_stack.len() > self.max_undo_depth {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Perform undo: pops the most recent undo entry, executes it,
+    /// and pushes it onto the redo stack.  Returns the description
+    /// of the undone operation, or `None` if the stack is empty.
+    pub fn undo(&mut self) -> Option<String> {
+        let entry = self.undo_stack.pop()?;
+        let desc = entry.description.clone();
+        entry.undo.call();
+        self.redo_stack.push(entry);
+        Some(desc)
+    }
+
+    /// Perform redo: pops the most recent redo entry, re-applies it,
+    /// and pushes it back onto the undo stack.  Returns the description,
+    /// or `None` if the stack is empty.
+    pub fn redo(&mut self) -> Option<String> {
+        let entry = self.redo_stack.pop()?;
+        let desc = entry.description.clone();
+        entry.redo.call();
+        self.undo_stack.push(entry);
+        Some(desc)
+    }
+
+    /// Whether undo is available.
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
+    /// Whether redo is available.
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    /// Undo description of the next undoable operation.
+    pub fn undo_description(&self) -> Option<&str> {
+        self.undo_stack.last().map(|e| e.description.as_str())
+    }
+
+    /// Redo description of the next redoable operation.
+    pub fn redo_description(&self) -> Option<&str> {
+        self.redo_stack.last().map(|e| e.description.as_str())
+    }
+
+    /// Clear all undo/redo history.
+    pub fn clear_history(&mut self) {
+        self.undo_stack.clear();
+        self.redo_stack.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -757,5 +1130,205 @@ mod tests {
         assert!(found.is_some());
         found.unwrap().enabled = false;
         assert!(!find_action(&actions, "child").unwrap().enabled);
+    }
+
+    #[test]
+    fn test_action_context_info() {
+        let ctx = ActionContextInfo::builder()
+            .address("0x100000")
+            .program("test.exe")
+            .function("main")
+            .selection("0x100000", "0x100100")
+            .source_provider("ListingView")
+            .build();
+
+        assert!(ctx.has_address());
+        assert!(ctx.has_program());
+        assert!(ctx.has_function());
+        assert!(ctx.has_selection());
+        assert_eq!(ctx.address.as_deref(), Some("0x100000"));
+        assert_eq!(ctx.function.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn test_action_context_info_empty() {
+        let ctx = ActionContextInfo::empty();
+        assert!(!ctx.has_address());
+        assert!(!ctx.has_program());
+        assert!(!ctx.has_function());
+        assert!(!ctx.has_selection());
+    }
+
+    #[test]
+    fn test_context_action_callback() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let called = Arc::new(AtomicBool::new(false));
+        let called2 = called.clone();
+
+        let cb = ContextActionCallback::new(move |_ctx| {
+            called2.store(true, Ordering::SeqCst);
+        });
+
+        let ctx = ActionContextInfo::with_address("0x1000");
+        cb.invoke(&ctx);
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_action_with_context_callback() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let called = Arc::new(AtomicBool::new(false));
+        let called2 = called.clone();
+
+        let action = DockingAction::new("test", "Test").with_context_callback(
+            ContextActionCallback::new(move |_| {
+                called2.store(true, Ordering::SeqCst);
+            }),
+        );
+
+        assert!(action.context_callback.is_some());
+        let ctx = ActionContextInfo::empty();
+        action.context_callback.as_ref().unwrap().invoke(&ctx);
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_gui_action_manager_register() {
+        let mut mgr = GuiActionManager::new();
+        assert!(mgr.is_empty());
+
+        mgr.register(DockingAction::new("a", "A"));
+        mgr.register(DockingAction::new("b", "B"));
+        assert_eq!(mgr.len(), 2);
+        assert!(mgr.get("a").is_some());
+        assert!(mgr.get("b").is_some());
+        assert!(mgr.get("c").is_none());
+    }
+
+    #[test]
+    fn test_gui_action_manager_trigger() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let called = Arc::new(AtomicBool::new(false));
+        let called2 = called.clone();
+
+        let mut mgr = GuiActionManager::new();
+        let action = DockingAction::new("do-it", "Do It").with_callback(ActionCallback::new(
+            move || {
+                called2.store(true, Ordering::SeqCst);
+            },
+        ));
+        mgr.register(action);
+
+        assert!(mgr.trigger("do-it"));
+        assert!(called.load(Ordering::SeqCst));
+        assert!(!mgr.trigger("nonexistent"));
+    }
+
+    #[test]
+    fn test_gui_action_manager_trigger_with_context() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        let captured_addr = Arc::new(AtomicU64::new(0));
+
+        let captured2 = captured_addr.clone();
+        let action =
+            DockingAction::new("goto", "Go To").with_context_callback(
+                ContextActionCallback::new(move |ctx| {
+                    // Just check that we received context.
+                    if ctx.has_address() {
+                        captured2.store(1, Ordering::SeqCst);
+                    }
+                }),
+            );
+
+        let mut mgr = GuiActionManager::new();
+        mgr.register(action);
+
+        let ctx = ActionContextInfo::with_address("0x100000");
+        assert!(mgr.trigger_with_context("goto", &ctx));
+        assert_eq!(captured_addr.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn test_gui_action_manager_undo_redo() {
+        use std::sync::atomic::{AtomicI32, Ordering};
+        let state = Arc::new(AtomicI32::new(0));
+
+        let mut mgr = GuiActionManager::new();
+
+        let s1 = state.clone();
+        let undo = ActionCallback::new(move || {
+            s1.store(0, Ordering::SeqCst);
+        });
+        let s2 = state.clone();
+        let redo = ActionCallback::new(move || {
+            s2.store(42, Ordering::SeqCst);
+        });
+
+        assert!(!mgr.can_undo());
+        assert!(!mgr.can_redo());
+
+        mgr.push_undo(UndoEntry {
+            description: "Set value to 42".to_owned(),
+            undo,
+            redo,
+        });
+
+        assert!(mgr.can_undo());
+        assert!(!mgr.can_redo());
+        assert_eq!(mgr.undo_description(), Some("Set value to 42"));
+
+        // Undo.
+        let desc = mgr.undo();
+        assert_eq!(desc.as_deref(), Some("Set value to 42"));
+        assert_eq!(state.load(Ordering::SeqCst), 0);
+        assert!(mgr.can_redo());
+
+        // Redo.
+        let desc = mgr.redo();
+        assert_eq!(desc.as_deref(), Some("Set value to 42"));
+        assert_eq!(state.load(Ordering::SeqCst), 42);
+        assert!(!mgr.can_redo());
+    }
+
+    #[test]
+    fn test_gui_action_manager_undo_clears_redo() {
+        let mut mgr = GuiActionManager::new();
+
+        let noop = || {};
+        mgr.push_undo(UndoEntry {
+            description: "first".to_owned(),
+            undo: ActionCallback::new(noop),
+            redo: ActionCallback::new(noop),
+        });
+        mgr.undo();
+        assert!(mgr.can_redo());
+
+        // Pushing a new undo clears the redo stack.
+        mgr.push_undo(UndoEntry {
+            description: "second".to_owned(),
+            undo: ActionCallback::new(noop),
+            redo: ActionCallback::new(noop),
+        });
+        assert!(!mgr.can_redo());
+    }
+
+    #[test]
+    fn test_gui_action_manager_applicable_actions() {
+        let mut mgr = GuiActionManager::new();
+        mgr.register(DockingAction::new("global", "Global"));
+        mgr.register(DockingAction::contextual(
+            "func-ctx",
+            "Func Ctx",
+            ActionContext::Function,
+        ));
+        mgr.register(
+            DockingAction::new("disabled", "Disabled").with_enabled(false),
+        );
+
+        let applicable = mgr.applicable_actions(&ActionContext::Function);
+        assert_eq!(applicable.len(), 2); // global + func-ctx
+
+        let applicable = mgr.applicable_actions(&ActionContext::Program);
+        assert_eq!(applicable.len(), 1); // global only
     }
 }

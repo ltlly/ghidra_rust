@@ -1708,7 +1708,7 @@ pub fn bytecode_mnemonic(opcode: u8) -> &'static str {
 /// Return the mnemonic for a JVM bytecode opcode, or None for unknown opcodes.
 pub fn bytecode_mnemonic_known(opcode: u8) -> Option<&'static str> {
     let name = JVM_BYTECODE_NAMES[opcode as usize];
-    if name == "unknown" { None } else { Some(name) }
+    if name == "unknown" || name == "breakpoint" { None } else { Some(name) }
 }
 
 /// Decode a bytecode instruction at the given position in a code array.
@@ -1862,6 +1862,59 @@ pub fn disassemble_bytecode(code: &[u8]) -> Vec<(usize, String, Option<i32>)> {
         }
     }
     result
+}
+
+// ============================================================================
+// BinaryLoader Implementation
+// ============================================================================
+
+/// Java class file loader — loads JVM bytecode `.class` files for analysis.
+pub struct JavaClassLoader;
+
+impl crate::BinaryLoader for JavaClassLoader {
+    fn name(&self) -> &str {
+        "Java Class"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        is_class(data)
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        let class = parse_class(data)?;
+        let lang = crate::base::analyzer::Language {
+            processor: "JVM".into(),
+            variant: "BE".into(),
+            size: 32,
+        };
+
+        let base = options.base_address;
+        let mut program = Program::new(
+            &format!("class_{}", class.class_name.replace('/', "_")),
+            lang,
+        );
+        program.image_base = base;
+
+        // Create a single memory block for the class file.
+        let block = MemoryBlock {
+            name: "CLASS_DATA".into(),
+            start: Address::new(base),
+            size: data.len() as u64,
+            is_read: true,
+            is_write: false,
+            is_execute: false,
+            is_initialized: true,
+        };
+        program.memory_blocks.push(block);
+
+        Ok(program)
+    }
 }
 
 // ============================================================================

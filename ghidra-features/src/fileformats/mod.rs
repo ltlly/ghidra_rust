@@ -18,3 +18,12 @@ pub mod pe_full;
 pub mod raw;
 pub mod xbe;
 pub mod zip;
+
+// Re-export BinaryLoader structs for each format.
+pub use macho::MachOLoader;
+pub use raw::RawBinaryLoader;
+pub use zip::ZipLoader;
+pub use iso::IsoLoader;
+pub use apk::ApkLoader;
+pub use dex::DexLoader;
+pub use classfile::JavaClassLoader;

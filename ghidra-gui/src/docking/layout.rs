@@ -11,6 +11,217 @@ use serde::{Deserialize, Serialize};
 use super::component::{ComponentProvider, WindowPosition};
 
 // ---------------------------------------------------------------------------
+// SplitNode — recursive split-pane tree
+// ---------------------------------------------------------------------------
+
+/// Direction of a split.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum SplitDirection {
+    /// Horizontal split: left | right.
+    Horizontal,
+    /// Vertical split: top / bottom.
+    Vertical,
+}
+
+/// A node in the recursive split-pane tree.
+///
+/// Ghidra's layout uses a tree of split panes.  Each inner node splits
+/// either horizontally or vertically with a ratio; leaf nodes hold a
+/// provider.  This enum represents that tree structure.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum SplitNode {
+    /// A leaf node holding a component provider.
+    Leaf {
+        provider: ComponentProvider,
+        /// Whether this leaf is currently visible.
+        visible: bool,
+    },
+    /// An interior node splitting its children.
+    Split {
+        /// Split direction.
+        direction: SplitDirection,
+        /// Ratio of space allocated to the first child (0.0–1.0).
+        ratio: f32,
+        /// First child (left or top).
+        first: Box<SplitNode>,
+        /// Second child (right or bottom).
+        second: Box<SplitNode>,
+    },
+    /// A tabbed container holding multiple providers.
+    Tabbed {
+        /// Providers in tab order.
+        providers: Vec<ComponentProvider>,
+        /// Index of the active tab.
+        active_tab: usize,
+    },
+}
+
+impl SplitNode {
+    /// Create a leaf node.
+    pub fn leaf(provider: ComponentProvider) -> Self {
+        SplitNode::Leaf {
+            provider,
+            visible: true,
+        }
+    }
+
+    /// Create a horizontal split (left | right).
+    pub fn horizontal_split(
+        left: SplitNode,
+        right: SplitNode,
+        ratio: f32,
+    ) -> Self {
+        SplitNode::Split {
+            direction: SplitDirection::Horizontal,
+            ratio: ratio.clamp(0.0, 1.0),
+            first: Box::new(left),
+            second: Box::new(right),
+        }
+    }
+
+    /// Create a vertical split (top / bottom).
+    pub fn vertical_split(
+        top: SplitNode,
+        bottom: SplitNode,
+        ratio: f32,
+    ) -> Self {
+        SplitNode::Split {
+            direction: SplitDirection::Vertical,
+            ratio: ratio.clamp(0.0, 1.0),
+            first: Box::new(top),
+            second: Box::new(bottom),
+        }
+    }
+
+    /// Create a tabbed node.
+    pub fn tabbed(providers: Vec<ComponentProvider>) -> Self {
+        SplitNode::Tabbed {
+            providers,
+            active_tab: 0,
+        }
+    }
+
+    /// Whether this is a leaf node.
+    pub fn is_leaf(&self) -> bool {
+        matches!(self, SplitNode::Leaf { .. })
+    }
+
+    /// Whether this is a split node.
+    pub fn is_split(&self) -> bool {
+        matches!(self, SplitNode::Split { .. })
+    }
+
+    /// Whether this is a tabbed node.
+    pub fn is_tabbed(&self) -> bool {
+        matches!(self, SplitNode::Tabbed { .. })
+    }
+
+    /// Get all providers contained in this tree (depth-first).
+    pub fn all_providers(&self) -> Vec<ComponentProvider> {
+        match self {
+            SplitNode::Leaf { provider, .. } => vec![*provider],
+            SplitNode::Split { first, second, .. } => {
+                let mut v = first.all_providers();
+                v.extend(second.all_providers());
+                v
+            }
+            SplitNode::Tabbed { providers, .. } => providers.clone(),
+        }
+    }
+
+    /// Count the total number of leaf nodes in the tree.
+    pub fn leaf_count(&self) -> usize {
+        match self {
+            SplitNode::Leaf { .. } => 1,
+            SplitNode::Split { first, second, .. } => first.leaf_count() + second.leaf_count(),
+            SplitNode::Tabbed { providers, .. } => providers.len(),
+        }
+    }
+
+    /// Depth of the tree (leaf = 1).
+    pub fn depth(&self) -> usize {
+        match self {
+            SplitNode::Leaf { .. } => 1,
+            SplitNode::Tabbed { .. } => 1,
+            SplitNode::Split { first, second, .. } => {
+                1 + first.depth().max(second.depth())
+            }
+        }
+    }
+
+    /// Find the leaf containing `provider`, returning a mutable reference.
+    pub fn find_leaf_mut(&mut self, provider: &ComponentProvider) -> Option<&mut SplitNode> {
+        match self {
+            SplitNode::Leaf { provider: p, .. } if p == provider => Some(self),
+            SplitNode::Split { first, second, .. } => {
+                first
+                    .find_leaf_mut(provider)
+                    .or_else(|| second.find_leaf_mut(provider))
+            }
+            SplitNode::Tabbed { providers, .. } => {
+                if providers.contains(provider) {
+                    Some(self)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Find the leaf containing `provider`, returning an immutable reference.
+    pub fn find_leaf(&self, provider: &ComponentProvider) -> Option<&SplitNode> {
+        match self {
+            SplitNode::Leaf { provider: p, .. } if p == provider => Some(self),
+            SplitNode::Split { first, second, .. } => {
+                first
+                    .find_leaf(provider)
+                    .or_else(|| second.find_leaf(provider))
+            }
+            SplitNode::Tabbed { providers, .. } => {
+                if providers.contains(provider) {
+                    Some(self)
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Replace the leaf containing `provider` with a new node.
+    /// Returns `true` if the replacement succeeded.
+    pub fn replace_leaf(&mut self, provider: &ComponentProvider, replacement: SplitNode) -> bool {
+        match self {
+            SplitNode::Leaf { provider: p, .. } if p == provider => {
+                *self = replacement;
+                true
+            }
+            SplitNode::Split { first, second, .. } => {
+                first.replace_leaf(provider, replacement.clone())
+                    || second.replace_leaf(provider, replacement)
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Well-known dock areas for the split-pane tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DockArea {
+    /// Left panel.
+    Left,
+    /// Right panel.
+    Right,
+    /// Top panel.
+    Top,
+    /// Bottom panel.
+    Bottom,
+    /// Center area (main content).
+    Center,
+}
+
+// ---------------------------------------------------------------------------
 // DockingWindowPlacement
 // ---------------------------------------------------------------------------
 
@@ -204,6 +415,16 @@ pub struct DockingLayout {
     /// Toolbar configurations.
     #[serde(default)]
     pub toolbars: Vec<ToolbarConfig>,
+    /// Recursive split-pane tree for the main layout.
+    ///
+    /// When `Some`, the split tree defines the layout hierarchy instead
+    /// of the flat `windows` map.  The two representations co-exist
+    /// during the migration period.
+    #[serde(default)]
+    pub split_tree: Option<SplitNode>,
+    /// Default split ratios for dock areas.
+    #[serde(default)]
+    pub dock_ratios: HashMap<DockArea, f32>,
 }
 
 impl DockingLayout {
@@ -217,6 +438,8 @@ impl DockingLayout {
             windows: HashMap::new(),
             tabs: Vec::new(),
             toolbars: Vec::new(),
+            split_tree: None,
+            dock_ratios: HashMap::new(),
         }
     }
 
@@ -454,6 +677,210 @@ impl DockingLayout {
         } else {
             false
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Docking operations
+    // ---------------------------------------------------------------
+
+    /// Dock a provider at a specific position.
+    ///
+    /// If the provider already exists in the layout, its position is
+    /// updated.  Otherwise a new placement is created.
+    pub fn dock_provider(&mut self, provider: ComponentProvider, position: WindowPosition) {
+        if let Some(placement) = self.windows.get_mut(&provider) {
+            placement.position = position;
+            placement.floating = false;
+            placement.visible = true;
+        } else {
+            self.add_window(provider, DockingWindowPlacement::docked(position));
+        }
+    }
+
+    /// Float a provider at the given coordinates.
+    pub fn float_provider(
+        &mut self,
+        provider: ComponentProvider,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+    ) {
+        if let Some(placement) = self.windows.get_mut(&provider) {
+            placement.position = WindowPosition::Custom {
+                x,
+                y,
+                width,
+                height,
+            };
+            placement.floating = true;
+            placement.size = (width, height);
+            placement.visible = true;
+        } else {
+            self.add_window(
+                provider,
+                DockingWindowPlacement::floating(x, y, width, height),
+            );
+        }
+    }
+
+    /// Undock a provider (make it floating at its current size).
+    pub fn undock_provider(&mut self, provider: ComponentProvider) {
+        if let Some(placement) = self.windows.get_mut(&provider) {
+            if let WindowPosition::Custom { .. } = placement.position {
+                // Already floating.
+                return;
+            }
+            let (w, h) = placement.size;
+            placement.position = WindowPosition::Custom {
+                x: 0.0,
+                y: 0.0,
+                width: w,
+                height: h,
+            };
+            placement.floating = true;
+        }
+    }
+
+    /// Move a provider into a tab group with `target`.  If the target
+    /// already has a tab group, the provider is added to that group;
+    /// otherwise a new tab group is created.
+    pub fn tab_with(
+        &mut self,
+        provider: ComponentProvider,
+        target: ComponentProvider,
+    ) {
+        // Look for an existing tab group containing `target`.
+        let group_idx = self.tabs.iter().position(|g| g.tabs.contains(&target));
+
+        if let Some(idx) = group_idx {
+            // Add to existing tab group.
+            if !self.tabs[idx].tabs.contains(&provider) {
+                self.tabs[idx].tabs.push(provider);
+            }
+            // Move the provider to the same position as the group.
+            let pos = self.tabs[idx].position.clone();
+            self.dock_provider(provider, pos);
+        } else {
+            // Create a new tab group.
+            let target_pos = self
+                .windows
+                .get(&target)
+                .map(|p| p.position.clone())
+                .unwrap_or(WindowPosition::Center);
+            self.tabs
+                .push(TabGroup::new(vec![target, provider], target_pos.clone()));
+            self.dock_provider(provider, target_pos);
+        }
+    }
+
+    /// Remove a provider from its tab group (if any).
+    pub fn untab(&mut self, provider: ComponentProvider) {
+        for group in &mut self.tabs {
+            group.remove_tab(&provider);
+        }
+        // Remove empty tab groups.
+        self.tabs.retain(|g| !g.is_empty());
+    }
+
+    /// Split a provider with another, creating a split-pane at the
+    /// given position.  `ratio` controls how much space goes to the
+    /// first (existing) provider vs the second (new) provider.
+    pub fn split_with(
+        &mut self,
+        existing: ComponentProvider,
+        new: ComponentProvider,
+        direction: SplitDirection,
+        ratio: f32,
+    ) {
+        // Both providers share the existing provider's position.
+        let pos = self
+            .windows
+            .get(&existing)
+            .map(|p| p.position.clone())
+            .unwrap_or(WindowPosition::Center);
+
+        let ratio = ratio.clamp(0.0, 1.0);
+
+        // Update placements.
+        if let Some(placement) = self.windows.get_mut(&existing) {
+            placement.split_ratio = ratio;
+        }
+        self.add_window(
+            new,
+            DockingWindowPlacement {
+                position: pos.clone(),
+                split_ratio: 1.0 - ratio,
+                ..DockingWindowPlacement::default()
+            },
+        );
+
+        // Update the split tree.
+        match self.split_tree.as_mut() {
+            Some(tree) => {
+                // Replace the existing leaf with a split.
+                let existing_leaf = SplitNode::leaf(existing);
+                let new_leaf = SplitNode::leaf(new);
+                let split = match direction {
+                    SplitDirection::Horizontal => {
+                        SplitNode::horizontal_split(existing_leaf, new_leaf, ratio)
+                    }
+                    SplitDirection::Vertical => {
+                        SplitNode::vertical_split(existing_leaf, new_leaf, ratio)
+                    }
+                };
+                tree.replace_leaf(&existing, split);
+            }
+            None => {
+                // Create a simple tree.
+                let existing_leaf = SplitNode::leaf(existing);
+                let new_leaf = SplitNode::leaf(new);
+                self.split_tree = Some(match direction {
+                    SplitDirection::Horizontal => {
+                        SplitNode::horizontal_split(existing_leaf, new_leaf, ratio)
+                    }
+                    SplitDirection::Vertical => {
+                        SplitNode::vertical_split(existing_leaf, new_leaf, ratio)
+                    }
+                });
+            }
+        }
+    }
+
+    /// Set the split ratio between two providers that share a split.
+    pub fn set_split_pair_ratio(
+        &mut self,
+        first: ComponentProvider,
+        second: ComponentProvider,
+        ratio: f32,
+    ) {
+        let ratio = ratio.clamp(0.0, 1.0);
+        if let Some(p1) = self.windows.get_mut(&first) {
+            p1.split_ratio = ratio;
+        }
+        if let Some(p2) = self.windows.get_mut(&second) {
+            p2.split_ratio = 1.0 - ratio;
+        }
+    }
+
+    /// Set the split tree explicitly.
+    pub fn set_split_tree(&mut self, tree: SplitNode) {
+        self.split_tree = Some(tree);
+    }
+
+    /// Get the split tree, if one exists.
+    pub fn get_split_tree(&self) -> Option<&SplitNode> {
+        self.split_tree.as_ref()
+    }
+
+    /// Set the default split ratio for a dock area.
+    pub fn set_dock_ratio(&mut self, area: DockArea, ratio: f32) {
+        self.dock_ratios.insert(area, ratio.clamp(0.0, 1.0));
+    }
+
+    /// Get the default split ratio for a dock area.
+    pub fn get_dock_ratio(&self, area: &DockArea) -> f32 {
+        self.dock_ratios.get(area).copied().unwrap_or(0.5)
     }
 
     // ---------------------------------------------------------------
@@ -822,5 +1249,244 @@ mod tests {
         layout.reset_to_default();
         assert!(layout.windows.contains_key(&ComponentProvider::ListingView));
         assert!(layout.windows.contains_key(&ComponentProvider::Console));
+    }
+
+    // --- SplitNode tests ---
+
+    #[test]
+    fn test_split_node_leaf() {
+        let node = SplitNode::leaf(ComponentProvider::ListingView);
+        assert!(node.is_leaf());
+        assert!(!node.is_split());
+        assert_eq!(node.all_providers(), vec![ComponentProvider::ListingView]);
+        assert_eq!(node.leaf_count(), 1);
+        assert_eq!(node.depth(), 1);
+    }
+
+    #[test]
+    fn test_split_node_horizontal() {
+        let left = SplitNode::leaf(ComponentProvider::ListingView);
+        let right = SplitNode::leaf(ComponentProvider::DecompilerView);
+        let node = SplitNode::horizontal_split(left, right, 0.6);
+
+        assert!(node.is_split());
+        assert_eq!(node.leaf_count(), 2);
+        assert_eq!(node.depth(), 2);
+        assert_eq!(
+            node.all_providers(),
+            vec![
+                ComponentProvider::ListingView,
+                ComponentProvider::DecompilerView,
+            ]
+        );
+    }
+
+    #[test]
+    fn test_split_node_tabbed() {
+        let node = SplitNode::tabbed(vec![
+            ComponentProvider::ListingView,
+            ComponentProvider::Console,
+            ComponentProvider::BytesView,
+        ]);
+        assert!(node.is_tabbed());
+        assert_eq!(node.leaf_count(), 3);
+        assert_eq!(node.depth(), 1);
+    }
+
+    #[test]
+    fn test_split_node_nested() {
+        let tree = SplitNode::vertical_split(
+            SplitNode::horizontal_split(
+                SplitNode::leaf(ComponentProvider::SymbolTree),
+                SplitNode::leaf(ComponentProvider::ListingView),
+                0.3,
+            ),
+            SplitNode::tabbed(vec![
+                ComponentProvider::Console,
+                ComponentProvider::BytesView,
+            ]),
+            0.7,
+        );
+
+        assert_eq!(tree.leaf_count(), 4);
+        assert_eq!(tree.depth(), 3);
+        assert!(tree
+            .find_leaf(&ComponentProvider::SymbolTree)
+            .is_some());
+        assert!(tree.find_leaf(&ComponentProvider::Console).is_some());
+        assert!(tree
+            .find_leaf(&ComponentProvider::References)
+            .is_none());
+    }
+
+    #[test]
+    fn test_split_node_replace_leaf() {
+        let mut tree = SplitNode::horizontal_split(
+            SplitNode::leaf(ComponentProvider::ListingView),
+            SplitNode::leaf(ComponentProvider::DecompilerView),
+            0.5,
+        );
+
+        // Replace DecompilerView with a vertical split.
+        let replacement = SplitNode::vertical_split(
+            SplitNode::leaf(ComponentProvider::DecompilerView),
+            SplitNode::leaf(ComponentProvider::Console),
+            0.5,
+        );
+        assert!(tree.replace_leaf(&ComponentProvider::DecompilerView, replacement));
+        assert_eq!(tree.leaf_count(), 3);
+        assert!(tree.find_leaf(&ComponentProvider::Console).is_some());
+    }
+
+    #[test]
+    fn test_split_node_clamp_ratio() {
+        let node = SplitNode::horizontal_split(
+            SplitNode::leaf(ComponentProvider::ListingView),
+            SplitNode::leaf(ComponentProvider::Console),
+            1.5, // Out of range
+        );
+        match node {
+            SplitNode::Split { ratio, .. } => assert!((ratio - 1.0).abs() < f32::EPSILON),
+            _ => panic!("expected Split"),
+        }
+    }
+
+    // --- Docking operation tests ---
+
+    #[test]
+    fn test_dock_provider() {
+        let mut layout = DockingLayout::new();
+        layout.dock_provider(ComponentProvider::Console, WindowPosition::Bottom);
+        assert_eq!(
+            layout
+                .get_window(&ComponentProvider::Console)
+                .unwrap()
+                .position,
+            WindowPosition::Bottom
+        );
+        assert!(!layout
+            .get_window(&ComponentProvider::Console)
+            .unwrap()
+            .floating);
+
+        // Redock at different position.
+        layout.dock_provider(ComponentProvider::Console, WindowPosition::Right);
+        assert_eq!(
+            layout
+                .get_window(&ComponentProvider::Console)
+                .unwrap()
+                .position,
+            WindowPosition::Right
+        );
+    }
+
+    #[test]
+    fn test_float_provider() {
+        let mut layout = DockingLayout::new();
+        layout.float_provider(ComponentProvider::Console, 100.0, 200.0, 400.0, 300.0);
+        let p = layout.get_window(&ComponentProvider::Console).unwrap();
+        assert!(p.floating);
+        assert_eq!(p.size, (400.0, 300.0));
+    }
+
+    #[test]
+    fn test_undock_provider() {
+        let mut layout = DockingLayout::new();
+        layout.add_window(
+            ComponentProvider::Console,
+            make_placement(WindowPosition::Bottom),
+        );
+        layout.undock_provider(ComponentProvider::Console);
+        let p = layout.get_window(&ComponentProvider::Console).unwrap();
+        assert!(p.floating);
+    }
+
+    #[test]
+    fn test_tab_with() {
+        let mut layout = DockingLayout::new();
+        layout.add_window(
+            ComponentProvider::ListingView,
+            make_placement(WindowPosition::Center),
+        );
+        layout.add_window(
+            ComponentProvider::Console,
+            make_placement(WindowPosition::Center),
+        );
+
+        layout.tab_with(ComponentProvider::Console, ComponentProvider::ListingView);
+        assert_eq!(layout.tabs.len(), 1);
+        assert!(layout.tabs[0]
+            .tabs
+            .contains(&ComponentProvider::Console));
+        assert!(layout.tabs[0]
+            .tabs
+            .contains(&ComponentProvider::ListingView));
+    }
+
+    #[test]
+    fn test_untab() {
+        let mut layout = DockingLayout::new();
+        layout.tabs.push(TabGroup::new(
+            vec![
+                ComponentProvider::ListingView,
+                ComponentProvider::Console,
+            ],
+            WindowPosition::Center,
+        ));
+
+        layout.untab(ComponentProvider::Console);
+        assert_eq!(layout.tabs.len(), 1);
+        assert!(layout.tabs[0]
+            .tabs
+            .contains(&ComponentProvider::ListingView));
+        assert!(!layout.tabs[0]
+            .tabs
+            .contains(&ComponentProvider::Console));
+    }
+
+    #[test]
+    fn test_split_with() {
+        let mut layout = DockingLayout::new();
+        layout.add_window(
+            ComponentProvider::ListingView,
+            make_placement(WindowPosition::Center),
+        );
+
+        layout.split_with(
+            ComponentProvider::ListingView,
+            ComponentProvider::DecompilerView,
+            SplitDirection::Horizontal,
+            0.6,
+        );
+
+        assert!(layout.windows.contains_key(&ComponentProvider::DecompilerView));
+        assert!(layout.split_tree.is_some());
+
+        let tree = layout.split_tree.as_ref().unwrap();
+        assert!(tree.find_leaf(&ComponentProvider::ListingView).is_some());
+        assert!(tree
+            .find_leaf(&ComponentProvider::DecompilerView)
+            .is_some());
+    }
+
+    #[test]
+    fn test_split_tree_api() {
+        let mut layout = DockingLayout::new();
+        assert!(layout.get_split_tree().is_none());
+
+        let tree = SplitNode::tabbed(vec![
+            ComponentProvider::ListingView,
+            ComponentProvider::Console,
+        ]);
+        layout.set_split_tree(tree);
+        assert!(layout.get_split_tree().is_some());
+    }
+
+    #[test]
+    fn test_dock_ratios() {
+        let mut layout = DockingLayout::new();
+        layout.set_dock_ratio(DockArea::Left, 0.3);
+        assert!((layout.get_dock_ratio(&DockArea::Left) - 0.3).abs() < f32::EPSILON);
+        assert!((layout.get_dock_ratio(&DockArea::Right) - 0.5).abs() < f32::EPSILON);
     }
 }

@@ -1557,6 +1557,22 @@ impl ProcessorModule for SparcModule {
 
     fn languages() -> Vec<Language> {
         vec![
+            // -- .ldefs canonical variants (SparcV9.ldefs) --
+            Language::new(
+                "sparc:BE:32:default",
+                "Sparc V9 32-bit",
+                "1.5",
+                Endian::Big,
+                32,
+            ),
+            Language::new(
+                "sparc:BE:64:default",
+                "Sparc V9 64-bit",
+                "1.5",
+                Endian::Big,
+                64,
+            ),
+            // -- Extended ISA variants (superset of .ldefs) --
             Language::new(
                 "sparc:BE:32:V7",
                 "SPARC V7 32-bit Big Endian",
@@ -1824,7 +1840,7 @@ mod tests {
         let regs = SparcModule::registers();
         assert!(!regs.is_empty());
         let langs = SparcModule::languages();
-        assert!(langs.len() >= 5);
+        assert!(langs.len() >= 6, "Expected >= 6 SPARC language variants, got {}", langs.len());
         let insts = SparcModule::instructions();
         assert!(insts.len() >= 200);
     }

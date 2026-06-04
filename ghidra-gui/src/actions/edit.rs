@@ -160,7 +160,8 @@ mod tests {
     #[test]
     fn test_edit_action_names() {
         let q = crate::actions::commands::new_command_queue();
-        let names = action_names(&create_edit_actions(&q));
+        let actions = create_edit_actions(&q);
+        let names = action_names(&actions);
         assert!(names.contains(&"undo"));
         assert!(names.contains(&"redo"));
         assert!(names.contains(&"cut"));

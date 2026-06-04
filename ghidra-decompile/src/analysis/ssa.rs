@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::graph::NodeIndex;
 
-use ghidra_core::addr::AddressSpace;
+use ghidra_core::addr::{AddressSpace, AddrSpaceType};
 
 use super::cfg::ControlFlowGraph;
 use crate::pcode::{OpCode, PcodeOperation, Varnode};
@@ -613,7 +613,7 @@ impl SsaBuilder {
 
 /// Create a new SSA-renamed varnode in the unique space.
 fn make_ssa_varnode(base: &Varnode, version: u64) -> Varnode {
-    let unique_space = AddressSpace::new("ssa_unique", 8, false);
+    let unique_space = AddressSpace::new("ssa_unique", 8, false, AddrSpaceType::Unique, 4);
     Varnode::new(
         unique_space,
         (base.offset << 6) | version,
@@ -635,6 +635,8 @@ fn next_version(base: &Varnode, counters: &mut HashMap<Varnode, u64>) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
+    use super::super::cfg::{BasicBlock, CfgEdge};
     use petgraph::graph::DiGraph;
 
     fn test_addr(offset: u64) -> Address {
@@ -739,15 +741,21 @@ mod tests {
         let dom = DominatorTree::compute(&cfg);
         let df = dom.dominance_frontiers(&cfg);
 
-        // Node d (4) should be the merge point.
-        // a (1) has successors b(2) and c(3), both lead to d(4).
-        let a = NodeIndex::new(1);
+        // In the diamond CFG: entry -> a -> {b, c} -> d -> exit
+        // b and c do not dominate d, but they are predecessors of d.
+        // So d should be in the dominance frontier of b and c.
+        let b = NodeIndex::new(2);
+        let c = NodeIndex::new(3);
         let d = NodeIndex::new(4);
-        let frontier_a = df.get(&a).unwrap();
-        // d should be in a's dominance frontier.
+        let frontier_b = df.get(&b).unwrap();
+        let frontier_c = df.get(&c).unwrap();
         assert!(
-            frontier_a.contains(&d),
-            "d should be in a's dominance frontier"
+            frontier_b.contains(&d),
+            "d should be in b's dominance frontier"
+        );
+        assert!(
+            frontier_c.contains(&d),
+            "d should be in c's dominance frontier"
         );
     }
 

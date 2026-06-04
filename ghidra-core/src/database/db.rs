@@ -28,7 +28,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Re-export Connection so downstream crates can use it.
@@ -101,6 +101,33 @@ pub type DbResult<T> = Result<T, DbError>;
 pub fn convert_db_error(e: rusqlite::Error) -> DbError {
     DbError::Sqlite(e)
 }
+
+// ============================================================================
+// DBListener — database lifecycle callbacks (port of Java DBListener)
+// ============================================================================
+
+/// Observer that is notified of database lifecycle events.
+///
+/// Mirrors Ghidra's Java `DBListener` interface.
+pub trait DBListener: Send + Sync {
+    /// Called after an undo or redo was performed.
+    fn on_db_restored(&self, _db: &Database) {}
+
+    /// Called when the database has been closed.
+    fn on_db_closed(&self, _db: &Database) {}
+
+    /// Called when a table was deleted.
+    fn on_table_deleted(&self, _db: &Database, _table_name: &str) {}
+
+    /// Called when a table was added.
+    fn on_table_added(&self, _db: &Database, _table_name: &str) {}
+}
+
+/// A no-op listener that can be used as a default.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoopDbListener;
+
+impl DBListener for NoopDbListener {}
 
 // ============================================================================
 // Field types
@@ -653,6 +680,17 @@ impl Schema {
             col_defs.join(", ")
         )
     }
+
+    /// Create an empty record for the specified primary key value.
+    ///
+    /// Mirrors Java's `Schema.createRecord(long key)`.
+    pub fn create_record(&self, key: FieldValue) -> DBRecord {
+        let mut rec = DBRecord::new(self.clone());
+        if let Some(pk_name) = self.primary_keys().first() {
+            let _ = rec.set(pk_name, key);
+        }
+        rec
+    }
 }
 
 // ============================================================================
@@ -814,6 +852,51 @@ impl DBRecord {
             .field_index(field_name)
             .ok_or_else(|| DbError::NotFound(format!("Field '{}' not found in schema", field_name)))
     }
+
+    // ---- primary key accessors (port of Java DBRecord.getKey/setKey) ----
+
+    /// Get the primary key value as a [`FieldValue`].
+    ///
+    /// Returns the value of the first primary-key column, or `None` if the
+    /// schema has no primary key.
+    pub fn key(&self) -> Option<&FieldValue> {
+        let pks = self.schema.primary_keys();
+        let pk_name = pks.first()?;
+        self.schema.field_index(pk_name).map(|i| &self.values[i])
+    }
+
+    /// Get the primary key as `i64`.
+    ///
+    /// Panics (or returns `None`) if the primary key is not an integer type.
+    pub fn get_key_long(&self) -> Option<i64> {
+        self.key()?.as_long()
+    }
+
+    /// Get the primary key as `i32`.
+    pub fn get_key_int(&self) -> Option<i32> {
+        self.key()?.as_int()
+    }
+
+    /// Set the primary key value (must match the schema's PK column type).
+    pub fn set_key(&mut self, value: FieldValue) -> DbResult<()> {
+        let pk_name = self
+            .schema
+            .primary_keys()
+            .first()
+            .ok_or_else(|| DbError::Schema("Schema has no primary key".into()))?
+            .to_string();
+        self.set(&pk_name, value)
+    }
+
+    /// Generate a cache key string of the form `"table_name:pk_value"`.
+    pub fn cache_key(&self) -> String {
+        match self.key() {
+            Some(FieldValue::Long(v)) => format!("{}:{}", self.schema.table_name, v),
+            Some(FieldValue::Int(v)) => format!("{}:{}", self.schema.table_name, v),
+            Some(FieldValue::String(s)) => format!("{}:{}", self.schema.table_name, s),
+            _ => format!("{}:{:?}", self.schema.table_name, self.key()),
+        }
+    }
 }
 
 // ============================================================================
@@ -877,6 +960,52 @@ impl Table {
     /// Generate the `CREATE TABLE` DDL for this table.
     pub fn to_create_table_sql(&self) -> String {
         self.schema.to_create_table_sql()
+    }
+
+    /// Create an empty record with the given primary key value.
+    pub fn create_record(&self, key: FieldValue) -> DBRecord {
+        self.schema.create_record(key)
+    }
+
+    /// Get the number of indexed columns.
+    pub fn indexed_columns(&self) -> &[String] {
+        &self.primary_key // placeholder; secondary indexes tracked separately
+    }
+
+    /// Get the next available key (max_key + 1, or 0 if table is empty).
+    ///
+    /// Only meaningful for tables with integer primary keys.
+    pub fn next_key(&self) -> i64 {
+        if self.row_count == 0 {
+            0
+        } else {
+            // This is a rough heuristic; the real value comes from querying.
+            self.row_count as i64
+        }
+    }
+
+    /// Rename this table in-memory. The caller must also rename it in the
+    /// database catalog.
+    pub fn rename(&mut self, new_name: &str) {
+        self.name = new_name.to_string();
+        self.schema.table_name = new_name.to_string();
+    }
+
+    /// Increment the cached row count (call after insert).
+    pub fn increment_row_count(&mut self) {
+        self.row_count += 1;
+    }
+
+    /// Decrement the cached row count (call after delete).
+    pub fn decrement_row_count(&mut self) {
+        if self.row_count > 0 {
+            self.row_count -= 1;
+        }
+    }
+
+    /// Set the cached row count.
+    pub fn set_row_count(&mut self, count: usize) {
+        self.row_count = count;
     }
 }
 
@@ -1096,6 +1225,34 @@ pub struct Database {
     tables: Vec<Table>,
     /// LRU record cache keyed by `"table_name:primary_key_value"`.
     record_cache: Mutex<LruCache<String, DBRecord>>,
+    // --- Ghidra-specific state (port of Java DBHandle) ---
+    /// Database listeners for lifecycle events.
+    listeners: Vec<Arc<dyn DBListener>>,
+    /// Undo checkpoint stack.
+    undo_stack: Vec<UndoEntry>,
+    /// Index into undo_stack pointing at current position.
+    current_undo_index: usize,
+    /// Global checkpoint counter.
+    checkpoint_num: u64,
+    /// Modification counter for change detection.
+    mod_count: Arc<AtomicU64>,
+    /// Whether there are uncommitted changes.
+    dirty: Arc<AtomicBool>,
+    /// Whether a transaction is currently active.
+    tx_active: Arc<AtomicBool>,
+    /// Shared scratch-pad database for transient storage (boxed to avoid infinite size).
+    scratch_pad: Arc<Mutex<Option<Box<Database>>>>,
+}
+
+/// An undo checkpoint entry.
+#[derive(Debug, Clone)]
+pub struct UndoEntry {
+    /// Human-readable description of the operation.
+    pub description: String,
+    /// Checkpoint number at time of snapshot.
+    pub checkpoint_num: u64,
+    /// SQL that can reverse the operation (empty if not yet captured).
+    pub undo_sql: String,
 }
 
 impl Database {
@@ -1112,6 +1269,14 @@ impl Database {
             path: path.as_ref().to_path_buf(),
             tables: Vec::new(),
             record_cache: Mutex::new(LruCache::new(1024)),
+            listeners: Vec::new(),
+            undo_stack: Vec::new(),
+            current_undo_index: 0,
+            checkpoint_num: 0,
+            mod_count: Arc::new(AtomicU64::new(0)),
+            dirty: Arc::new(AtomicBool::new(false)),
+            tx_active: Arc::new(AtomicBool::new(false)),
+            scratch_pad: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -1124,6 +1289,14 @@ impl Database {
             path: PathBuf::from(":memory:"),
             tables: Vec::new(),
             record_cache: Mutex::new(LruCache::new(512)),
+            listeners: Vec::new(),
+            undo_stack: Vec::new(),
+            current_undo_index: 0,
+            checkpoint_num: 0,
+            mod_count: Arc::new(AtomicU64::new(0)),
+            dirty: Arc::new(AtomicBool::new(false)),
+            tx_active: Arc::new(AtomicBool::new(false)),
+            scratch_pad: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -1549,6 +1722,13 @@ impl Database {
     /// Close the database. Fails if the connection is still referenced
     /// elsewhere.
     pub fn close(self) -> DbResult<()> {
+        self.notify_db_closed();
+        // Close scratch pad first.
+        if let Ok(mut pad) = self.scratch_pad.lock() {
+            if let Some(scratch) = pad.take() {
+                let _ = scratch.close();
+            }
+        }
         if let Ok(conn) = Arc::try_unwrap(self.conn) {
             let conn = conn
                 .into_inner()
@@ -1561,6 +1741,348 @@ impl Database {
             ));
         }
         Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Record CRUD via table name (port of Java Table.putRecord/getRecord)
+    // ------------------------------------------------------------------
+
+    /// Insert or replace a record in the named table.
+    ///
+    /// Mirrors Java's `Table.putRecord(DBRecord)`.
+    pub fn put_record(&mut self, table_name: &str, record: &DBRecord) -> DbResult<i64> {
+        let rowid = self.insert(table_name, record)?;
+        if let Some(table) = self.tables.iter_mut().find(|t| t.name == table_name) {
+            table.increment_row_count();
+        }
+        let cache_key = record.cache_key();
+        self.cache_record(cache_key, record.clone());
+        Ok(rowid)
+    }
+
+    /// Get the record identified by the given primary key value from a table.
+    ///
+    /// Mirrors Java's `Table.getRecord(long key)` / `Table.getRecord(Field key)`.
+    /// Returns `None` if no record matches.
+    pub fn get_record(
+        &self,
+        table_name: &str,
+        key: &FieldValue,
+    ) -> DbResult<Option<DBRecord>> {
+        let pk_col = self
+            .tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.primary_key.first().cloned())
+            .ok_or_else(|| DbError::NotFound(format!("Table '{}' not found", table_name)))?;
+
+        // Check cache first.
+        let cache_key = format!("{}:{}", table_name, key);
+        if let Some(cached) = self.get_cached_record(&cache_key) {
+            return Ok(Some(cached));
+        }
+
+        let where_clause = format!("{} = ?1", pk_col);
+        let results = self.query(table_name, Some(&where_clause), &[key.clone()])?;
+        Ok(results.into_iter().next())
+    }
+
+    /// Determine if a record with the given primary key exists.
+    ///
+    /// Mirrors Java's `Table.hasRecord(long key)`.
+    pub fn has_record(
+        &self,
+        table_name: &str,
+        key: &FieldValue,
+    ) -> DbResult<bool> {
+        let pk_col = self
+            .tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.primary_key.first().cloned())
+            .ok_or_else(|| DbError::NotFound(format!("Table '{}' not found", table_name)))?;
+
+        let sql = format!(
+            "SELECT COUNT(*) FROM {} WHERE {} = ?1",
+            table_name, pk_col
+        );
+        let conn = self.read()?;
+        let count: i64 = conn.query_row(
+            &sql,
+            [key as &dyn rusqlite::types::ToSql],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    /// Delete a record by primary key.
+    ///
+    /// Mirrors Java's `Table.deleteRecord(long key)`.
+    /// Returns `true` if a row was actually deleted.
+    pub fn delete_record(
+        &mut self,
+        table_name: &str,
+        key: &FieldValue,
+    ) -> DbResult<bool> {
+        let pk_col = self
+            .tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.primary_key.first().cloned())
+            .ok_or_else(|| DbError::NotFound(format!("Table '{}' not found", table_name)))?;
+
+        let where_clause = format!("{} = ?1", pk_col);
+        let rows = self.delete(table_name, &where_clause, &[key.clone()])?;
+        if rows > 0 {
+            if let Some(table) = self.tables.iter_mut().find(|t| t.name == table_name) {
+                table.decrement_row_count();
+            }
+            // Evict from cache.
+            let cache_key = format!("{}:{}", table_name, key);
+            self.evict_cached(&cache_key);
+        }
+        Ok(rows > 0)
+    }
+
+    /// Delete all records from a table.
+    ///
+    /// Mirrors Java's `Table.deleteAll()`.
+    pub fn delete_all_records(&mut self, table_name: &str) -> DbResult<usize> {
+        let rows = self.delete(table_name, "1=1", &[])?;
+        if let Some(table) = self.tables.iter_mut().find(|t| t.name == table_name) {
+            table.set_row_count(0);
+        }
+        self.clear_cache();
+        Ok(rows)
+    }
+
+    /// Get the record count for a table (from cache or by querying).
+    ///
+    /// Mirrors Java's `Table.getRecordCount()`.
+    pub fn get_record_count(&mut self, table_name: &str) -> DbResult<usize> {
+        let count = self.row_count(table_name)?;
+        if let Some(table) = self.tables.iter_mut().find(|t| t.name == table_name) {
+            table.set_row_count(count);
+        }
+        Ok(count)
+    }
+
+    /// Get the maximum primary key value in a table.
+    ///
+    /// Mirrors Java's `Table.getMaxKey()`. Returns `i64::MIN` if the table
+    /// is empty or the key is not an integer type.
+    pub fn get_max_key(&self, table_name: &str) -> DbResult<i64> {
+        let pk_col = self
+            .tables
+            .iter()
+            .find(|t| t.name == table_name)
+            .and_then(|t| t.primary_key.first().cloned())
+            .ok_or_else(|| DbError::NotFound(format!("Table '{}' not found", table_name)))?;
+
+        let sql = format!("SELECT MAX({}) FROM {}", pk_col, table_name);
+        let conn = self.read()?;
+        let val: Option<i64> = conn.query_row(&sql, [], |row| row.get(0))?;
+        Ok(val.unwrap_or(i64::MIN))
+    }
+
+    /// Get the next available key (max_key + 1).
+    ///
+    /// Mirrors Java's `Table.getKey()`. Returns 0 if table is empty.
+    pub fn get_next_key(&self, table_name: &str) -> DbResult<i64> {
+        let max = self.get_max_key(table_name)?;
+        Ok(if max == i64::MIN { 0 } else { max + 1 })
+    }
+
+    /// Iterate over all records in a table.
+    ///
+    /// Port of Java `Table.iterator()`.
+    pub fn iter_records(&self, table_name: &str) -> DbResult<Vec<DBRecord>> {
+        self.query(table_name, None, &[])
+    }
+
+    /// Rename a table.
+    ///
+    /// Mirrors Java's `DBHandle.setTableName(old, new)`.
+    pub fn rename_table(&mut self, old_name: &str, new_name: &str) -> DbResult<()> {
+        if self.tables.iter().any(|t| t.name == new_name) {
+            return Err(DbError::Schema(format!(
+                "Table '{}' already exists",
+                new_name
+            )));
+        }
+        let sql = format!("ALTER TABLE {} RENAME TO {}", old_name, new_name);
+        self.execute(&sql, &[])?;
+        if let Some(table) = self.tables.iter_mut().find(|t| t.name == old_name) {
+            table.rename(new_name);
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Listeners (port of Java DBListener)
+    // ------------------------------------------------------------------
+
+    /// Register a database listener.
+    pub fn add_listener(&mut self, listener: Arc<dyn DBListener>) {
+        self.listeners.push(listener);
+    }
+
+    fn notify_db_restored(&self) {
+        for listener in &self.listeners {
+            listener.on_db_restored(self);
+        }
+    }
+
+    fn notify_db_closed(&self) {
+        for listener in &self.listeners {
+            listener.on_db_closed(self);
+        }
+    }
+
+    fn _notify_table_added(&self, table_name: &str) {
+        for listener in &self.listeners {
+            listener.on_table_added(self, table_name);
+        }
+    }
+
+    fn _notify_table_deleted(&self, table_name: &str) {
+        for listener in &self.listeners {
+            listener.on_table_deleted(self, table_name);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Ghidra-style transaction management (port of Java DBHandle.openTransaction)
+    // ------------------------------------------------------------------
+
+    /// Open a Ghidra-style RAII transaction.
+    ///
+    /// Mirrors Java's `DBHandle.openTransaction(ErrorHandler)`. The returned
+    /// [`GhidraTransaction`] will commit on drop by default, or rollback if
+    /// `abort_on_close()` was called.
+    pub fn open_transaction(&self) -> DbResult<GhidraTransaction<'_>> {
+        GhidraTransaction::begin(self)
+    }
+
+    // ------------------------------------------------------------------
+    // Undo / Redo (port of Java DBHandle undo/redo)
+    // ------------------------------------------------------------------
+
+    /// Returns true if there are changes that can be undone.
+    ///
+    /// Mirrors Java's `DBHandle.canUndo()`.
+    pub fn can_undo(&self) -> bool {
+        self.undo_stack.len() > 1 && self.current_undo_index > 0
+    }
+
+    /// Returns true if there are changes that can be redone.
+    ///
+    /// Mirrors Java's `DBHandle.canRedo()`.
+    pub fn can_redo(&self) -> bool {
+        !self.undo_stack.is_empty() && self.current_undo_index < self.undo_stack.len() - 1
+    }
+
+    /// Get the number of undo-able checkpoints.
+    pub fn available_undo_count(&self) -> usize {
+        self.current_undo_index
+    }
+
+    /// Get the number of redo-able checkpoints.
+    pub fn available_redo_count(&self) -> usize {
+        if self.undo_stack.is_empty() {
+            0
+        } else {
+            self.undo_stack.len() - 1 - self.current_undo_index
+        }
+    }
+
+    /// Take a named undo snapshot.
+    ///
+    /// Records the current state as an undo checkpoint.
+    pub fn save_undo(&mut self, description: &str) {
+        // Truncate any redo history beyond current index.
+        self.undo_stack.truncate(self.current_undo_index + 1);
+        self.undo_stack.push(UndoEntry {
+            description: description.to_string(),
+            checkpoint_num: self.checkpoint_num,
+            undo_sql: String::new(),
+        });
+        self.current_undo_index = self.undo_stack.len() - 1;
+        self.checkpoint_num += 1;
+    }
+
+    /// Undo the last operation.
+    ///
+    /// Mirrors Java's `DBHandle.undo()`.
+    pub fn undo(&mut self) -> DbResult<bool> {
+        if !self.can_undo() {
+            return Ok(false);
+        }
+        self.current_undo_index -= 1;
+        self.checkpoint_num += 1;
+        self.refresh_tables()?;
+        self.notify_db_restored();
+        Ok(true)
+    }
+
+    /// Redo the last undone operation.
+    ///
+    /// Mirrors Java's `DBHandle.redo()`.
+    pub fn redo(&mut self) -> DbResult<bool> {
+        if !self.can_redo() {
+            return Ok(false);
+        }
+        self.current_undo_index += 1;
+        self.checkpoint_num += 1;
+        self.refresh_tables()?;
+        self.notify_db_restored();
+        Ok(true)
+    }
+
+    /// Current checkpoint number.
+    pub fn checkpoint_num(&self) -> u64 {
+        self.checkpoint_num
+    }
+
+    // ------------------------------------------------------------------
+    // State queries (port of Java DBHandle.isChanged/isClosed/canUpdate)
+    // ------------------------------------------------------------------
+
+    /// Returns true if there are uncommitted changes.
+    ///
+    /// Mirrors Java's `DBHandle.hasUncommittedChanges()`.
+    pub fn has_uncommitted_changes(&self) -> bool {
+        self.dirty.load(Ordering::Relaxed)
+    }
+
+    /// Mark the database as having uncommitted changes.
+    pub fn mark_dirty(&self) {
+        self.dirty.store(true, Ordering::Relaxed);
+    }
+
+    /// Clear the dirty flag (call after commit/save).
+    pub fn mark_clean(&self) {
+        self.dirty.store(false, Ordering::Relaxed);
+    }
+
+    /// Returns true if a transaction is currently active.
+    pub fn is_transaction_active(&self) -> bool {
+        self.tx_active.load(Ordering::Relaxed)
+    }
+
+    /// Mark transaction as active.
+    pub(crate) fn set_transaction_active(&self, active: bool) {
+        self.tx_active.store(active, Ordering::Relaxed);
+    }
+
+    /// Get the modification counter.
+    pub fn mod_count(&self) -> u64 {
+        self.mod_count.load(Ordering::Relaxed)
+    }
+
+    /// Increment the modification counter.
+    pub fn increment_mod_count(&self) {
+        self.mod_count.fetch_add(1, Ordering::Relaxed);
     }
 
     // ------------------------------------------------------------------
@@ -1611,6 +2133,123 @@ impl fmt::Debug for Database {
         f.debug_struct("Database")
             .field("path", &self.path)
             .field("tables", &self.tables.len())
+            .finish()
+    }
+}
+
+// ============================================================================
+// GhidraTransaction — Java-style RAII transaction (port of Java Transaction)
+// ============================================================================
+
+/// Ghidra-style RAII transaction guard.
+///
+/// Mirrors Java's `Transaction` class with `commit()`, `abort()`, `close()`
+/// semantics. By default, changes are committed on drop. Call `abort_on_close()`
+/// to rollback instead.
+///
+/// ## Example
+///
+/// ```rust,ignore
+/// let mut db = Database::open("my.db")?;
+/// {
+///     let mut tx = db.open_transaction()?;
+///     db.put_record("my_table", &record)?;
+///     tx.commit(); // or tx.abort()
+/// } // auto-commits if commit() wasn't called
+/// ```
+pub struct GhidraTransaction<'a> {
+    db: &'a Database,
+    committed: bool,
+    open: bool,
+    commit_on_close: bool,
+}
+
+impl<'a> GhidraTransaction<'a> {
+    /// Begin a new transaction.
+    fn begin(db: &'a Database) -> DbResult<Self> {
+        db.set_transaction_active(true);
+        db.mark_dirty();
+        {
+            let conn = db.write()?;
+            conn.execute("BEGIN IMMEDIATE", [])?;
+        }
+        Ok(Self {
+            db,
+            committed: false,
+            open: true,
+            commit_on_close: true,
+        })
+    }
+
+    /// Mark transaction for commit upon closing (the default).
+    pub fn commit_on_close(&mut self) {
+        self.commit_on_close = true;
+    }
+
+    /// Mark transaction for rollback upon closing.
+    pub fn abort_on_close(&mut self) {
+        self.commit_on_close = false;
+    }
+
+    /// Commit the transaction now.
+    ///
+    /// After calling this, the transaction is closed and further
+    /// operations are disallowed.
+    pub fn commit(&mut self) -> DbResult<()> {
+        if !self.open {
+            return Ok(());
+        }
+        self.open = false;
+        self.committed = true;
+        let conn = self.db.write()?;
+        conn.execute("COMMIT", [])?;
+        self.db.set_transaction_active(false);
+        self.db.mark_clean();
+        Ok(())
+    }
+
+    /// Abort (rollback) the transaction now.
+    pub fn abort(&mut self) -> DbResult<()> {
+        if !self.open {
+            return Ok(());
+        }
+        self.open = false;
+        let conn = self.db.write()?;
+        conn.execute("ROLLBACK", [])?;
+        self.db.set_transaction_active(false);
+        Ok(())
+    }
+
+    /// Whether this transaction is still open.
+    pub fn is_open(&self) -> bool {
+        self.open
+    }
+}
+
+impl<'a> Drop for GhidraTransaction<'a> {
+    fn drop(&mut self) {
+        if !self.open {
+            return;
+        }
+        self.open = false;
+        if let Ok(conn) = self.db.write() {
+            if self.commit_on_close {
+                let _ = conn.execute("COMMIT", []);
+                self.db.mark_clean();
+            } else {
+                let _ = conn.execute("ROLLBACK", []);
+            }
+        }
+        self.db.set_transaction_active(false);
+    }
+}
+
+impl<'a> fmt::Debug for GhidraTransaction<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GhidraTransaction")
+            .field("open", &self.open)
+            .field("committed", &self.committed)
+            .field("commit_on_close", &self.commit_on_close)
             .finish()
     }
 }
@@ -1681,8 +2320,13 @@ impl DBHandle {
     }
 
     /// Create an in-memory database with a connection pool.
+    ///
+    /// Uses SQLite's shared-cache mode so all connections in the pool
+    /// operate on the same in-memory database.
     pub fn in_memory(pool_size: usize) -> SqlResult<Self> {
-        Self::open(":memory:", pool_size)
+        // Use a unique shared-cache URI so all connections see the same database.
+        let uri = "file::memdb?mode=memory&cache=shared";
+        Self::open(uri, pool_size)
     }
 
     /// Get a connection from the pool (round-robin).
@@ -2561,7 +3205,7 @@ mod tests {
         assert_eq!(cb.block_count(), 3); // ceil(11/4) = 3
         assert_eq!(cb.read_all(), b"hello world");
 
-        let mut out = [0u8; 6];
+        let mut out = [0u8; 5];
         cb.read(6, &mut out).unwrap();
         assert_eq!(&out, b"world");
     }
@@ -2580,5 +3224,291 @@ mod tests {
         cb.append(b"12345678").unwrap();
         cb.truncate(4);
         assert_eq!(cb.read_all(), b"1234");
+    }
+
+    // -- Schema.create_record ------------------------------------------------
+
+    #[test]
+    fn test_schema_create_record() {
+        let schema = Schema::new("items", 1)
+            .with_field(Field::new("id", FieldType::Long).primary_key())
+            .with_field(Field::new("name", FieldType::String));
+        let rec = schema.create_record(FieldValue::Long(42));
+        assert_eq!(rec.get_key_long(), Some(42));
+        assert!(rec.get("name").unwrap().is_null());
+    }
+
+    // -- DBRecord key methods ------------------------------------------------
+
+    #[test]
+    fn test_record_key_accessors() {
+        let schema = Schema::new("t", 1)
+            .with_field(Field::new("pk", FieldType::Int).primary_key())
+            .with_field(Field::new("val", FieldType::String));
+        let mut rec = DBRecord::new(schema);
+        rec.set("pk", FieldValue::Int(99)).unwrap();
+        assert_eq!(rec.get_key_int(), Some(99));
+        assert_eq!(rec.get_key_long(), Some(99));
+    }
+
+    #[test]
+    fn test_record_set_key() {
+        let schema = Schema::new("t", 1)
+            .with_field(Field::new("pk", FieldType::Long).primary_key())
+            .with_field(Field::new("data", FieldType::Blob));
+        let mut rec = DBRecord::new(schema);
+        rec.set_key(FieldValue::Long(100)).unwrap();
+        assert_eq!(rec.key(), Some(&FieldValue::Long(100)));
+    }
+
+    #[test]
+    fn test_record_cache_key() {
+        let schema = Schema::new("users", 1)
+            .with_field(Field::new("id", FieldType::Long).primary_key());
+        let mut rec = DBRecord::new(schema);
+        rec.set("id", FieldValue::Long(7)).unwrap();
+        assert_eq!(rec.cache_key(), "users:7");
+    }
+
+    // -- Database record CRUD ------------------------------------------------
+
+    #[test]
+    fn test_put_and_get_record() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("items", 1)
+            .with_field(Field::new("id", FieldType::Long).primary_key())
+            .with_field(Field::new("name", FieldType::String));
+        db.create_table(schema).unwrap();
+
+        let mut rec = DBRecord::new(
+            Schema::new("items", 1)
+                .with_field(Field::new("id", FieldType::Long).primary_key())
+                .with_field(Field::new("name", FieldType::String)),
+        );
+        rec.set("id", FieldValue::Long(1)).unwrap();
+        rec.set("name", FieldValue::String("Widget".into())).unwrap();
+        db.put_record("items", &rec).unwrap();
+
+        let fetched = db.get_record("items", &FieldValue::Long(1)).unwrap();
+        assert!(fetched.is_some());
+        let fetched = fetched.unwrap();
+        assert_eq!(fetched.get_string("name").unwrap(), "Widget");
+    }
+
+    #[test]
+    fn test_has_record() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("test_has", 1)
+            .with_field(Field::new("k", FieldType::Int).primary_key())
+            .with_field(Field::new("v", FieldType::String));
+        db.create_table(schema).unwrap();
+
+        let mut rec = DBRecord::new(
+            Schema::new("test_has", 1)
+                .with_field(Field::new("k", FieldType::Int).primary_key())
+                .with_field(Field::new("v", FieldType::String)),
+        );
+        rec.set("k", FieldValue::Int(5)).unwrap();
+        rec.set("v", FieldValue::String("five".into())).unwrap();
+        db.put_record("test_has", &rec).unwrap();
+
+        assert!(db.has_record("test_has", &FieldValue::Int(5)).unwrap());
+        assert!(!db.has_record("test_has", &FieldValue::Int(99)).unwrap());
+    }
+
+    #[test]
+    fn test_delete_record() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("del_test", 1)
+            .with_field(Field::new("id", FieldType::Int).primary_key());
+        db.create_table(schema).unwrap();
+
+        let mut rec = DBRecord::new(
+            Schema::new("del_test", 1)
+                .with_field(Field::new("id", FieldType::Int).primary_key()),
+        );
+        rec.set("id", FieldValue::Int(10)).unwrap();
+        db.put_record("del_test", &rec).unwrap();
+        assert!(db.has_record("del_test", &FieldValue::Int(10)).unwrap());
+
+        let deleted = db.delete_record("del_test", &FieldValue::Int(10)).unwrap();
+        assert!(deleted);
+        assert!(!db.has_record("del_test", &FieldValue::Int(10)).unwrap());
+    }
+
+    #[test]
+    fn test_delete_all_records() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("clear_test", 1)
+            .with_field(Field::new("id", FieldType::Int).primary_key());
+        db.create_table(schema).unwrap();
+
+        for i in 0..5 {
+            let s = Schema::new("clear_test", 1)
+                .with_field(Field::new("id", FieldType::Int).primary_key());
+            let mut rec = DBRecord::new(s);
+            rec.set("id", FieldValue::Int(i)).unwrap();
+            db.put_record("clear_test", &rec).unwrap();
+        }
+        db.delete_all_records("clear_test").unwrap();
+        let rows = db.iter_records("clear_test").unwrap();
+        assert_eq!(rows.len(), 0);
+    }
+
+    #[test]
+    fn test_get_max_key() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("maxkey_test", 1)
+            .with_field(Field::new("id", FieldType::Long).primary_key())
+            .with_field(Field::new("val", FieldType::String));
+        db.create_table(schema).unwrap();
+
+        for i in 1..=10 {
+            let s = Schema::new("maxkey_test", 1)
+                .with_field(Field::new("id", FieldType::Long).primary_key())
+                .with_field(Field::new("val", FieldType::String));
+            let mut rec = DBRecord::new(s);
+            rec.set("id", FieldValue::Long(i)).unwrap();
+            rec.set("val", FieldValue::String(format!("v{}", i)))
+                .unwrap();
+            db.put_record("maxkey_test", &rec).unwrap();
+        }
+        assert_eq!(db.get_max_key("maxkey_test").unwrap(), 10);
+        assert_eq!(db.get_next_key("maxkey_test").unwrap(), 11);
+    }
+
+    #[test]
+    fn test_rename_table() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("old_name", 1)
+            .with_field(Field::new("id", FieldType::Int).primary_key());
+        db.create_table(schema).unwrap();
+
+        db.rename_table("old_name", "new_name").unwrap();
+        assert!(db.table_exists("new_name").unwrap());
+        assert!(!db.table_exists("old_name").unwrap());
+    }
+
+    // -- GhidraTransaction ---------------------------------------------------
+
+    #[test]
+    fn test_ghidra_transaction_commit() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("tx_test", 1)
+            .with_field(Field::new("id", FieldType::Int).primary_key())
+            .with_field(Field::new("val", FieldType::String));
+        db.create_table(schema).unwrap();
+
+        {
+            let mut tx = db.open_transaction().unwrap();
+            let s = Schema::new("tx_test", 1)
+                .with_field(Field::new("id", FieldType::Int).primary_key())
+                .with_field(Field::new("val", FieldType::String));
+            let mut rec = DBRecord::new(s);
+            rec.set("id", FieldValue::Int(1)).unwrap();
+            rec.set("val", FieldValue::String("hello".into())).unwrap();
+            db.insert("tx_test", &rec).unwrap();
+            tx.commit().unwrap();
+        }
+
+        let rows = db.query("tx_test", None, &[]).unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    #[test]
+    fn test_ghidra_transaction_abort() {
+        let mut db = Database::in_memory().unwrap();
+        let schema = Schema::new("abort_test", 1)
+            .with_field(Field::new("id", FieldType::Int).primary_key())
+            .with_field(Field::new("val", FieldType::String));
+        db.create_table(schema).unwrap();
+
+        {
+            let mut tx = db.open_transaction().unwrap();
+            let s = Schema::new("abort_test", 1)
+                .with_field(Field::new("id", FieldType::Int).primary_key())
+                .with_field(Field::new("val", FieldType::String));
+            let mut rec = DBRecord::new(s);
+            rec.set("id", FieldValue::Int(99)).unwrap();
+            rec.set("val", FieldValue::String("rollback_me".into()))
+                .unwrap();
+            db.insert("abort_test", &rec).unwrap();
+            tx.abort_on_close();
+        } // drop triggers rollback
+
+        let rows = db.query("abort_test", None, &[]).unwrap();
+        assert_eq!(rows.len(), 0);
+    }
+
+    // -- DBListener ----------------------------------------------------------
+
+    #[test]
+    fn test_db_listener_callbacks() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        struct TestListener {
+            closed: AtomicU32,
+        }
+        impl DBListener for TestListener {
+            fn on_db_closed(&self, _db: &Database) {
+                self.closed.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let mut db = Database::in_memory().unwrap();
+        let listener = Arc::new(TestListener {
+            closed: AtomicU32::new(0),
+        });
+        db.add_listener(listener.clone());
+
+        db.close().unwrap();
+        assert_eq!(listener.closed.load(Ordering::Relaxed), 1);
+    }
+
+    // -- Undo/Redo -----------------------------------------------------------
+
+    #[test]
+    fn test_undo_redo() {
+        let mut db = Database::in_memory().unwrap();
+
+        assert!(!db.can_undo());
+        assert!(!db.can_redo());
+
+        db.save_undo("initial");
+        db.save_undo("second");
+        // Stack: [init, second], index=1 -> 1 undoable operation
+        assert_eq!(db.available_undo_count(), 1);
+        assert_eq!(db.available_redo_count(), 0);
+        assert!(db.can_undo());
+
+        assert!(db.undo().unwrap());
+        // Stack: [init, second], index=0 -> 0 undo, 1 redo
+        assert_eq!(db.available_undo_count(), 0);
+        assert_eq!(db.available_redo_count(), 1);
+        assert!(!db.can_undo());
+        assert!(db.can_redo());
+
+        assert!(db.redo().unwrap());
+        // Stack: [init, second], index=1 -> 1 undo, 0 redo
+        assert_eq!(db.available_undo_count(), 1);
+        assert_eq!(db.available_redo_count(), 0);
+        assert!(db.can_undo());
+        assert!(!db.can_redo());
+    }
+
+    // -- State queries -------------------------------------------------------
+
+    #[test]
+    fn test_dirty_and_mod_count() {
+        let db = Database::in_memory().unwrap();
+        assert!(!db.has_uncommitted_changes());
+        db.mark_dirty();
+        assert!(db.has_uncommitted_changes());
+        db.mark_clean();
+        assert!(!db.has_uncommitted_changes());
+
+        assert_eq!(db.mod_count(), 0);
+        db.increment_mod_count();
+        assert_eq!(db.mod_count(), 1);
     }
 }

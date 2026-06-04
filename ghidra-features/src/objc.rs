@@ -1667,7 +1667,8 @@ mod tests {
             has_assoc_objects: false,
             has_cxx_structors: false,
         };
-        let found = find_class_by_name(&[cls], "UIViewController");
+        let classes = [cls];
+        let found = find_class_by_name(&classes, "UIViewController");
         assert!(found.is_some());
         assert_eq!(found.unwrap().address, 0x1000);
     }

@@ -1338,6 +1338,9 @@ impl PrettyPrinter {
                 self.emit(CToken::Whitespace(" ".into()));
                 self.print_expression(right);
             }
+            Expression::StringLiteral { value } => {
+                self.emit(CToken::StringLiteral(value.clone()));
+            }
             Expression::Nop => {}
         }
     }
@@ -1471,6 +1474,9 @@ fn expr_to_c(expr: &Expression, _outer_prec: u32, show_casts: bool) -> String {
                 expr_to_c(left, 0, show_casts),
                 expr_to_c(right, 0, show_casts)
             )
+        }
+        Expression::StringLiteral { value } => {
+            format!("\"{}\"", value)
         }
         Expression::Nop => String::new(),
     }

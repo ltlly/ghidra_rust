@@ -431,8 +431,8 @@ fn parse_nso_inner(data: &[u8]) -> NsoResult<NsoFile> {
         let seg_data = extract_segment_data(data, header.text_offset, file_size);
         segments.push(NsoSegment {
             offset: header.text_offset,
-            memory_size: header.text_size,
-            file_size: if compressed { file_size } else { header.text_size },
+            memory_size: header.text_memory_size,
+            file_size: if compressed { file_size } else { header.text_memory_size },
             kind: NsoSegmentKind::Text,
             hash: header.text_hash,
             data: seg_data,
@@ -850,7 +850,7 @@ mod tests {
         buf[0x1C..0x20].copy_from_slice(&0x2000_u32.to_le_bytes());
 
         // Fill text with some AArch64 NOPs
-        for i in 0x100..0x100 + 0x1000 {
+        for i in (0x100..0x100 + 0x1000).step_by(4) {
             buf[i] = 0xD5;
             buf[i + 1] = 0x03;
             buf[i + 2] = 0x20;
@@ -874,7 +874,7 @@ mod tests {
         buf[0x14..0x18].copy_from_slice(&0x1000_u32.to_le_bytes());
 
         // Fill text with AArch64 NOPs
-        for i in 0x100..0x100 + 0x1000 {
+        for i in (0x100..0x100 + 0x1000).step_by(4) {
             buf[i] = 0xD5;
             buf[i + 1] = 0x03;
             buf[i + 2] = 0x20;
@@ -894,7 +894,7 @@ mod tests {
         let text = nso.text().expect("should have text segment");
         assert_eq!(text.offset, 0x100);
         assert_eq!(text.memory_size, 0x2000);
-        assert_eq!(text.file_size, 0x1000);
+        assert_eq!(text.file_size, 0x2000); // uncompressed: file_size = memory_size
         assert!(!text.compressed);
         assert_eq!(text.data.len(), 0x1000);
     }

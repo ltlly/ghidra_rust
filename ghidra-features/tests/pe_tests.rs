@@ -616,6 +616,7 @@ fn test_map_pe_sections_to_memory_blocks() {
             ),
             permissions: perms,
             initialized: sec.size_of_raw_data > 0,
+            data: Vec::new(),
         });
     }
 

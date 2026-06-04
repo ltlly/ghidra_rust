@@ -5,7 +5,7 @@
 //! operation.
 
 use super::opcodes::OpCode;
-use ghidra_core::addr::{Address, AddressSpace};
+use ghidra_core::addr::{Address, AddressSpace, AddrSpaceType};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -42,7 +42,7 @@ impl Varnode {
     /// Create a constant varnode (space = `"const"`).
     pub fn constant(value: u64, size: u32) -> Self {
         Self {
-            space: AddressSpace::new("const", size as usize, false),
+            space: AddressSpace::new("const", size as usize, false, AddrSpaceType::Constant, 3),
             offset: value,
             size,
         }
@@ -51,7 +51,7 @@ impl Varnode {
     /// Create a register varnode (space = `"register"`).
     pub fn register(name: &str, offset: u64, size: u32) -> Self {
         Self {
-            space: AddressSpace::new(name, size as usize, false),
+            space: AddressSpace::new(name, size as usize, false, AddrSpaceType::Register, 2),
             offset,
             size,
         }
@@ -60,7 +60,7 @@ impl Varnode {
     /// Create a unique/temporary varnode (space = `"unique"`).
     pub fn unique(id: u64, size: u32) -> Self {
         Self {
-            space: AddressSpace::new("unique", size as usize, false),
+            space: AddressSpace::new("unique", size as usize, false, AddrSpaceType::Unique, 4),
             offset: id,
             size,
         }
@@ -69,7 +69,7 @@ impl Varnode {
     /// Create a RAM varnode (space = `"ram"`).
     pub fn ram(offset: u64, size: u32) -> Self {
         Self {
-            space: AddressSpace::new("ram", size as usize, false),
+            space: AddressSpace::new("ram", size as usize, false, AddrSpaceType::Ram, 1),
             offset,
             size,
         }
@@ -77,22 +77,22 @@ impl Varnode {
 
     /// Returns true if this varnode lives in the constant space.
     pub fn is_constant(&self) -> bool {
-        self.space.name == "const"
+        self.space.space_type == AddrSpaceType::Constant
     }
 
     /// Returns true if this varnode lives in the register space.
     pub fn is_register(&self) -> bool {
-        self.space.name == "register"
+        self.space.space_type == AddrSpaceType::Register
     }
 
     /// Returns true if this varnode lives in the unique (temporary) space.
     pub fn is_unique(&self) -> bool {
-        self.space.name == "unique"
+        self.space.space_type == AddrSpaceType::Unique
     }
 
     /// Returns true if this varnode lives in the RAM space.
     pub fn is_ram(&self) -> bool {
-        self.space.name == "ram"
+        self.space.space_type == AddrSpaceType::Ram
     }
 
     /// Returns the value of this varnode if it is a constant, otherwise `None`.
@@ -335,7 +335,7 @@ mod tests {
     use super::*;
 
     fn make_space(name: &str) -> AddressSpace {
-        AddressSpace::new(name, 8, false)
+        AddressSpace::new(name, 8, false, AddrSpaceType::Unique, 4)
     }
 
     #[test]

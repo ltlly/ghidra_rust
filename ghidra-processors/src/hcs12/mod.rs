@@ -54,7 +54,7 @@ fn build_registers() -> RegisterBank {
     bank.add(Register::sub_register("N", 1, 0x0028, "CCR", 3));   // Negative (sign)
     bank.add(Register::sub_register("I", 1, 0x0028, "CCR", 4));   // IRQ interrupt mask
     bank.add(Register::sub_register("H", 1, 0x0028, "CCR", 5));   // Half-carry (BCD)
-    bank.add(Register::sub_register("X", 1, 0x0028, "CCR", 6));   // XIRQ interrupt mask
+    bank.add(Register::sub_register("XIRQ", 1, 0x0028, "CCR", 6)); // XIRQ interrupt mask
     bank.add(Register::sub_register("S", 1, 0x0028, "CCR", 7));   // Stop disable
 
     // ---- Memory paging registers (for extended addressing) ----

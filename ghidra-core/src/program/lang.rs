@@ -291,12 +291,12 @@ impl Language {
     ) -> Self {
         let is_be = id.is_big_endian();
         let pointer_size = (id.size / 8).max(1);
-        let data_org = DataOrganization {
-            big_endian: is_be,
-            pointer_size,
-            absolute_max_alignment: 16,
-            machine_alignment: pointer_size,
-            default_alignment: 1,
+        let data_org = if is_be {
+            DataOrganization::default_64bit_be()
+        } else if pointer_size >= 8 {
+            DataOrganization::default_64bit_le()
+        } else {
+            DataOrganization::default_32bit_le()
         };
 
         Self {

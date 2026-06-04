@@ -1053,10 +1053,8 @@ fn nom_optional_header(
     // number_of_rva_and_sizes
     let (i, _num_rva_sizes) = le_u32(i)?;
 
-    // Consume remaining optional-header padding
-    let consumed: usize = if is_plus { 112 } else { 96 };
-    let pad = size_of_optional_header as usize - consumed;
-    let (i, _) = take(pad)(i)?;
+    // Note: data directories follow directly after the fixed optional header
+    // fields and are parsed below. No padding consumption needed.
 
     // Data directories
     let (i, data_directories) = nom_data_directories(i)?;

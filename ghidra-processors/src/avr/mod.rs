@@ -71,7 +71,7 @@ fn build_registers() -> RegisterBank {
 
     // SREG bit fields
     bank.add(Register::sub_register("C", 1, 0x0020, "SREG", 0)); // Carry Flag
-    bank.add(Register::sub_register("Z", 1, 0x0020, "SREG", 1)); // Zero Flag
+    bank.add(Register::sub_register("Z_FLAG", 1, 0x0020, "SREG", 1)); // Zero Flag
     bank.add(Register::sub_register("N", 1, 0x0020, "SREG", 2)); // Negative Flag
     bank.add(Register::sub_register("V", 1, 0x0020, "SREG", 3)); // Two's Complement Overflow Flag
     bank.add(Register::sub_register("S", 1, 0x0020, "SREG", 4)); // Sign Flag (N xor V)
@@ -485,7 +485,7 @@ mod tests {
         assert_eq!(c.lsb, 0);
         assert_eq!(c.bit_size, 1);
 
-        let z = bank.get("Z").unwrap();
+        let z = bank.get("Z_FLAG").unwrap();
         assert_eq!(z.lsb, 1);
 
         let n = bank.get("N").unwrap();

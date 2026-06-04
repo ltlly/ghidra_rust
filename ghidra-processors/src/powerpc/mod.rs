@@ -1489,16 +1489,42 @@ impl ProcessorModule for PowerPcModule {
 
     fn languages() -> Vec<Language> {
         vec![
-            Language::new("PowerPC:BE:32:default", "PowerPC 32-bit Big Endian", "PPC32", Endian::Big, 32),
-            Language::new("PowerPC:BE:64:default", "PowerPC 64-bit Big Endian", "PPC64", Endian::Big, 64),
-            Language::new("PowerPC:LE:64:default", "PowerPC 64-bit Little Endian", "PPC64LE", Endian::Little, 64),
-            Language::new("PowerPC:BE:32:4xx", "PowerPC 4xx Embedded Big Endian", "PPC4xx", Endian::Big, 32),
-            Language::new("PowerPC:BE:32:e500", "PowerPC e500 Big Endian", "e500", Endian::Big, 32),
-            Language::new("PowerPC:BE:64:power8", "POWER8 64-bit Big Endian", "POWER8", Endian::Big, 64),
-            Language::new("PowerPC:LE:64:power9", "POWER9 64-bit Little Endian", "POWER9", Endian::Little, 64),
-            Language::new("PowerPC:BE:64:power10", "POWER10 64-bit Big Endian", "POWER10", Endian::Big, 64),
-            Language::new("PowerPC:BE:32:VLE", "PowerPC VLE 32-bit Big Endian", "VLE", Endian::Big, 32),
-            Language::new("PowerPC:BE:64:A2", "PowerPC A2 64-bit Big Endian", "A2", Endian::Big, 64),
+            // -- 32-bit default --
+            Language::new("PowerPC:BE:32:default", "PowerPC 32-bit big endian w/Altivec, G2", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:32:default", "PowerPC 32-bit little endian w/Altivec, G2", "1.7", Endian::Little, 32),
+            // -- 64-bit default --
+            Language::new("PowerPC:BE:64:default", "PowerPC 64-bit big endian w/Altivec, G2", "1.7", Endian::Big, 64),
+            Language::new("PowerPC:LE:64:default", "PowerPC 64-bit little endian w/Altivec, G2", "1.7", Endian::Little, 64),
+            // -- 64-bit with 32-bit addressing --
+            Language::new("PowerPC:BE:64:64-32addr", "PowerPC 64-bit big endian w/Altivec and 32 bit addressing, G2", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:64:64-32addr", "PowerPC 64-bit little endian w/Altivec and 32 bit addressing, G2", "1.7", Endian::Little, 32),
+            // -- 4xx embedded --
+            Language::new("PowerPC:BE:32:4xx", "PowerPC 4xx 32-bit big endian embedded core", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:32:4xx", "PowerPC 4xx 32-bit little endian embedded core", "1.7", Endian::Little, 32),
+            // -- MPC8270 --
+            Language::new("PowerPC:BE:32:MPC8270", "Freescale MPC8280 32-bit big endian family (PowerQUICC-III)", "1.7", Endian::Big, 32),
+            // -- PowerQUICC-III --
+            Language::new("PowerPC:BE:32:QUICC", "PowerQUICC-III 32-bit big endian family", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:32:QUICC", "PowerQUICC-III 32-bit little endian family", "1.7", Endian::Little, 32),
+            // -- e500 --
+            Language::new("PowerPC:BE:32:e500", "PowerQUICC-III e500 32-bit big-endian family", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:32:e500", "PowerQUICC-III e500 32-bit little-endian family", "1.7", Endian::Little, 32),
+            // -- e500mc --
+            Language::new("PowerPC:BE:32:e500mc", "PowerQUICC-III e500mc 32-bit big-endian family", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:32:e500mc", "PowerQUICC-III e500mc 32-bit little-endian family", "1.7", Endian::Little, 32),
+            // -- Power ISA A2 (EVX, 32-bit addressing) --
+            Language::new("PowerPC:BE:64:A2-32addr", "Power ISA 3.0 Big Endian w/EVX and 32-bit Addressing", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:64:A2-32addr", "Power ISA 3.0 Little Endian w/EVX and 32-bit Addressing", "1.7", Endian::Little, 32),
+            // -- Power ISA A2+Altivec (32-bit addressing) --
+            Language::new("PowerPC:BE:64:A2ALT-32addr", "Power ISA 3.0 Big Endian w/Altivec and 32-bit Addressing", "1.7", Endian::Big, 32),
+            Language::new("PowerPC:LE:64:A2ALT-32addr", "Power ISA 3.0 Little Endian w/Altivec and 32-bit Addressing", "1.7", Endian::Little, 32),
+            // -- Power ISA A2+Altivec (64-bit) --
+            Language::new("PowerPC:BE:64:A2ALT", "Power ISA 3.0 Big Endian w/Altivec", "1.7", Endian::Big, 64),
+            Language::new("PowerPC:LE:64:A2ALT", "Power ISA 3.0 Little Endian w/Altivec", "1.7", Endian::Little, 64),
+            // -- Power ISA VLE (32-bit addressing) --
+            Language::new("PowerPC:BE:64:VLE-32addr", "Power ISA 3.0 Big Endian w/VLE, EVX and 32-bit Addressing", "1.7", Endian::Big, 32),
+            // -- Power ISA VLE+Altivec (32-bit addressing) --
+            Language::new("PowerPC:BE:64:VLEALT-32addr", "Power ISA 3.0 Big Endian w/VLE, Altivec and 32-bit Addressing", "1.7", Endian::Big, 32),
         ]
     }
 
@@ -1644,7 +1670,7 @@ mod tests {
         let regs = PowerPcModule::registers();
         assert!(!regs.is_empty());
         let langs = PowerPcModule::languages();
-        assert!(langs.len() >= 5);
+        assert!(langs.len() >= 20, "Expected >= 20 PowerPC language variants, got {}", langs.len());
         let insts = PowerPcModule::instructions();
         assert!(insts.len() >= 250);
     }

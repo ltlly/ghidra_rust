@@ -151,6 +151,25 @@ pub struct SlaFile {
     pub decisions: Vec<DecisionNode>,
 }
 
+fn serialize_magic<S: serde::Serializer>(magic: &[u8; 4], serializer: S) -> Result<S::Ok, S::Error> {
+    let s = std::str::from_utf8(magic).unwrap_or("????");
+    serializer.serialize_str(s)
+}
+
+fn deserialize_magic<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<[u8; 4], D::Error> {
+    let s: String = serde::Deserialize::deserialize(deserializer)?;
+    let bytes = s.as_bytes();
+    if bytes.len() != 4 {
+        return Err(serde::de::Error::custom(format!(
+            "magic must be exactly 4 bytes, got {}",
+            bytes.len()
+        )));
+    }
+    let mut arr = [0u8; 4];
+    arr.copy_from_slice(bytes);
+    Ok(arr)
+}
+
 /// Header for the `.sla` binary format.
 ///
 /// This 32-byte header identifies the file and provides the section counts
@@ -158,6 +177,10 @@ pub struct SlaFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlaHeader {
     /// Magic identifier: must be `[0x53, 0x4C, 0x45, 0x48]` ("SLEH").
+    #[serde(
+        serialize_with = "serialize_magic",
+        deserialize_with = "deserialize_magic"
+    )]
     pub magic: [u8; 4],
     /// Format version number (currently 1).
     pub version: u32,
@@ -1322,7 +1345,6 @@ impl SlaCompiler {
                 parser::SpaceType::UniqueSpace => 3u8,
             };
 
-            // Skip standard spaces that we already added defaults for
             let is_standard = matches!(
                 space.space_type,
                 parser::SpaceType::RegisterSpace
@@ -1331,25 +1353,28 @@ impl SlaCompiler {
                     | parser::SpaceType::UniqueSpace
             );
 
-            let index = if is_standard {
-                s_type as u32
-            } else {
-                next_index + (i as u32)
-            };
-
-            // Update or add the space entry
-            if is_standard && index < 4 {
-                // Override the default
-                if let Some(existing) = spaces.iter_mut().find(|s| s.index == index) {
-                    existing.name = space.name.clone();
-                    existing.size = space.size;
-                    existing.wordsize = space.wordsize;
-                    existing.delay = 0;
-                }
-            } else {
+            if is_standard {
+                // Ghidra standard space order: register=0, ram=1, constant=2, unique=3
+                let index = match space.space_type {
+                    parser::SpaceType::RegisterSpace => 0u32,
+                    parser::SpaceType::RamSpace => 1u32,
+                    parser::SpaceType::ConstantSpace => 2u32,
+                    parser::SpaceType::UniqueSpace => 3u32,
+                    _ => unreachable!(),
+                };
+                // The default was not added (the space is in the spec), so push it.
                 spaces.push(SerializedSpace {
                     name: space.name.clone(),
                     index,
+                    space_type: s_type,
+                    size: space.size,
+                    wordsize: space.wordsize,
+                    delay: 0,
+                });
+            } else {
+                spaces.push(SerializedSpace {
+                    name: space.name.clone(),
+                    index: next_index + (i as u32),
                     space_type: s_type,
                     size: space.size,
                     wordsize: space.wordsize,

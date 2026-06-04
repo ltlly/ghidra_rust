@@ -1594,6 +1594,56 @@ pub fn is_dex(data: &[u8]) -> bool {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BinaryLoader Implementation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// DEX binary loader — loads Android Dalvik Executable files for analysis.
+pub struct DexLoader;
+
+impl crate::BinaryLoader for DexLoader {
+    fn name(&self) -> &str {
+        "DEX"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        is_dex(data)
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        let dex = parse_dex(data)?;
+        let lang = crate::base::analyzer::Language {
+            processor: "Dalvik".into(),
+            variant: "LE".into(),
+            size: 32,
+        };
+
+        let base = options.base_address;
+        let mut program = Program::new("dex_file", lang);
+        program.image_base = base;
+
+        // Create a single memory block for the DEX file.
+        let block = MemoryBlock {
+            name: "DEX".into(),
+            start: Address::new(base),
+            size: dex.header.file_size as u64,
+            is_read: true,
+            is_write: false,
+            is_execute: false,
+            is_initialized: true,
+        };
+        program.memory_blocks.push(block);
+
+        Ok(program)
+    }
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Tests
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

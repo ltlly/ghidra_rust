@@ -6,17 +6,21 @@
 //! - [`EnumDataType`] with bitmask mode
 //! - [`PointerDataType`], [`ArrayDataType`], [`TypedefDataType`]
 //! - [`FunctionDefinitionDataType`] with calling convention and varargs
+//! - [`BitFieldDataType`] for standalone bitfield types
+//! - [`StringDataType`] for fixed-length string types with charset
 //! - [`CategoryPath`] for hierarchical type organization
 //! - [`DataTypeComponent`] for composite member fields
 //! - Type manager interfaces: [`DataTypeManager`] trait,
 //!   [`StandaloneDataTypeManager`], [`BuiltInDataTypeManager`]
+//! - [`DataOrganization`] with full primitive type size/alignment settings
 //!
 //! All concrete types implement the [`DataType`] trait.
 //!
 //! ## Module Organization
 //!
 //! - `mod.rs` (this file): Core path types (`CategoryPath`, `DataTypePath`),
-//!   the `DataTypeKind` enum, alignment utilities, and re-exports.
+//!   the `DataTypeKind` enum, `DataOrganization`, alignment utilities,
+//!   and re-exports.
 //! - `types.rs`: The `DataType` trait, all concrete data type structs,
 //!   the `DataTypeManager` trait, type managers, and serialization support.
 
@@ -28,12 +32,12 @@ use std::fmt;
 
 // Re-export key types from types.rs for convenient access via `crate::data::*`.
 pub use types::{
-    ArrayDataType, BuiltInDataType, BuiltInDataTypeManager, BuiltInDataTypeWrapper,
-    CallingConvention, DataType, DataTypeComponent, DataTypeManager, DataTypeNode,
-    DataTypeTag, DataTypeTreeNode, EnumDataType, FunctionDefinitionDataType,
-    FunctionParameter, PointerDataType, SerializableDataType,
-    StandaloneDataTypeManager, StructureDataType, TypedefDataType,
-    UndefinedDataType, UnionDataType,
+    ArrayDataType, BitFieldDataType, BuiltInDataType, BuiltInDataTypeManager,
+    BuiltInDataTypeWrapper, CallingConvention, DataType, DataTypeComponent,
+    DataTypeManager, DataTypeNode, DataTypeTag, DataTypeTreeNode, EnumDataType,
+    FunctionDefinitionDataType, FunctionParameter, PointerDataType,
+    SerializableDataType, StandaloneDataTypeManager, StringDataType,
+    StructureDataType, TypedefDataType, UndefinedDataType, UnionDataType,
 };
 
 // Re-export the bitfield info type.
@@ -67,6 +71,10 @@ pub enum DataTypeKind {
     Typedef,
     /// A function signature.
     FunctionSignature,
+    /// A standalone bitfield type.
+    BitField,
+    /// A string data type (fixed-length with charset).
+    StringDataType,
 }
 
 impl fmt::Display for DataTypeKind {
@@ -81,6 +89,8 @@ impl fmt::Display for DataTypeKind {
             DataTypeKind::Enum => write!(f, "enum"),
             DataTypeKind::Typedef => write!(f, "typedef"),
             DataTypeKind::FunctionSignature => write!(f, "function"),
+            DataTypeKind::BitField => write!(f, "bitfield"),
+            DataTypeKind::StringDataType => write!(f, "string"),
         }
     }
 }
@@ -499,65 +509,424 @@ pub trait DataTypeManagerExt: types::DataTypeManager {
 impl<T> DataTypeManagerExt for T where T: types::DataTypeManager + ?Sized {}
 
 // ============================================================================
-// DataOrganization  (minimal)
+// BitFieldPacking
 // ============================================================================
 
-/// Describes the data organization (endianness, alignment, pointer size, etc.)
+/// Describes how bitfields are packed within composite types.
+///
+/// Corresponds to Ghidra's `BitFieldPacking` interface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BitFieldPacking {
+    /// If true, bitfields are packed sequentially without reordering.
+    pub sequential_packing: bool,
+    /// If true, the most-significant bit is at the low address (big-endian bit order).
+    pub msb_order: bool,
+    /// If true, bitfields use a right-to-left packing direction.
+    pub right_to_left: bool,
+    /// Maximum packing size in bytes (0 means no limit).
+    pub max_packing_size: usize,
+}
+
+impl BitFieldPacking {
+    /// Default GCC-compatible bitfield packing.
+    pub fn gcc_default() -> Self {
+        Self {
+            sequential_packing: true,
+            msb_order: false,
+            right_to_left: true,
+            max_packing_size: 0,
+        }
+    }
+
+    /// Default MSVC-compatible bitfield packing.
+    pub fn msvc_default() -> Self {
+        Self {
+            sequential_packing: false,
+            msb_order: false,
+            right_to_left: true,
+            max_packing_size: 0,
+        }
+    }
+}
+
+impl Default for BitFieldPacking {
+    fn default() -> Self {
+        Self::gcc_default()
+    }
+}
+
+// ============================================================================
+// DataOrganization
+// ============================================================================
+
+/// Describes the data organization (endianness, type sizes, alignment, etc.)
 /// used by a compiler / architecture specification.
+///
+/// This is a comprehensive port of Ghidra's `DataOrganizationImpl` Java class,
+/// covering all primitive type sizes, pointer configuration, and alignment rules.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DataOrganization {
     /// `true` for big-endian, `false` for little-endian.
     pub big_endian: bool,
     /// Default pointer size in bytes (e.g., 4 or 8).
     pub pointer_size: usize,
-    /// Default absolute maximum alignment.
+    /// Left-shift amount for shifted pointer types (0 = no shift).
+    pub pointer_shift: usize,
+    /// Default absolute maximum alignment (0 means no maximum).
     pub absolute_max_alignment: usize,
     /// Default machine alignment (typically `pointer_size`).
     pub machine_alignment: usize,
     /// Default alignment for this organization (typically 1).
     pub default_alignment: usize,
+    /// Default pointer alignment in bytes.
+    pub default_pointer_alignment: usize,
+    // Primitive type sizes:
+    /// Size of `char` in bytes.
+    pub char_size: usize,
+    /// Whether `char` is signed by default.
+    pub char_is_signed: bool,
+    /// Size of `wchar_t` in bytes.
+    pub wide_char_size: usize,
+    /// Size of `short` in bytes.
+    pub short_size: usize,
+    /// Size of `int` in bytes.
+    pub int_size: usize,
+    /// Size of `long` in bytes.
+    pub long_size: usize,
+    /// Size of `long long` in bytes.
+    pub long_long_size: usize,
+    /// Size of `float` in bytes (encoding size).
+    pub float_size: usize,
+    /// Size of `double` in bytes (encoding size).
+    pub double_size: usize,
+    /// Size of `long double` in bytes (encoding size).
+    pub long_double_size: usize,
+    /// Size-to-alignment mapping for non-standard sizes.
+    pub size_alignment_map: BTreeMap<usize, usize>,
+    /// Bitfield packing rules.
+    pub bit_field_packing: BitFieldPacking,
 }
 
 impl DataOrganization {
-    /// Create a typical 64-bit little-endian layout.
+    /// Sentinel value indicating no maximum alignment constraint.
+    pub const NO_MAXIMUM_ALIGNMENT: usize = 0;
+
+    // Default constants matching Ghidra's DataOrganizationImpl.
+    const DEFAULT_MACHINE_ALIGNMENT: usize = 8;
+    const DEFAULT_DEFAULT_ALIGNMENT: usize = 1;
+    const DEFAULT_DEFAULT_POINTER_ALIGNMENT: usize = 4;
+    const DEFAULT_POINTER_SHIFT: usize = 0;
+    const DEFAULT_POINTER_SIZE: usize = 4;
+    const DEFAULT_CHAR_SIZE: usize = 1;
+    const DEFAULT_WIDE_CHAR_SIZE: usize = 2;
+    const DEFAULT_SHORT_SIZE: usize = 2;
+    const DEFAULT_INT_SIZE: usize = 4;
+    const DEFAULT_LONG_SIZE: usize = 4;
+    const DEFAULT_LONG_LONG_SIZE: usize = 8;
+    const DEFAULT_FLOAT_SIZE: usize = 4;
+    const DEFAULT_DOUBLE_SIZE: usize = 8;
+    const DEFAULT_LONG_DOUBLE_SIZE: usize = 8;
+
+    /// Create a typical 64-bit little-endian layout with standard C type sizes.
     pub fn default_64bit_le() -> Self {
-        DataOrganization {
+        let mut org = Self {
             big_endian: false,
             pointer_size: 8,
-            absolute_max_alignment: 16,
-            machine_alignment: 8,
-            default_alignment: 1,
-        }
+            pointer_shift: Self::DEFAULT_POINTER_SHIFT,
+            absolute_max_alignment: Self::NO_MAXIMUM_ALIGNMENT,
+            machine_alignment: Self::DEFAULT_MACHINE_ALIGNMENT,
+            default_alignment: Self::DEFAULT_DEFAULT_ALIGNMENT,
+            default_pointer_alignment: 8,
+            char_size: Self::DEFAULT_CHAR_SIZE,
+            char_is_signed: true,
+            wide_char_size: Self::DEFAULT_WIDE_CHAR_SIZE,
+            short_size: Self::DEFAULT_SHORT_SIZE,
+            int_size: Self::DEFAULT_INT_SIZE,
+            long_size: 8,
+            long_long_size: Self::DEFAULT_LONG_LONG_SIZE,
+            float_size: Self::DEFAULT_FLOAT_SIZE,
+            double_size: Self::DEFAULT_DOUBLE_SIZE,
+            long_double_size: 16,
+            size_alignment_map: BTreeMap::new(),
+            bit_field_packing: BitFieldPacking::default(),
+        };
+        org.set_default_size_alignments();
+        org
+    }
+
+    /// Create a typical 64-bit big-endian layout.
+    pub fn default_64bit_be() -> Self {
+        let mut org = Self {
+            big_endian: true,
+            pointer_size: 8,
+            pointer_shift: Self::DEFAULT_POINTER_SHIFT,
+            absolute_max_alignment: Self::NO_MAXIMUM_ALIGNMENT,
+            machine_alignment: Self::DEFAULT_MACHINE_ALIGNMENT,
+            default_alignment: Self::DEFAULT_DEFAULT_ALIGNMENT,
+            default_pointer_alignment: 8,
+            char_size: Self::DEFAULT_CHAR_SIZE,
+            char_is_signed: true,
+            wide_char_size: Self::DEFAULT_WIDE_CHAR_SIZE,
+            short_size: Self::DEFAULT_SHORT_SIZE,
+            int_size: Self::DEFAULT_INT_SIZE,
+            long_size: 8,
+            long_long_size: Self::DEFAULT_LONG_LONG_SIZE,
+            float_size: Self::DEFAULT_FLOAT_SIZE,
+            double_size: Self::DEFAULT_DOUBLE_SIZE,
+            long_double_size: 16,
+            size_alignment_map: BTreeMap::new(),
+            bit_field_packing: BitFieldPacking::default(),
+        };
+        org.set_default_size_alignments();
+        org
     }
 
     /// Create a typical 32-bit little-endian layout.
     pub fn default_32bit_le() -> Self {
-        DataOrganization {
+        let mut org = Self {
             big_endian: false,
             pointer_size: 4,
-            absolute_max_alignment: 8,
-            machine_alignment: 4,
-            default_alignment: 1,
-        }
+            pointer_shift: Self::DEFAULT_POINTER_SHIFT,
+            absolute_max_alignment: Self::NO_MAXIMUM_ALIGNMENT,
+            machine_alignment: Self::DEFAULT_MACHINE_ALIGNMENT,
+            default_alignment: Self::DEFAULT_DEFAULT_ALIGNMENT,
+            default_pointer_alignment: Self::DEFAULT_DEFAULT_POINTER_ALIGNMENT,
+            char_size: Self::DEFAULT_CHAR_SIZE,
+            char_is_signed: true,
+            wide_char_size: Self::DEFAULT_WIDE_CHAR_SIZE,
+            short_size: Self::DEFAULT_SHORT_SIZE,
+            int_size: Self::DEFAULT_INT_SIZE,
+            long_size: Self::DEFAULT_LONG_SIZE,
+            long_long_size: Self::DEFAULT_LONG_LONG_SIZE,
+            float_size: Self::DEFAULT_FLOAT_SIZE,
+            double_size: Self::DEFAULT_DOUBLE_SIZE,
+            long_double_size: Self::DEFAULT_LONG_DOUBLE_SIZE,
+            size_alignment_map: BTreeMap::new(),
+            bit_field_packing: BitFieldPacking::default(),
+        };
+        org.set_default_size_alignments();
+        org
     }
+
+    /// Create a default organization (64-bit little-endian).
+    pub fn default_organization() -> Self {
+        Self::default_64bit_le()
+    }
+
+    /// Populate the default size-to-alignment mapping.
+    fn set_default_size_alignments(&mut self) {
+        self.size_alignment_map.insert(1, 1);
+        self.size_alignment_map.insert(2, 2);
+        self.size_alignment_map.insert(4, 4);
+        self.size_alignment_map.insert(8, 8);
+    }
+
+    // -- Endianness --
 
     /// Return `true` if this organization uses big-endian byte order.
     pub fn is_big_endian(&self) -> bool {
         self.big_endian
     }
 
+    /// Set data endianness.
+    pub fn set_big_endian(&mut self, big_endian: bool) {
+        self.big_endian = big_endian;
+    }
+
+    // -- Pointer --
+
     /// Return the default pointer size in bytes.
     pub fn get_pointer_size(&self) -> usize {
         self.pointer_size
     }
 
-    /// Compute the C/C++ sizeof-style alignment for a value of `size` bytes.
+    /// Set the pointer size.
+    pub fn set_pointer_size(&mut self, size: usize) {
+        self.pointer_size = size;
+    }
+
+    /// Return the pointer shift amount.
+    pub fn get_pointer_shift(&self) -> usize {
+        self.pointer_shift
+    }
+
+    /// Set the pointer shift amount.
+    pub fn set_pointer_shift(&mut self, shift: usize) {
+        self.pointer_shift = shift;
+    }
+
+    /// Return the default pointer alignment.
+    pub fn get_default_pointer_alignment(&self) -> usize {
+        self.default_pointer_alignment
+    }
+
+    // -- Char / Signed --
+
+    /// Return whether `char` is signed.
+    pub fn is_signed_char(&self) -> bool {
+        self.char_is_signed
+    }
+
+    /// Set whether `char` is signed.
+    pub fn set_char_is_signed(&mut self, signed: bool) {
+        self.char_is_signed = signed;
+    }
+
+    /// Get the char size.
+    pub fn get_char_size(&self) -> usize {
+        self.char_size
+    }
+
+    /// Set the char size.
+    pub fn set_char_size(&mut self, size: usize) {
+        self.char_size = size;
+    }
+
+    /// Get the wide char size.
+    pub fn get_wide_char_size(&self) -> usize {
+        self.wide_char_size
+    }
+
+    /// Set the wide char size.
+    pub fn set_wide_char_size(&mut self, size: usize) {
+        self.wide_char_size = size;
+    }
+
+    // -- Primitive type sizes --
+
+    /// Get the short size.
+    pub fn get_short_size(&self) -> usize {
+        self.short_size
+    }
+
+    /// Set the short size.
+    pub fn set_short_size(&mut self, size: usize) {
+        self.short_size = size;
+    }
+
+    /// Get the int size.
+    pub fn get_int_size(&self) -> usize {
+        self.int_size
+    }
+
+    /// Set the int size.
+    pub fn set_int_size(&mut self, size: usize) {
+        self.int_size = size;
+    }
+
+    /// Get the long size.
+    pub fn get_long_size(&self) -> usize {
+        self.long_size
+    }
+
+    /// Set the long size.
+    pub fn set_long_size(&mut self, size: usize) {
+        self.long_size = size;
+    }
+
+    /// Get the long long size.
+    pub fn get_long_long_size(&self) -> usize {
+        self.long_long_size
+    }
+
+    /// Set the long long size.
+    pub fn set_long_long_size(&mut self, size: usize) {
+        self.long_long_size = size;
+    }
+
+    /// Get the float encoding size.
+    pub fn get_float_size(&self) -> usize {
+        self.float_size
+    }
+
+    /// Set the float size.
+    pub fn set_float_size(&mut self, size: usize) {
+        self.float_size = size;
+    }
+
+    /// Get the double encoding size.
+    pub fn get_double_size(&self) -> usize {
+        self.double_size
+    }
+
+    /// Set the double size.
+    pub fn set_double_size(&mut self, size: usize) {
+        self.double_size = size;
+    }
+
+    /// Get the long double encoding size.
+    pub fn get_long_double_size(&self) -> usize {
+        self.long_double_size
+    }
+
+    /// Set the long double size.
+    pub fn set_long_double_size(&mut self, size: usize) {
+        self.long_double_size = size;
+    }
+
+    // -- Alignment --
+
+    /// Get the absolute maximum alignment (0 = no maximum).
+    pub fn get_absolute_max_alignment(&self) -> usize {
+        self.absolute_max_alignment
+    }
+
+    /// Set the absolute maximum alignment (0 = no maximum).
+    pub fn set_absolute_max_alignment(&mut self, alignment: usize) {
+        self.absolute_max_alignment = alignment;
+    }
+
+    /// Get the machine alignment.
+    pub fn get_machine_alignment(&self) -> usize {
+        self.machine_alignment
+    }
+
+    /// Set the machine alignment.
+    pub fn set_machine_alignment(&mut self, alignment: usize) {
+        self.machine_alignment = alignment;
+    }
+
+    /// Set a size-to-alignment mapping entry.
+    pub fn set_size_alignment(&mut self, size: usize, alignment: usize) {
+        self.size_alignment_map.insert(size, alignment);
+    }
+
+    /// Get the bitfield packing configuration.
+    pub fn get_bit_field_packing(&self) -> &BitFieldPacking {
+        &self.bit_field_packing
+    }
+
+    /// Set the bitfield packing configuration.
+    pub fn set_bit_field_packing(&mut self, packing: BitFieldPacking) {
+        self.bit_field_packing = packing;
+    }
+
+    /// Compute alignment for a value of `size` bytes using the size-alignment map.
+    ///
+    /// If the exact size is not in the map, falls back to natural alignment
+    /// (power of two up to absolute max alignment).
     pub fn get_size_alignment(&self, size: usize) -> usize {
+        if let Some(&alignment) = self.size_alignment_map.get(&size) {
+            return alignment;
+        }
+        // When the size is not in the map, use natural alignment but cap
+        // at the largest alignment value in the size_alignment_map.
+        let max_map_alignment = self.size_alignment_map.values().copied().max().unwrap_or(1);
+        self.get_natural_alignment(size).min(max_map_alignment)
+    }
+
+    /// Compute the natural (power-of-two) alignment for a value of `size` bytes.
+    fn get_natural_alignment(&self, size: usize) -> usize {
         if size <= 1 {
             return 1;
         }
+        let max = if self.absolute_max_alignment == Self::NO_MAXIMUM_ALIGNMENT {
+            size
+        } else {
+            self.absolute_max_alignment
+        };
         let mut alignment = 1;
-        while alignment < size && alignment < self.absolute_max_alignment {
+        while alignment < size && alignment < max {
             alignment <<= 1;
         }
         alignment.min(size)
@@ -783,5 +1152,71 @@ mod tests {
     fn test_data_type_kind_display() {
         assert_eq!(format!("{}", DataTypeKind::Structure), "structure");
         assert_eq!(format!("{}", DataTypeKind::Pointer), "pointer");
+        assert_eq!(format!("{}", DataTypeKind::BitField), "bitfield");
+        assert_eq!(format!("{}", DataTypeKind::StringDataType), "string");
+    }
+
+    #[test]
+    fn test_data_organization_64bit_le() {
+        let org = DataOrganization::default_64bit_le();
+        assert!(!org.is_big_endian());
+        assert_eq!(org.get_pointer_size(), 8);
+        assert_eq!(org.get_long_size(), 8);
+        assert_eq!(org.get_long_double_size(), 16);
+        assert_eq!(org.get_int_size(), 4);
+        assert_eq!(org.get_char_size(), 1);
+        assert!(org.is_signed_char());
+        assert_eq!(org.get_wide_char_size(), 2);
+    }
+
+    #[test]
+    fn test_data_organization_32bit_le() {
+        let org = DataOrganization::default_32bit_le();
+        assert_eq!(org.get_pointer_size(), 4);
+        assert_eq!(org.get_long_size(), 4);
+        assert_eq!(org.get_long_double_size(), 8);
+    }
+
+    #[test]
+    fn test_data_organization_size_alignment() {
+        let org = DataOrganization::default_organization();
+        assert_eq!(org.get_size_alignment(1), 1);
+        assert_eq!(org.get_size_alignment(2), 2);
+        assert_eq!(org.get_size_alignment(4), 4);
+        assert_eq!(org.get_size_alignment(8), 8);
+        assert_eq!(org.get_size_alignment(3), 3); // natural
+        assert_eq!(org.get_size_alignment(16), 8); // max map entry is 8
+    }
+
+    #[test]
+    fn test_data_organization_setters() {
+        let mut org = DataOrganization::default_organization();
+        org.set_pointer_size(4);
+        assert_eq!(org.get_pointer_size(), 4);
+        org.set_long_size(4);
+        assert_eq!(org.get_long_size(), 4);
+        org.set_char_is_signed(false);
+        assert!(!org.is_signed_char());
+        org.set_big_endian(true);
+        assert!(org.is_big_endian());
+    }
+
+    #[test]
+    fn test_bit_field_packing() {
+        let gcc = BitFieldPacking::gcc_default();
+        assert!(gcc.sequential_packing);
+        assert!(gcc.right_to_left);
+
+        let msvc = BitFieldPacking::msvc_default();
+        assert!(!msvc.sequential_packing);
+        assert!(msvc.right_to_left);
+    }
+
+    #[test]
+    fn test_data_organization_bit_field_packing() {
+        let mut org = DataOrganization::default_organization();
+        let packing = BitFieldPacking::msvc_default();
+        org.set_bit_field_packing(packing.clone());
+        assert_eq!(org.get_bit_field_packing(), &packing);
     }
 }

@@ -422,7 +422,7 @@ pub fn parse_rpx(data: &[u8]) -> RpxResult<RpxFile> {
 
 /// Quick check: is this blob a Cafe OS ELF (RPX/RPL)?
 pub fn is_rpx(data: &[u8]) -> bool {
-    if data.len() < 7 {
+    if data.len() < 8 {
         return false;
     }
     data[0..4] == ELF_MAGIC && data[7] == ELFOSABI_CAFE
@@ -433,20 +433,8 @@ fn parse_rpx_file(input: &[u8]) -> IResult<&[u8], RpxFile> {
     let (input, ident) = take(EI_NIDENT)(input)?;
     let ident_arr: [u8; EI_NIDENT] = ident.try_into().unwrap();
 
-    // Verify ELF magic
-    let (input, _) = verify(
-        tuple((
-            be_u16, // e_type
-            be_u16, // e_machine
-            be_u32, // e_version
-        )),
-        |_| true, // validation done later
-    )
-    .parse(input)?;
-
-    // Restart from ident for cleaner parsing
+    // Parse ELF header fields after the ident
     let (input, (
-        _magic,       // we already verified ident
         file_type,
         machine,
         version,
@@ -461,7 +449,6 @@ fn parse_rpx_file(input: &[u8]) -> IResult<&[u8], RpxFile> {
         shnum,
         shstrndx,
     )) = tuple((
-        take(EI_NIDENT),
         be_u16,
         be_u16,
         be_u32,
@@ -477,8 +464,6 @@ fn parse_rpx_file(input: &[u8]) -> IResult<&[u8], RpxFile> {
         be_u16,
     ))
     .parse(input)?;
-
-    let _magic_ident: &[u8] = _magic;
 
     // Parse program headers
     let segments = Vec::new();

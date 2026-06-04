@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 // Import path types and utilities from the parent module.
 use super::{
-    align_up, CategoryPath, DataTypePath,
+    align_up, CategoryPath, DataOrganization, DataTypePath,
 };
 
 // ============================================================================
@@ -143,6 +143,319 @@ impl BitfieldInfo {
     /// Shifted mask at the correct bit offset.
     pub fn shifted_mask(&self) -> u64 {
         self.mask() << self.bit_offset
+    }
+}
+
+// ============================================================================
+// BitFieldDataType — standalone bitfield data type
+// ============================================================================
+
+/// Maximum allowed bitfield length in bits.
+const MAX_BIT_LENGTH: usize = 255;
+
+/// A standalone bitfield data type, ported from Ghidra's `BitFieldDataType`.
+///
+/// Represents a bitfield defined by a base data type, a bit size, and a
+/// bit offset within the minimal storage unit.  The storage size is the
+/// minimum number of bytes needed to hold the bitfield at the given offset.
+///
+/// Instantiation is intended for internal use.  Creating and manipulating
+/// bitfields should be done via [`StructureDataType::add_bitfield`] or
+/// [`UnionDataType::add_member`].
+#[derive(Debug, Clone)]
+pub struct BitFieldDataType {
+    /// The base data type (integer or enum type, or typedef to one).
+    pub base_data_type: Arc<dyn DataType>,
+    /// Declared bitfield size in bits (0..255).
+    pub bit_size: usize,
+    /// Effective bit size constrained by the base type size.
+    pub effective_bit_size: usize,
+    /// Right-shift amount within the big-endian view of the storage (0..7).
+    pub bit_offset: usize,
+    /// Minimal storage size in bytes.
+    pub storage_size: usize,
+    /// Category path.
+    pub category_path: CategoryPath,
+    /// Description.
+    pub description: String,
+}
+
+impl BitFieldDataType {
+    /// Create a new bitfield data type.
+    ///
+    /// Returns `None` if `bit_size` exceeds [`MAX_BIT_LENGTH`],
+    /// `bit_offset` exceeds 7, or `base_data_type` has size 0.
+    pub fn new(
+        base_data_type: Arc<dyn DataType>,
+        bit_size: usize,
+        bit_offset: usize,
+    ) -> Option<Self> {
+        if bit_size > MAX_BIT_LENGTH || bit_offset > 7 {
+            return None;
+        }
+        let base_size = base_data_type.get_size();
+        if base_size == 0 {
+            return None;
+        }
+        let effective_bit_size = Self::get_effective_bit_size(bit_size, base_size);
+        let storage_size = Self::get_minimum_storage_size(effective_bit_size, bit_offset);
+        Some(Self {
+            base_data_type,
+            bit_size,
+            effective_bit_size,
+            bit_offset,
+            storage_size,
+            category_path: CategoryPath::ROOT,
+            description: String::new(),
+        })
+    }
+
+    /// Create a bitfield with offset 0.
+    pub fn with_offset0(base_data_type: Arc<dyn DataType>, bit_size: usize) -> Option<Self> {
+        Self::new(base_data_type, bit_size, 0)
+    }
+
+    /// Get the effective bit size, capped by the base type byte size.
+    pub fn get_effective_bit_size(declared_bit_size: usize, base_type_byte_size: usize) -> usize {
+        (8 * base_type_byte_size).min(declared_bit_size)
+    }
+
+    /// Get the minimum storage size in bytes for a given bit size.
+    pub fn get_minimum_storage_size(bit_size: usize, bit_offset: usize) -> usize {
+        let base = if bit_size == 0 { 0 } else { (bit_size + 7) / 8 };
+        let with_offset = if bit_size + bit_offset == 0 {
+            0
+        } else {
+            (bit_size + bit_offset + 7) / 8
+        };
+        base.max(with_offset)
+    }
+
+    /// Returns true if this is a zero-length bitfield (used as a separator).
+    pub fn is_zero_length(&self) -> bool {
+        self.bit_size == 0
+    }
+
+    /// The display name for this bitfield type (e.g., `"int:3"`).
+    pub fn bitfield_name(&self) -> String {
+        format!("{}:{}", self.base_data_type.name(), self.bit_size)
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path;
+        self
+    }
+}
+
+impl DataType for BitFieldDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { "bitfield" }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { self.storage_size }
+    fn get_alignment(&self) -> usize { self.storage_size }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        if let Some(other_bf) = other.as_any().downcast_ref::<BitFieldDataType>() {
+            self.bit_size == other_bf.bit_size
+                && self.bit_offset == other_bf.bit_offset
+                && self.storage_size == other_bf.storage_size
+        } else {
+            false
+        }
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+}
+
+impl fmt::Display for BitFieldDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f, "{}:{} (storage={} bytes, offset={})",
+            self.base_data_type.name(), self.bit_size,
+            self.storage_size, self.bit_offset
+        )
+    }
+}
+
+// ============================================================================
+// StringDataType — fixed-length string with charset encoding
+// ============================================================================
+
+/// Character encoding supported by string data types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum StringCharset {
+    /// ASCII (single-byte).
+    Ascii,
+    /// UTF-8 (variable width).
+    Utf8,
+    /// UTF-16 (wide, 2-byte units).
+    Utf16,
+    /// UTF-32 (4-byte units).
+    Utf32,
+    /// Shift-JIS (Japanese, variable width).
+    ShiftJis,
+    /// A custom charset identified by name.
+    Custom,
+}
+
+impl Default for StringCharset {
+    fn default() -> Self { Self::Ascii }
+}
+
+impl fmt::Display for StringCharset {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ascii => write!(f, "ASCII"),
+            Self::Utf8 => write!(f, "UTF-8"),
+            Self::Utf16 => write!(f, "UTF-16"),
+            Self::Utf32 => write!(f, "UTF-32"),
+            Self::ShiftJis => write!(f, "Shift-JIS"),
+            Self::Custom => write!(f, "Custom"),
+        }
+    }
+}
+
+/// A fixed-length string data type, ported from Ghidra's `StringDataType`.
+///
+/// Models string data with a configurable character encoding (charset),
+/// element size, and fixed length (in number of elements).
+#[derive(Debug, Clone)]
+pub struct StringDataType {
+    /// The type name (e.g., `"string"`, `"unicode"`).
+    pub name: String,
+    /// Description.
+    pub description: String,
+    /// Character encoding.
+    pub charset: StringCharset,
+    /// Size of a single character element in bytes (1 for ASCII/UTF-8, 2 for UTF-16, etc.).
+    pub char_size: usize,
+    /// Number of character elements.  0 means dynamic / terminated.
+    pub length: usize,
+    /// Category path.
+    pub category_path: CategoryPath,
+    /// Mnemonic for display (e.g., `"ds"`).
+    pub mnemonic_str: String,
+    /// Default label prefix (e.g., `"STRING"`).
+    pub default_label: String,
+    /// Short label prefix (e.g., `"s"`).
+    pub abbrev_label: String,
+}
+
+impl StringDataType {
+    /// Create a fixed-length ASCII string of `length` bytes.
+    pub fn new(length: usize) -> Self {
+        Self {
+            name: "string".into(),
+            description: "String (fixed length)".into(),
+            charset: StringCharset::Ascii,
+            char_size: 1,
+            length,
+            category_path: CategoryPath::new("builtin/string"),
+            mnemonic_str: "ds".into(),
+            default_label: "STRING".into(),
+            abbrev_label: "s".into(),
+        }
+    }
+
+    /// Create a UTF-16 string of `length` elements (each 2 bytes).
+    pub fn unicode(length: usize) -> Self {
+        Self {
+            name: "unicode".into(),
+            description: "Unicode (fixed length)".into(),
+            charset: StringCharset::Utf16,
+            char_size: 2,
+            length,
+            category_path: CategoryPath::new("builtin/string"),
+            mnemonic_str: "du".into(),
+            default_label: "UNICODE".into(),
+            abbrev_label: "u".into(),
+        }
+    }
+
+    /// Create a UTF-32 string of `length` elements (each 4 bytes).
+    pub fn unicode32(length: usize) -> Self {
+        Self {
+            name: "unicode32".into(),
+            description: "Unicode 32-bit (fixed length)".into(),
+            charset: StringCharset::Utf32,
+            char_size: 4,
+            length,
+            category_path: CategoryPath::new("builtin/string"),
+            mnemonic_str: "du32".into(),
+            default_label: "UNICODE32".into(),
+            abbrev_label: "u32".into(),
+        }
+    }
+
+    /// Create a terminated (unbounded) string.  Length 0 means dynamic.
+    pub fn terminated() -> Self {
+        Self { length: 0, ..Self::new(0) }
+    }
+
+    /// The total size in bytes (char_size * length, or 0 if dynamic).
+    pub fn total_size(&self) -> usize {
+        self.char_size * self.length
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    pub fn with_category_path(mut self, path: CategoryPath) -> Self {
+        self.category_path = path;
+        self
+    }
+
+    pub fn with_charset(mut self, charset: StringCharset) -> Self {
+        self.charset = charset;
+        self
+    }
+
+    pub fn with_mnemonic(mut self, mnemonic: impl Into<String>) -> Self {
+        self.mnemonic_str = mnemonic.into();
+        self
+    }
+}
+
+impl DataType for StringDataType {
+    fn as_any(&self) -> &dyn std::any::Any { self }
+    fn name(&self) -> &str { &self.name }
+    fn description(&self) -> &str { &self.description }
+    fn get_size(&self) -> usize { self.total_size() }
+    fn get_alignment(&self) -> usize { self.char_size.max(1) }
+    fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
+
+    fn is_equivalent(&self, other: &dyn DataType) -> bool {
+        if let Some(other_str) = other.as_any().downcast_ref::<StringDataType>() {
+            self.charset == other_str.charset
+                && self.char_size == other_str.char_size
+                && self.length == other_str.length
+        } else {
+            false
+        }
+    }
+
+    fn get_category_path(&self) -> &CategoryPath { &self.category_path }
+    fn set_category_path(&mut self, path: CategoryPath) { self.category_path = path; }
+
+    fn mnemonic(&self) -> String { self.mnemonic_str.clone() }
+}
+
+impl fmt::Display for StringDataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.length == 0 {
+            write!(f, "{} (terminated, {})", self.name, self.charset)
+        } else {
+            write!(f, "{}[{}] ({} bytes, {})", self.name, self.length, self.total_size(), self.charset)
+        }
     }
 }
 
@@ -1439,6 +1752,47 @@ pub trait DataTypeManager: fmt::Debug + Send + Sync {
 
     /// Get the root category path for this manager.
     fn root_category(&self) -> &CategoryPath;
+
+    /// Resolve a data type by a [`DataTypePath`] value.
+    fn get_data_type(&self, path: &DataTypePath) -> Option<Arc<dyn DataType>> {
+        self.resolve(&path.as_path_string())
+    }
+
+    /// Alias for [`resolve`](Self::resolve) matching Ghidra naming.
+    fn find_data_type(&self, path: &str) -> Option<Arc<dyn DataType>> {
+        self.resolve(path)
+    }
+
+    /// Replace an existing type with a replacement type.
+    ///
+    /// Returns `true` if the replacement succeeded.  Both the existing and
+    /// replacement types must be fixed-length.  Returns `false` if the
+    /// existing path is not found or the replacement is a dynamic/bitfield type.
+    fn replace_type(
+        &mut self,
+        existing_path: &str,
+        replacement: Arc<dyn DataType>,
+        update_category_path: bool,
+    ) -> bool {
+        // Default implementation: remove old, add new at the same path.
+        if !self.contains(existing_path) {
+            return false;
+        }
+        let _ = update_category_path; // implementations may honor this
+        self.remove_type(existing_path);
+        let category = replacement.get_category_path().clone();
+        self.add_type(replacement, category)
+    }
+
+    /// Get the [`DataOrganization`] associated with this manager.
+    ///
+    /// Default implementation returns a standard 64-bit little-endian org.
+    fn get_data_organization(&self) -> &DataOrganization {
+        // Subtypes should override to provide the correct organization.
+        // Use a const-like pattern to avoid allocation on each call.
+        static DEFAULT_ORG: std::sync::OnceLock<DataOrganization> = std::sync::OnceLock::new();
+        DEFAULT_ORG.get_or_init(DataOrganization::default)
+    }
 }
 
 // ============================================================================
@@ -1448,11 +1802,16 @@ pub trait DataTypeManager: fmt::Debug + Send + Sync {
 /// An in-memory, standalone data type manager.
 ///
 /// Stores all types in a `HashMap` keyed by their full category path.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct StandaloneDataTypeManager {
     types: HashMap<String, Arc<dyn DataType>>,
     categories: HashMap<CategoryPath, Vec<String>>,
     root: CategoryPath,
+    data_organization: DataOrganization,
+}
+
+impl Default for StandaloneDataTypeManager {
+    fn default() -> Self { Self::new() }
 }
 
 impl StandaloneDataTypeManager {
@@ -1461,7 +1820,28 @@ impl StandaloneDataTypeManager {
             types: HashMap::new(),
             categories: HashMap::new(),
             root: CategoryPath::ROOT,
+            data_organization: DataOrganization::default(),
         }
+    }
+
+    /// Create a new manager with a specific [`DataOrganization`].
+    pub fn with_organization(data_organization: DataOrganization) -> Self {
+        Self {
+            types: HashMap::new(),
+            categories: HashMap::new(),
+            root: CategoryPath::ROOT,
+            data_organization,
+        }
+    }
+
+    /// Get a reference to the data organization.
+    pub fn data_organization(&self) -> &DataOrganization {
+        &self.data_organization
+    }
+
+    /// Set the data organization.
+    pub fn set_data_organization(&mut self, org: DataOrganization) {
+        self.data_organization = org;
     }
 
     fn make_path(&self, category: &CategoryPath, name: &str) -> String {
@@ -1543,6 +1923,10 @@ impl DataTypeManager for StandaloneDataTypeManager {
     fn contains(&self, path: &str) -> bool { self.types.contains_key(path) }
     fn type_count(&self) -> usize { self.types.len() }
     fn root_category(&self) -> &CategoryPath { &self.root }
+
+    fn get_data_organization(&self) -> &DataOrganization {
+        &self.data_organization
+    }
 }
 
 impl fmt::Display for StandaloneDataTypeManager {
@@ -1779,6 +2163,7 @@ pub fn builtin_data_type_tree() -> DataTypeNode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DataTypeTag {
     BuiltIn, Structure, Union, Enum, Pointer, Array, Typedef, FunctionDef, Undefined,
+    BitField, String,
 }
 
 /// A serializable representation of any data type.
@@ -1803,6 +2188,17 @@ pub enum SerializableDataType {
         description: String,
     },
     FunctionDef(FunctionDefinitionDataType),
+    BitField {
+        base_type: Box<SerializableDataType>,
+        bit_size: usize,
+        bit_offset: usize,
+    },
+    String {
+        name: String,
+        charset: StringCharset,
+        char_size: usize,
+        length: usize,
+    },
     Undefined(usize),
 }
 
@@ -1842,6 +2238,22 @@ impl SerializableDataType {
         if let Some(f) = dt.as_any().downcast_ref::<FunctionDefinitionDataType>() {
             return Some(Self::FunctionDef(f.clone()));
         }
+        if let Some(bf) = dt.as_any().downcast_ref::<BitFieldDataType>() {
+            let inner = Self::from_data_type(bf.base_data_type.as_ref())?;
+            return Some(Self::BitField {
+                base_type: Box::new(inner),
+                bit_size: bf.bit_size,
+                bit_offset: bf.bit_offset,
+            });
+        }
+        if let Some(s) = dt.as_any().downcast_ref::<StringDataType>() {
+            return Some(Self::String {
+                name: s.name.clone(),
+                charset: s.charset,
+                char_size: s.char_size,
+                length: s.length,
+            });
+        }
         if let Some(u) = dt.as_any().downcast_ref::<UndefinedDataType>() {
             return Some(Self::Undefined(u.size));
         }
@@ -1866,11 +2278,22 @@ impl fmt::Display for SerializableDataType {
                 write!(f, "typedef {} = {}", name, base_type)
             }
             Self::FunctionDef(fd) => write!(f, "{}", fd.signature_string()),
+            Self::BitField { base_type, bit_size, .. } => {
+                write!(f, "{}:{}", base_type, bit_size)
+            }
+            Self::String { name, charset, length, .. } => {
+                if *length == 0 {
+                    write!(f, "{} (terminated, {})", name, charset)
+                } else {
+                    write!(f, "{}[{}] ({})", name, length, charset)
+                }
+            }
             Self::Undefined(n) => write!(f, "undefined{}", n),
         }
     }
 }
 
+// ============================================================================
 // ============================================================================
 // Tests
 // ============================================================================
@@ -1911,7 +2334,7 @@ mod tests {
     }
 
     #[test]
-    fn test_builtin_all_count() { assert_eq!(BuiltInDataType::all().len(), 30); }
+    fn test_builtin_all_count() { assert_eq!(BuiltInDataType::all().len(), 31); }
 
     #[test]
     fn test_empty_structure() {
@@ -2188,7 +2611,7 @@ mod tests {
     #[test]
     fn test_builtin_manager_has_all_types() {
         let mgr = BuiltInDataTypeManager::new();
-        assert_eq!(mgr.type_count(), 30);
+        assert_eq!(mgr.type_count(), 31);
         let void = mgr.resolve("/builtin/void");
         assert!(void.is_some());
         assert_eq!(void.unwrap().get_size(), 0);
@@ -2260,7 +2683,7 @@ mod tests {
         assert!(tree.has_children());
         assert!(tree.get_child(0).is_some());
         let total_leaves: usize = tree.children.iter().map(|c| c.leaf_count()).sum();
-        assert_eq!(total_leaves, 30);
+        assert_eq!(total_leaves, 31);
     }
 
     #[test]
@@ -2391,5 +2814,286 @@ mod tests {
         let int = mgr.resolve("/builtin/integer/int");
         assert!(int.is_some());
         assert_eq!(int.unwrap().name(), "int");
+    }
+
+    // =====================================================================
+    // BitFieldDataType tests
+    // =====================================================================
+
+    #[test]
+    fn test_bitfield_basic() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::new(int_type, 3, 0).unwrap();
+        assert_eq!(bf.bit_size, 3);
+        assert_eq!(bf.effective_bit_size, 3);
+        assert_eq!(bf.bit_offset, 0);
+        assert_eq!(bf.storage_size, 1); // 3 bits fits in 1 byte
+        assert_eq!(bf.get_size(), 1);
+        assert!(!bf.is_zero_length());
+    }
+
+    #[test]
+    fn test_bitfield_with_offset() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::new(int_type, 4, 4).unwrap();
+        assert_eq!(bf.storage_size, 1); // 4+4 = 8 bits = 1 byte
+        assert_eq!(bf.bitfield_name(), "int:4");
+    }
+
+    #[test]
+    fn test_bitfield_large_field() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::new(int_type, 20, 0).unwrap();
+        assert_eq!(bf.effective_bit_size, 20); // min(32, 20)
+        assert_eq!(bf.storage_size, 3); // 20 bits -> 3 bytes
+    }
+
+    #[test]
+    fn test_bitfield_exceeds_base_type() {
+        let char_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Char));
+        // char is 1 byte (8 bits), asking for 12 bits -> effective = 8
+        let bf = BitFieldDataType::new(char_type, 12, 0).unwrap();
+        assert_eq!(bf.effective_bit_size, 8);
+        assert_eq!(bf.storage_size, 1);
+    }
+
+    #[test]
+    fn test_bitfield_invalid_params() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        assert!(BitFieldDataType::new(int_type.clone(), 256, 0).is_none()); // > MAX_BIT_LENGTH
+        assert!(BitFieldDataType::new(int_type.clone(), 4, 8).is_none());   // offset > 7
+        let void_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Void));
+        assert!(BitFieldDataType::new(void_type, 4, 0).is_none());           // zero-size base
+    }
+
+    #[test]
+    fn test_bitfield_with_offset0() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::with_offset0(int_type, 8).unwrap();
+        assert_eq!(bf.bit_offset, 0);
+        assert_eq!(bf.storage_size, 1);
+    }
+
+    #[test]
+    fn test_bitfield_zero_length() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        // bit_size = 0 is valid (used as separator in some compilers)
+        // but our new() rejects 0-size base, let's test with a non-void base
+        let bf = BitFieldDataType::new(int_type, 0, 0).unwrap();
+        assert!(bf.is_zero_length());
+        assert_eq!(bf.storage_size, 0);
+    }
+
+    #[test]
+    fn test_bitfield_equivalence() {
+        let int_type1: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let int_type2: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf1 = BitFieldDataType::new(int_type1, 3, 0).unwrap();
+        let bf2 = BitFieldDataType::new(int_type2, 3, 0).unwrap();
+        assert!(bf1.is_equivalent(&bf2));
+    }
+
+    #[test]
+    fn test_bitfield_display() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::new(int_type, 5, 2).unwrap();
+        let display = format!("{}", bf);
+        assert!(display.contains("int:5"));
+        assert!(display.contains("offset=2"));
+    }
+
+    // =====================================================================
+    // StringDataType tests
+    // =====================================================================
+
+    #[test]
+    fn test_string_ascii_fixed() {
+        let s = StringDataType::new(32);
+        assert_eq!(s.name(), "string");
+        assert_eq!(s.get_size(), 32);
+        assert_eq!(s.char_size, 1);
+        assert_eq!(s.length, 32);
+        assert_eq!(s.charset, StringCharset::Ascii);
+        assert_eq!(s.get_alignment(), 1);
+    }
+
+    #[test]
+    fn test_string_unicode() {
+        let s = StringDataType::unicode(16);
+        assert_eq!(s.name(), "unicode");
+        assert_eq!(s.get_size(), 32); // 16 * 2 bytes
+        assert_eq!(s.char_size, 2);
+        assert_eq!(s.charset, StringCharset::Utf16);
+        assert_eq!(s.get_alignment(), 2);
+    }
+
+    #[test]
+    fn test_string_unicode32() {
+        let s = StringDataType::unicode32(10);
+        assert_eq!(s.get_size(), 40); // 10 * 4 bytes
+        assert_eq!(s.char_size, 4);
+        assert_eq!(s.charset, StringCharset::Utf32);
+        assert_eq!(s.get_alignment(), 4);
+    }
+
+    #[test]
+    fn test_string_terminated() {
+        let s = StringDataType::terminated();
+        assert_eq!(s.length, 0);
+        assert_eq!(s.get_size(), 0);
+    }
+
+    #[test]
+    fn test_string_equivalence() {
+        let s1 = StringDataType::new(32);
+        let s2 = StringDataType::new(32);
+        let s3 = StringDataType::new(64);
+        assert!(s1.is_equivalent(&s2));
+        assert!(!s1.is_equivalent(&s3));
+    }
+
+    #[test]
+    fn test_string_charset_display() {
+        assert_eq!(format!("{}", StringCharset::Ascii), "ASCII");
+        assert_eq!(format!("{}", StringCharset::Utf8), "UTF-8");
+        assert_eq!(format!("{}", StringCharset::Utf16), "UTF-16");
+    }
+
+    #[test]
+    fn test_string_display() {
+        let s = StringDataType::new(32);
+        let display = format!("{}", s);
+        assert!(display.contains("string[32]"));
+        assert!(display.contains("32 bytes"));
+    }
+
+    #[test]
+    fn test_string_display_terminated() {
+        let s = StringDataType::terminated();
+        let display = format!("{}", s);
+        assert!(display.contains("terminated"));
+    }
+
+    #[test]
+    fn test_string_mnemonic() {
+        let s = StringDataType::new(10);
+        assert_eq!(s.mnemonic(), "ds");
+    }
+
+    #[test]
+    fn test_string_custom_charset() {
+        let s = StringDataType::new(10).with_charset(StringCharset::Utf8);
+        assert_eq!(s.charset, StringCharset::Utf8);
+    }
+
+    // =====================================================================
+    // DataTypeManager extension tests
+    // =====================================================================
+
+    #[test]
+    fn test_manager_get_data_type() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        mgr.add_type(int_type, CategoryPath::new("test"));
+        let path = DataTypePath::from_path("/test/int");
+        let resolved = mgr.get_data_type(&path);
+        assert!(resolved.is_some());
+        assert_eq!(resolved.unwrap().name(), "int");
+    }
+
+    #[test]
+    fn test_manager_find_data_type() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        mgr.add_type(int_type, CategoryPath::new("test"));
+        let resolved = mgr.find_data_type("/test/int");
+        assert!(resolved.is_some());
+        assert_eq!(resolved.unwrap().name(), "int");
+    }
+
+    #[test]
+    fn test_manager_replace_type() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        mgr.add_type(int_type, CategoryPath::new("test"));
+        assert!(mgr.contains("/test/int"));
+
+        let float_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float));
+        let replaced = mgr.replace_type("/test/int", float_type, true);
+        assert!(replaced);
+        assert!(!mgr.contains("/test/int"));
+        assert_eq!(mgr.type_count(), 1); // float added, int removed
+    }
+
+    #[test]
+    fn test_manager_replace_nonexistent() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let replaced = mgr.replace_type("/nonexistent", int_type, false);
+        assert!(!replaced);
+    }
+
+    #[test]
+    fn test_manager_data_organization() {
+        let org = DataOrganization::default_32bit_le();
+        let mgr = StandaloneDataTypeManager::with_organization(org);
+        assert_eq!(mgr.data_organization().get_pointer_size(), 4);
+        assert_eq!(mgr.get_data_organization().get_pointer_size(), 4);
+    }
+
+    #[test]
+    fn test_manager_default_data_organization() {
+        let mgr = StandaloneDataTypeManager::new();
+        assert_eq!(mgr.get_data_organization().get_pointer_size(), 8);
+    }
+
+    // =====================================================================
+    // SerializableDataType new variant tests
+    // =====================================================================
+
+    #[test]
+    fn test_serializable_bitfield() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::new(int_type, 5, 2).unwrap();
+        let ser = SerializableDataType::from_data_type(&bf).unwrap();
+        match ser {
+            SerializableDataType::BitField { bit_size, bit_offset, .. } => {
+                assert_eq!(bit_size, 5);
+                assert_eq!(bit_offset, 2);
+            }
+            _ => panic!("expected BitField variant"),
+        }
+    }
+
+    #[test]
+    fn test_serializable_string() {
+        let s = StringDataType::new(32);
+        let ser = SerializableDataType::from_data_type(&s).unwrap();
+        match ser {
+            SerializableDataType::String { name, charset, char_size, length } => {
+                assert_eq!(name, "string");
+                assert_eq!(charset, StringCharset::Ascii);
+                assert_eq!(char_size, 1);
+                assert_eq!(length, 32);
+            }
+            _ => panic!("expected String variant"),
+        }
+    }
+
+    #[test]
+    fn test_serializable_bitfield_display() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf = BitFieldDataType::new(int_type, 4, 0).unwrap();
+        let ser = SerializableDataType::from_data_type(&bf).unwrap();
+        let display = format!("{}", ser);
+        assert!(display.contains("int:4"));
+    }
+
+    #[test]
+    fn test_serializable_string_display() {
+        let s = StringDataType::new(16);
+        let ser = SerializableDataType::from_data_type(&s).unwrap();
+        let display = format!("{}", ser);
+        assert!(display.contains("string[16]"));
     }
 }

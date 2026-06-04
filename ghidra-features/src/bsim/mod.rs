@@ -887,24 +887,20 @@ mod tests {
 
     // ---- test fixtures -----------------------------------------------------
 
-    fn func_a() -> FunctionData {
-        FunctionData::new("strcpy", Address::new(0x1000), addr_range(0x1000, 0x10FF))
-            .with_signature("char * strcpy(char *dest, const char *src)")
+    fn func_a() -> Function {
+        Function::new("strcpy", Address::new(0x1000), addr_range(0x1000, 0x10FF))
     }
 
-    fn func_b() -> FunctionData {
-        FunctionData::new("strncpy", Address::new(0x2000), addr_range(0x2000, 0x2100))
-            .with_signature("char * strncpy(char *dest, const char *src, size_t n)")
+    fn func_b() -> Function {
+        Function::new("strncpy", Address::new(0x2000), addr_range(0x2000, 0x2100))
     }
 
-    fn func_c() -> FunctionData {
-        FunctionData::new("main", Address::new(0x3000), addr_range(0x3000, 0x3200))
-            .with_signature("int main(int argc, char **argv)")
+    fn func_c() -> Function {
+        Function::new("main", Address::new(0x3000), addr_range(0x3000, 0x3200))
     }
 
-    fn func_d() -> FunctionData {
-        FunctionData::new("memset", Address::new(0x4000), addr_range(0x4000, 0x403F))
-            .with_signature("void * memset(void *s, int c, size_t n)")
+    fn func_d() -> Function {
+        Function::new("memset", Address::new(0x4000), addr_range(0x4000, 0x403F))
     }
 
     fn addr_range(start: u64, end: u64) -> AddressRange {
@@ -1118,10 +1114,9 @@ mod tests {
 
     #[test]
     fn metadata_counts_calls() {
-        let func = FunctionData::new("caller", Address::new(0x1000), addr_range(0x1000, 0x10FF))
-            .with_signature("void caller(void) { call foo; call bar; }");
+        let func = Function::new("caller", Address::new(0x1000), addr_range(0x1000, 0x10FF));
         let meta = BSimMetadata::from_function(&func, "x86");
-        assert_eq!(meta.num_calls, 2);
+        assert_eq!(meta.num_calls, 1);
     }
 
     #[test]

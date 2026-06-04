@@ -58,7 +58,7 @@ fn build_registers() -> RegisterBank {
     // Flag bit fields
     bank.add(Register::sub_register("S", 1, 0x0001, "F", 7)); // Sign Flag
     bank.add(Register::sub_register("Z", 1, 0x0001, "F", 6)); // Zero Flag
-    bank.add(Register::sub_register("H", 1, 0x0001, "F", 4)); // Half Carry Flag
+    bank.add(Register::sub_register("HALF_CARRY", 1, 0x0001, "F", 4)); // Half Carry Flag
     bank.add(Register::sub_register("P_V", 1, 0x0001, "F", 2)); // Parity/Overflow Flag
     bank.add(Register::sub_register("N", 1, 0x0001, "F", 1)); // Add/Subtract Flag
     bank.add(Register::sub_register("C", 1, 0x0001, "F", 0)); // Carry Flag
@@ -250,6 +250,11 @@ fn build_instructions() -> Vec<InstructionMnemonic> {
         InstructionMnemonic::new("jp_hl"), // JP (HL)
         InstructionMnemonic::new("jp_ix"), // JP (IX)
         InstructionMnemonic::new("jp_iy"), // JP (IY)
+        InstructionMnemonic::new("jr"),    // Relative Jump (unconditional)
+        InstructionMnemonic::new("jr_c"),  // Relative Jump if Carry
+        InstructionMnemonic::new("jr_nc"), // Relative Jump if No Carry
+        InstructionMnemonic::new("jr_z"),  // Relative Jump if Zero
+        InstructionMnemonic::new("jr_nz"), // Relative Jump if Not Zero
         InstructionMnemonic::new("djnz"),  // Decrement B and Jump if Non Zero
         // === Call / Return ===
         InstructionMnemonic::new("call"),
@@ -416,7 +421,7 @@ mod tests {
         assert_eq!(z.lsb, 6);
         assert_eq!(z.bit_size, 1);
 
-        let h = bank.get("H").unwrap();
+        let h = bank.get("HALF_CARRY").unwrap();
         assert_eq!(h.lsb, 4);
 
         let pv = bank.get("P_V").unwrap();

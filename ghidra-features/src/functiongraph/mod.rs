@@ -722,12 +722,7 @@ mod tests {
     use ghidra_core::addr::AddressRange;
 
     fn dummy_function() -> Function {
-        Function {
-            name: "test_fn".to_string(),
-            entry_point: Address::new(0x1000),
-            body: AddressRange::new(Address::new(0x1000), Address::new(0x1100)),
-            signature: "void test_fn(int)".to_string(),
-        }
+        Function::new("test_fn", Address::new(0x1000), AddressRange::new(Address::new(0x1000), Address::new(0x1100)))
     }
 
     #[test]
@@ -744,7 +739,7 @@ mod tests {
             vec![FGVertex::new(Address::new(0x1000), "entry".into(), vec![])],
             vec![],
         );
-        g.layout.circular();
+        g.layout_circular();
         assert_eq!(g.vertices.len(), 1);
     }
 
@@ -823,8 +818,9 @@ mod tests {
             ],
         );
         g.layout_radial();
-        // Root should be near centre.
-        let (rx, ry) = g.vertices[0].centre();
+        // Root (x,y) should be at centre; centre() includes width/height offset
+        let rx = g.vertices[0].x;
+        let ry = g.vertices[0].y;
         let root_dist = ((rx - 400.0).powi(2) + (ry - 400.0).powi(2)).sqrt();
         assert!(root_dist < 10.0, "root should be at centre");
     }

@@ -386,7 +386,10 @@ impl ByteMappingScheme {
         let modulo = mapped_source_offset % msbc;
         if modulo < mbc {
             mapped_offset += modulo;
-        } else if !skip_back {
+        } else if skip_back {
+            // Non-mapped byte: snap back to the last mapped byte in this group
+            mapped_offset += mbc - 1;
+        } else {
             mapped_offset += mbc;
             if mapped_offset > offset_limit {
                 return None;
@@ -852,6 +855,100 @@ impl MemoryBlock {
             mapped_source_base: Some(mapped_source_base),
             mapping_scheme: None,
             is_overlay: false,
+            is_loaded: true,
+        }
+    }
+
+    /// Create an overlay memory block.
+    ///
+    /// An overlay provides alternate content for a physical memory region in a
+    /// different execution context. Any block type can be used as an overlay.
+    /// If `source_block` is provided the new block inherits its type and
+    /// mapping properties; otherwise it defaults to an initialized block with
+    /// the given `data`.
+    pub fn new_overlay(
+        name: impl Into<String>,
+        range: AddressRange,
+        flags: u8,
+        data: Vec<u8>,
+    ) -> Self {
+        let len = range.len();
+        let min_addr = range.start;
+        let source_info = MemoryBlockSourceInfo::new_initialized(len, min_addr, None, -1);
+        Self {
+            name: name.into(),
+            range,
+            block_type: MemoryBlockType::Default,
+            flags,
+            comment: String::new(),
+            source_name: String::new(),
+            source_infos: vec![source_info],
+            initialized: true,
+            data,
+            mapped_source_base: None,
+            mapping_scheme: None,
+            is_overlay: true,
+            is_loaded: true,
+        }
+    }
+
+    /// Create an overlay byte-mapped block.
+    pub fn new_overlay_byte_mapped(
+        name: impl Into<String>,
+        range: AddressRange,
+        flags: u8,
+        mapped_source_base: Address,
+        scheme: ByteMappingScheme,
+    ) -> Self {
+        let len = range.len();
+        let mapped_range = AddressRange::new(mapped_source_base, mapped_source_base.add(len));
+        let source_info = MemoryBlockSourceInfo::new_byte_mapped(
+            len,
+            range.start,
+            mapped_range,
+            scheme.clone(),
+        );
+        Self {
+            name: name.into(),
+            range,
+            block_type: MemoryBlockType::ByteMapped,
+            flags,
+            comment: String::new(),
+            source_name: String::new(),
+            source_infos: vec![source_info],
+            initialized: false,
+            data: Vec::new(),
+            mapped_source_base: Some(mapped_source_base),
+            mapping_scheme: Some(scheme),
+            is_overlay: true,
+            is_loaded: true,
+        }
+    }
+
+    /// Create an overlay bit-mapped block.
+    pub fn new_overlay_bit_mapped(
+        name: impl Into<String>,
+        range: AddressRange,
+        flags: u8,
+        mapped_source_base: Address,
+    ) -> Self {
+        let len = range.len();
+        let mapped_range = AddressRange::new(mapped_source_base, mapped_source_base.add(len));
+        let source_info =
+            MemoryBlockSourceInfo::new_bit_mapped(len, range.start, mapped_range);
+        Self {
+            name: name.into(),
+            range,
+            block_type: MemoryBlockType::BitMapped,
+            flags,
+            comment: String::new(),
+            source_name: String::new(),
+            source_infos: vec![source_info],
+            initialized: false,
+            data: Vec::new(),
+            mapped_source_base: Some(mapped_source_base),
+            mapping_scheme: None,
+            is_overlay: true,
             is_loaded: true,
         }
     }
@@ -2580,7 +2677,53 @@ impl Memory for MemoryMap {
                     addr
                 ))
             })?;
-        // Now we have a copy of the name with no borrow on self
+
+        // Extract mapped block properties into locals to avoid borrow conflicts
+        let mapped_info: Option<(MemoryBlockType, Address, ByteMappingScheme, bool, u64)> = {
+            let block = self.blocks.get(&block_name).unwrap();
+            match block.block_type {
+                MemoryBlockType::ByteMapped | MemoryBlockType::BitMapped => {
+                    let base = block.mapped_source_base.ok_or_else(|| {
+                        GhidraError::MemoryError("Mapped block without source base".into())
+                    })?;
+                    if !block.is_write() {
+                        return Err(GhidraError::MemoryError(format!(
+                            "Block '{}' is not writable",
+                            block_name
+                        )));
+                    }
+                    let default_scheme = ByteMappingScheme::one_to_one();
+                    let scheme = block.mapping_scheme.as_ref().unwrap_or(&default_scheme);
+                    Some((block.block_type, base, scheme.clone(), true, block.start().offset))
+                }
+                MemoryBlockType::Default => None,
+            }
+        };
+
+        // Handle mapped blocks: write-through to the source (no borrow on self.blocks)
+        if let Some((btype, base, scheme, is_write, start_offset)) = mapped_info {
+            if !is_write {
+                return Err(GhidraError::MemoryError(format!(
+                    "Block '{}' is not writable",
+                    block_name
+                )));
+            }
+            let offset = addr.offset - start_offset;
+            return match btype {
+                MemoryBlockType::ByteMapped => {
+                    let src_addr = scheme.get_mapped_source_address(base, offset);
+                    self.set_byte(src_addr, value)
+                }
+                MemoryBlockType::BitMapped => {
+                    let src_addr = base.add(offset);
+                    let existing = self.get_byte(src_addr).unwrap_or(0);
+                    let new_val = (existing & 0xFE) | (value & 0x01);
+                    self.set_byte(src_addr, new_val)
+                }
+                _ => unreachable!(),
+            };
+        }
+
         let block = self.blocks.get_mut(&block_name).unwrap();
         if !block.is_write() {
             return Err(GhidraError::MemoryError(format!(
@@ -2620,6 +2763,55 @@ impl Memory for MemoryMap {
                     addr
                 ))
             })?;
+
+        // Extract mapped block properties into locals to avoid borrow conflicts
+        let mapped_info: Option<(MemoryBlockType, Address, ByteMappingScheme, bool, u64)> = {
+            let block = self.blocks.get(&block_name).unwrap();
+            match block.block_type {
+                MemoryBlockType::ByteMapped | MemoryBlockType::BitMapped => {
+                    let base = block.mapped_source_base.ok_or_else(|| {
+                        GhidraError::MemoryError("Mapped block without source base".into())
+                    })?;
+                    if !block.is_write() {
+                        return Err(GhidraError::MemoryError(format!(
+                            "Block '{}' is not writable",
+                            block_name
+                        )));
+                    }
+                    let default_scheme = ByteMappingScheme::one_to_one();
+                    let scheme = block.mapping_scheme.as_ref().unwrap_or(&default_scheme);
+                    Some((block.block_type, base, scheme.clone(), true, block.start().offset))
+                }
+                MemoryBlockType::Default => None,
+            }
+        };
+
+        // Handle mapped blocks: write-through to the source (no borrow on self.blocks)
+        if let Some((btype, base, scheme, is_write, start_offset)) = mapped_info {
+            if !is_write {
+                return Err(GhidraError::MemoryError(format!(
+                    "Block '{}' is not writable",
+                    block_name
+                )));
+            }
+            let offset = addr.offset - start_offset;
+            return match btype {
+                MemoryBlockType::ByteMapped => {
+                    scheme.set_bytes(self, base, offset, source, source_index, size)
+                }
+                MemoryBlockType::BitMapped => {
+                    for i in 0..size {
+                        let src_addr = base.add(offset + i as u64);
+                        let existing = self.get_byte(src_addr).unwrap_or(0);
+                        let new_val = (existing & 0xFE) | (source[source_index + i] & 0x01);
+                        self.set_byte(src_addr, new_val)?;
+                    }
+                    Ok(())
+                }
+                _ => unreachable!(),
+            };
+        }
+
         let block = self.blocks.get_mut(&block_name).unwrap();
         if !block.is_write() {
             return Err(GhidraError::MemoryError(format!(
@@ -2793,6 +2985,102 @@ impl MemoryMap {
     /// Returns true if the address falls within any memory block.
     pub fn contains(&self, addr: &Address) -> bool {
         self.get_block(addr).is_some()
+    }
+
+    /// Returns only the overlay blocks.
+    pub fn get_overlay_blocks(&self) -> Vec<&MemoryBlock> {
+        self.blocks
+            .values()
+            .filter(|b| b.is_overlay)
+            .collect()
+    }
+
+    /// Returns only the non-overlay (physical) blocks in address order.
+    pub fn get_physical_blocks(&self) -> Vec<&MemoryBlock> {
+        self.blocks_by_addr
+            .iter()
+            .filter_map(|name| self.blocks.get(name))
+            .filter(|b| !b.is_overlay)
+            .collect()
+    }
+
+    /// Returns the number of overlay blocks.
+    pub fn num_overlay_blocks(&self) -> usize {
+        self.blocks.values().filter(|b| b.is_overlay).count()
+    }
+
+    /// Returns true if this map contains any overlay blocks.
+    pub fn has_overlay_blocks(&self) -> bool {
+        self.blocks.values().any(|b| b.is_overlay)
+    }
+
+    /// Returns all mapped blocks (byte-mapped and bit-mapped) in address order.
+    pub fn get_mapped_blocks(&self) -> Vec<&MemoryBlock> {
+        self.blocks_by_addr
+            .iter()
+            .filter_map(|name| self.blocks.get(name))
+            .filter(|b| b.is_mapped())
+            .collect()
+    }
+
+    /// Create an overlay initialized block with custom data.
+    pub fn create_overlay_initialized_block(
+        &mut self,
+        name: &str,
+        start: Address,
+        data: Vec<u8>,
+    ) -> Result<&MemoryBlock, GhidraError> {
+        let size = data.len() as u64;
+        let end = start.add(size.saturating_sub(1));
+        let block = MemoryBlock::new_overlay(
+            name,
+            AddressRange::new(start, end),
+            FLAG_READ | FLAG_WRITE | FLAG_EXECUTE,
+            data,
+        );
+        self.insert_block(block)?;
+        Ok(self.blocks.get(name).unwrap())
+    }
+
+    /// Create an overlay byte-mapped block.
+    pub fn create_overlay_byte_mapped_block(
+        &mut self,
+        name: &str,
+        start: Address,
+        mapped_address: Address,
+        length: u64,
+        scheme: Option<ByteMappingScheme>,
+    ) -> Result<&MemoryBlock, GhidraError> {
+        let end = start.add(length.saturating_sub(1));
+        let scheme = scheme.unwrap_or_default();
+        let block = MemoryBlock::new_overlay_byte_mapped(
+            name,
+            AddressRange::new(start, end),
+            FLAG_READ | FLAG_WRITE,
+            mapped_address,
+            scheme,
+        );
+        self.insert_block(block)?;
+        Ok(self.blocks.get(name).unwrap())
+    }
+
+    /// Create an overlay bit-mapped block.
+    pub fn create_overlay_bit_mapped_block(
+        &mut self,
+        name: &str,
+        start: Address,
+        mapped_address: Address,
+        length: u64,
+    ) -> Result<&MemoryBlock, GhidraError> {
+        let end = start.add(length.saturating_sub(1));
+        let block = MemoryBlock::new_overlay_bit_mapped(
+            name,
+            AddressRange::new(start, end),
+            FLAG_READ | FLAG_WRITE,
+            mapped_address,
+        );
+        self.insert_block(block)?;
+        Ok(self.blocks.get(name).unwrap())
     }
 }
 
@@ -3415,4 +3703,243 @@ mod tests {
         let err = MemoryBlockError::default();
         assert_eq!(format!("{}", err), "MemoryBlockError: Memory block error");
     }
+
+    #[test]
+    fn test_overlay_block() {
+        let block = MemoryBlock::new_overlay(
+            "ov",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ | FLAG_WRITE | FLAG_EXECUTE,
+            vec![0xAAu8; 256],
+        );
+        assert!(block.is_overlay());
+        assert!(block.is_initialized());
+        assert_eq!(block.size(), 256);
+        assert_eq!(block.get_byte(&Address::new(0x1000)).unwrap(), 0xAA);
+        assert_eq!(block.permissions_string(), "rwx");
+    }
+
+    #[test]
+    fn test_overlay_byte_mapped_block() {
+        let block = MemoryBlock::new_overlay_byte_mapped(
+            "ov_map",
+            AddressRange::new(Address::new(0x2000), Address::new(0x20FF)),
+            FLAG_READ | FLAG_WRITE,
+            Address::new(0x1000),
+            ByteMappingScheme::default(),
+        );
+        assert!(block.is_overlay());
+        assert!(block.is_byte_mapped());
+        assert!(block.is_mapped());
+        assert_eq!(block.get_mapped_source_base(), Some(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_overlay_bit_mapped_block() {
+        let block = MemoryBlock::new_overlay_bit_mapped(
+            "ov_bmap",
+            AddressRange::new(Address::new(0x3000), Address::new(0x30FF)),
+            FLAG_READ | FLAG_WRITE,
+            Address::new(0x1000),
+        );
+        assert!(block.is_overlay());
+        assert!(block.is_bit_mapped());
+        assert!(block.is_mapped());
+    }
+
+    #[test]
+    fn test_memory_map_overlay_blocks() {
+        let mut mem = make_memory();
+        mem.create_initialized_block(".text", Address::new(0x1000), vec![0x90u8; 256], false)
+            .unwrap();
+        mem.create_overlay_initialized_block("ov.text", Address::new(0x1000), vec![0xCCu8; 256])
+            .unwrap();
+
+        assert!(mem.has_overlay_blocks());
+        assert_eq!(num_overlay_blocks(&mem), 1);
+
+        let physical = get_physical_block_count(&mem);
+        assert_eq!(physical, 1);
+
+        // The overlay should be returned for address 0x1000 (first match)
+        // Both blocks contain that address - the result depends on block ordering
+        // but both exist in the map
+        let overlays = mem.get_overlay_blocks();
+        assert_eq!(overlays.len(), 1);
+        assert!(overlays[0].is_overlay());
+    }
+
+    #[test]
+    fn test_memory_map_overlay_byte_mapped() {
+        let mut mem = make_memory();
+        // Create source block
+        mem.create_initialized_block("src", Address::new(0x5000), vec![0xAAu8; 256], false)
+            .unwrap();
+        // Create overlay byte-mapped block pointing to source
+        mem.create_overlay_byte_mapped_block(
+            "ov_map",
+            Address::new(0x6000),
+            Address::new(0x5000),
+            256,
+            None,
+        )
+        .unwrap();
+
+        let mapped = mem.get_mapped_blocks();
+        assert_eq!(mapped.len(), 1);
+        assert!(mapped[0].is_byte_mapped());
+        assert!(mapped[0].is_overlay());
+    }
+
+    #[test]
+    fn test_byte_mapped_write_through() {
+        let mut mem = make_memory();
+        // Create source block
+        mem.create_initialized_block("src", Address::new(0x5000), vec![0u8; 256], false)
+            .unwrap();
+        // Create byte-mapped block pointing to source (1:1 mapping)
+        mem.create_byte_mapped_block(
+            "map",
+            Address::new(0x6000),
+            Address::new(0x5000),
+            64,
+            None,
+            false,
+        )
+        .unwrap();
+
+        // Writing to the mapped block should write through to the source
+        mem.set_byte(Address::new(0x6000), 0x42).unwrap();
+        // Read through the source directly
+        assert_eq!(mem.get_byte(Address::new(0x5000)).unwrap(), 0x42);
+        // Read through the mapped block
+        assert_eq!(mem.get_byte(Address::new(0x6000)).unwrap(), 0x42);
+    }
+
+    #[test]
+    fn test_bit_mapped_write_through() {
+        let mut mem = make_memory();
+        // Create source block
+        mem.create_initialized_block("src", Address::new(0x5000), vec![0u8; 256], false)
+            .unwrap();
+        // Create bit-mapped block pointing to source
+        mem.create_bit_mapped_block(
+            "bmap",
+            Address::new(0x6000),
+            Address::new(0x5000),
+            64,
+            false,
+        )
+        .unwrap();
+
+        // Writing 1 to the bit-mapped block should set bit 0 in the source
+        mem.set_byte(Address::new(0x6000), 0x01).unwrap();
+        assert_eq!(mem.get_byte(Address::new(0x5000)).unwrap(), 0x01);
+
+        // Writing 0 should clear bit 0
+        mem.set_byte(Address::new(0x6000), 0x00).unwrap();
+        assert_eq!(mem.get_byte(Address::new(0x5000)).unwrap(), 0x00);
+    }
+
+    #[test]
+    fn test_byte_mapped_non_one_to_one_write_through() {
+        let mut mem = make_memory();
+        // Create source block
+        mem.create_initialized_block("src", Address::new(0x5000), vec![0u8; 256], false)
+            .unwrap();
+        // Create 2:4 byte-mapped block: 2 mapped bytes per 4 source bytes
+        let scheme = ByteMappingScheme::new(2, 4);
+        mem.create_byte_mapped_block(
+            "map24",
+            Address::new(0x6000),
+            Address::new(0x5000),
+            64,
+            Some(scheme),
+            false,
+        )
+        .unwrap();
+
+        // Write at mapped block offset 0 -> source offset 0
+        mem.set_byte(Address::new(0x6000), 0xAA).unwrap();
+        assert_eq!(mem.get_byte(Address::new(0x5000)).unwrap(), 0xAA);
+
+        // Write at mapped block offset 1 -> source offset 1
+        mem.set_byte(Address::new(0x6001), 0xBB).unwrap();
+        assert_eq!(mem.get_byte(Address::new(0x5001)).unwrap(), 0xBB);
+
+        // Write at mapped block offset 2 -> source offset 4 (skips 2)
+        mem.set_byte(Address::new(0x6002), 0xCC).unwrap();
+        assert_eq!(mem.get_byte(Address::new(0x5004)).unwrap(), 0xCC);
+    }
+
+    #[test]
+    fn test_memory_block_is_loaded_check() {
+        let block = MemoryBlock::new_initialized(
+            "test",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert!(block.is_loaded());
+
+        let overlay = MemoryBlock::new_overlay(
+            "ov",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert!(overlay.is_overlay());
+        assert!(overlay.is_loaded());
+    }
+
+    #[test]
+    fn test_memory_block_default_type_check() {
+        let init = MemoryBlock::new_initialized(
+            "init",
+            AddressRange::new(Address::new(0x1000), Address::new(0x10FF)),
+            FLAG_READ,
+            vec![0u8; 256],
+        );
+        assert!(init.is_default());
+
+        let uninit = MemoryBlock::new_uninitialized(
+            "uninit",
+            AddressRange::new(Address::new(0x2000), Address::new(0x20FF)),
+            FLAG_READ,
+        );
+        assert!(uninit.is_default());
+    }
+
+    #[test]
+    fn test_byte_mapping_scheme_get_mapped_address() {
+        let scheme = ByteMappingScheme::new(2, 4);
+        let start = Address::new(0x6000);
+
+        // Source offset 0 (mapped byte) -> mapped offset 0
+        let addr = scheme.get_mapped_address(start, 64, 0, false).unwrap();
+        assert_eq!(addr, Address::new(0x6000));
+
+        // Source offset 1 (mapped byte) -> mapped offset 1
+        let addr = scheme.get_mapped_address(start, 64, 1, false).unwrap();
+        assert_eq!(addr, Address::new(0x6001));
+
+        // Source offset 2 (non-mapped, skip_back=false) -> mapped offset 2 (next mapped)
+        let addr = scheme.get_mapped_address(start, 64, 2, false).unwrap();
+        assert_eq!(addr, Address::new(0x6002));
+
+        // Source offset 2 (non-mapped, skip_back=true) -> mapped offset 1 (prev)
+        let addr = scheme.get_mapped_address(start, 64, 2, true).unwrap();
+        assert_eq!(addr, Address::new(0x6001));
+    }
+}
+
+// Helper functions used by tests
+#[cfg(test)]
+fn num_overlay_blocks(mem: &MemoryMap) -> usize {
+    mem.get_overlay_blocks().len()
+}
+
+#[cfg(test)]
+fn get_physical_block_count(mem: &MemoryMap) -> usize {
+    mem.get_physical_blocks().len()
 }

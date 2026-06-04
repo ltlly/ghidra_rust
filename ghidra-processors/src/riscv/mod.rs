@@ -331,6 +331,7 @@ impl McauseBit {
 }
 
 /// Machine cause exception/interrupt codes.
+#[repr(u64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExceptionCode {
     InstructionAddressMisaligned = 0,
@@ -353,21 +354,21 @@ pub enum ExceptionCode {
     LoadGuestPageFault = 21,
     VirtualInstruction = 22,
     StoreGuestPageFault = 23,
-    // Interrupt codes share the same numeric values as exceptions;
-    // they're distinguished by the top bit of mcause.
-    SupervisorSoftwareInterrupt,
-    MachineSoftwareInterrupt,
-    SupervisorTimerInterrupt,
-    MachineTimerInterrupt,
-    SupervisorExternalInterrupt,
-    MachineExternalInterrupt,
-    CounterOverflowInterrupt,
-    GuestExternalInterrupt,
+    // Interrupt codes use the top bit set (bit 63) to distinguish from exceptions,
+    // matching the RISC-V privileged spec mcause encoding.
+    SupervisorSoftwareInterrupt = 0x8000_0000_0000_0001,
+    MachineSoftwareInterrupt = 0x8000_0000_0000_0003,
+    SupervisorTimerInterrupt = 0x8000_0000_0000_0005,
+    MachineTimerInterrupt = 0x8000_0000_0000_0007,
+    SupervisorExternalInterrupt = 0x8000_0000_0000_0009,
+    MachineExternalInterrupt = 0x8000_0000_0000_000B,
+    CounterOverflowInterrupt = 0x8000_0000_0000_000D,
+    GuestExternalInterrupt = 0x8000_0000_0000_000E,
 }
 
 impl ExceptionCode {
-    pub fn code(&self) -> u32 {
-        *self as u32
+    pub fn code(&self) -> u64 {
+        *self as u64
     }
 
     pub fn is_interrupt(&self) -> bool {
@@ -2607,76 +2608,92 @@ impl ProcessorModule for RiscVModule {
 
     fn languages() -> Vec<Language> {
         vec![
+            // -- .ldefs canonical variants --
+            Language::new(
+                "RISCV:LE:64:default",
+                "RISC-V 64 little default",
+                "1.4",
+                Endian::Little,
+                64,
+            ).with_pc_register("pc"),
+            Language::new(
+                "RISCV:LE:32:default",
+                "RISC-V 32 little default",
+                "1.4",
+                Endian::Little,
+                32,
+            ).with_pc_register("pc"),
+            // -- Extension-specific variants --
             Language::new(
                 "RISCV:LE:32:RV32I",
                 "RISC-V 32-bit RV32I (Little Endian)",
                 "RV32I",
                 Endian::Little,
                 32,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:32:RV32IMAC",
                 "RISC-V 32-bit RV32IMAC (Little Endian)",
                 "RV32IMAC",
                 Endian::Little,
                 32,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:32:RV32G",
                 "RISC-V 32-bit RV32G (Little Endian)",
                 "RV32G",
                 Endian::Little,
                 32,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:32:RV32GC",
                 "RISC-V 32-bit RV32GC (Little Endian)",
                 "RV32GC",
                 Endian::Little,
                 32,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:64:RV64I",
                 "RISC-V 64-bit RV64I (Little Endian)",
                 "RV64I",
                 Endian::Little,
                 64,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:64:RV64IMAC",
                 "RISC-V 64-bit RV64IMAC (Little Endian)",
                 "RV64IMAC",
                 Endian::Little,
                 64,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:64:RV64G",
                 "RISC-V 64-bit RV64G (Little Endian)",
                 "RV64G",
                 Endian::Little,
                 64,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:64:RV64GC",
                 "RISC-V 64-bit RV64GC (Little Endian)",
                 "RV64GC",
                 Endian::Little,
                 64,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:64:RV64GC_Zba_Zbb",
                 "RISC-V 64-bit RV64GC+Zba+Zbb (Little Endian)",
                 "RV64GCB",
                 Endian::Little,
                 64,
-            ),
+            ).with_pc_register("pc"),
             Language::new(
                 "RISCV:LE:64:RV64GCV",
                 "RISC-V 64-bit RV64GC+V (Little Endian)",
                 "RV64GCV",
                 Endian::Little,
                 64,
-            ),
+            ).with_pc_register("pc"),
         ]
     }
 
@@ -2814,7 +2831,7 @@ mod tests {
         let bank = RiscVRegisterBank::new_rv64();
         for i in 0..32 {
             let s_reg = bank.get(&format!("f{}_s", i)).unwrap();
-            assert_eq!(s_reg.parent.as_deref(), Some(&format!("f{}", i)));
+            assert_eq!(s_reg.parent.as_deref(), Some(format!("f{}", i).as_str()));
             assert_eq!(s_reg.bit_size, 32);
             assert_eq!(s_reg.lsb, 0);
         }
@@ -2919,7 +2936,7 @@ mod tests {
         let regs = RiscVModule::registers();
         assert!(!regs.is_empty());
         let langs = RiscVModule::languages();
-        assert!(langs.len() >= 6);
+        assert!(langs.len() >= 10, "Expected >= 10 RISC-V language variants, got {}", langs.len());
         let insts = RiscVModule::instructions();
         assert!(insts.len() >= 200);
     }

@@ -191,17 +191,15 @@ impl AddressSet {
         let mut i = 0;
         while i < self.ranges.len() {
             let existing = &self.ranges[i];
-            if existing.end.offset < range.start.offset.saturating_sub(1)
-                && existing.start.space_id == range.start.space_id
-            {
-                i += 1;
-            } else if existing.start.space_id != range.start.space_id {
+            if existing.start.space_id != range.start.space_id {
                 if existing.start.space_id < range.start.space_id {
                     i += 1;
                 } else {
                     self.ranges.insert(i, range);
                     return;
                 }
+            } else if existing.end.offset < range.start.offset {
+                i += 1;
             } else {
                 break;
             }
@@ -844,12 +842,24 @@ impl fmt::Display for AnalyzerPriority {
 /// 8. `FUNCTION_ID_ANALYSIS` (800) — function identification
 /// 9. `DATA_TYPE_PROPAGATION` (900) — type propagation
 /// 10. `LOW_PRIORITY` (10000) — speculative/heuristic analysis
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnalysisPriority {
     /// Human-readable name for this priority level.
     pub name: &'static str,
     /// Numeric priority value (lower = higher priority).
     pub priority: i32,
+}
+
+impl PartialOrd for AnalysisPriority {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for AnalysisPriority {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority.cmp(&other.priority)
+    }
 }
 
 impl AnalysisPriority {
@@ -1642,6 +1652,9 @@ impl AutoAnalysisManager {
         // Phase 1: Prime the queue with all pending schedulers
         self.enqueue_pending();
 
+        // Check cancellation before entering the processing loop
+        monitor.check_cancelled()?;
+
         // Phase 2: Drain the queue up to max_iterations
         let mut iteration = 0u32;
         while !self.queue.is_empty() && iteration < self.options.max_iterations {
@@ -2394,7 +2407,7 @@ mod tests {
         let a = Address::new(0x1000);
         assert_eq!(a.add(8), Address::new(0x1008));
         assert_eq!(a.sub(8), Address::new(0xFF8)); // wrapping
-        assert_eq!(a.to_string(), "0x1000");
+        assert_eq!(a.to_string(), "0x00001000");
     }
 
     #[test]

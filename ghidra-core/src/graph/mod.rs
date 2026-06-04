@@ -516,8 +516,11 @@ impl ControlFlowGraph {
                 .collect()
         };
 
+        // Compute predecessors once -- used by the loop detection algorithm.
+        let predecessors = Predecessors::build(node_count, &successors_fn);
+
         match self.dominator_tree() {
-            Some(dt) => detect_natural_loops(node_count, successors_fn, &dt),
+            Some(dt) => detect_natural_loops(node_count, &successors_fn, &predecessors, &dt),
             None => Vec::new(),
         }
     }
@@ -1216,17 +1219,19 @@ pub struct DominatorTree {
     /// The entry node index.
     entry: usize,
     /// Reverse postorder numbering (used by the algorithm).
+    #[allow(dead_code)]
     rpo: Vec<usize>,
 }
 
 impl DominatorTree {
     /// Build a dominator tree from a control-flow graph.
     ///
-    /// `cfg` provides, for each node index `0..n`:
-    /// - `successors(i)` returns the outgoing edge targets.
-    /// - The entry node is `0`.
+    /// `successors(i)` returns the outgoing edge targets for each node `0..n`.
+    /// The entry node is `0`.
     ///
     /// Uses the Lengauer-Tarjan algorithm for near-linear construction.
+    /// Predecessors are computed once (O(V+E)) and reused across all RPO nodes,
+    /// eliminating the prior O(V*(V+E)) inner-loop predecessor scan.
     pub fn build(
         node_count: usize,
         successors: impl Fn(usize) -> Vec<usize>,
@@ -1242,51 +1247,50 @@ impl DominatorTree {
             };
         }
 
-        // Build reverse postorder numbering
-        let rpo = compute_rpo(node_count, &successors);
+        // Compute predecessors ONCE (fixes O(n^2) bug).
+        let predecessors = Predecessors::build(node_count, &successors);
 
-        // Map node -> RPO position
-        let mut rpo_pos = vec![0usize; node_count];
-        for (i, &node) in rpo.iter().enumerate() {
-            rpo_pos[node] = i;
+        // Build DFS preorder numbering and DFS parent tree.
+        let (preorder, dfs_parent) = compute_dfs_preorder(node_count, &successors);
+
+        // Map node -> preorder position
+        let mut preorder_pos = vec![0usize; node_count];
+        for (i, &node) in preorder.iter().enumerate() {
+            preorder_pos[node] = i;
         }
 
-        // Lengauer-Tarjan algorithm
+        // --- Lengauer-Tarjan algorithm ---
         let mut idom = vec![None; node_count];
         let mut semi = vec![0usize; node_count];
         let mut label = vec![0usize; node_count];
         let mut ancestor: Vec<Option<usize>> = vec![None; node_count];
         let mut bucket: Vec<Vec<usize>> = vec![Vec::new(); node_count];
 
-        // Initialize
         for i in 0..node_count {
             semi[i] = i;
             label[i] = i;
         }
 
-        // Process nodes in reverse RPO order (skip entry)
-        for &w in rpo.iter().skip(1) {
-            // Step 2: compute semi-dominator
-            let preds = compute_predecessors(node_count, &successors);
-            for &v in &preds[w] {
-                let u = eval(v, &mut ancestor, &semi, &mut label, &rpo_pos);
-                if rpo_pos[semi[u]] < rpo_pos[semi[w]] {
+        // Process nodes in reverse preorder (skip entry at preorder[0]).
+        for &w in preorder.iter().skip(1).rev() {
+            let w_pos = preorder_pos[w];
+
+            // Step 2: compute semi-dominator using precomputed predecessors.
+            for &v in predecessors.get(w) {
+                let u = eval(v, &mut ancestor, &semi, &mut label, &preorder_pos);
+                if preorder_pos[semi[u]] < preorder_pos[semi[w]] {
                     semi[w] = semi[u];
                 }
             }
             bucket[semi[w]].push(w);
 
-            // Link w to its parent in the DFS tree
-            link(
-                idom_of_rpo(rpo_pos[w], &rpo, &idom),
-                w,
-                &mut ancestor,
-            );
+            // Link w to its DFS-tree parent.
+            let parent_w = preorder[dfs_parent[w_pos]];
+            link(parent_w, w, &mut ancestor);
 
-            // Step 3: implicitly define idom for nodes in bucket[parent(w)]
-            let parent_w = idom_of_rpo(rpo_pos[w], &rpo, &idom);
-            for &v in &bucket[parent_w].clone() {
-                let u = eval(v, &mut ancestor, &semi, &mut label, &rpo_pos);
+            // Step 3: implicitly define idom for nodes in bucket[parent_w].
+            for &v in bucket[parent_w].clone().iter() {
+                let u = eval(v, &mut ancestor, &semi, &mut label, &preorder_pos);
                 if semi[u] == semi[v] {
                     idom[v] = Some(semi[v]);
                 } else {
@@ -1296,21 +1300,20 @@ impl DominatorTree {
             bucket[parent_w].clear();
         }
 
-        // Step 4: explicitly define idom
-        for &w in rpo.iter().skip(1) {
+        // Step 4: explicitly define idom.
+        for &w in preorder.iter().skip(1) {
             if let Some(id) = idom[w] {
                 if id != semi[w] {
                     idom[w] = idom[id];
                 }
             }
         }
-        // Entry node has no idom
-        idom[0] = None;
+        idom[0] = None; // Entry node has no idom.
 
-        // Compute full dominator sets
+        // Compute full dominator sets (transitive closure along idom chain).
         let mut dominators: Vec<HashSet<usize>> = vec![HashSet::new(); node_count];
         dominators[0].insert(0);
-        for &w in rpo.iter().skip(1) {
+        for &w in preorder.iter().skip(1) {
             if let Some(id) = idom[w] {
                 let mut doms = dominators[id].clone();
                 doms.insert(w);
@@ -1318,9 +1321,9 @@ impl DominatorTree {
             }
         }
 
-        // Compute dominated children
+        // Compute children in the dominator tree.
         let mut dominated: Vec<Vec<usize>> = vec![Vec::new(); node_count];
-        for i in 1..node_count {
+        for i in 0..node_count {
             if let Some(id) = idom[i] {
                 dominated[id].push(i);
             }
@@ -1332,7 +1335,7 @@ impl DominatorTree {
             dominators,
             dominated,
             entry: 0,
-            rpo,
+            rpo: preorder,
         }
     }
 
@@ -1378,13 +1381,12 @@ impl DominatorTree {
     /// `X` dominates a predecessor of `Y` but does not strictly dominate `Y`.
     pub fn dominance_frontiers(
         &self,
-        successors: impl Fn(usize) -> Vec<usize>,
+        predecessors: &Predecessors,
     ) -> Vec<HashSet<usize>> {
         let mut frontiers = vec![HashSet::new(); self.node_count];
         for b in 0..self.node_count {
-            let preds = compute_predecessors(self.node_count, &successors);
-            if preds[b].len() >= 2 {
-                for &p in &preds[b] {
+            if predecessors.get(b).len() >= 2 {
+                for &p in predecessors.get(b) {
                     let mut runner = Some(p);
                     while let Some(r) = runner {
                         if r == b {
@@ -1400,47 +1402,105 @@ impl DominatorTree {
     }
 }
 
-/// Helper: compute reverse postorder numbering via DFS.
-fn compute_rpo(node_count: usize, successors: impl Fn(usize) -> Vec<usize>) -> Vec<usize> {
+/// Precomputed predecessor lists for each node.
+///
+/// `predecessors[i]` contains all nodes that have an edge to node `i`.
+/// Used by Lengauer-Tarjan, dominance frontiers, and loop detection.
+#[derive(Debug, Clone)]
+pub struct Predecessors {
+    /// predecessors[i] = list of nodes with edges to node i.
+    preds: Vec<Vec<usize>>,
+}
+
+impl Predecessors {
+    /// Build predecessor lists from a successor function.
+    pub fn build(node_count: usize, successors: impl Fn(usize) -> Vec<usize>) -> Self {
+        let mut preds: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+        for i in 0..node_count {
+            for s in successors(i) {
+                if s < node_count {
+                    preds[s].push(i);
+                }
+            }
+        }
+        Self { preds }
+    }
+
+    /// Get the predecessors of a node.
+    pub fn get(&self, node: usize) -> &[usize] {
+        &self.preds[node]
+    }
+
+    /// Number of nodes.
+    pub fn node_count(&self) -> usize {
+        self.preds.len()
+    }
+}
+
+impl ControlFlowGraph {
+    /// Compute predecessor lists for all nodes in this CFG.
+    pub fn cfg_predecessors(&self) -> Predecessors {
+        let node_count = self.graph.node_count();
+        let idx_map: HashMap<NodeIndex, usize> = self
+            .graph
+            .node_indices()
+            .enumerate()
+            .map(|(i, ni)| (ni, i))
+            .collect();
+        let rev_map: Vec<NodeIndex> = self.graph.node_indices().collect();
+
+        Predecessors::build(node_count, |n: usize| -> Vec<usize> {
+            let ni = rev_map[n];
+            self.graph
+                .neighbors_directed(ni, Direction::Outgoing)
+                .filter_map(|s| idx_map.get(&s).copied())
+                .collect()
+        })
+    }
+}
+
+/// Helper: compute DFS preorder numbering and DFS parent via DFS.
+/// Returns `(preorder, dfs_parent)` where `dfs_parent[i]` is the preorder
+/// index of the DFS-tree parent of the node at preorder position `i`
+/// (or `0` for the root).
+fn compute_dfs_preorder(
+    node_count: usize,
+    successors: impl Fn(usize) -> Vec<usize>,
+) -> (Vec<usize>, Vec<usize>) {
     let mut visited = vec![false; node_count];
     let mut order = Vec::with_capacity(node_count);
+    // Indexed by node id: parent_node_id.
+    let mut parent_by_node = vec![0usize; node_count];
 
     fn dfs(
         node: usize,
         visited: &mut [bool],
         order: &mut Vec<usize>,
+        parent_by_node: &mut [usize],
         successors: &dyn Fn(usize) -> Vec<usize>,
     ) {
         visited[node] = true;
+        order.push(node); // preorder: push on entry
         for &succ in &successors(node) {
             if succ < visited.len() && !visited[succ] {
-                dfs(succ, visited, order, successors);
-            }
-        }
-        order.push(node);
-    }
-
-    dfs(0, &mut visited, &mut order, &successors);
-
-    // Reverse to get RPO
-    order.reverse();
-    order
-}
-
-/// Helper: compute predecessors for each node.
-fn compute_predecessors(
-    node_count: usize,
-    successors: impl Fn(usize) -> Vec<usize>,
-) -> Vec<Vec<usize>> {
-    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); node_count];
-    for i in 0..node_count {
-        for &s in &successors(i) {
-            if s < node_count {
-                preds[s].push(i);
+                parent_by_node[succ] = node;
+                dfs(succ, visited, order, parent_by_node, successors);
             }
         }
     }
-    preds
+
+    dfs(0, &mut visited, &mut order, &mut parent_by_node, &successors);
+
+    // Map node id -> preorder position.
+    let pos: HashMap<usize, usize> =
+        order.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+    // Remap so dfs_parent[preorder_index] = preorder_index of DFS parent.
+    let dfs_parent: Vec<usize> = order
+        .iter()
+        .map(|&n| *pos.get(&parent_by_node[n]).unwrap_or(&0))
+        .collect();
+
+    (order, dfs_parent)
 }
 
 /// Helper: Lengauer-Tarjan `eval` function.
@@ -1449,12 +1509,12 @@ fn eval(
     ancestor: &mut [Option<usize>],
     semi: &[usize],
     label: &mut [usize],
-    rpo_pos: &[usize],
+    preorder_pos: &[usize],
 ) -> usize {
     if ancestor[v].is_none() {
-        return v;
+        return label[v];
     }
-    compress(v, ancestor, semi, label, rpo_pos);
+    compress(v, ancestor, semi, label, preorder_pos);
     label[v]
 }
 
@@ -1464,15 +1524,15 @@ fn compress(
     ancestor: &mut [Option<usize>],
     semi: &[usize],
     label: &mut [usize],
-    rpo_pos: &[usize],
+    preorder_pos: &[usize],
 ) {
     if let Some(a) = ancestor[v] {
         if ancestor[a].is_some() {
-            compress(a, ancestor, semi, label, rpo_pos);
-            if rpo_pos[semi[label[a]]] < rpo_pos[semi[label[v]]] {
+            compress(a, ancestor, semi, label, preorder_pos);
+            if preorder_pos[semi[label[a]]] < preorder_pos[semi[label[v]]] {
                 label[v] = label[a];
             }
-            ancestor[v] = ancestor[a];
+            ancestor[v] = ancestor[a]; // path compression
         }
     }
 }
@@ -1480,20 +1540,6 @@ fn compress(
 /// Helper: Lengauer-Tarjan `link` function.
 fn link(v: usize, w: usize, ancestor: &mut [Option<usize>]) {
     ancestor[w] = Some(v);
-}
-
-/// Helper: get the idom (or default to rpo-based parent).
-fn idom_of_rpo(
-    rpo_idx: usize,
-    rpo: &[usize],
-    idom: &[Option<usize>],
-) -> usize {
-    if rpo_idx == 0 {
-        return 0;
-    }
-    let w = rpo[rpo_idx];
-    // The DFS parent is the node at the previous RPO position
-    idom[w].unwrap_or(rpo[rpo_idx - 1])
 }
 
 // ============================================================================
@@ -1508,8 +1554,6 @@ fn idom_of_rpo(
 #[derive(Debug, Clone)]
 pub struct PostDominatorTree {
     inner: DominatorTree,
-    /// Maps original CFG node indices to post-dominator tree node indices.
-    node_map: Vec<usize>,
 }
 
 impl PostDominatorTree {
@@ -1518,68 +1562,95 @@ impl PostDominatorTree {
     /// `node_count` is the number of nodes. `successors(i)` returns outgoing
     /// edges. `exit_node` is the index of the unique exit node.
     ///
-    /// If the graph has multiple exit nodes a synthetic exit node is created
-    /// that is the successor of all original exits.
+    /// Handles multiple exit nodes by adding a virtual entry node (index 0 in
+    /// the internal reversed graph) that reaches all actual exit nodes.
+    /// Original nodes are mapped to indices 1..=n in the reversed graph.
     pub fn build(
         node_count: usize,
         successors: impl Fn(usize) -> Vec<usize>,
         exit_node: usize,
     ) -> Self {
+        // Build predecessor lists from the original forward graph.
+        let preds: Vec<Vec<usize>> = {
+            let mut p: Vec<Vec<usize>> = vec![Vec::new(); node_count];
+            for i in 0..node_count {
+                for s in successors(i) {
+                    if s < node_count {
+                        p[s].push(i);
+                    }
+                }
+            }
+            p
+        };
+
+        // Identify actual exit nodes: have no outgoing edges or only connect to
+        // the given exit_node.
+        let actual_exits: Vec<usize> = (0..node_count)
+            .filter(|&i| {
+                let succs = successors(i);
+                succs.is_empty() || (succs.len() == 1 && succs[0] == exit_node)
+            })
+            .collect();
+
+        // Reversed graph with a virtual entry node (index 0).
+        // - Virtual entry (0) -> each actual exit (i+1) -- so actual exits are
+        //   reachable from the root in the reversed graph.
+        // - Original node i (mapped to i+1) -> its original predecessors
+        //   (mapped to p+1) -- the reversed edge direction.
+        let n = node_count;
         let rev_successors = |node: usize| -> Vec<usize> {
-            if node == exit_node {
-                let mut preds = Vec::new();
-                for i in 0..node_count {
-                    if successors(i).contains(&exit_node) {
-                        preds.push(i);
-                    }
-                }
-                for i in 0..node_count {
-                    if successors(i).is_empty() && i != exit_node {
-                        preds.push(i);
-                    }
-                }
-                preds
-            } else {
-                let mut preds = Vec::new();
-                for i in 0..node_count {
-                    if successors(i).contains(&node) {
-                        preds.push(i);
-                    }
-                }
-                preds
+            match node {
+                0 => actual_exits.iter().map(|&e| e + 1).collect(),
+                i if i >= 1 && i <= n => preds[i - 1].iter().map(|&p| p + 1).collect(),
+                _ => Vec::new(),
             }
         };
 
-        let inner = DominatorTree::build(node_count, rev_successors);
-        let node_map = (0..node_count).collect();
+        // Dominator tree on the extended graph (0..=n).
+        let inner = DominatorTree::build(n + 1, rev_successors);
 
-        Self { inner, node_map }
+        Self { inner }
     }
 
     /// Returns the immediate post-dominator of `node`, or `None` if `node`
-    /// is the exit.
+    /// is an exit (has no actual post-dominator).
     pub fn immediate_post_dominator(&self, node: usize) -> Option<usize> {
-        self.inner.immediate_dominator(node)
+        // In the extended dominator tree, the virtual entry is index 0.
+        // Actual nodes are stored at index `node+1` in the extended tree.
+        let extended_idx = node + 1;
+        match self.inner.immediate_dominator(extended_idx) {
+            Some(0) => None, // idom is the virtual entry -- no real post-dominator
+            Some(id) => Some(id - 1), // map back to original node index
+            None => None,
+        }
     }
 
     /// Returns all nodes that post-dominate `node`.
-    pub fn post_dominators(&self, node: usize) -> &HashSet<usize> {
-        self.inner.dominators(node)
+    ///
+    /// Both arguments and results use original node indices.
+    pub fn post_dominators(&self, node: usize) -> HashSet<usize> {
+        let extended_idx = node + 1;
+        self.inner
+            .dominators(extended_idx)
+            .iter()
+            .filter_map(|&d| if d == 0 { None } else { Some(d - 1) })
+            .collect()
     }
 
     /// Returns `true` when `a` post-dominates `b`.
     pub fn post_dominates(&self, a: usize, b: usize) -> bool {
-        self.inner.dominates(a, b)
+        self.inner.dominates(a + 1, b + 1)
     }
 
     /// Returns `true` when `a` strictly post-dominates `b`.
     pub fn strictly_post_dominates(&self, a: usize, b: usize) -> bool {
-        self.inner.strictly_dominates(a, b)
+        self.inner.strictly_dominates(a + 1, b + 1)
     }
 
-    /// Returns the number of nodes.
+    /// Returns the number of nodes in the original graph.
     pub fn node_count(&self) -> usize {
-        self.inner.node_count()
+        // Extended tree has n+1 nodes; original has n.
+        self.inner.node_count().saturating_sub(1)
     }
 }
 
@@ -1665,13 +1736,15 @@ impl LoopInfo {
 /// Detect all natural loops in a control-flow graph.
 ///
 /// Uses the algorithm from "Compilers: Principles, Techniques, and Tools"
-/// (Aho, Lam, Sethi, Ullman). Requires a dominator tree.
+/// (Aho, Lam, Sethi, Ullman). Requires a dominator tree and precomputed
+/// predecessor lists (avoids recomputing predecessors for every back edge).
 ///
 /// Returns a list of top-level loops (not nested within any other loop).
 /// Each loop's `children` field contains its nested loops.
 pub fn detect_natural_loops(
     node_count: usize,
     successors: impl Fn(usize) -> Vec<usize>,
+    predecessors: &Predecessors,
     dominator_tree: &DominatorTree,
 ) -> Vec<LoopInfo> {
     // Step 1: find back edges
@@ -1694,10 +1767,9 @@ pub fn detect_natural_loops(
 
         // Add all predecessors of source until we reach the header
         let mut stack = vec![source];
-        let preds = compute_predecessors(node_count, &successors);
 
         while let Some(node) = stack.pop() {
-            for &pred in &preds[node] {
+            for &pred in predecessors.get(node) {
                 if !loop_nodes.contains(&pred) {
                     loop_nodes.insert(pred);
                     stack.push(pred);
@@ -1721,40 +1793,57 @@ pub fn detect_natural_loops(
         }
     }
 
-    // Step 3: determine nesting
-    // A loop A is nested inside loop B if A's header is different from B's
-    // header and B's nodes contain all of A's nodes.
+    // Step 3: determine nesting relationships.
+    // A loop A is nested inside loop B if A's header differs from B's and
+    // all of A's nodes are contained in B's node set.  We find the direct
+    // (innermost) parent for each loop.
     let mut sorted_loops = loops.clone();
-    sorted_loops.sort_by_key(|l| l.nodes.len());
+    sorted_loops.sort_by_key(|l| l.nodes.len()); // smallest first
 
-    let mut top_level = Vec::new();
-
-    for i in 0..sorted_loops.len() {
-        let mut is_nested = false;
-        for j in (i + 1)..sorted_loops.len() {
-            if sorted_loops[j].header != sorted_loops[i].header
-                && sorted_loops[i].nodes.is_subset(&sorted_loops[j].nodes)
-            {
-                is_nested = true;
-                let child = sorted_loops[i].clone();
-                // Place inside sorted_loops[j]'s children tree
-                fn place_loop(parent: &mut LoopInfo, child: &LoopInfo) -> bool {
-                    for c in parent.children.iter_mut() {
-                        if child.nodes.is_subset(&c.nodes) {
-                            return place_loop(c, child);
-                        }
-                    }
-                    parent.children.push(child.clone());
-                    true
-                }
-                place_loop(&mut sorted_loops[j], &child);
-                break;
+    // Place each loop inside its direct parent.  Process from largest to
+    // smallest so that when a small loop is placed, its parent (larger) is
+    // already in the tree and searchable.
+    fn place_loop(parents: &mut Vec<LoopInfo>, child: LoopInfo) {
+        for p in parents.iter_mut() {
+            if p.nodes.is_superset(&child.nodes) {
+                place_loop(&mut p.children, child);
+                return;
             }
         }
-        if !is_nested {
-            top_level.push(sorted_loops[i].clone());
+        parents.push(child);
+    }
+
+    let mut top_level: Vec<LoopInfo> = Vec::new();
+    for loop_info in sorted_loops.into_iter().rev() {
+        // Only place loops that are nested inside some other loop; top-level
+        // loops have no enclosing loop (other than themselves).
+        let has_parent = loops
+            .iter()
+            .any(|other| {
+                other.header != loop_info.header
+                    && loop_info.nodes.is_subset(&other.nodes)
+            });
+        if has_parent {
+            place_loop(&mut top_level, loop_info);
+        } else {
+            top_level.push(loop_info);
         }
     }
+
+    // Set parent pointers on each child so nest_depth() works correctly.
+    fn set_parent_pointers(loops: &mut [LoopInfo]) {
+        for i in 0..loops.len() {
+            // Collect children, set parent, then write them back.
+            let mut children: Vec<LoopInfo> =
+                std::mem::take(&mut loops[i].children);
+            for child in children.iter_mut() {
+                child.parent = Some(Box::new(loops[i].clone()));
+            }
+            loops[i].children = children;
+            set_parent_pointers(&mut loops[i].children);
+        }
+    }
+    set_parent_pointers(&mut top_level);
 
     top_level
 }
@@ -2886,7 +2975,8 @@ mod tests {
         };
 
         let dt = DominatorTree::build(4, successors);
-        let loops = detect_natural_loops(4, successors, &dt);
+        let preds = Predecessors::build(4, successors);
+        let loops = detect_natural_loops(4, successors, &preds, &dt);
 
         assert_eq!(loops.len(), 1);
         let loop_info = &loops[0];
@@ -2912,7 +3002,8 @@ mod tests {
         };
 
         let dt = DominatorTree::build(6, successors);
-        let loops = detect_natural_loops(6, successors, &dt);
+        let preds = Predecessors::build(6, successors);
+        let loops = detect_natural_loops(6, successors, &preds, &dt);
 
         // We expect at least one loop
         assert!(!loops.is_empty());

@@ -20,12 +20,14 @@ pub mod util;
 pub mod utility;
 
 // Re-exports for key types used across the workspace.
-pub use addr::{Address, AddressRange, AddressSpace};
+pub use addr::{AddrSpaceType, Address, AddressFactory, AddressRange, AddressSet, AddressSpace};
 pub use data::{DataType, DataTypePath, DataTypeTreeNode};
 pub use symbol::{
-    FlowType, FunctionSymbol, GlobalSymbol, LabelHistory, LabelSymbol, Namespace, RefType,
-    Reference, ReferenceManager, SourceType, Symbol, SymbolApi, SymbolKind, SymbolPath,
-    SymbolSource, SymbolTable as SymbolTableTrait, SymbolTreeNode, SymbolType,
+    ClassSymbol, DataRefType, ExportSymbol, FlowType, FunctionSymbol, GlobalSymbol,
+    GlobalVarSymbol, ImportSymbol, LabelHistory, LabelSymbol, LibrarySymbol, LocalVarSymbol,
+    Namespace, NamespaceSymbol, ParameterSymbol, RefType, Reference, ReferenceManager,
+    SourceType, Symbol, SymbolApi, SymbolKind, SymbolPath, SymbolSource,
+    SymbolTable as SymbolTableTrait, SymbolTreeNode, SymbolType,
 };
 pub use listing::{InstructionMnemonic, ListingRow};
 pub use program::program::{
@@ -36,12 +38,15 @@ pub use program::program::{
 };
 pub use program::listing::{
     Bookmark, BookmarkManager, BookmarkType, CodeUnitComments, CodeUnitData,
-    CodeUnitFormat, CodeUnitFormatOptions, CommentType, Data, FlowOverride,
+    CodeUnitFormat, CodeUnitFormatOptions, CommentType, Data, Equate, EquateTable,
+    ExternalLibrary, ExternalManager, ExternalSymbol, FlowOverride,
     Function, FunctionData, FunctionManager, FunctionParameter,
-    FunctionSignature, FunctionTag, FunctionUpdateType, FunctionVariable,
+    FunctionSignature, FunctionTag, FunctionTagManager, FunctionUpdateType,
+    FunctionVariable,
     Group, InMemoryFunctionManager, InMemoryListing, Instruction, Listing,
     LocalVariable, LocalVariableImpl, Operand, Parameter, ParameterImpl,
-    ProgramFragment, ProgramModule, SourceType as ListingSourceType,
+    ProgramContext, ProgramFragment, ProgramModule, PrototypeModel,
+    SourceType as ListingSourceType,
     StackFrame, Variable, VariableStorage,
 };
 pub use project::{

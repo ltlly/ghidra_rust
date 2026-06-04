@@ -2257,6 +2257,14 @@ pub fn evaluate_dwarf_expression(
             _ => {}
         }
     }
+    // If the expression didn't produce explicit pieces (PIECE/STACK_VALUE),
+    // the result is whatever remains on the stack.
+    if pieces.is_empty() {
+        if let Some(&val) = stack.last() {
+            let size = stack.len() as u64;
+            pieces.push((val, size));
+        }
+    }
     Ok(pieces)
 }
 

@@ -264,11 +264,11 @@ impl SourceType {
     /// Returns the numeric priority. Higher numbers mean higher priority.
     pub fn priority(self) -> u8 {
         match self {
-            SourceType::Default => 2,
-            SourceType::Analysis => 0,
-            SourceType::AI => 4,
+            SourceType::Default => 1,
+            SourceType::Analysis => 2,
+            SourceType::AI => 2,
             SourceType::Imported => 3,
-            SourceType::UserDefined => 1,
+            SourceType::UserDefined => 4,
         }
     }
 
@@ -1599,6 +1599,664 @@ impl FunctionSymbol {
     }
 }
 
+// ---------------------------------------------------------------------------
+// NamespaceSymbol
+// ---------------------------------------------------------------------------
+
+/// A generic namespace symbol. Corresponds to `SymbolType::Namespace`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NamespaceSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The namespace name.
+    name: String,
+    /// The parent namespace ID (0 = global).
+    parent_namespace_id: u64,
+    /// The source of this namespace symbol.
+    source: SourceType,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl NamespaceSymbol {
+    /// Creates a new namespace symbol.
+    pub fn new(id: u64, name: impl Into<String>, parent_namespace_id: u64, source: SourceType) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            parent_namespace_id,
+            source,
+            deleted: false,
+        }
+    }
+
+    /// Returns the parent namespace ID.
+    pub fn parent_namespace_id(&self) -> u64 {
+        self.parent_namespace_id
+    }
+}
+
+impl SymbolApi for NamespaceSymbol {
+    fn get_address(&self) -> &Address {
+        &Address::NULL
+    }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, include_namespace: bool) -> String {
+        if include_namespace { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, namespace: &dyn Namespace) -> bool {
+        self.parent_namespace_id == namespace.get_id()
+    }
+    fn is_valid_parent(&self, parent: &dyn Namespace) -> bool {
+        !parent.get_type().is_namespace() || parent.get_id() != self.id
+    }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::Namespace }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { self.parent_namespace_id == 0 }
+    fn is_external(&self) -> bool { false }
+    fn is_primary(&self) -> bool { false }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        if new_namespace.get_id() == self.id {
+            return Err(SymbolError::CircularDependency("cannot move namespace into itself".into()));
+        }
+        self.parent_namespace_id = new_namespace.get_id();
+        Ok(())
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)?;
+        self.set_namespace(new_namespace)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+impl Namespace for NamespaceSymbol {
+    fn get_symbol(&self) -> &dyn SymbolApi { self }
+    fn get_type(&self) -> SymbolType { SymbolType::Namespace }
+    fn is_external(&self) -> bool { false }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_name_full(&self, include_namespace_path: bool) -> String {
+        if include_namespace_path { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_id(&self) -> u64 { self.id }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_body(&self) -> Vec<Address> { Vec::new() }
+    fn set_parent_namespace(&mut self, parent: &dyn Namespace) -> SymbolResult<()> {
+        self.set_namespace(parent)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClassSymbol
+// ---------------------------------------------------------------------------
+
+/// A class namespace symbol. Corresponds to `SymbolType::Class`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClassSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The class name.
+    name: String,
+    /// The parent namespace ID (0 = global).
+    parent_namespace_id: u64,
+    /// The source of this class symbol.
+    source: SourceType,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl ClassSymbol {
+    /// Creates a new class symbol.
+    pub fn new(id: u64, name: impl Into<String>, parent_namespace_id: u64, source: SourceType) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            parent_namespace_id,
+            source,
+            deleted: false,
+        }
+    }
+
+    /// Returns the parent namespace ID.
+    pub fn parent_namespace_id(&self) -> u64 {
+        self.parent_namespace_id
+    }
+}
+
+impl SymbolApi for ClassSymbol {
+    fn get_address(&self) -> &Address { &Address::NULL }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, include_namespace: bool) -> String {
+        if include_namespace { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, namespace: &dyn Namespace) -> bool {
+        self.parent_namespace_id == namespace.get_id()
+    }
+    fn is_valid_parent(&self, parent: &dyn Namespace) -> bool {
+        // Class cannot be inside a function.
+        parent.get_type() != SymbolType::Function
+    }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::Class }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { self.parent_namespace_id == 0 }
+    fn is_external(&self) -> bool { false }
+    fn is_primary(&self) -> bool { false }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        if !self.is_valid_parent(new_namespace) {
+            return Err(SymbolError::InvalidInput("invalid parent namespace for class symbol".into()));
+        }
+        self.parent_namespace_id = new_namespace.get_id();
+        Ok(())
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)?;
+        self.set_namespace(new_namespace)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+impl Namespace for ClassSymbol {
+    fn get_symbol(&self) -> &dyn SymbolApi { self }
+    fn get_type(&self) -> SymbolType { SymbolType::Class }
+    fn is_external(&self) -> bool { false }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_name_full(&self, include_namespace_path: bool) -> String {
+        if include_namespace_path { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_id(&self) -> u64 { self.id }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_body(&self) -> Vec<Address> { Vec::new() }
+    fn set_parent_namespace(&mut self, parent: &dyn Namespace) -> SymbolResult<()> {
+        self.set_namespace(parent)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LibrarySymbol
+// ---------------------------------------------------------------------------
+
+/// An external library symbol. Corresponds to `SymbolType::Library`.
+/// Always resides in the global namespace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LibrarySymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The library name (e.g., "libc.so.6").
+    name: String,
+    /// The source of this library symbol.
+    source: SourceType,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl LibrarySymbol {
+    /// Creates a new library symbol.
+    pub fn new(id: u64, name: impl Into<String>, source: SourceType) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            source,
+            deleted: false,
+        }
+    }
+}
+
+impl SymbolApi for LibrarySymbol {
+    fn get_address(&self) -> &Address { &Address::NULL }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, _include_namespace: bool) -> String { self.name.clone() }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, _namespace: &dyn Namespace) -> bool { true }
+    fn is_valid_parent(&self, parent: &dyn Namespace) -> bool {
+        // Libraries must be in the global namespace.
+        parent.get_id() == 0
+    }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::Library }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { true }
+    fn is_external(&self) -> bool { true }
+    fn is_primary(&self) -> bool { false }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        if !self.is_valid_parent(new_namespace) {
+            return Err(SymbolError::InvalidInput("library must be in global namespace".into()));
+        }
+        Ok(()) // no-op; library is always global
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)?;
+        self.set_namespace(new_namespace)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+impl Namespace for LibrarySymbol {
+    fn get_symbol(&self) -> &dyn SymbolApi { self }
+    fn get_type(&self) -> SymbolType { SymbolType::Library }
+    fn is_external(&self) -> bool { true }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_name_full(&self, _include_namespace_path: bool) -> String { self.name.clone() }
+    fn get_id(&self) -> u64 { self.id }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_body(&self) -> Vec<Address> { Vec::new() }
+    fn set_parent_namespace(&mut self, _parent: &dyn Namespace) -> SymbolResult<()> {
+        Err(SymbolError::UnsupportedOperation("cannot change parent of library namespace".into()))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ImportSymbol
+// ---------------------------------------------------------------------------
+
+/// An imported symbol (external library function/data). Corresponds to
+/// `SymbolType::Import`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImportSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The imported name.
+    name: String,
+    /// The external address (or entry point address).
+    address: Address,
+    /// The parent namespace ID (usually a Library namespace).
+    namespace_id: u64,
+    /// The source of this import symbol.
+    source: SourceType,
+    /// Whether this is the primary symbol at this address.
+    primary: bool,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl ImportSymbol {
+    /// Creates a new import symbol.
+    pub fn new(id: u64, name: impl Into<String>, address: Address, namespace_id: u64, source: SourceType) -> Self {
+        Self { id, name: name.into(), address, namespace_id, source, primary: true, deleted: false }
+    }
+
+    /// Returns the parent namespace ID.
+    pub fn namespace_id(&self) -> u64 { self.namespace_id }
+}
+
+impl SymbolApi for ImportSymbol {
+    fn get_address(&self) -> &Address { &self.address }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, include_namespace: bool) -> String {
+        if include_namespace { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, namespace: &dyn Namespace) -> bool { self.namespace_id == namespace.get_id() }
+    fn is_valid_parent(&self, _parent: &dyn Namespace) -> bool { true }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::Import }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { self.namespace_id == 0 }
+    fn is_external(&self) -> bool { self.address.is_external_address() }
+    fn is_primary(&self) -> bool { self.primary }
+    fn set_primary(&mut self) -> bool { if self.primary { false } else { self.primary = true; true } }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        self.namespace_id = new_namespace.get_id();
+        Ok(())
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)?;
+        self.set_namespace(new_namespace)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExportSymbol
+// ---------------------------------------------------------------------------
+
+/// An exported symbol (function or data exported by the binary). Corresponds to
+/// `SymbolType::Export`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExportSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The exported name.
+    name: String,
+    /// The export address.
+    address: Address,
+    /// The parent namespace ID (0 = global).
+    namespace_id: u64,
+    /// The source of this export symbol.
+    source: SourceType,
+    /// Whether this is the primary symbol at this address.
+    primary: bool,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl ExportSymbol {
+    /// Creates a new export symbol.
+    pub fn new(id: u64, name: impl Into<String>, address: Address, namespace_id: u64, source: SourceType) -> Self {
+        Self { id, name: name.into(), address, namespace_id, source, primary: true, deleted: false }
+    }
+
+    /// Returns the parent namespace ID.
+    pub fn namespace_id(&self) -> u64 { self.namespace_id }
+}
+
+impl SymbolApi for ExportSymbol {
+    fn get_address(&self) -> &Address { &self.address }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, include_namespace: bool) -> String {
+        if include_namespace { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, namespace: &dyn Namespace) -> bool { self.namespace_id == namespace.get_id() }
+    fn is_valid_parent(&self, _parent: &dyn Namespace) -> bool { true }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::Export }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { self.namespace_id == 0 }
+    fn is_external(&self) -> bool { self.address.is_external_address() }
+    fn is_primary(&self) -> bool { self.primary }
+    fn set_primary(&mut self) -> bool { if self.primary { false } else { self.primary = true; true } }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        self.namespace_id = new_namespace.get_id();
+        Ok(())
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)?;
+        self.set_namespace(new_namespace)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ParameterSymbol
+// ---------------------------------------------------------------------------
+
+/// A function parameter symbol. Corresponds to `SymbolType::Parameter`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParameterSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The parameter name.
+    name: String,
+    /// The address (variable address space).
+    address: Address,
+    /// The owning function symbol ID.
+    function_id: u64,
+    /// Ordinal position of the parameter (0-based).
+    ordinal: u32,
+    /// The source of this parameter.
+    source: SourceType,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl ParameterSymbol {
+    /// Creates a new parameter symbol.
+    pub fn new(id: u64, name: impl Into<String>, address: Address, function_id: u64, ordinal: u32, source: SourceType) -> Self {
+        Self { id, name: name.into(), address, function_id, ordinal, source, deleted: false }
+    }
+
+    /// Returns the owning function ID.
+    pub fn function_id(&self) -> u64 { self.function_id }
+
+    /// Returns the parameter ordinal.
+    pub fn ordinal(&self) -> u32 { self.ordinal }
+}
+
+impl SymbolApi for ParameterSymbol {
+    fn get_address(&self) -> &Address { &self.address }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, _include_namespace: bool) -> String { self.name.clone() }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, _namespace: &dyn Namespace) -> bool { false }
+    fn is_valid_parent(&self, _parent: &dyn Namespace) -> bool { true }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::Parameter }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { false }
+    fn is_external(&self) -> bool { false }
+    fn is_primary(&self) -> bool { false }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, _new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        Err(SymbolError::UnsupportedOperation("cannot move parameter symbol to a different namespace".into()))
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, _new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocalVarSymbol
+// ---------------------------------------------------------------------------
+
+/// A function local variable symbol. Corresponds to `SymbolType::LocalVar`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalVarSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The variable name.
+    name: String,
+    /// The address (variable address space).
+    address: Address,
+    /// The owning function symbol ID.
+    function_id: u64,
+    /// The source of this local variable.
+    source: SourceType,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl LocalVarSymbol {
+    /// Creates a new local variable symbol.
+    pub fn new(id: u64, name: impl Into<String>, address: Address, function_id: u64, source: SourceType) -> Self {
+        Self { id, name: name.into(), address, function_id, source, deleted: false }
+    }
+
+    /// Returns the owning function ID.
+    pub fn function_id(&self) -> u64 { self.function_id }
+}
+
+impl SymbolApi for LocalVarSymbol {
+    fn get_address(&self) -> &Address { &self.address }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, _include_namespace: bool) -> String { self.name.clone() }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, _namespace: &dyn Namespace) -> bool { false }
+    fn is_valid_parent(&self, _parent: &dyn Namespace) -> bool { true }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::LocalVar }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { false }
+    fn is_external(&self) -> bool { false }
+    fn is_primary(&self) -> bool { false }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, _new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        Err(SymbolError::UnsupportedOperation("cannot move local variable to a different namespace".into()))
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, _new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GlobalVarSymbol
+// ---------------------------------------------------------------------------
+
+/// A global register variable symbol. Corresponds to `SymbolType::GlobalVar`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GlobalVarSymbol {
+    /// The symbol ID.
+    id: u64,
+    /// The variable name.
+    name: String,
+    /// The address (variable/register address space).
+    address: Address,
+    /// The parent namespace ID (0 = global).
+    namespace_id: u64,
+    /// The source of this global variable.
+    source: SourceType,
+    /// Whether this symbol has been deleted.
+    deleted: bool,
+}
+
+impl GlobalVarSymbol {
+    /// Creates a new global register variable symbol.
+    pub fn new(id: u64, name: impl Into<String>, address: Address, namespace_id: u64, source: SourceType) -> Self {
+        Self { id, name: name.into(), address, namespace_id, source, deleted: false }
+    }
+
+    /// Returns the parent namespace ID.
+    pub fn namespace_id(&self) -> u64 { self.namespace_id }
+}
+
+impl SymbolApi for GlobalVarSymbol {
+    fn get_address(&self) -> &Address { &self.address }
+    fn get_name(&self) -> String { self.name.clone() }
+    fn get_path(&self) -> Vec<String> { vec![self.name.clone()] }
+    fn get_name_qualified(&self, include_namespace: bool) -> String {
+        if include_namespace { format!("Global::{}", self.name) } else { self.name.clone() }
+    }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
+    fn is_descendant(&self, namespace: &dyn Namespace) -> bool { self.namespace_id == namespace.get_id() }
+    fn is_valid_parent(&self, _parent: &dyn Namespace) -> bool { true }
+    fn get_symbol_type(&self) -> SymbolType { SymbolType::GlobalVar }
+    fn get_id(&self) -> u64 { self.id }
+    fn is_global(&self) -> bool { self.namespace_id == 0 }
+    fn is_external(&self) -> bool { false }
+    fn is_primary(&self) -> bool { false }
+    fn is_dynamic(&self) -> bool { false }
+    fn get_source(&self) -> SourceType { self.source }
+    fn set_source(&mut self, source: SourceType) { self.source = source; }
+    fn is_deleted(&self) -> bool { self.deleted }
+    fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
+        validate_symbol_name(new_name)?;
+        self.name = new_name.to_string();
+        self.source = source;
+        Ok(())
+    }
+    fn set_namespace(&mut self, new_namespace: &dyn Namespace) -> SymbolResult<()> {
+        self.namespace_id = new_namespace.get_id();
+        Ok(())
+    }
+    fn set_name_and_namespace(&mut self, new_name: &str, new_namespace: &dyn Namespace, source: SourceType) -> SymbolResult<()> {
+        self.set_name(new_name, source)?;
+        self.set_namespace(new_namespace)
+    }
+    fn delete(&mut self) -> bool {
+        if self.deleted { return false; }
+        self.deleted = true;
+        true
+    }
+}
+
 impl SymbolApi for FunctionSymbol {
     fn get_address(&self) -> &Address {
         &self.address
@@ -2905,6 +3563,22 @@ pub enum Symbol {
     Function(FunctionSymbol),
     /// The global root symbol.
     Global(GlobalSymbol),
+    /// A generic namespace symbol.
+    Namespace(NamespaceSymbol),
+    /// A class namespace symbol.
+    Class(ClassSymbol),
+    /// An external library symbol.
+    Library(LibrarySymbol),
+    /// An imported symbol (external library function/data).
+    Import(ImportSymbol),
+    /// An exported symbol (function or data exported by the binary).
+    Export(ExportSymbol),
+    /// A function parameter symbol.
+    Parameter(ParameterSymbol),
+    /// A function local variable symbol.
+    LocalVar(LocalVarSymbol),
+    /// A global register variable symbol.
+    GlobalVar(GlobalVarSymbol),
 }
 
 impl Symbol {
@@ -2915,6 +3589,24 @@ impl Symbol {
                 let mut fs = FunctionSymbol::new(0, name, address);
                 fs.primary = true;
                 Symbol::Function(fs)
+            }
+            SymbolType::Namespace => {
+                Symbol::Namespace(NamespaceSymbol::new(0, name, 0, SourceType::UserDefined))
+            }
+            SymbolType::Class => {
+                Symbol::Class(ClassSymbol::new(0, name, 0, SourceType::UserDefined))
+            }
+            SymbolType::Library => {
+                Symbol::Library(LibrarySymbol::new(0, name, SourceType::UserDefined))
+            }
+            SymbolType::Import => {
+                Symbol::Import(ImportSymbol::new(0, name, address, 0, SourceType::Imported))
+            }
+            SymbolType::Export => {
+                Symbol::Export(ExportSymbol::new(0, name, address, 0, SourceType::UserDefined))
+            }
+            SymbolType::GlobalVar => {
+                Symbol::GlobalVar(GlobalVarSymbol::new(0, name, address, 0, SourceType::UserDefined))
             }
             _ => {
                 let mut ls =
@@ -2942,18 +3634,27 @@ impl Symbol {
 
     /// Create an import symbol (backward-compatible).
     pub fn import(name: impl Into<String>, address: Address) -> Self {
-        let mut ls =
-            LabelSymbol::with_options(0, name, address, 0, SourceType::Imported);
-        ls.primary = false;
-        Symbol::Label(ls)
+        Symbol::Import(ImportSymbol::new(0, name, address, 0, SourceType::Imported))
     }
 
     /// Create an export symbol (backward-compatible).
     pub fn export(name: impl Into<String>, address: Address) -> Self {
-        let mut ls =
-            LabelSymbol::with_options(0, name, address, 0, SourceType::UserDefined);
-        ls.primary = true;
-        Symbol::Label(ls)
+        Symbol::Export(ExportSymbol::new(0, name, address, 0, SourceType::UserDefined))
+    }
+
+    /// Create a library symbol.
+    pub fn library(name: impl Into<String>) -> Self {
+        Symbol::Library(LibrarySymbol::new(0, name, SourceType::UserDefined))
+    }
+
+    /// Create a namespace symbol.
+    pub fn namespace(name: impl Into<String>, parent_id: u64) -> Self {
+        Symbol::Namespace(NamespaceSymbol::new(0, name, parent_id, SourceType::UserDefined))
+    }
+
+    /// Create a class symbol.
+    pub fn class(name: impl Into<String>, parent_id: u64) -> Self {
+        Symbol::Class(ClassSymbol::new(0, name, parent_id, SourceType::UserDefined))
     }
 
     /// Returns the symbol name. Delegates to the inner type's `SymbolApi::get_name`.
@@ -3016,7 +3717,15 @@ impl Symbol {
         match self {
             Symbol::Label(s) => Some(s.namespace_id),
             Symbol::Function(s) => Some(s.namespace_id),
+            Symbol::Namespace(s) => Some(s.parent_namespace_id()),
+            Symbol::Class(s) => Some(s.parent_namespace_id()),
+            Symbol::Import(s) => Some(s.namespace_id()),
+            Symbol::Export(s) => Some(s.namespace_id()),
+            Symbol::GlobalVar(s) => Some(s.namespace_id()),
+            Symbol::Library(_) => Some(0), // libraries are always in global
             Symbol::Global(_) => None,
+            Symbol::Parameter(s) => Some(s.function_id()),
+            Symbol::LocalVar(s) => Some(s.function_id()),
         }
     }
 
@@ -3049,12 +3758,79 @@ impl Symbol {
         }
     }
 
+    /// Returns the namespace variant if this symbol is a namespace symbol.
+    pub fn as_namespace_symbol(&self) -> Option<&NamespaceSymbol> {
+        match self {
+            Symbol::Namespace(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the class variant if this symbol is a class symbol.
+    pub fn as_class(&self) -> Option<&ClassSymbol> {
+        match self {
+            Symbol::Class(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the library variant if this symbol is a library symbol.
+    pub fn as_library(&self) -> Option<&LibrarySymbol> {
+        match self {
+            Symbol::Library(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the import variant if this symbol is an import symbol.
+    pub fn as_import(&self) -> Option<&ImportSymbol> {
+        match self {
+            Symbol::Import(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the export variant if this symbol is an export symbol.
+    pub fn as_export(&self) -> Option<&ExportSymbol> {
+        match self {
+            Symbol::Export(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the parameter variant if this symbol is a parameter symbol.
+    pub fn as_parameter(&self) -> Option<&ParameterSymbol> {
+        match self {
+            Symbol::Parameter(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the local var variant if this symbol is a local variable symbol.
+    pub fn as_local_var(&self) -> Option<&LocalVarSymbol> {
+        match self {
+            Symbol::LocalVar(s) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Returns the global var variant if this symbol is a global register variable.
+    pub fn as_global_var(&self) -> Option<&GlobalVarSymbol> {
+        match self {
+            Symbol::GlobalVar(s) => Some(s),
+            _ => None,
+        }
+    }
+
     /// Returns the symbol variant as a namespace when applicable.
     pub fn as_namespace(&self) -> Option<&dyn Namespace> {
         match self {
             Symbol::Function(function) => Some(function),
             Symbol::Global(global) => Some(global),
-            Symbol::Label(_) => None,
+            Symbol::Namespace(s) => Some(s),
+            Symbol::Class(s) => Some(s),
+            Symbol::Library(s) => Some(s),
+            _ => None,
         }
     }
 
@@ -3092,6 +3868,46 @@ impl Symbol {
     pub fn is_label_symbol(&self) -> bool {
         matches!(self, Symbol::Label(_))
     }
+
+    /// Returns true if this symbol is a namespace symbol.
+    pub fn is_namespace_type(&self) -> bool {
+        matches!(self, Symbol::Namespace(_))
+    }
+
+    /// Returns true if this symbol is a class symbol.
+    pub fn is_class_symbol(&self) -> bool {
+        matches!(self, Symbol::Class(_))
+    }
+
+    /// Returns true if this symbol is a library symbol.
+    pub fn is_library_symbol(&self) -> bool {
+        matches!(self, Symbol::Library(_))
+    }
+
+    /// Returns true if this symbol is an import symbol.
+    pub fn is_import_symbol(&self) -> bool {
+        matches!(self, Symbol::Import(_))
+    }
+
+    /// Returns true if this symbol is an export symbol.
+    pub fn is_export_symbol(&self) -> bool {
+        matches!(self, Symbol::Export(_))
+    }
+
+    /// Returns true if this symbol is a parameter symbol.
+    pub fn is_parameter_symbol(&self) -> bool {
+        matches!(self, Symbol::Parameter(_))
+    }
+
+    /// Returns true if this symbol is a local variable symbol.
+    pub fn is_local_var_symbol(&self) -> bool {
+        matches!(self, Symbol::LocalVar(_))
+    }
+
+    /// Returns true if this symbol is a global variable symbol.
+    pub fn is_global_var_symbol(&self) -> bool {
+        matches!(self, Symbol::GlobalVar(_))
+    }
 }
 
 impl From<LabelSymbol> for Symbol {
@@ -3109,6 +3925,54 @@ impl From<FunctionSymbol> for Symbol {
 impl From<GlobalSymbol> for Symbol {
     fn from(symbol: GlobalSymbol) -> Self {
         Symbol::Global(symbol)
+    }
+}
+
+impl From<NamespaceSymbol> for Symbol {
+    fn from(symbol: NamespaceSymbol) -> Self {
+        Symbol::Namespace(symbol)
+    }
+}
+
+impl From<ClassSymbol> for Symbol {
+    fn from(symbol: ClassSymbol) -> Self {
+        Symbol::Class(symbol)
+    }
+}
+
+impl From<LibrarySymbol> for Symbol {
+    fn from(symbol: LibrarySymbol) -> Self {
+        Symbol::Library(symbol)
+    }
+}
+
+impl From<ImportSymbol> for Symbol {
+    fn from(symbol: ImportSymbol) -> Self {
+        Symbol::Import(symbol)
+    }
+}
+
+impl From<ExportSymbol> for Symbol {
+    fn from(symbol: ExportSymbol) -> Self {
+        Symbol::Export(symbol)
+    }
+}
+
+impl From<ParameterSymbol> for Symbol {
+    fn from(symbol: ParameterSymbol) -> Self {
+        Symbol::Parameter(symbol)
+    }
+}
+
+impl From<LocalVarSymbol> for Symbol {
+    fn from(symbol: LocalVarSymbol) -> Self {
+        Symbol::LocalVar(symbol)
+    }
+}
+
+impl From<GlobalVarSymbol> for Symbol {
+    fn from(symbol: GlobalVarSymbol) -> Self {
+        Symbol::GlobalVar(symbol)
     }
 }
 
@@ -3483,10 +4347,16 @@ impl SymbolTable for Vec<Symbol> {
 
     fn get_namespace(
         &self,
-        _name: &str,
-        _namespace: &dyn Namespace,
+        name: &str,
+        namespace: &dyn Namespace,
     ) -> Option<&dyn Namespace> {
-        None
+        self.iter()
+            .find(|symbol| {
+                symbol.get_name() == name
+                    && symbol.kind().is_namespace()
+                    && symbol.namespace_id() == Some(namespace.get_id())
+            })
+            .and_then(|symbol| symbol.as_namespace())
     }
 
     fn get_namespace_for_address(&self, _addr: Address) -> Option<&dyn Namespace> {
@@ -3515,28 +4385,37 @@ impl SymbolTable for Vec<Symbol> {
 
     fn create_class(
         &mut self,
-        _parent: &dyn Namespace,
-        _name: &str,
-        _source: SourceType,
+        parent: &dyn Namespace,
+        name: &str,
+        source: SourceType,
     ) -> SymbolResult<Box<dyn Namespace>> {
-        Err(SymbolError::UnsupportedOperation("class namespaces are not implemented".to_string()))
+        validate_symbol_name(name)?;
+        let sym = ClassSymbol::new(0, name, parent.get_id(), source);
+        self.push(Symbol::Class(sym.clone()));
+        Ok(Box::new(sym))
     }
 
     fn create_external_library(
         &mut self,
-        _name: &str,
-        _source: SourceType,
+        name: &str,
+        source: SourceType,
     ) -> SymbolResult<Box<dyn Namespace>> {
-        Err(SymbolError::UnsupportedOperation("library namespaces are not implemented".to_string()))
+        validate_symbol_name(name)?;
+        let sym = LibrarySymbol::new(0, name, source);
+        self.push(Symbol::Library(sym.clone()));
+        Ok(Box::new(sym))
     }
 
     fn create_namespace(
         &mut self,
-        _parent: &dyn Namespace,
-        _name: &str,
-        _source: SourceType,
+        parent: &dyn Namespace,
+        name: &str,
+        source: SourceType,
     ) -> SymbolResult<Box<dyn Namespace>> {
-        Err(SymbolError::UnsupportedOperation("generic namespaces are not implemented".to_string()))
+        validate_symbol_name(name)?;
+        let sym = NamespaceSymbol::new(0, name, parent.get_id(), source);
+        self.push(Symbol::Namespace(sym.clone()));
+        Ok(Box::new(sym))
     }
 }
 
@@ -3553,6 +4432,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_address(s),
             Symbol::Function(s) => SymbolApi::get_address(s),
             Symbol::Global(s) => SymbolApi::get_address(s),
+            Symbol::Namespace(s) => SymbolApi::get_address(s),
+            Symbol::Class(s) => SymbolApi::get_address(s),
+            Symbol::Library(s) => SymbolApi::get_address(s),
+            Symbol::Import(s) => SymbolApi::get_address(s),
+            Symbol::Export(s) => SymbolApi::get_address(s),
+            Symbol::Parameter(s) => SymbolApi::get_address(s),
+            Symbol::LocalVar(s) => SymbolApi::get_address(s),
+            Symbol::GlobalVar(s) => SymbolApi::get_address(s),
         }
     }
     fn get_name(&self) -> String {
@@ -3560,6 +4447,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_name(s),
             Symbol::Function(s) => SymbolApi::get_name(s),
             Symbol::Global(s) => SymbolApi::get_name(s),
+            Symbol::Namespace(s) => SymbolApi::get_name(s),
+            Symbol::Class(s) => SymbolApi::get_name(s),
+            Symbol::Library(s) => SymbolApi::get_name(s),
+            Symbol::Import(s) => SymbolApi::get_name(s),
+            Symbol::Export(s) => SymbolApi::get_name(s),
+            Symbol::Parameter(s) => SymbolApi::get_name(s),
+            Symbol::LocalVar(s) => SymbolApi::get_name(s),
+            Symbol::GlobalVar(s) => SymbolApi::get_name(s),
         }
     }
     fn get_path(&self) -> Vec<String> {
@@ -3567,6 +4462,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_path(s),
             Symbol::Function(s) => SymbolApi::get_path(s),
             Symbol::Global(s) => SymbolApi::get_path(s),
+            Symbol::Namespace(s) => SymbolApi::get_path(s),
+            Symbol::Class(s) => SymbolApi::get_path(s),
+            Symbol::Library(s) => SymbolApi::get_path(s),
+            Symbol::Import(s) => SymbolApi::get_path(s),
+            Symbol::Export(s) => SymbolApi::get_path(s),
+            Symbol::Parameter(s) => SymbolApi::get_path(s),
+            Symbol::LocalVar(s) => SymbolApi::get_path(s),
+            Symbol::GlobalVar(s) => SymbolApi::get_path(s),
         }
     }
     fn get_name_qualified(&self, include_namespace: bool) -> String {
@@ -3574,19 +4477,31 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_name_qualified(s, include_namespace),
             Symbol::Function(s) => SymbolApi::get_name_qualified(s, include_namespace),
             Symbol::Global(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::Namespace(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::Class(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::Library(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::Import(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::Export(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::Parameter(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::LocalVar(s) => SymbolApi::get_name_qualified(s, include_namespace),
+            Symbol::GlobalVar(s) => SymbolApi::get_name_qualified(s, include_namespace),
         }
     }
-    fn get_parent_namespace(&self) -> Option<&dyn Namespace> {
-        None
-    }
-    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> {
-        None
-    }
+    fn get_parent_namespace(&self) -> Option<&dyn Namespace> { None }
+    fn get_parent_symbol(&self) -> Option<&dyn SymbolApi> { None }
     fn is_descendant(&self, namespace: &dyn Namespace) -> bool {
         match self {
             Symbol::Label(s) => SymbolApi::is_descendant(s, namespace),
             Symbol::Function(s) => SymbolApi::is_descendant(s, namespace),
             Symbol::Global(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::Namespace(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::Class(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::Library(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::Import(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::Export(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::Parameter(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::LocalVar(s) => SymbolApi::is_descendant(s, namespace),
+            Symbol::GlobalVar(s) => SymbolApi::is_descendant(s, namespace),
         }
     }
     fn is_valid_parent(&self, parent: &dyn Namespace) -> bool {
@@ -3594,6 +4509,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::is_valid_parent(s, parent),
             Symbol::Function(s) => SymbolApi::is_valid_parent(s, parent),
             Symbol::Global(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::Namespace(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::Class(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::Library(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::Import(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::Export(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::Parameter(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::LocalVar(s) => SymbolApi::is_valid_parent(s, parent),
+            Symbol::GlobalVar(s) => SymbolApi::is_valid_parent(s, parent),
         }
     }
     fn get_symbol_type(&self) -> SymbolType {
@@ -3601,6 +4524,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_symbol_type(s),
             Symbol::Function(s) => SymbolApi::get_symbol_type(s),
             Symbol::Global(s) => SymbolApi::get_symbol_type(s),
+            Symbol::Namespace(s) => SymbolApi::get_symbol_type(s),
+            Symbol::Class(s) => SymbolApi::get_symbol_type(s),
+            Symbol::Library(s) => SymbolApi::get_symbol_type(s),
+            Symbol::Import(s) => SymbolApi::get_symbol_type(s),
+            Symbol::Export(s) => SymbolApi::get_symbol_type(s),
+            Symbol::Parameter(s) => SymbolApi::get_symbol_type(s),
+            Symbol::LocalVar(s) => SymbolApi::get_symbol_type(s),
+            Symbol::GlobalVar(s) => SymbolApi::get_symbol_type(s),
         }
     }
     fn get_id(&self) -> u64 {
@@ -3608,6 +4539,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_id(s),
             Symbol::Function(s) => SymbolApi::get_id(s),
             Symbol::Global(s) => SymbolApi::get_id(s),
+            Symbol::Namespace(s) => SymbolApi::get_id(s),
+            Symbol::Class(s) => SymbolApi::get_id(s),
+            Symbol::Library(s) => SymbolApi::get_id(s),
+            Symbol::Import(s) => SymbolApi::get_id(s),
+            Symbol::Export(s) => SymbolApi::get_id(s),
+            Symbol::Parameter(s) => SymbolApi::get_id(s),
+            Symbol::LocalVar(s) => SymbolApi::get_id(s),
+            Symbol::GlobalVar(s) => SymbolApi::get_id(s),
         }
     }
     fn is_global(&self) -> bool {
@@ -3615,6 +4554,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::is_global(s),
             Symbol::Function(s) => SymbolApi::is_global(s),
             Symbol::Global(s) => SymbolApi::is_global(s),
+            Symbol::Namespace(s) => SymbolApi::is_global(s),
+            Symbol::Class(s) => SymbolApi::is_global(s),
+            Symbol::Library(s) => SymbolApi::is_global(s),
+            Symbol::Import(s) => SymbolApi::is_global(s),
+            Symbol::Export(s) => SymbolApi::is_global(s),
+            Symbol::Parameter(s) => SymbolApi::is_global(s),
+            Symbol::LocalVar(s) => SymbolApi::is_global(s),
+            Symbol::GlobalVar(s) => SymbolApi::is_global(s),
         }
     }
     fn is_external(&self) -> bool {
@@ -3622,6 +4569,14 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::is_external(s),
             Symbol::Function(s) => SymbolApi::is_external(s),
             Symbol::Global(s) => SymbolApi::is_external(s),
+            Symbol::Namespace(s) => SymbolApi::is_external(s),
+            Symbol::Class(s) => SymbolApi::is_external(s),
+            Symbol::Library(s) => SymbolApi::is_external(s),
+            Symbol::Import(s) => SymbolApi::is_external(s),
+            Symbol::Export(s) => SymbolApi::is_external(s),
+            Symbol::Parameter(s) => SymbolApi::is_external(s),
+            Symbol::LocalVar(s) => SymbolApi::is_external(s),
+            Symbol::GlobalVar(s) => SymbolApi::is_external(s),
         }
     }
     fn is_primary(&self) -> bool {
@@ -3629,27 +4584,32 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::is_primary(s),
             Symbol::Function(s) => SymbolApi::is_primary(s),
             Symbol::Global(s) => SymbolApi::is_primary(s),
+            Symbol::Import(s) => SymbolApi::is_primary(s),
+            Symbol::Export(s) => SymbolApi::is_primary(s),
+            _ => false,
         }
     }
     fn set_primary(&mut self) -> bool {
         match self {
             Symbol::Label(s) => s.set_primary(),
             Symbol::Function(s) => s.set_primary(),
-            Symbol::Global(_) => false,
+            Symbol::Import(s) => s.set_primary(),
+            Symbol::Export(s) => s.set_primary(),
+            _ => false,
         }
     }
     fn is_pinned(&self) -> bool {
         match self {
             Symbol::Label(s) => SymbolApi::is_pinned(s),
             Symbol::Function(s) => SymbolApi::is_pinned(s),
-            Symbol::Global(s) => SymbolApi::is_pinned(s),
+            _ => false,
         }
     }
     fn set_pinned(&mut self, pinned: bool) -> SymbolResult<()> {
         match self {
             Symbol::Label(s) => s.set_pinned(pinned),
             Symbol::Function(s) => s.set_pinned(pinned),
-            Symbol::Global(_) => Err(SymbolError::UnsupportedOperation(
+            _ => Err(SymbolError::UnsupportedOperation(
                 "Only Code and Function Symbols may be pinned.".to_string(),
             )),
         }
@@ -3658,7 +4618,7 @@ impl SymbolApi for Symbol {
         match self {
             Symbol::Label(s) => SymbolApi::is_dynamic(s),
             Symbol::Function(s) => SymbolApi::is_dynamic(s),
-            Symbol::Global(s) => SymbolApi::is_dynamic(s),
+            _ => false,
         }
     }
     fn get_source(&self) -> SourceType {
@@ -3666,12 +4626,28 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::get_source(s),
             Symbol::Function(s) => SymbolApi::get_source(s),
             Symbol::Global(s) => SymbolApi::get_source(s),
+            Symbol::Namespace(s) => SymbolApi::get_source(s),
+            Symbol::Class(s) => SymbolApi::get_source(s),
+            Symbol::Library(s) => SymbolApi::get_source(s),
+            Symbol::Import(s) => SymbolApi::get_source(s),
+            Symbol::Export(s) => SymbolApi::get_source(s),
+            Symbol::Parameter(s) => SymbolApi::get_source(s),
+            Symbol::LocalVar(s) => SymbolApi::get_source(s),
+            Symbol::GlobalVar(s) => SymbolApi::get_source(s),
         }
     }
     fn set_source(&mut self, source: SourceType) {
         match self {
             Symbol::Label(s) => s.set_source(source),
             Symbol::Function(s) => s.set_source(source),
+            Symbol::Namespace(s) => s.set_source(source),
+            Symbol::Class(s) => s.set_source(source),
+            Symbol::Library(s) => s.set_source(source),
+            Symbol::Import(s) => s.set_source(source),
+            Symbol::Export(s) => s.set_source(source),
+            Symbol::Parameter(s) => s.set_source(source),
+            Symbol::LocalVar(s) => s.set_source(source),
+            Symbol::GlobalVar(s) => s.set_source(source),
             Symbol::Global(_) => {}
         }
     }
@@ -3680,12 +4656,28 @@ impl SymbolApi for Symbol {
             Symbol::Label(s) => SymbolApi::is_deleted(s),
             Symbol::Function(s) => SymbolApi::is_deleted(s),
             Symbol::Global(s) => SymbolApi::is_deleted(s),
+            Symbol::Namespace(s) => SymbolApi::is_deleted(s),
+            Symbol::Class(s) => SymbolApi::is_deleted(s),
+            Symbol::Library(s) => SymbolApi::is_deleted(s),
+            Symbol::Import(s) => SymbolApi::is_deleted(s),
+            Symbol::Export(s) => SymbolApi::is_deleted(s),
+            Symbol::Parameter(s) => SymbolApi::is_deleted(s),
+            Symbol::LocalVar(s) => SymbolApi::is_deleted(s),
+            Symbol::GlobalVar(s) => SymbolApi::is_deleted(s),
         }
     }
     fn set_name(&mut self, new_name: &str, source: SourceType) -> SymbolResult<()> {
         match self {
             Symbol::Label(s) => s.set_name(new_name, source),
             Symbol::Function(s) => s.set_name(new_name, source),
+            Symbol::Namespace(s) => s.set_name(new_name, source),
+            Symbol::Class(s) => s.set_name(new_name, source),
+            Symbol::Library(s) => s.set_name(new_name, source),
+            Symbol::Import(s) => s.set_name(new_name, source),
+            Symbol::Export(s) => s.set_name(new_name, source),
+            Symbol::Parameter(s) => s.set_name(new_name, source),
+            Symbol::LocalVar(s) => s.set_name(new_name, source),
+            Symbol::GlobalVar(s) => s.set_name(new_name, source),
             Symbol::Global(_) => Err(SymbolError::UnsupportedOperation(
                 "Cannot rename global symbol".to_string(),
             )),
@@ -3695,8 +4687,20 @@ impl SymbolApi for Symbol {
         match self {
             Symbol::Label(s) => s.set_namespace(new_namespace),
             Symbol::Function(s) => s.set_namespace(new_namespace),
+            Symbol::Namespace(s) => s.set_namespace(new_namespace),
+            Symbol::Class(s) => s.set_namespace(new_namespace),
+            Symbol::Library(s) => s.set_namespace(new_namespace),
+            Symbol::Import(s) => s.set_namespace(new_namespace),
+            Symbol::Export(s) => s.set_namespace(new_namespace),
+            Symbol::GlobalVar(s) => s.set_namespace(new_namespace),
             Symbol::Global(_) => Err(SymbolError::UnsupportedOperation(
                 "Cannot move global symbol".to_string(),
+            )),
+            Symbol::Parameter(_) => Err(SymbolError::UnsupportedOperation(
+                "Cannot move parameter symbol".to_string(),
+            )),
+            Symbol::LocalVar(_) => Err(SymbolError::UnsupportedOperation(
+                "Cannot move local variable symbol".to_string(),
             )),
         }
     }
@@ -3707,21 +4711,33 @@ impl SymbolApi for Symbol {
         source: SourceType,
     ) -> SymbolResult<()> {
         match self {
-            Symbol::Label(s) => {
-                s.set_name_and_namespace(new_name, new_namespace, source)
-            }
-            Symbol::Function(s) => {
-                s.set_name_and_namespace(new_name, new_namespace, source)
-            }
+            Symbol::Label(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::Function(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::Namespace(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::Class(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::Library(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::Import(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::Export(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::GlobalVar(s) => s.set_name_and_namespace(new_name, new_namespace, source),
             Symbol::Global(_) => Err(SymbolError::UnsupportedOperation(
                 "Cannot rename or move global symbol".to_string(),
             )),
+            Symbol::Parameter(s) => s.set_name_and_namespace(new_name, new_namespace, source),
+            Symbol::LocalVar(s) => s.set_name_and_namespace(new_name, new_namespace, source),
         }
     }
     fn delete(&mut self) -> bool {
         match self {
             Symbol::Label(s) => s.delete(),
             Symbol::Function(s) => s.delete(),
+            Symbol::Namespace(s) => s.delete(),
+            Symbol::Class(s) => s.delete(),
+            Symbol::Library(s) => s.delete(),
+            Symbol::Import(s) => s.delete(),
+            Symbol::Export(s) => s.delete(),
+            Symbol::Parameter(s) => s.delete(),
+            Symbol::LocalVar(s) => s.delete(),
+            Symbol::GlobalVar(s) => s.delete(),
             Symbol::Global(_) => false,
         }
     }
@@ -3948,9 +4964,9 @@ mod tests {
     fn test_function_symbol_basics() {
         let addr = Address::new(0x401000);
         let func = FunctionSymbol::new(300, "main", addr);
-        assert_eq!(func.get_name(), "main");
-        assert_eq!(func.get_symbol_type(), SymbolType::Function);
-        assert!(func.is_primary());
+        assert_eq!(SymbolApi::get_name(&func), "main");
+        assert_eq!(SymbolApi::get_symbol_type(&func), SymbolType::Function);
+        assert!(SymbolApi::is_primary(&func));
         assert!(!func.is_default());
     }
 
@@ -3959,17 +4975,17 @@ mod tests {
         let addr = Address::new(0x401000);
         let func = FunctionSymbol::default_symbol(400, addr);
         assert!(func.is_default());
-        assert_eq!(func.get_name(), "FUN_00401000");
-        assert_eq!(func.get_source(), SourceType::Default);
+        assert_eq!(SymbolApi::get_name(&func), "FUN_00401000");
+        assert_eq!(SymbolApi::get_source(&func), SourceType::Default);
     }
 
     #[test]
     fn test_global_symbol() {
         let gs = GlobalSymbol::new();
-        assert_eq!(gs.get_name(), "Global");
-        assert_eq!(gs.get_symbol_type(), SymbolType::Global);
-        assert!(gs.is_global());
-        assert_eq!(gs.get_id(), 0);
+        assert_eq!(SymbolApi::get_name(&gs), "Global");
+        assert_eq!(SymbolApi::get_symbol_type(&gs), SymbolType::Global);
+        assert!(SymbolApi::is_global(&gs));
+        assert_eq!(SymbolApi::get_id(&gs), 0);
     }
 
     #[test]
@@ -4093,10 +5109,10 @@ mod tests {
         let mut func = FunctionSymbol::default_symbol(1, Address::new(0x401000));
         assert!(func.is_default());
 
-        func.set_name("main", SourceType::UserDefined).unwrap();
-        assert_eq!(func.get_name(), "main");
+        SymbolApi::set_name(&mut func, "main", SourceType::UserDefined).unwrap();
+        assert_eq!(<FunctionSymbol as SymbolApi>::get_name(&func), "main");
         assert!(!func.is_default());
-        assert_eq!(func.get_source(), SourceType::UserDefined);
+        assert_eq!(<FunctionSymbol as SymbolApi>::get_source(&func), SourceType::UserDefined);
     }
 
     #[test]

@@ -148,7 +148,7 @@ pub fn unit_code_name(code: u8) -> &'static str {
 /// The capacity byte encodes the ROM size as `128 KiB << value`.
 /// Standard cart sizes are 8, 16, 32, 64, 128, 256, and 512 MiB.
 pub fn decode_rom_size(capacity: u8) -> u32 {
-    if capacity > 16 {
+    if capacity >= 16 {
         return MAX_ROM_SIZE; // cap at 512 MiB
     }
     0x20000_u32 << (capacity as u32) // 128 KiB << capacity
@@ -342,8 +342,8 @@ pub fn parse_nds(data: &[u8]) -> NdsResult<NdsRom> {
     // Validate ROM size from capacity byte
     let capacity_size = decode_rom_size(rom.device_capacity);
     if capacity_size > data.len() as u32 && capacity_size > 0 {
-        // This is common for trimmed ROMs; only error on extreme mismatch
-        if data.len() < 0x20000 {
+        // This is common for trimmed ROMs; only error if data is smaller than the header
+        if data.len() < NDS_HEADER_SIZE {
             return Err(NdsError::RomSizeExceedsFile);
         }
     }
@@ -686,7 +686,7 @@ mod tests {
         assert_eq!(decode_rom_size(0), 0x20000); // 128 KiB
         assert_eq!(decode_rom_size(7), 0x1000000); // 16 MiB
         assert_eq!(decode_rom_size(10), 0x8000000); // 128 MiB
-        assert_eq!(decode_rom_size(16), 0x20000000); // 512 MiB
+        assert_eq!(decode_rom_size(16), MAX_ROM_SIZE); // capped at 512 MiB
         assert_eq!(decode_rom_size(99), MAX_ROM_SIZE); // capped
     }
 

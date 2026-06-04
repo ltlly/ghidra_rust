@@ -292,14 +292,18 @@ impl ExpressionSimplifier {
     fn try_algebraic_identity(
         &self,
         op: &PcodeOperation,
-        consts: &[u64],
+        _consts: &[u64],
         const_inputs: &[Option<u64>],
     ) -> Option<PcodeOperation> {
         let out = op.output.clone()?;
 
+        // Helper closures for checking specific input positions.
+        let in0 = || const_inputs.first().and_then(|c| *c);
+        let in1 = || const_inputs.get(1).and_then(|c| *c);
+
         match op.opcode {
             // x + 0 => x
-            OpCode::INT_ADD if consts.len() >= 2 && consts[1] == 0 => {
+            OpCode::INT_ADD if in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -308,7 +312,7 @@ impl ExpressionSimplifier {
             }
 
             // 0 + x => x
-            OpCode::INT_ADD if consts.len() >= 2 && consts[0] == 0 => {
+            OpCode::INT_ADD if in0() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -317,7 +321,7 @@ impl ExpressionSimplifier {
             }
 
             // x - 0 => x
-            OpCode::INT_SUB if consts.len() >= 2 && consts[1] == 0 => {
+            OpCode::INT_SUB if in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -337,7 +341,7 @@ impl ExpressionSimplifier {
             }
 
             // x * 0 => 0
-            OpCode::INT_MUL if consts.len() >= 2 && (consts[0] == 0 || consts[1] == 0) => {
+            OpCode::INT_MUL if in0() == Some(0) || in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out.clone()),
@@ -346,7 +350,7 @@ impl ExpressionSimplifier {
             }
 
             // x * 1 => x
-            OpCode::INT_MUL if consts.len() >= 2 && consts[1] == 1 => {
+            OpCode::INT_MUL if in1() == Some(1) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -355,7 +359,7 @@ impl ExpressionSimplifier {
             }
 
             // 1 * x => x
-            OpCode::INT_MUL if consts.len() >= 2 && consts[0] == 1 => {
+            OpCode::INT_MUL if in0() == Some(1) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -365,7 +369,7 @@ impl ExpressionSimplifier {
 
             // x / 1 => x
             OpCode::INT_DIV | OpCode::INT_SDIV
-                if consts.len() >= 2 && consts[1] == 1 =>
+                if in1() == Some(1) =>
             {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
@@ -376,7 +380,7 @@ impl ExpressionSimplifier {
 
             // x % 1 => 0
             OpCode::INT_REM | OpCode::INT_SREM
-                if consts.len() >= 2 && consts[1] == 1 =>
+                if in1() == Some(1) =>
             {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
@@ -386,7 +390,7 @@ impl ExpressionSimplifier {
             }
 
             // x & 0 => 0
-            OpCode::INT_AND if consts.len() >= 2 && (consts[0] == 0 || consts[1] == 0) => {
+            OpCode::INT_AND if in0() == Some(0) || in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out.clone()),
@@ -395,7 +399,7 @@ impl ExpressionSimplifier {
             }
 
             // x & -1 => x  (all-ones mask)
-            OpCode::INT_AND if consts.len() >= 2 && consts[1] == u64::MAX => {
+            OpCode::INT_AND if in1() == Some(u64::MAX) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -404,7 +408,7 @@ impl ExpressionSimplifier {
             }
 
             // -1 & x => x
-            OpCode::INT_AND if consts.len() >= 2 && consts[0] == u64::MAX => {
+            OpCode::INT_AND if in0() == Some(u64::MAX) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -413,7 +417,7 @@ impl ExpressionSimplifier {
             }
 
             // x | 0 => x
-            OpCode::INT_OR if consts.len() >= 2 && consts[1] == 0 => {
+            OpCode::INT_OR if in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -422,7 +426,7 @@ impl ExpressionSimplifier {
             }
 
             // x | -1 => -1
-            OpCode::INT_OR if consts.len() >= 2 && consts[1] == u64::MAX => {
+            OpCode::INT_OR if in1() == Some(u64::MAX) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out.clone()),
@@ -431,7 +435,7 @@ impl ExpressionSimplifier {
             }
 
             // x ^ 0 => x
-            OpCode::INT_XOR if consts.len() >= 2 && consts[1] == 0 => {
+            OpCode::INT_XOR if in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -451,7 +455,7 @@ impl ExpressionSimplifier {
             }
 
             // x ^ -1 => ~x  (bitwise NOT)
-            OpCode::INT_XOR if consts.len() >= 2 && consts[1] == u64::MAX => {
+            OpCode::INT_XOR if in1() == Some(u64::MAX) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::INT_XOR,
                     Some(out),
@@ -460,7 +464,7 @@ impl ExpressionSimplifier {
             }
 
             // x << 0 => x
-            OpCode::INT_LEFT if consts.len() >= 2 && consts[1] == 0 => {
+            OpCode::INT_LEFT if in1() == Some(0) => {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,
                     Some(out),
@@ -470,7 +474,7 @@ impl ExpressionSimplifier {
 
             // x >> 0 => x (both logical and arithmetic)
             OpCode::INT_RIGHT | OpCode::INT_SRIGHT
-                if consts.len() >= 2 && consts[1] == 0 =>
+                if in1() == Some(0) =>
             {
                 Some(PcodeOperation::new_unannotated(
                     OpCode::COPY,

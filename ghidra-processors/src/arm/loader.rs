@@ -148,11 +148,23 @@ impl ArmModeDetector {
     /// or `MOV IP, SP`, while Thumb prologues typically begin with `PUSH {..., LR}`
     /// or `SUB SP, SP, #imm`.
     pub fn detect_mode_from_bytes(data: &[u8]) -> Option<ArmExecutionMode> {
+        if data.len() < 2 {
+            return None;
+        }
+
+        // Check for common Thumb-mode instruction signatures first (2 bytes)
+        // Thumb PUSH {..., LR} = 0xB5xx
+        // Thumb SUB SP, SP, #imm = 0xB08x
+        let thumb_half = u16::from_le_bytes([data[0], data[1]]);
+        if (thumb_half & 0xFF00) == 0xB500 || (thumb_half & 0xFF80) == 0xB080 {
+            return Some(ArmExecutionMode::Thumb);
+        }
+
+        // Check for common ARM-mode instruction signatures (requires 4 bytes)
         if data.len() < 4 {
             return None;
         }
 
-        // Check for common ARM-mode instruction signatures
         // STMFD SP!, {R4-R11, LR} = 0xE92D 4FF0 (typical prologue)
         // MOV R12, SP = 0xE1A0 C00D
         // STMFD SP!, {R4-R7, LR} = 0xE92D 40F0
@@ -166,14 +178,6 @@ impl ArmModeDetector {
             if op_type == 0b100 || op_type == 0b010 || op_type == 0b101 {
                 return Some(ArmExecutionMode::Arm);
             }
-        }
-
-        // Check for common Thumb-mode instruction signatures
-        // Thumb PUSH {..., LR} = 0xB5xx
-        // Thumb SUB SP, SP, #imm = 0xB08x
-        let thumb_half = u16::from_le_bytes([data[0], data[1]]);
-        if (thumb_half & 0xFF00) == 0xB500 || (thumb_half & 0xFF80) == 0xB080 {
-            return Some(ArmExecutionMode::Thumb);
         }
 
         None
@@ -190,15 +194,32 @@ impl ArmModeDetector {
 // ========================================================================
 
 /// ARM calling conventions.
+///
+/// Derived from Ghidra's cspec definitions:
+/// - ARM.cspec (AAPCS default, AAPCS with VFP, SoftFP)
+/// - ARM_apcs.cspec (deprecated APCS/ATPCS from gcc -mabi=apcs-gnu / -mabi=atpcs)
+/// - ARM_win.cspec (Visual Studio / Windows ARM)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArmCallingConvention {
-    /// ARM standard (AAPCS): r0-r3 args, r0-r1 return, r4-r11 preserved
+    /// ARM standard (AAPCS): r0-r3 args, r0-r1 return, r4-r11 preserved,
+    /// s0-s15/d0-d7 for float args. Default for Linux/GCC/Clang.
     AAPCS,
-    /// ARM standard with VFP: r0-r3 + s0-s15/d0-d7 args
+    /// ARM standard with VFP (hard-float): r0-r3 + s0-s15/d0-d7 args.
+    /// Floats passed in VFP registers, aggregates may use HFA rules.
     AAPCSVfp,
-    /// Thumb calling convention (same as AAPCS)
+    /// Soft-float ABI (-mfloat-abi=soft / softfp): no VFP register usage
+    /// for parameter passing; floats passed in r0-r3 / stack.
+    SoftFP,
+    /// Deprecated ARM Procedure Call Standard (gcc -mabi=apcs-gnu / -mabi=atpcs).
+    /// Similar to AAPCS but structs returned by pointer (hidden return).
+    APCS,
+    /// Thumb calling convention (same register usage as AAPCS).
     TPCS,
-    /// Bare-metal / interrupt handler
+    /// Windows ARM calling convention (Visual Studio).
+    /// r0-r3 args, r0 return, r4-r11 preserved, r12 is scratch.
+    /// Same register usage as AAPCS but with Windows-specific struct rules.
+    Windows,
+    /// Bare-metal / interrupt handler (minimal convention).
     BareMetal,
 }
 
@@ -208,7 +229,10 @@ impl ArmCallingConvention {
         match self {
             ArmCallingConvention::AAPCS
             | ArmCallingConvention::AAPCSVfp
-            | ArmCallingConvention::TPCS => &["R0", "R1", "R2", "R3"],
+            | ArmCallingConvention::SoftFP
+            | ArmCallingConvention::APCS
+            | ArmCallingConvention::TPCS
+            | ArmCallingConvention::Windows => &["R0", "R1", "R2", "R3"],
             ArmCallingConvention::BareMetal => &["R0"],
         }
     }
@@ -218,19 +242,47 @@ impl ArmCallingConvention {
         "R0"
     }
 
-    /// Return the callee-saved (preserved) registers.
+    /// Return the second return value register (for 64-bit values in r0:r1).
+    pub fn return_register_pair_high(&self) -> &str {
+        "R1"
+    }
+
+    /// Return the callee-saved (preserved/unaffected) registers.
     pub fn callee_saved(&self) -> &[&str] {
         &["R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "SP"]
     }
 
-    /// Return the caller-saved (scratch) registers.
+    /// Return the caller-saved (scratch/killed-by-call) registers.
     pub fn caller_saved(&self) -> &[&str] {
         match self {
             ArmCallingConvention::AAPCSVfp => &[
-                "R0", "R1", "R2", "R3", "R12", "LR", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+                "R0", "R1", "R2", "R3", "R12", "LR",
+                "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
             ],
             _ => &["R0", "R1", "R2", "R3", "R12", "LR"],
         }
+    }
+
+    /// Return the VFP argument registers (AAPCS with VFP only).
+    pub fn vfp_arg_registers(&self) -> &[&str] {
+        match self {
+            ArmCallingConvention::AAPCS | ArmCallingConvention::AAPCSVfp => {
+                &["S0", "S1", "S2", "S3", "S4", "S5", "S6", "S7",
+                  "S8", "S9", "S10", "S11", "S12", "S13", "S14", "S15"]
+            }
+            _ => &[],
+        }
+    }
+
+    /// Return the VFP callee-saved registers.
+    pub fn vfp_callee_saved(&self) -> &[&str] {
+        &["D8", "D9", "D10", "D11", "D12", "D13", "D14", "D15"]
+    }
+
+    /// Return the hidden return register (struct return pointer).
+    pub fn hidden_return_register(&self) -> Option<&str> {
+        // AAPCS uses r0 for small struct returns; Windows also uses r0
+        None // No dedicated hidden return register in ARM AAPCS
     }
 
     /// Detect the likely calling convention from symbol/function name.
@@ -244,8 +296,24 @@ impl ArmCallingConvention {
             || name.starts_with("__fiq_")
         {
             ArmCallingConvention::BareMetal
+        } else if name.starts_with("__rt_") || name.starts_with("__cpp_") {
+            // ARM RealView / RVCT naming
+            ArmCallingConvention::APCS
         } else {
             ArmCallingConvention::AAPCS
+        }
+    }
+
+    /// Returns the compiler spec ID used in Ghidra's cspec definitions.
+    pub fn compiler_spec_id(&self) -> &'static str {
+        match self {
+            ArmCallingConvention::AAPCS
+            | ArmCallingConvention::AAPCSVfp
+            | ArmCallingConvention::SoftFP
+            | ArmCallingConvention::TPCS => "default",
+            ArmCallingConvention::APCS => "apcs",
+            ArmCallingConvention::Windows => "windows",
+            ArmCallingConvention::BareMetal => "default",
         }
     }
 }
@@ -537,7 +605,8 @@ pub fn detect_function_boundaries(
 
 /// Detect a function prologue at the given offset.
 pub fn detect_prologue(data: &[u8], mode: ArmExecutionMode) -> Option<ProloguePattern> {
-    if data.len() < 4 {
+    let min_size = mode.min_instruction_size() as usize;
+    if data.len() < min_size {
         return None;
     }
 
@@ -581,7 +650,8 @@ pub fn detect_prologue(data: &[u8], mode: ArmExecutionMode) -> Option<ProloguePa
 
 /// Detect a function epilogue at the given offset.
 pub fn detect_epilogue(data: &[u8], mode: ArmExecutionMode) -> bool {
-    if data.len() < 4 {
+    let min_size = mode.min_instruction_size() as usize;
+    if data.len() < min_size {
         return false;
     }
 

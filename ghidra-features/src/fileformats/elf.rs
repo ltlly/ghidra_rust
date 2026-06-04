@@ -3048,6 +3048,203 @@ impl ElfFile {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════
+// BinaryLoader Implementation
+// ═══════════════════════════════════════════════════════════════════════════════════
+
+use crate::base::analyzer::{
+    Address, AddressRange, AddressSet, Function, FunctionManager, Language,
+    Listing, MemoryBlock, Program,
+};
+
+/// ELF machine code to Ghidra processor name mapping.
+fn elf_machine_to_processor(machine: u16) -> (&'static str, &'static str, u32) {
+    match machine {
+        EM_386 => ("x86", "LE", 32),
+        EM_X86_64 => ("x86", "LE", 64),
+        EM_ARM => ("ARM", "LE", 32),
+        EM_AARCH64 => ("AARCH64", "LE", 64),
+        EM_MIPS => ("MIPS", "BE", 32),
+        EM_PPC => ("PowerPC", "BE", 32),
+        EM_PPC64 => ("PowerPC", "BE", 64),
+        EM_SPARC => ("sparc", "BE", 32),
+        EM_SPARCV9 => ("sparc", "BE", 64),
+        EM_RISCV => ("RISCV", "LE", 64),
+        EM_S390 => ("S390", "BE", 64),
+        EM_SH => ("SuperH", "LE", 32),
+        EM_IA_64 => ("IA64", "LE", 64),
+        EM_MSP430 => ("MSP430", "LE", 16),
+        EM_AVR => ("avr", "LE", 8),
+        EM_LOONGARCH => ("LoongArch", "LE", 64),
+        _ => ("unknown", "LE", 32),
+    }
+}
+
+/// ELF binary loader — implements the [`crate::BinaryLoader`] trait.
+///
+/// Loads an ELF file into a [`Program`] by:
+/// 1. Parsing headers and segments via [`parse_elf`]
+/// 2. Creating memory blocks for each `PT_LOAD` segment
+/// 3. Populating the function manager from the symbol table
+/// 4. Setting the image base from the ELF entry point
+///
+/// Supports ELF32 and ELF64, all endiannesses, all standard architectures.
+pub struct ElfLoader;
+
+impl crate::BinaryLoader for ElfLoader {
+    fn name(&self) -> &str {
+        "ELF"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        data.len() >= 4 && data[0..4] == ELF_MAGIC
+    }
+
+    fn load(&self, data: &[u8], options: &crate::LoadOptions) -> anyhow::Result<Program> {
+        let elf = parse_elf(data)
+            .map_err(|e| anyhow::anyhow!("ELF parse error: {}", e))?;
+
+        let (processor, variant, size) = elf_machine_to_processor(elf.header.machine);
+        let architecture = options.architecture.clone().unwrap_or_else(|| {
+            format!("{}:{}:{}", processor, variant, size)
+        });
+
+        // Extract language components from architecture string
+        let lang = {
+            let parts: Vec<&str> = architecture.split(':').collect();
+            Language {
+                processor: parts.first().unwrap_or(&processor).to_string(),
+                variant: parts.get(1).unwrap_or(&variant).to_string(),
+                size: parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(size),
+            }
+        };
+
+        let base_addr = if options.base_address != 0 {
+            options.base_address
+        } else {
+            // For shared libraries (ET_DYN), use the first LOAD segment's vaddr
+            // For executables, use the entry point from the header
+            if elf.header.e_type == ET_DYN {
+                elf.program_headers
+                    .iter()
+                    .find(|ph| ph.is_load())
+                    .map(|ph| ph.p_vaddr)
+                    .unwrap_or(0)
+            } else {
+                0 // Default base for PIE / executables
+            }
+        };
+
+        let mut program = Program::new("elf_binary", lang);
+        program.image_base = base_addr;
+
+        // Create memory blocks from PT_LOAD segments
+        for phdr in &elf.program_headers {
+            if phdr.p_type != PT_LOAD {
+                continue;
+            }
+            let vaddr = phdr.p_vaddr;
+            let size = phdr.p_memsz;
+            if size == 0 {
+                continue;
+            }
+            let block = MemoryBlock {
+                name: format!("segment_{:#x}", vaddr),
+                start: Address::new(vaddr),
+                size,
+                is_read: phdr.is_readable(),
+                is_write: phdr.is_writable(),
+                is_execute: phdr.is_executable(),
+                is_initialized: phdr.p_filesz > 0,
+            };
+            program.memory.add_range(AddressRange {
+                start: Address::new(vaddr),
+                end: Address::new(vaddr + size - 1),
+            });
+            program.memory_blocks.push(block);
+        }
+
+        // Also create blocks from alloc sections (catches sections not covered by segments)
+        if program.memory_blocks.is_empty() {
+            for shdr in &elf.section_headers {
+                if !shdr.is_alloc() || shdr.sh_size == 0 {
+                    continue;
+                }
+                let vaddr = shdr.sh_addr;
+                let size = shdr.sh_size;
+                let block = MemoryBlock {
+                    name: format!("section_{:#x}", vaddr),
+                    start: Address::new(vaddr),
+                    size,
+                    is_read: (shdr.sh_flags & SHF_WRITE) == 0 || true, // alloc sections are readable
+                    is_write: shdr.is_writable(),
+                    is_execute: shdr.is_executable(),
+                    is_initialized: shdr.sh_type != SHT_NOBITS,
+                };
+                program.memory.add_range(AddressRange {
+                    start: Address::new(vaddr),
+                    end: Address::new(vaddr + size - 1),
+                });
+                program.memory_blocks.push(block);
+            }
+        }
+
+        // Populate functions from STT_FUNC symbols
+        let strtab = elf.dynstr.as_deref()
+            .or_else(|| elf.sym_strtab(data))
+            .unwrap_or(&[]);
+        for sym in &elf.symbols {
+            if sym.stype() == STT_FUNC && sym.st_value != 0 && !sym.is_undefined() {
+                let name = sym.get_name(strtab).map(|s| s.to_string());
+                let func = Function {
+                    entry_point: Address::new(sym.st_value),
+                    body: AddressSet::from_range(AddressRange {
+                        start: Address::new(sym.st_value),
+                        end: Address::new(sym.st_value + sym.st_size.max(1) - 1),
+                    }),
+                    name,
+                    is_external: false,
+                    is_thunk: false,
+                    is_inline: false,
+                    has_noreturn: false,
+                };
+                program
+                    .function_manager
+                    .functions
+                    .insert(Address::new(sym.st_value), func);
+            }
+        }
+
+        // Add external (imported) functions
+        for sym in &elf.dynsyms {
+            if sym.stype() == STT_FUNC && sym.is_undefined() && sym.is_global() {
+                let name = sym.get_name(strtab).map(|s| s.to_string());
+                if let Some(n) = &name {
+                    if !n.is_empty() {
+                        let func = Function {
+                            entry_point: Address::in_space(Address::EXTERNAL_SPACE, 0),
+                            body: AddressSet::from_address(Address::in_space(
+                                Address::EXTERNAL_SPACE,
+                                0,
+                            )),
+                            name: Some(n.clone()),
+                            is_external: true,
+                            is_thunk: false,
+                            is_inline: false,
+                            has_noreturn: false,
+                        };
+                        // Use a synthetic address for external functions
+                        let ext_addr = Address::in_space(Address::EXTERNAL_SPACE, sym.st_name as u64);
+                        program.function_manager.functions.insert(ext_addr, func);
+                    }
+                }
+            }
+        }
+
+        Ok(program)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════
 // Tests
 // ═══════════════════════════════════════════════════════════════════════════════════
 

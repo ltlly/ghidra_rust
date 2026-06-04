@@ -271,6 +271,9 @@ fn parse_directory(data: &[u8], header: &MsfHeader, dir_offset: usize, dir_len: 
 }
 
 fn parse_directory_from_bytes(dir_bytes: &[u8], header: &MsfHeader) -> Result<MsfDirectory, MsfError> {
+    if dir_bytes.is_empty() {
+        return Ok(MsfDirectory { streams: Vec::new() });
+    }
     if dir_bytes.len() < 4 {
         return Err(MsfError::TruncatedInput { expected: 4, actual: dir_bytes.len() });
     }
@@ -2040,7 +2043,7 @@ mod tests {
 
     #[test]
     fn test_simple_type_resolution() {
-        let st = resolve_simple_type(0x0003); // mode=0, kind=3 = NotTranslated
+        let st = resolve_simple_type(0x0002); // mode=0, kind=2 = NotTranslated
         assert!(st.is_simple);
         assert_eq!(st.kind, SimpleTypeKind::NotTranslated);
         assert_eq!(st.mode, SimpleTypeMode::Direct);
@@ -2088,7 +2091,7 @@ mod tests {
     fn test_pointer_type_parsing() {
         let mut payload = Vec::new();
         payload.extend_from_slice(&0x1022u32.to_le_bytes()); // underlying_type_index
-        payload.extend_from_slice(&0x000Cu32.to_le_bytes()); // attributes: ptrtype=0, Flat32=1, is_const=1
+        payload.extend_from_slice(&0x040Cu32.to_le_bytes()); // attributes: ptrkind=12, mode=0, is_const(bit10)=1
         payload.extend_from_slice(&0u32.to_le_bytes()); // padding
 
         let mut record = Vec::new();

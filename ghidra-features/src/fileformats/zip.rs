@@ -1022,6 +1022,55 @@ pub fn is_zip(data: &[u8]) -> bool {
 }
 
 // ===========================================================================
+// BinaryLoader Implementation
+// ===========================================================================
+
+/// ZIP archive loader — loads ZIP files for analysis of contained entries.
+pub struct ZipLoader;
+
+impl crate::BinaryLoader for ZipLoader {
+    fn name(&self) -> &str {
+        "ZIP"
+    }
+
+    fn can_load(&self, data: &[u8]) -> bool {
+        is_zip(data)
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        let zip = parse_zip(data)?;
+        let lang = crate::base::analyzer::Language {
+            processor: "DATA".into(),
+            variant: "LE".into(),
+            size: 8,
+        };
+
+        let mut program = Program::new("zip_archive", lang);
+        program.image_base = options.base_address;
+
+        // Create a single memory block for the raw ZIP data.
+        let block = MemoryBlock {
+            name: "ZIP_DATA".into(),
+            start: Address::new(options.base_address),
+            size: data.len() as u64,
+            is_read: true,
+            is_write: false,
+            is_execute: false,
+            is_initialized: true,
+        };
+        program.memory_blocks.push(block);
+
+        Ok(program)
+    }
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -1230,13 +1279,13 @@ mod tests {
 
     #[test]
     fn test_dos_datetime() {
-        let (h, m, s) = decode_dos_time(0x4A38); // 9:17:16
+        let (h, m, s) = decode_dos_time(0x4A38); // 9:17:48
         assert_eq!(h, 9);
         assert_eq!(m, 17);
-        assert_eq!(s, 16);
+        assert_eq!(s, 48);
 
-        let (y, mo, d) = decode_dos_date(0x4AEF); // 2021-07-15
-        assert_eq!(y, 2021);
+        let (y, mo, d) = decode_dos_date(0x4AEF); // 2017-07-15
+        assert_eq!(y, 2017);
         assert_eq!(mo, 7);
         assert_eq!(d, 15);
     }
@@ -1244,7 +1293,7 @@ mod tests {
     #[test]
     fn test_format_dos_datetime() {
         let formatted = format_dos_datetime(0x4AEF, 0x4A38);
-        assert_eq!(formatted, "2021-07-15T09:17:16");
+        assert_eq!(formatted, "2017-07-15T09:17:48");
     }
 
     #[test]

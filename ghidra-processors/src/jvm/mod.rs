@@ -1164,8 +1164,8 @@ impl ProcessorModule for JvmModule {
         vec![
             Language::new(
                 "JVM:BE:32:default",
-                "JVM Bytecode (32-bit, big-endian)",
-                "default",
+                "Generic JVM",
+                "1.1",
                 Endian::Big,
                 32,
             ),

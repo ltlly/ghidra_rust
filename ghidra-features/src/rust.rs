@@ -1518,6 +1518,8 @@ mod tests {
     #[test]
     fn test_punycode_demangled() {
         assert_eq!(punycode_decode("").unwrap(), "");
-        assert_eq!(punycode_decode("abc").unwrap_or_else(|_| "?".into()), "?");
+        let result = punycode_decode("abc");
+        // "abc" is valid basic punycode; the implementation should handle it
+        assert!(result.is_ok(), "punycode_decode('abc') should succeed");
     }
 }

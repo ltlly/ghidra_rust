@@ -99,7 +99,7 @@ impl Architecture {
             "m68k" | "68000" | "68020" | "68030" | "68040" | "68060" | "coldfire" => {
                 Some(Architecture::M68K)
             }
-            other => Some(Architecture::Unknown(other.to_string())),
+            _ => None,
         }
     }
 
@@ -417,6 +417,77 @@ pub fn load_raw_regions(
 
     program.regions = mem_regions;
     Ok(program)
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// BinaryLoader Implementation
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Raw binary loader — always matches as a fallback.
+///
+/// Loads an arbitrary byte blob as a flat memory image at a configurable
+/// base address. This is the lowest-priority loader: it should only be
+/// used when no other loader claims the data.
+pub struct RawBinaryLoader;
+
+impl crate::BinaryLoader for RawBinaryLoader {
+    fn name(&self) -> &str {
+        "Raw Binary"
+    }
+
+    fn can_load(&self, _data: &[u8]) -> bool {
+        // Raw binary is always a valid fallback.
+        true
+    }
+
+    fn load(
+        &self,
+        data: &[u8],
+        options: &crate::LoadOptions,
+    ) -> anyhow::Result<crate::base::analyzer::Program> {
+        use crate::base::analyzer::{Address, MemoryBlock, Program};
+
+        let arch_str = options.architecture.as_deref().unwrap_or("x86_64");
+        let raw = load_raw(data, arch_str, options.base_address)?;
+        let lang = crate::base::analyzer::Language {
+            processor: match &raw.arch {
+                Architecture::X86 | Architecture::X86_64 => "x86",
+                Architecture::ARM | Architecture::ARM_Thumb => "ARM",
+                Architecture::AArch64 => "AARCH64",
+                Architecture::PowerPC | Architecture::PowerPC64 => "PowerPC",
+                Architecture::MIPS | Architecture::MIPS64 => "MIPS",
+                Architecture::RISCV32 | Architecture::RISCV64 => "RISCV",
+                Architecture::SPARC => "SPARC",
+                Architecture::M68K => "68000",
+                Architecture::Unknown(_) => "unknown",
+            }
+            .into(),
+            variant: match raw.endian {
+                Endian::Little => "LE",
+                Endian::Big => "BE",
+            }
+            .into(),
+            size: raw.arch.word_size() as u32 * 8,
+        };
+
+        let mut program = Program::new("raw_binary", lang);
+        program.image_base = raw.base_addr;
+
+        for region in &raw.regions {
+            let block = MemoryBlock {
+                name: region.name.clone(),
+                start: Address::new(region.start),
+                size: region.size,
+                is_read: region.is_readable(),
+                is_write: region.is_writable(),
+                is_execute: region.is_executable(),
+                is_initialized: true,
+            };
+            program.memory_blocks.push(block);
+        }
+
+        Ok(program)
+    }
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

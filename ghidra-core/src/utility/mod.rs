@@ -617,7 +617,7 @@ mod tests {
 
     #[test]
     fn test_bit_utils() {
-        assert_eq!(BitUtils::extract(0x1234, 11, 8), 0x12);
+        assert_eq!(BitUtils::extract(0x1234, 11, 8), 0x2);
         assert_eq!(BitUtils::sign_extend(0xFF, 8), -1);
         assert_eq!(BitUtils::byte_swap16(0x1234), 0x3412);
     }

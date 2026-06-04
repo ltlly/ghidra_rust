@@ -25,12 +25,18 @@
 //!   mnemonics), condition codes, shift types, extend types, addressing modes
 
 pub mod instructions;
+pub mod loader;
 pub mod registers;
 
 // Re-export key types for convenience
 pub use instructions::{
     all_aarch64_mnemonics, Aarch64Mnemonic, AddressingMode, ConditionCode, ExtendType,
     InstructionCategory, ShiftType,
+};
+pub use loader::{
+    detect_aarch64_function_boundaries, detect_epilogue, detect_prologue, Aarch64BinaryFormat,
+    Aarch64BinaryImage, Aarch64BoundaryType, Aarch64CallingConvention, Aarch64FunctionBoundary,
+    Aarch64ProloguePattern, Aarch64Section,
 };
 pub use registers::{Aarch64RegisterBank, PstateField};
 
@@ -165,40 +171,44 @@ impl ProcessorModule for Aarch64Module {
 
     fn languages() -> Vec<Language> {
         vec![
+            // --- v8A (primary 64-bit) ---
             Language::new(
                 "AARCH64:LE:64:v8A",
-                "AARCH64 ARMv8-A - Little Endian",
+                "Generic ARM64 v8.5-A LE instructions, LE data",
                 "v8A",
                 Endian::Little,
                 64,
             ),
+            // Big-endian data, little-endian instructions (Ghidra convention for BE)
             Language::new(
                 "AARCH64:BE:64:v8A",
-                "AARCH64 ARMv8-A - Big Endian",
+                "Generic ARM64 v8.5-A LE instructions, BE data",
                 "v8A",
                 Endian::Big,
                 64,
             ),
+            // --- ILP32 (32-bit pointers) ---
             Language::new(
-                "AARCH64:LE:64:v8.2A",
-                "AARCH64 ARMv8.2-A - Little Endian",
-                "v8.2A",
-                Endian::Little,
-                64,
-            ),
-            Language::new(
-                "AARCH64:LE:64:v9A",
-                "AARCH64 ARMv9-A - Little Endian",
-                "v9A",
-                Endian::Little,
-                64,
-            ),
-            Language::new(
-                "AARCH64:LE:64:ILP32",
-                "AARCH64 ILP32 - Little Endian (32-bit pointers)",
-                "v8A",
+                "AARCH64:LE:32:ilp32",
+                "Generic ARM64 v8.5-A LE instructions, LE data, ilp32",
+                "ilp32",
                 Endian::Little,
                 32,
+            ),
+            Language::new(
+                "AARCH64:BE:32:ilp32",
+                "Generic ARM64 v8.5-A LE instructions, BE data, ilp32",
+                "ilp32",
+                Endian::Big,
+                32,
+            ),
+            // --- Apple Silicon ---
+            Language::new(
+                "AARCH64:LE:64:AppleSilicon",
+                "AppleSilicon ARM v8.5-A LE instructions, LE data, AMX extensions",
+                "AppleSilicon",
+                Endian::Little,
+                64,
             ),
         ]
     }
@@ -222,7 +232,7 @@ mod tests {
         assert!(!regs.is_empty());
 
         let langs = Aarch64Module::languages();
-        assert!(langs.len() >= 4);
+        assert!(langs.len() >= 4, "Expected >= 4 AArch64 language variants, got {}", langs.len());
 
         let insts = Aarch64Module::instructions();
         assert!(insts.len() >= 300);
@@ -254,5 +264,8 @@ mod tests {
         assert_eq!(ConditionCode::AL.encoding(), 0b1110);
         assert_eq!(ShiftType::LSL.suffix(), "LSL");
         assert_eq!(ExtendType::UXTB.encoding(), 0b000);
+        // Verify loader types are accessible
+        let _cc = Aarch64CallingConvention::AAPCS64;
+        let _fmt = Aarch64BinaryFormat::ELF64;
     }
 }

@@ -1424,10 +1424,10 @@ fn format_structured_node(
 mod tests {
     use super::*;
     use crate::pcode::{OpCode, PcodeOperation, Varnode};
-    use ghidra_core::addr::{Address, AddressSpace};
+    use ghidra_core::addr::{Address, AddressSpace, AddrSpaceType};
 
     fn make_vn(name: &str, offset: u64, size: u32) -> Varnode {
-        Varnode::new(AddressSpace::new(name, 8, false), offset, size)
+        Varnode::new(AddressSpace::new(name, 8, false, AddrSpaceType::Unique, 4), offset, size)
     }
 
     #[test]

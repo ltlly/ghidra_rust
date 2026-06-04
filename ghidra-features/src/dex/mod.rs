@@ -736,8 +736,8 @@ fn parse_mutf8(input: &[u8]) -> IResult<&[u8], String> {
         }
     }
 
-    // Terminating NUL
-    Ok((&input[len..], result))
+    // input is already past the consumed string bytes
+    Ok((input, result))
 }
 
 /// Read a single LEB128 unsigned integer.
@@ -1846,8 +1846,7 @@ mod tests {
         // String IDs table: one entry, offset to "Ljava/lang/Object;"
         let string_ids_off_val = buf.len() as u32;
         buf[0x3C..0x40].copy_from_slice(&string_ids_off_val.to_le_bytes());
-        let str_data_off = string_ids_off_val + 4; // right after this table entry
-        buf.extend_from_slice(&str_data_off.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes()); // placeholder, patched below
 
         // Type IDs table: one entry, string index 0
         let type_ids_off_val = buf.len() as u32;
@@ -1871,9 +1870,12 @@ mod tests {
         // Data section: string_data_item for "Ljava/lang/Object;"
         let data_off_val = buf.len() as u32;
         buf[0x6C..0x70].copy_from_slice(&data_off_val.to_le_bytes());
+        // Patch string_ids[0] to point to the string data in the data section
+        buf[string_ids_off_val as usize..string_ids_off_val as usize + 4]
+            .copy_from_slice(&data_off_val.to_le_bytes());
         // MUTF-8: L j a v a / l a n g / O b j e c t ;
-        // length uleb128: 19
-        buf.push(19); // uleb128 length of string
+        // length uleb128: 18
+        buf.push(18); // uleb128 length of string
         buf.extend_from_slice(b"Ljava/lang/Object;");
         let data_size_val = (buf.len() as u32) - data_off_val;
         buf[0x68..0x6C].copy_from_slice(&data_size_val.to_le_bytes());

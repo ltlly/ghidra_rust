@@ -26,7 +26,7 @@ use petgraph::Direction;
 use ghidra_core::addr::Address;
 use ghidra_core::error::Result;
 
-use crate::sleigh::pcode::{OpCode, PcodeOp, Varnode};
+use crate::pcode::{OpCode, PcodeOperation, Varnode};
 
 // ============================================================================
 // PcodeSequence
@@ -39,7 +39,7 @@ use crate::sleigh::pcode::{OpCode, PcodeOp, Varnode};
 #[derive(Debug, Clone)]
 pub struct PcodeSequence {
     /// The P-code operations in sequential order.
-    pub ops: Vec<PcodeOp>,
+    pub ops: Vec<PcodeOperation>,
     /// Start address of the sequence (inclusive).
     pub start_address: Address,
     /// End address of the sequence (inclusive).
@@ -48,7 +48,7 @@ pub struct PcodeSequence {
 
 impl PcodeSequence {
     /// Create a new P-code sequence spanning the given address range.
-    pub fn new(ops: Vec<PcodeOp>, start: Address, end: Address) -> Self {
+    pub fn new(ops: Vec<PcodeOperation>, start: Address, end: Address) -> Self {
         Self {
             ops,
             start_address: start,
@@ -233,7 +233,7 @@ impl DataFlowEngine {
                         self.varnode_graph[inp_idx].use_count += 1;
 
                         // Only add data-flow edges for non-control-flow ops.
-                        if !op.opcode.is_control_flow() {
+                        if !op.opcode.is_flow() {
                             let flow = classify_flow(&op.opcode);
                             self.varnode_graph.add_edge(inp_idx, out_idx, flow);
                         }
@@ -277,7 +277,7 @@ impl DataFlowEngine {
         for seq in pcode {
             for op in &seq.ops {
                 match op.opcode {
-                    OpCode::Store => {
+                    OpCode::STORE => {
                         // *v0 = v1  →  the value (v1) escapes.
                         if op.inputs.len() >= 2 {
                             if let Some(&idx) = self.node_map.get(&op.inputs[1]) {
@@ -285,7 +285,7 @@ impl DataFlowEngine {
                             }
                         }
                     }
-                    OpCode::Return => {
+                    OpCode::RETURN => {
                         // RETURN v0  →  v0 escapes.
                         if let Some(ref inp) = op.inputs.first() {
                             if let Some(&idx) = self.node_map.get(inp) {
@@ -293,7 +293,7 @@ impl DataFlowEngine {
                             }
                         }
                     }
-                    OpCode::Call | OpCode::CallInd => {
+                    OpCode::CALL | OpCode::CALLIND => {
                         // CALL target, arg0, arg1, ...
                         // Arguments escape to the callee.
                         for inp in op.inputs.iter().skip(1) {
@@ -345,7 +345,7 @@ impl DataFlowEngine {
                     }
 
                     // If this is a COPY, OUT is directly defined by IN[0].
-                    if op.opcode == OpCode::Copy && !op.inputs.is_empty() {
+                    if op.opcode == OpCode::COPY && !op.inputs.is_empty() {
                         let src = &op.inputs[0];
                         if let Some(chain) = self.def_use_chains.get_mut(out) {
                             // Only set the first (most immediate) definition.
@@ -357,7 +357,7 @@ impl DataFlowEngine {
                 }
 
                 // For STORE: *v0 = v1; v1 is also a use of v0 (address flows).
-                if op.opcode == OpCode::Store && op.inputs.len() >= 2 {
+                if op.opcode == OpCode::STORE && op.inputs.len() >= 2 {
                     let addr = &op.inputs[0];
                     let val = &op.inputs[1];
                     if let Some(chain) = self.def_use_chains.get_mut(val) {
@@ -446,10 +446,11 @@ impl DataFlowEngine {
         let mut locally_defined: HashSet<Varnode> = HashSet::new();
 
         for seq in &self.sequences {
+            let mut seq_defined: HashSet<Varnode> = HashSet::new();
             for op in &seq.ops {
                 // Use an address that is monotonic within the sequence:
                 // we use sequence start + sequence_number offset.
-                let effective_addr = Address::new(seq.start_address.offset + op.sequence as u64);
+                let effective_addr = Address::new(seq.start_address.offset + op.address.map(|a| a.offset).unwrap_or(0));
 
                 // Inputs are uses; check use-before-def.
                 for inp in &op.inputs {
@@ -466,6 +467,16 @@ impl DataFlowEngine {
                 if let Some(ref out) = op.output {
                     first_def.entry(out.clone()).or_insert(effective_addr);
                     locally_defined.insert(out.clone());
+                    seq_defined.insert(out.clone());
+                }
+            }
+
+            // Variables defined in this sequence are live through the end of
+            // the instruction (the sequence end address).
+            for vn in &seq_defined {
+                let entry = last_use.entry(vn.clone()).or_insert(seq.end_address);
+                if seq.end_address.offset > entry.offset {
+                    *entry = seq.end_address;
                 }
             }
         }
@@ -1061,8 +1072,8 @@ impl Default for RangeAnalyzer {
 /// Classify the data-flow type for a given opcode.
 fn classify_flow(opcode: &OpCode) -> FlowType {
     match opcode {
-        OpCode::Copy => FlowType::Direct,
-        OpCode::Load | OpCode::Store => FlowType::Indirect,
+        OpCode::COPY => FlowType::Direct,
+        OpCode::LOAD | OpCode::STORE => FlowType::Indirect,
         _ => FlowType::Combined,
     }
 }
@@ -1093,15 +1104,15 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
     let v0 = inputs[0].value & mask;
 
     match opcode {
-        OpCode::Copy => Some(inputs[0]),
+        OpCode::COPY => Some(inputs[0]),
 
         // ---- Unary ----
-        OpCode::IntNegate => Some(ConstantValue {
+        OpCode::INT_NEGATE => Some(ConstantValue {
             value: (!v0).wrapping_add(1) & mask,
             size,
             is_signed: true,
         }),
-        OpCode::IntZext => {
+        OpCode::INT_ZEXT => {
             // Zero extension: the value stays the same (upper bits already 0).
             Some(ConstantValue {
                 value: v0,
@@ -1109,7 +1120,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntSext => {
+        OpCode::INT_SEXT => {
             // Sign extension: already handled by the mask.
             let sign_bit = 1u64 << (size * 8 - 1);
             let extended = if v0 & sign_bit != 0 { v0 | !mask } else { v0 };
@@ -1121,7 +1132,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
         }
 
         // ---- Binary arithmetic ----
-        OpCode::IntAdd if inputs.len() >= 2 => {
+        OpCode::INT_ADD if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: v0.wrapping_add(v1) & mask,
@@ -1129,7 +1140,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntSub if inputs.len() >= 2 => {
+        OpCode::INT_SUB if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: v0.wrapping_sub(v1) & mask,
@@ -1137,7 +1148,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntMul if inputs.len() >= 2 => {
+        OpCode::INT_MUL if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: v0.wrapping_mul(v1) & mask,
@@ -1145,7 +1156,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntDiv if inputs.len() >= 2 => {
+        OpCode::INT_DIV if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             if v1 == 0 {
                 return None; // Division by zero.
@@ -1156,7 +1167,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntSdiv if inputs.len() >= 2 => {
+        OpCode::INT_SDIV if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             if v1 == 0 {
                 return None;
@@ -1173,7 +1184,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: true,
             })
         }
-        OpCode::IntRem if inputs.len() >= 2 => {
+        OpCode::INT_REM if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             if v1 == 0 {
                 return None;
@@ -1184,7 +1195,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntSrem if inputs.len() >= 2 => {
+        OpCode::INT_SREM if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             if v1 == 0 {
                 return None;
@@ -1203,7 +1214,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
         }
 
         // ---- Bitwise ----
-        OpCode::IntAnd if inputs.len() >= 2 => {
+        OpCode::INT_AND if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: (v0 & v1) & mask,
@@ -1211,7 +1222,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntOr if inputs.len() >= 2 => {
+        OpCode::INT_OR if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: (v0 | v1) & mask,
@@ -1219,7 +1230,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntXor if inputs.len() >= 2 => {
+        OpCode::INT_XOR if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: (v0 ^ v1) & mask,
@@ -1229,7 +1240,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
         }
 
         // ---- Shifts ----
-        OpCode::IntLeft if inputs.len() >= 2 => {
+        OpCode::INT_LEFT if inputs.len() >= 2 => {
             let shift = (inputs[1].value & 0x3f) as u32; // Only low 6 bits matter.
             Some(ConstantValue {
                 value: (v0 << shift) & mask,
@@ -1237,7 +1248,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntRight if inputs.len() >= 2 => {
+        OpCode::INT_RIGHT if inputs.len() >= 2 => {
             let shift = (inputs[1].value & 0x3f) as u32;
             Some(ConstantValue {
                 value: (v0 >> shift) & mask,
@@ -1245,7 +1256,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntSright if inputs.len() >= 2 => {
+        OpCode::INT_SRIGHT if inputs.len() >= 2 => {
             let shift = (inputs[1].value & 0x3f) as u32;
             let signed = inputs[0].as_signed();
             Some(ConstantValue {
@@ -1256,7 +1267,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
         }
 
         // ---- Comparison (boolean result, size = 1) ----
-        OpCode::IntEqual if inputs.len() >= 2 => {
+        OpCode::INT_EQUAL if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: if v0 == v1 { 1 } else { 0 },
@@ -1264,7 +1275,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntNotEqual if inputs.len() >= 2 => {
+        OpCode::INT_NOTEQUAL if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: if v0 != v1 { 1 } else { 0 },
@@ -1272,7 +1283,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntLess if inputs.len() >= 2 => {
+        OpCode::INT_LESS if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: if v0 < v1 { 1 } else { 0 },
@@ -1280,7 +1291,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntLessEqual if inputs.len() >= 2 => {
+        OpCode::INT_LESSEQUAL if inputs.len() >= 2 => {
             let v1 = inputs[1].value & mask;
             Some(ConstantValue {
                 value: if v0 <= v1 { 1 } else { 0 },
@@ -1288,7 +1299,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::IntSless if inputs.len() >= 2 => {
+        OpCode::INT_SLESS if inputs.len() >= 2 => {
             let s0 = inputs[0].as_signed();
             let s1 = inputs[1].as_signed();
             Some(ConstantValue {
@@ -1297,7 +1308,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: true,
             })
         }
-        OpCode::IntSlessEqual if inputs.len() >= 2 => {
+        OpCode::INT_SLESSEQUAL if inputs.len() >= 2 => {
             let s0 = inputs[0].as_signed();
             let s1 = inputs[1].as_signed();
             Some(ConstantValue {
@@ -1308,19 +1319,19 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
         }
 
         // ---- Popcount / Lzcount ----
-        OpCode::Popcount => Some(ConstantValue {
+        OpCode::POPCOUNT => Some(ConstantValue {
             value: v0.count_ones() as u64,
             size: 1,
             is_signed: false,
         }),
-        OpCode::Lzcount => Some(ConstantValue {
+        OpCode::LZCOUNT => Some(ConstantValue {
             value: v0.leading_zeros() as u64,
             size: 1,
             is_signed: false,
         }),
 
         // ---- Boolean (bitwise on 1-bit values) ----
-        OpCode::BoolAnd if inputs.len() >= 2 => {
+        OpCode::BOOL_AND if inputs.len() >= 2 => {
             let v1 = inputs[1].value & 1;
             Some(ConstantValue {
                 value: (v0 & v1) & 1,
@@ -1328,7 +1339,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::BoolOr if inputs.len() >= 2 => {
+        OpCode::BOOL_OR if inputs.len() >= 2 => {
             let v1 = inputs[1].value & 1;
             Some(ConstantValue {
                 value: (v0 | v1) & 1,
@@ -1336,7 +1347,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::BoolXor if inputs.len() >= 2 => {
+        OpCode::BOOL_XOR if inputs.len() >= 2 => {
             let v1 = inputs[1].value & 1;
             Some(ConstantValue {
                 value: (v0 ^ v1) & 1,
@@ -1344,7 +1355,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
                 is_signed: false,
             })
         }
-        OpCode::BoolNeg => Some(ConstantValue {
+        OpCode::BOOL_NEGATE => Some(ConstantValue {
             value: if v0 == 0 { 1 } else { 0 },
             size: 1,
             is_signed: false,
@@ -1362,29 +1373,24 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sleigh::pcode::PcodeOp;
+        use super::*;
 
     // --- Helper builders ---
 
-    fn make_vn_reg(offset: u64, size: usize) -> Varnode {
-        Varnode::register(offset, size)
+    fn make_vn_reg(offset: u64, size: u32) -> Varnode {
+        Varnode::register("r", offset, size)
     }
 
-    fn make_vn_const(value: u64, size: usize) -> Varnode {
+    fn make_vn_const(value: u64, size: u32) -> Varnode {
         Varnode::constant(value, size)
     }
 
-    fn make_vn_unique(index: u64, size: usize) -> Varnode {
+    fn make_vn_unique(index: u64, size: u32) -> Varnode {
         Varnode::unique(index, size)
     }
 
-    fn make_op(opcode: OpCode, out: Option<Varnode>, inputs: Vec<Varnode>, seq: u32) -> PcodeOp {
-        PcodeOp {
-            opcode,
-            output: out,
-            inputs,
-            sequence: seq,
-        }
+    fn make_op(opcode: OpCode, out: Option<Varnode>, inputs: Vec<Varnode>, seq: u32) -> PcodeOperation {
+        PcodeOperation::new(opcode, out, inputs, Some(Address::new(seq as u64)))
     }
 
     fn addr(val: u64) -> Address {
@@ -1401,7 +1407,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Copy,
+                OpCode::COPY,
                 Some(out.clone()),
                 vec![inp.clone()],
                 0,
@@ -1436,13 +1442,13 @@ mod tests {
             vec![
                 // u0 = r0 + r1  (both r0 and r1 used, neither defined yet)
                 make_op(
-                    OpCode::IntAdd,
+                    OpCode::INT_ADD,
                     Some(u0.clone()),
                     vec![r0.clone(), r1.clone()],
                     0,
                 ),
                 // r0 = COPY u0  (now r0 is defined locally)
-                make_op(OpCode::Copy, Some(r0.clone()), vec![u0.clone()], 1),
+                make_op(OpCode::COPY, Some(r0.clone()), vec![u0.clone()], 1),
             ],
             addr(0x1000),
             addr(0x1001),
@@ -1465,7 +1471,7 @@ mod tests {
         // STORE ram_addr, r0 → r0 escapes.
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Store,
+                OpCode::STORE,
                 None,
                 vec![ram_addr.clone(), r0.clone()],
                 0,
@@ -1491,8 +1497,8 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![
-                make_op(OpCode::Copy, Some(b.clone()), vec![a.clone()], 0),
-                make_op(OpCode::Copy, Some(c.clone()), vec![b.clone()], 1),
+                make_op(OpCode::COPY, Some(b.clone()), vec![a.clone()], 0),
+                make_op(OpCode::COPY, Some(c.clone()), vec![b.clone()], 1),
             ],
             addr(0x1000),
             addr(0x1001),
@@ -1520,7 +1526,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::IntAdd,
+                OpCode::INT_ADD,
                 Some(sum.clone()),
                 vec![x.clone(), y.clone()],
                 0,
@@ -1552,8 +1558,8 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![
-                make_op(OpCode::Copy, Some(b.clone()), vec![a.clone()], 0),
-                make_op(OpCode::Copy, Some(c.clone()), vec![b.clone()], 1),
+                make_op(OpCode::COPY, Some(b.clone()), vec![a.clone()], 0),
+                make_op(OpCode::COPY, Some(c.clone()), vec![b.clone()], 1),
             ],
             addr(0x1000),
             addr(0x1001),
@@ -1583,9 +1589,9 @@ mod tests {
         let seq = PcodeSequence::new(
             vec![
                 // a used at offset 1000.
-                make_op(OpCode::Copy, Some(b.clone()), vec![a.clone()], 0),
+                make_op(OpCode::COPY, Some(b.clone()), vec![a.clone()], 0),
                 // b used at offset 1001.
-                make_op(OpCode::Copy, Some(c.clone()), vec![b.clone()], 1),
+                make_op(OpCode::COPY, Some(c.clone()), vec![b.clone()], 1),
             ],
             addr(0x1000),
             addr(0x1001),
@@ -1614,10 +1620,10 @@ mod tests {
         let seq = PcodeSequence::new(
             vec![
                 // a used at 1000.
-                make_op(OpCode::Copy, Some(b.clone()), vec![a.clone()], 0),
+                make_op(OpCode::COPY, Some(b.clone()), vec![a.clone()], 0),
                 // b used at 1002.
                 make_op(
-                    OpCode::IntAdd,
+                    OpCode::INT_ADD,
                     Some(make_vn_unique(2, 4)),
                     vec![b.clone()],
                     1,
@@ -1647,7 +1653,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Copy,
+                OpCode::COPY,
                 Some(reg.clone()),
                 vec![cnst.clone()],
                 0,
@@ -1675,7 +1681,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::IntAdd,
+                OpCode::INT_ADD,
                 Some(sum.clone()),
                 vec![c1.clone(), c2.clone()],
                 0,
@@ -1701,7 +1707,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Copy,
+                OpCode::COPY,
                 Some(tmp.clone()),
                 vec![r0.clone()],
                 0,
@@ -1728,7 +1734,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Copy,
+                OpCode::COPY,
                 Some(tmp.clone()),
                 vec![cnst.clone()],
                 0,
@@ -1825,7 +1831,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Copy,
+                OpCode::COPY,
                 Some(tmp.clone()),
                 vec![cnst.clone()],
                 0,
@@ -1865,7 +1871,7 @@ mod tests {
     #[test]
     fn test_evaluate_constant_add() {
         let result = evaluate_constant_op(
-            &OpCode::IntAdd,
+            &OpCode::INT_ADD,
             &[
                 ConstantValue {
                     value: 3,
@@ -1886,7 +1892,7 @@ mod tests {
     #[test]
     fn test_evaluate_constant_sub() {
         let result = evaluate_constant_op(
-            &OpCode::IntSub,
+            &OpCode::INT_SUB,
             &[
                 ConstantValue {
                     value: 10,
@@ -1907,7 +1913,7 @@ mod tests {
     #[test]
     fn test_evaluate_constant_sdiv() {
         let result = evaluate_constant_op(
-            &OpCode::IntSdiv,
+            &OpCode::INT_SDIV,
             &[
                 ConstantValue {
                     value: (-20i64) as u64,
@@ -1928,7 +1934,7 @@ mod tests {
     #[test]
     fn test_evaluate_constant_and() {
         let result = evaluate_constant_op(
-            &OpCode::IntAnd,
+            &OpCode::INT_AND,
             &[
                 ConstantValue {
                     value: 0xFF,
@@ -1949,7 +1955,7 @@ mod tests {
     #[test]
     fn test_evaluate_constant_div_by_zero() {
         let result = evaluate_constant_op(
-            &OpCode::IntDiv,
+            &OpCode::INT_DIV,
             &[
                 ConstantValue {
                     value: 10,
@@ -1975,7 +1981,7 @@ mod tests {
 
         let seq1 = PcodeSequence::new(
             vec![make_op(
-                OpCode::Copy,
+                OpCode::COPY,
                 Some(tmp.clone()),
                 vec![r0.clone()],
                 0,
@@ -1985,7 +1991,7 @@ mod tests {
         );
         let seq2 = PcodeSequence::new(
             vec![make_op(
-                OpCode::IntAdd,
+                OpCode::INT_ADD,
                 Some(r1.clone()),
                 vec![tmp.clone(), make_vn_const(1, 4)],
                 1,
@@ -2020,7 +2026,7 @@ mod tests {
 
         let seq = PcodeSequence::new(
             vec![make_op(
-                OpCode::Cbranch,
+                OpCode::CBRANCH,
                 None,
                 vec![cond.clone(), target.clone()],
                 0,
