@@ -24,6 +24,7 @@
 pub mod base;
 pub mod bsim;
 pub mod codebrowser;
+pub mod decompile_ui;
 pub mod external;
 pub mod bsim_elastic;
 pub mod byte_patterns;
@@ -53,6 +54,7 @@ pub mod pyghidra;
 pub mod sarif;
 pub mod recognizers;
 pub mod rust;
+pub mod structure_editor;
 pub mod swift;
 pub mod system_emulation;
 pub mod table;

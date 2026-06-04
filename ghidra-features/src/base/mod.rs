@@ -13,6 +13,7 @@
 pub mod analyzer;
 pub mod assembler;
 pub mod bookmark;
+pub mod clear;
 pub mod equate;
 pub mod function;
 pub mod label;
@@ -20,4 +21,5 @@ pub mod memory;
 pub mod merge;
 pub mod operand;
 pub mod register;
+pub mod rename;
 pub mod symbol;
