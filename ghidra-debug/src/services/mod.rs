@@ -3,6 +3,19 @@
 //! Ported from Ghidra's debugger service interfaces in `ghidra.app.services`.
 //! Each service trait defines an interface that plugin components can
 //! implement and register.
+//!
+//! Implementation modules:
+//! - `breakpoint_impl`: Breakpoint action items and logical breakpoint internals.
+//! - `platform_impl`: Platform opinions, offers, and built-in connectors.
+//! - `tracemgr_impl`: Trace manager service implementation.
+//! - `control_impl`: Debugger control service implementation.
+//! - `modules_impl`: Modules/mapping service implementation.
+
+pub mod breakpoint_impl;
+pub mod control_impl;
+pub mod modules_impl;
+pub mod platform_impl;
+pub mod tracemgr_impl;
 
 use crate::api::breakpoint::LogicalBreakpoint;
 use crate::model::Lifespan;

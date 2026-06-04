@@ -72,6 +72,36 @@ pub mod symtable;
 pub mod table;
 pub mod versiontracking;
 
+// -- New modules ported from Ghidra's Features/Base plugin/core --
+pub mod instructionsearch;
+pub mod bookmark;
+pub mod calltree;
+pub mod reachability;
+pub mod fallthrough;
+pub mod label;
+pub mod memory;
+pub mod reloc;
+pub mod disassembler;
+pub mod assembler;
+pub mod scalartable;
+pub mod stackeditor;
+pub mod sourcefilestable;
+pub mod module;
+pub mod clipboard;
+pub mod clear;
+pub mod select;
+pub mod highlight;
+pub mod flowarrow;
+pub mod colorizer;
+pub mod comments_plugin;
+pub mod commentwindow;
+pub mod printing;
+pub mod misc;
+pub mod hover;
+pub mod help;
+pub mod check;
+pub mod data_plugin;
+
 pub use base::analyzer::*;
 pub use dwarf::*;
 pub use fileformats::*;

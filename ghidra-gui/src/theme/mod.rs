@@ -13,6 +13,7 @@
 //! - [`ThemeManager`] -- singleton managing the active theme.
 //! - [`ThemeEvent`] -- notification when theme values change.
 
+pub mod builtin;
 pub mod color_value;
 pub mod font_modifier;
 pub mod font_value;

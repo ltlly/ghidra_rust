@@ -320,7 +320,272 @@ impl UiDefaultsMapper {
 }
 
 // ============================================================================
-// ComponentFontRegistry
+// Concrete LAF Managers
+// ============================================================================
+
+/// Metal LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct MetalLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl MetalLookAndFeelManager {
+    /// Create a new Metal LAF manager.
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for MetalLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::Metal }
+    fn install(&mut self) -> Result<(), String> { self.installed = true; Ok(()) }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// Nimbus LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct NimbusLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl NimbusLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for NimbusLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::Nimbus }
+    fn install(&mut self) -> Result<(), String> { self.installed = true; Ok(()) }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// GTK LAF manager (Linux only).
+#[derive(Debug, Clone, Default)]
+pub struct GtkLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl GtkLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for GtkLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::Gtk }
+    fn install(&mut self) -> Result<(), String> {
+        if !cfg!(target_os = "linux") {
+            return Err("GTK LAF is only available on Linux".to_string());
+        }
+        self.installed = true;
+        Ok(())
+    }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// FlatLaf Light LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct FlatLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl FlatLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for FlatLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::FlatLight }
+    fn install(&mut self) -> Result<(), String> { self.installed = true; Ok(()) }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// FlatLaf Dark LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct FlatDarkLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl FlatDarkLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for FlatDarkLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::FlatDark }
+    fn install(&mut self) -> Result<(), String> { self.installed = true; Ok(()) }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// macOS LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct MacLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl MacLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for MacLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::Mac }
+    fn install(&mut self) -> Result<(), String> {
+        if !cfg!(target_os = "macos") {
+            return Err("Mac LAF is only available on macOS".to_string());
+        }
+        self.installed = true;
+        Ok(())
+    }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// Windows LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct WindowsLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl WindowsLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for WindowsLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::Windows }
+    fn install(&mut self) -> Result<(), String> {
+        if !cfg!(target_os = "windows") {
+            return Err("Windows LAF is only available on Windows".to_string());
+        }
+        self.installed = true;
+        Ok(())
+    }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// Windows Classic LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct WindowsClassicLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl WindowsClassicLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for WindowsClassicLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::WindowsClassic }
+    fn install(&mut self) -> Result<(), String> {
+        if !cfg!(target_os = "windows") {
+            return Err("Windows Classic LAF is only available on Windows".to_string());
+        }
+        self.installed = true;
+        Ok(())
+    }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// Motif LAF manager.
+#[derive(Debug, Clone, Default)]
+pub struct MotifLookAndFeelManager {
+    installed: bool,
+    cursor_blink_rate: u32,
+}
+
+impl MotifLookAndFeelManager {
+    pub fn new() -> Self {
+        Self { installed: false, cursor_blink_rate: DEFAULT_CURSOR_BLINK_RATE }
+    }
+}
+
+impl LookAndFeelManager for MotifLookAndFeelManager {
+    fn laf_type(&self) -> LafType { LafType::Motif }
+    fn install(&mut self) -> Result<(), String> { self.installed = true; Ok(()) }
+    fn uninstall(&mut self) -> Result<(), String> { self.installed = false; Ok(()) }
+    fn is_installed(&self) -> bool { self.installed }
+    fn update_component_ui(&self, _component_id: &str) {}
+    fn refresh_fonts(&mut self) {}
+    fn set_cursor_blink_rate(&mut self, rate_ms: u32) { self.cursor_blink_rate = rate_ms; }
+    fn cursor_blink_rate(&self) -> u32 { self.cursor_blink_rate }
+}
+
+/// Font change listener trait.
+pub trait FontChangeListener: std::fmt::Debug {
+    /// Called when the font for a theme id changes.
+    fn font_changed(&self, font_theme_id: &str);
+}
+
+/// Get all concrete LAF managers.
+pub fn all_laf_managers() -> Vec<Box<dyn LookAndFeelManager>> {
+    vec![
+        Box::new(MetalLookAndFeelManager::new()),
+        Box::new(NimbusLookAndFeelManager::new()),
+        Box::new(GtkLookAndFeelManager::new()),
+        Box::new(FlatLookAndFeelManager::new()),
+        Box::new(FlatDarkLookAndFeelManager::new()),
+        Box::new(MacLookAndFeelManager::new()),
+        Box::new(WindowsLookAndFeelManager::new()),
+        Box::new(WindowsClassicLookAndFeelManager::new()),
+        Box::new(MotifLookAndFeelManager::new()),
+    ]
+}
+
+/// ComponentFontRegistry
 // ============================================================================
 
 /// Tracks which font ID each component is using, so the LAF manager can

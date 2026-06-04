@@ -80,10 +80,12 @@ pub mod flatapi;
 pub mod highlighter;
 pub mod location;
 pub mod parallel;
+pub mod plugin;
 pub mod pretty_printer;
 pub mod signature;
 pub mod token_iterator;
 pub mod util;
+pub mod validator;
 
 // ============================================================================
 // Re-exports for convenience
