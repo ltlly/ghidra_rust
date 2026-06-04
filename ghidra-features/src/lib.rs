@@ -7,6 +7,10 @@
 //! - `dwarf`: DWARF debug information parser
 //! - `pdb`: Microsoft PDB debug information parser
 //! - `swift`: Swift name demangling and type metadata
+//! - `byte_patterns`: Byte pattern matching and closed sequence mining
+//! - `function_id`: Function identification via hash-based signature matching
+//! - `microsoft_code_analyzer`: MSVC RTTI, vtables, and SEH analysis
+//! - `system_emulation`: P-code based emulation and syscall handling
 //!
 //! # Feature Manager
 //!
@@ -16,6 +20,8 @@
 
 pub mod base;
 pub mod bsim;
+pub mod bsim_elastic;
+pub mod byte_patterns;
 pub mod byteviewer;
 pub mod demangler;
 pub mod codecompare;
@@ -23,14 +29,20 @@ pub mod debug;
 pub mod dex;
 pub mod dwarf;
 pub mod fileformats;
+pub mod function_id;
 pub mod functiongraph;
 pub mod graphservices;
+pub mod lisa;
+pub mod machine_learning;
+pub mod microsoft_code_analyzer;
 pub mod objc;
 pub mod pdb;
 pub mod programdiff;
+pub mod sarif;
 pub mod recognizers;
 pub mod rust;
 pub mod swift;
+pub mod system_emulation;
 pub mod versiontracking;
 
 pub use base::analyzer::*;

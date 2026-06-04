@@ -53,6 +53,7 @@ pub mod breakpoints;
 pub mod executor;
 pub mod memory;
 pub mod state;
+pub mod symz3;
 
 use ghidra_core::addr::Address;
 use ghidra_core::program::lang::Language;
