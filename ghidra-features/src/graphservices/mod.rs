@@ -57,7 +57,7 @@ impl GraphRenderer {
         .map_err(|e| e.to_string())?;
         writeln!(
             svg,
-            r#"      <path d="M 0 0 L 10 5 L 0 10 z" fill="#555" />"#
+            "      <path d=\"M 0 0 L 10 5 L 0 10 z\" fill=\"#555\" />"
         )
         .map_err(|e| e.to_string())?;
         writeln!(svg, "    </marker>").map_err(|e| e.to_string())?;
@@ -94,7 +94,7 @@ impl GraphRenderer {
         // Background
         writeln!(
             svg,
-            r#"  <rect width="100%" height="100%" fill="#fafafa" />"#
+            r##"  <rect width="100%" height="100%" fill="#fafafa" />"##
         )
         .map_err(|e| e.to_string())?;
 
@@ -118,7 +118,7 @@ impl GraphRenderer {
                     .collect();
                 writeln!(
                     svg,
-                    r#"  <path d="{}" fill="none" stroke="{}" stroke-width="1.5" marker-end="{}" />"#,
+                    r##"  <path d="{}" fill="none" stroke="{}" stroke-width="1.5" marker-end="{}" />"##,
                     path.join(" "),
                     color,
                     marker
@@ -129,7 +129,7 @@ impl GraphRenderer {
                 let (tx, ty) = graph.vertices[edge.to].centre();
                 writeln!(
                     svg,
-                    r#"  <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="1.5" marker-end="{}" />"#,
+                    r##"  <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" stroke-width="1.5" marker-end="{}" />"##,
                     sx - min_x + pad,
                     sy - min_y + pad,
                     tx - min_x + pad,
@@ -149,7 +149,7 @@ impl GraphRenderer {
             let rh = v.height;
             writeln!(
                 svg,
-                r#"  <rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="4" ry="4" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" />"#,
+                r##"  <rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="4" ry="4" fill="#e3f2fd" stroke="#1565c0" stroke-width="1.5" />"##,
                 rx, ry, rw, rh
             )
             .map_err(|e| e.to_string())?;
@@ -157,7 +157,7 @@ impl GraphRenderer {
             let label = xml_escape(&v.label);
             writeln!(
                 svg,
-                r#"  <text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-size="11" fill="#212121">{}</text>"#,
+                r##"  <text x="{:.1}" y="{:.1}" text-anchor="middle" dominant-baseline="central" font-family="monospace" font-size="11" fill="#212121">{}</text>"##,
                 rx + rw / 2.0,
                 ry + rh / 2.0,
                 label
@@ -618,6 +618,19 @@ fn svg_to_png_bytes(_svg: &str) -> Result<Vec<u8>, String> {
     Ok(png)
 }
 
+// ---------------------------------------------------------------------------
+// AttributedGraph model (ported from ghidra.service.graph)
+// ---------------------------------------------------------------------------
+
+pub mod attributed;
+pub use attributed::*;
+
+pub mod exporter;
+
+/// Build a set of attribute filters from a collection of attributed elements.
+pub mod filters;
+pub use filters::AttributeFilter;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,12 +639,11 @@ mod tests {
     use ghidra_core::program::listing::Function;
 
     fn sample_graph() -> FunctionGraph {
-        let f = Function {
-            name: "main".to_string(),
-            entry_point: Address::new(0x1000),
-            body: AddressRange::new(Address::new(0x1000), Address::new(0x1200)),
-            signature: "int main(int, char**)".to_string(),
-        };
+        let f = Function::new(
+            "main",
+            Address::new(0x1000),
+            AddressRange::new(Address::new(0x1000), Address::new(0x1200)),
+        );
         let vertices = vec![
             FGVertex::new(Address::new(0x1000), "entry".into(), vec![]),
             FGVertex::new(Address::new(0x1040), "if_then".into(), vec![]),

@@ -16,13 +16,19 @@
 
 pub mod base;
 pub mod bsim;
+pub mod byteviewer;
+pub mod demangler;
+pub mod codecompare;
 pub mod debug;
 pub mod dex;
 pub mod dwarf;
 pub mod fileformats;
 pub mod functiongraph;
+pub mod graphservices;
 pub mod objc;
 pub mod pdb;
+pub mod programdiff;
+pub mod recognizers;
 pub mod rust;
 pub mod swift;
 pub mod versiontracking;
