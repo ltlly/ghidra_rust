@@ -111,6 +111,31 @@ impl Preview for DataTypePreview {
     }
 
     fn get_preview(&self, memory: &[u8], offset: usize) -> Option<String> {
+        if offset >= memory.len() {
+            return None;
+        }
+
+        // Handle variable-length types (string, char[]) first
+        match self.type_name.as_str() {
+            "string" | "char[]" => {
+                let bytes = &memory[offset..];
+                let s: String = bytes
+                    .iter()
+                    .take_while(|&&b| b != 0)
+                    .map(|&b| {
+                        if b.is_ascii_graphic() || b == b' ' {
+                            b as char
+                        } else {
+                            '.'
+                        }
+                    })
+                    .take(MAX_PREVIEW_LENGTH)
+                    .collect();
+                return Some(format!("\"{}\"", s));
+            }
+            _ => {}
+        }
+
         let len = self.byte_length?;
         if offset + len > memory.len() {
             return None;
@@ -149,21 +174,6 @@ impl Preview for DataTypePreview {
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(bytes);
                 Some(format!("{}", f64::from_le_bytes(buf)))
-            }
-            "string" | "char[]" => {
-                let s: String = bytes
-                    .iter()
-                    .take_while(|&&b| b != 0)
-                    .map(|&b| {
-                        if b.is_ascii_graphic() || b == b' ' {
-                            b as char
-                        } else {
-                            '.'
-                        }
-                    })
-                    .take(MAX_PREVIEW_LENGTH)
-                    .collect();
-                Some(format!("\"{}\"", s))
             }
             _ => {
                 // Fallback: hex dump

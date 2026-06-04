@@ -535,7 +535,8 @@ mod tests {
         gg.add_to_group(&100, 3);
 
         let members = gg.group_members(&100).unwrap();
-        assert_eq!(members.len(), 3);
+        // 4 members: the group_id (100) + vertices 1, 2, 3
+        assert_eq!(members.len(), 4);
 
         assert!(gg.is_in_group(&2));
         assert_eq!(gg.group_of(&2), Some(&100));

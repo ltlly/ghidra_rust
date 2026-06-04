@@ -434,12 +434,13 @@ mod tests {
     #[test]
     fn cpp_exporter_sort_by_address() {
         let mut exporter = CppExporter::new();
-        exporter.add_function(DecompiledFunctionExport::new("b", 0x3000, "void b()", "{}"));
-        exporter.add_function(DecompiledFunctionExport::new("a", 0x1000, "void a()", "{}"));
+        exporter.add_function(DecompiledFunctionExport::new("func_b", 0x3000, "void func_b()", "{}"));
+        exporter.add_function(DecompiledFunctionExport::new("func_a", 0x1000, "void func_a()", "{}"));
         let source = exporter.export();
-        let pos_a = source.find("void a()").unwrap();
-        let pos_b = source.find("void b()").unwrap();
-        assert!(pos_a < pos_b);
+        // Find the last occurrence of each function (in the bodies section).
+        let pos_a = source.rfind("void func_a()").unwrap();
+        let pos_b = source.rfind("void func_b()").unwrap();
+        assert!(pos_a < pos_b, "func_a (addr 0x1000) should appear before func_b (addr 0x3000) in bodies");
     }
 
     #[test]
