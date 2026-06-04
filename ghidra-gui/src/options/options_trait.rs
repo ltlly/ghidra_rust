@@ -54,10 +54,10 @@ pub trait Options: Send + Sync {
     fn contains(&self, option_name: &str) -> bool;
 
     /// Get the description of the named option.
-    fn get_description(&self, option_name: &str) -> Option<&str>;
+    fn get_description(&self, option_name: &str) -> Option<String>;
 
     /// Get the help location for the named option.
-    fn get_help_location(&self, option_name: &str) -> Option<&HelpLocation>;
+    fn get_help_location(&self, option_name: &str) -> Option<HelpLocation>;
 
     /// Whether the option was explicitly registered.
     fn is_registered(&self, option_name: &str) -> bool;

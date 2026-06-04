@@ -10,7 +10,7 @@ use std::sync::Arc;
 use crate::gui_util::help_location::HelpLocation;
 use crate::gui_util::web_colors::RgbaColor;
 use super::action_trigger::ActionTrigger;
-use super::option::Option;
+use super::option::OptionEntry;
 use super::option_type::OptionType;
 use super::option_value::{FontDescriptor, KeyStroke, OptionValue};
 use super::options_trait::{Options, OptionsChangeListener, DELIMITER, DELIMITER_STR};
@@ -18,20 +18,29 @@ use super::options_trait::{Options, OptionsChangeListener, DELIMITER, DELIMITER_
 /// A concrete hierarchical options store.
 ///
 /// Ported from Ghidra's `ToolOptions` / `AbstractOptions`.
-#[derive(Debug)]
 pub struct ToolOptions {
     /// Display name for this options node.
     name: String,
     /// Prefix for all option names (for sub-options).
     prefix: String,
     /// Stored options keyed by their full (prefixed) name.
-    value_map: HashMap<String, Option>,
+    value_map: HashMap<String, OptionEntry>,
     /// Alias map for renamed options.
     alias_map: HashMap<String, String>,
     /// Help locations for categories.
     category_help_map: HashMap<String, HelpLocation>,
     /// Registered change listeners.
     listeners: Vec<Arc<dyn OptionsChangeListener>>,
+}
+
+impl std::fmt::Debug for ToolOptions {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ToolOptions")
+            .field("name", &self.name)
+            .field("prefix", &self.prefix)
+            .field("options_count", &self.value_map.len())
+            .finish()
+    }
 }
 
 impl ToolOptions {
@@ -49,13 +58,13 @@ impl ToolOptions {
     }
 
     /// Get the option entry (or `None` if not found).
-    pub fn get_option(&self, name: &str) -> Option<&Option> {
+    pub fn get_option(&self, name: &str) -> Option<&OptionEntry> {
         let full = self.full_name(name);
         self.value_map.get(&full)
     }
 
     /// Get a mutable reference to the option entry.
-    pub fn get_option_mut(&mut self, name: &str) -> Option<&mut Option> {
+    pub fn get_option_mut(&mut self, name: &str) -> Option<&mut OptionEntry> {
         let full = self.full_name(name);
         self.value_map.get_mut(&full)
     }
@@ -94,7 +103,7 @@ impl ToolOptions {
             opt.set_current_value(value.clone());
             self.notify_changed(name, &old_value, &value);
         } else {
-            let opt = Option::new_unregistered(&full, option_type, value);
+            let opt = OptionEntry::new_unregistered(&full, option_type, value);
             self.value_map.insert(full, opt);
         }
     }
@@ -109,7 +118,7 @@ impl ToolOptions {
         description: &str,
     ) {
         let full = self.full_name(name);
-        let mut opt = Option::new(&full, option_type, default_value)
+        let mut opt = OptionEntry::new(&full, option_type, default_value)
             .with_description(description);
         if let Some(h) = help {
             opt = opt.with_help_location(h.clone());
@@ -176,12 +185,12 @@ impl Options for ToolOptions {
         self.value_map.contains_key(&full) || self.alias_map.contains_key(&full)
     }
 
-    fn get_description(&self, option_name: &str) -> Option<&str> {
-        self.get_option(option_name).and_then(|o| o.description())
+    fn get_description(&self, option_name: &str) -> Option<String> {
+        self.get_option(option_name).and_then(|o| o.description().map(|s| s.to_string()))
     }
 
-    fn get_help_location(&self, option_name: &str) -> Option<&HelpLocation> {
-        self.get_option(option_name).and_then(|o| o.help_location())
+    fn get_help_location(&self, option_name: &str) -> Option<HelpLocation> {
+        self.get_option(option_name).and_then(|o| o.help_location().cloned())
     }
 
     fn is_registered(&self, option_name: &str) -> bool {
@@ -465,7 +474,7 @@ mod tests {
         assert!(opts.contains("test"));
         assert!(opts.is_registered("test"));
         assert!(opts.is_default_value("test"));
-        assert_eq!(opts.get_description("test"), Some("A test option"));
+        assert_eq!(opts.get_description("test"), Some("A test option".to_string()));
         assert_eq!(opts.get_int("test", 0), 10);
     }
 

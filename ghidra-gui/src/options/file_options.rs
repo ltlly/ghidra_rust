@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use super::option::Option;
+use super::option::OptionEntry;
 use super::option_type::OptionType;
 use super::option_value::OptionValue;
 
@@ -23,7 +23,7 @@ pub struct FileOptions {
     /// The backing file path.
     file: Option<PathBuf>,
     /// Stored options.
-    options: HashMap<String, Option>,
+    options: HashMap<String, OptionEntry>,
 }
 
 impl FileOptions {
@@ -54,7 +54,7 @@ impl FileOptions {
         for (key, value) in map {
             let opt_value = json_to_option_value(&value);
             let option_type = opt_value.option_type();
-            let opt = Option::new_unregistered(&key, option_type, opt_value);
+            let opt = OptionEntry::new_unregistered(&key, option_type, opt_value);
             options.insert(key, opt);
         }
 
@@ -77,9 +77,7 @@ impl FileOptions {
         let path = self.file.as_ref().context("No file associated")?;
         let mut map = serde_json::Map::new();
         for (key, opt) in &self.options {
-            if !opt.is_default() {
-                map.insert(key.clone(), option_value_to_json(opt.current_value()));
-            }
+            map.insert(key.clone(), option_value_to_json(opt.current_value()));
         }
         let json = serde_json::to_string_pretty(&map)?;
         fs::write(path, json)
@@ -98,18 +96,19 @@ impl FileOptions {
     }
 
     /// Get a reference to the stored options.
-    pub fn options(&self) -> &HashMap<String, Option> {
+    pub fn options(&self) -> &HashMap<String, OptionEntry> {
         &self.options
     }
 
     /// Get a mutable reference to the stored options.
-    pub fn options_mut(&mut self) -> &mut HashMap<String, Option> {
+    pub fn options_mut(&mut self) -> &mut HashMap<String, OptionEntry> {
         &mut self.options
     }
 
     /// Put an option value.
     pub fn put(&mut self, key: &str, value: OptionValue) {
-        let opt = Option::new_unregistered(key, value.option_type(), value);
+        let mut opt = OptionEntry::new_unregistered(key, value.option_type(), OptionValue::None);
+        opt.set_current_value(value);
         self.options.insert(key.to_string(), opt);
     }
 
@@ -118,13 +117,11 @@ impl FileOptions {
         self.options.get(key).map(|o| o.current_value())
     }
 
-    /// Copy all non-default options into a new FileOptions.
+    /// Copy all options into a new FileOptions.
     pub fn copy(&self) -> Self {
         let mut copy = FileOptions::new("copy");
         for (key, opt) in &self.options {
-            if !opt.is_default() {
-                copy.put(key, opt.current_value().clone());
-            }
+            copy.put(key, opt.current_value().clone());
         }
         copy
     }
@@ -158,7 +155,7 @@ fn json_to_option_value(value: &serde_json::Value) -> OptionValue {
         serde_json::Value::Object(obj) => {
             // Could be a custom option or a wrapped value
             if let Some(serde_json::Value::String(s)) = obj.get("type") {
-                OptionValue::Custom(format!("{}:{}", s, obj))
+                OptionValue::Custom(format!("{}:{}", s, serde_json::to_string(obj).unwrap_or_default()))
             } else {
                 OptionValue::Custom(serde_json::to_string(obj).unwrap_or_default())
             }

@@ -45,7 +45,7 @@ impl ColorUtils {
     /// Derive a lighter variant of a color (nudge toward white).
     pub fn brighter(color: RgbaColor, factor: f32) -> RgbaColor {
         let factor = factor.max(0.0);
-        RgbaColor::new(
+        RgbaColor::with_alpha(
             (color.r as f32 + (255.0 - color.r as f32) * factor).min(255.0) as u8,
             (color.g as f32 + (255.0 - color.g as f32) * factor).min(255.0) as u8,
             (color.b as f32 + (255.0 - color.b as f32) * factor).min(255.0) as u8,
@@ -56,7 +56,7 @@ impl ColorUtils {
     /// Derive a darker variant of a color (nudge toward black).
     pub fn darker(color: RgbaColor, factor: f32) -> RgbaColor {
         let factor = factor.max(0.0);
-        RgbaColor::new(
+        RgbaColor::with_alpha(
             (color.r as f32 * (1.0 - factor)).max(0.0) as u8,
             (color.g as f32 * (1.0 - factor)).max(0.0) as u8,
             (color.b as f32 * (1.0 - factor)).max(0.0) as u8,
@@ -68,7 +68,7 @@ impl ColorUtils {
     pub fn blend(c1: RgbaColor, c2: RgbaColor, alpha: f32) -> RgbaColor {
         let alpha = alpha.clamp(0.0, 1.0);
         let inv = 1.0 - alpha;
-        RgbaColor::new(
+        RgbaColor::with_alpha(
             (c1.r as f32 * inv + c2.r as f32 * alpha) as u8,
             (c1.g as f32 * inv + c2.g as f32 * alpha) as u8,
             (c1.b as f32 * inv + c2.b as f32 * alpha) as u8,

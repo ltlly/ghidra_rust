@@ -10,8 +10,9 @@ use crate::gui_util::help_location::HelpLocation;
 /// description, and help location.
 ///
 /// Ported from Ghidra's `ghidra.framework.options.Option`.
+/// Named `OptionEntry` to avoid collision with `std::Option`.
 #[derive(Debug, Clone)]
-pub struct Option {
+pub struct OptionEntry {
     /// Unique name within the options tree.
     name: String,
     /// The option type.
@@ -28,7 +29,7 @@ pub struct Option {
     registered: bool,
 }
 
-impl Option {
+impl OptionEntry {
     /// Create a new registered option.
     pub fn new(
         name: impl Into<String>,
@@ -127,10 +128,10 @@ impl Option {
 
     /// Get the value with a fallback to the provided default if the
     /// current value is `None`.
-    pub fn get_value(&self, fallback: &OptionValue) -> &OptionValue {
+    pub fn get_value(&self, fallback: &OptionValue) -> OptionValue {
         match &self.current_value {
-            OptionValue::None => fallback,
-            other => other,
+            OptionValue::None => fallback.clone(),
+            other => other.clone(),
         }
     }
 }
@@ -141,7 +142,7 @@ mod tests {
 
     #[test]
     fn test_option_new() {
-        let opt = Option::new("test.int", OptionType::IntType, OptionValue::Int(42));
+        let opt = OptionEntry::new("test.int", OptionType::IntType, OptionValue::Int(42));
         assert_eq!(opt.name(), "test.int");
         assert_eq!(opt.option_type(), OptionType::IntType);
         assert_eq!(*opt.current_value(), OptionValue::Int(42));
@@ -150,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_option_set_value() {
-        let mut opt = Option::new("test.str", OptionType::StringType, OptionValue::String("default".into()));
+        let mut opt = OptionEntry::new("test.str", OptionType::StringType, OptionValue::String("default".into()));
         opt.set_current_value(OptionValue::String("changed".into()));
         assert!(!opt.is_default());
         assert_eq!(*opt.current_value(), OptionValue::String("changed".into()));
@@ -158,7 +159,7 @@ mod tests {
 
     #[test]
     fn test_option_restore_default() {
-        let mut opt = Option::new("test.bool", OptionType::BooleanType, OptionValue::Boolean(false));
+        let mut opt = OptionEntry::new("test.bool", OptionType::BooleanType, OptionValue::Boolean(false));
         opt.set_current_value(OptionValue::Boolean(true));
         assert!(!opt.is_default());
         opt.restore_default();
@@ -167,28 +168,28 @@ mod tests {
 
     #[test]
     fn test_option_with_description() {
-        let opt = Option::new("test", OptionType::IntType, OptionValue::Int(0))
+        let opt = OptionEntry::new("test", OptionType::IntType, OptionValue::Int(0))
             .with_description("A test option");
         assert_eq!(opt.description(), Some("A test option"));
     }
 
     #[test]
     fn test_option_with_help() {
-        let opt = Option::new("test", OptionType::IntType, OptionValue::Int(0))
+        let opt = OptionEntry::new("test", OptionType::IntType, OptionValue::Int(0))
             .with_help_location(HelpLocation::new("MyPlugin", "option_help"));
         assert!(opt.help_location().is_some());
     }
 
     #[test]
     fn test_option_unregistered() {
-        let opt = Option::new_unregistered("loaded", OptionType::StringType, OptionValue::String("val".into()));
+        let opt = OptionEntry::new_unregistered("loaded", OptionType::StringType, OptionValue::String("val".into()));
         assert!(!opt.is_registered());
     }
 
     #[test]
     fn test_option_get_value_with_fallback() {
-        let opt = Option::new("test", OptionType::IntType, OptionValue::None);
+        let opt = OptionEntry::new("test", OptionType::IntType, OptionValue::None);
         let fallback = OptionValue::Int(99);
-        assert_eq!(*opt.get_value(&fallback), OptionValue::Int(99));
+        assert_eq!(opt.get_value(&fallback), OptionValue::Int(99));
     }
 }

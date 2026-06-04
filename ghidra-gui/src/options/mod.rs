@@ -32,7 +32,7 @@ pub mod wrapped_option;
 pub use action_trigger::ActionTrigger;
 pub use editor_state::EditorState;
 pub use file_options::FileOptions;
-pub use option::Option;
+pub use option::OptionEntry;
 pub use option_type::OptionType;
 pub use option_value::OptionValue;
 pub use options_trait::{Options, OptionsChangeListener};
