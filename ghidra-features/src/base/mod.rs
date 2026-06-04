@@ -14,16 +14,22 @@
 
 pub mod analyzer;
 pub mod assembler;
+pub mod console;
 pub mod association;
 pub mod bookmark;
 pub mod clear;
+pub mod comments;
+pub mod crossrefs;
+pub mod disassembler;
 pub mod equate;
+pub mod flow;
 pub mod function;
 pub mod label;
 pub mod memory;
 pub mod merge;
 pub mod operand;
 pub mod property;
+pub mod references;
 pub mod register;
 pub mod rename;
 pub mod stack;

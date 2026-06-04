@@ -2693,6 +2693,38 @@ impl Iterator for ReferenceIterator {
 }
 
 // ---------------------------------------------------------------------------
+// ReferenceDestinationRangeIter -- iterates over "to" addresses in a range
+// ---------------------------------------------------------------------------
+
+/// Iterates over unique "to" addresses within a given address range.
+///
+/// This is used by cross-reference utilities to find all addresses referenced
+/// within a specific code unit range (for offcut xref detection).
+pub struct ReferenceDestinationRangeIter<'a> {
+    mgr: &'a ReferenceManager,
+    start: Address,
+    end: Address,
+    index: usize,
+    seen: HashSet<Address>,
+}
+
+impl<'a> Iterator for ReferenceDestinationRangeIter<'a> {
+    type Item = Address;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.index < self.mgr.references.len() {
+            let r = &self.mgr.references[self.index];
+            self.index += 1;
+            let addr = r.to_address;
+            if addr >= self.start && addr <= self.end && self.seen.insert(addr) {
+                return Some(addr);
+            }
+        }
+        None
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ReferenceManager
 // ---------------------------------------------------------------------------
 
@@ -2841,9 +2873,14 @@ impl ReferenceManager {
     }
 
     /// Removes references at a specific from address and operand index.
-    fn remove_references_at(&mut self, from_addr: Address, op_index: i32) {
+    pub fn remove_references_at(&mut self, from_addr: Address, op_index: i32) {
         self.references
             .retain(|r| !(r.from_address == from_addr && r.op_index == op_index));
+    }
+
+    /// Returns the total number of references.
+    pub fn num_references(&self) -> usize {
+        self.references.len()
     }
 
     /// Sets the primary flag on a reference.
@@ -3040,6 +3077,21 @@ impl ReferenceManager {
             to_addrs.reverse();
         }
         to_addrs
+    }
+
+    /// Returns an iterator over "to" addresses within the given range (inclusive).
+    pub fn get_reference_destination_iterator_range(
+        &self,
+        start_addr: &Address,
+        end_addr: &Address,
+    ) -> ReferenceDestinationRangeIter<'_> {
+        ReferenceDestinationRangeIter {
+            mgr: self,
+            start: *start_addr,
+            end: *end_addr,
+            index: 0,
+            seen: HashSet::new(),
+        }
     }
 
     /// Updates the reference type on a reference.

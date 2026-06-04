@@ -27,7 +27,7 @@ impl AnalysisPriority {
     pub const FUNCTION_ID_ANALYSIS: Self = Self::new("FUNCTION ID", 800);
     pub const DATA_TYPE_PROPAGATION: Self = Self::new("DATA TYPE PROPAGATION", 900);
     pub const LOW_PRIORITY: Self = Self::new("LOW", 10000);
-    const fn new(name: &'static str, priority: i32) -> Self { Self { name, priority } }
+    pub const fn new(name: &'static str, priority: i32) -> Self { Self { name, priority } }
     pub const fn before(&self) -> Self { Self::new(self.name, self.priority - 1) }
     pub const fn after(&self) -> Self { Self::new(self.name, self.priority + 1) }
     pub const fn priority(&self) -> i32 { self.priority }
