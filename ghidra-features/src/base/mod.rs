@@ -10,4 +10,8 @@
 
 pub mod analyzer;
 pub mod assembler;
+pub mod bookmark;
+pub mod function;
+pub mod label;
 pub mod merge;
+pub mod symbol;
