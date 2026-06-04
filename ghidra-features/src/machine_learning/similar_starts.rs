@@ -7,7 +7,7 @@
 //! the most similar function starts from the training set based on
 //! proximity in the random forest (proportion of trees that agree).
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use super::training::RandomForestModel;
 
@@ -66,7 +66,7 @@ pub struct SimilarStartsFinder {
     /// The random forest model.
     model: RandomForestModel,
     /// For each known start address, the leaf node IDs per tree.
-    leaf_map: HashMap<u64, Vec<u64>>,
+    leaf_map: BTreeMap<u64, Vec<u64>>,
 }
 
 impl SimilarStartsFinder {
@@ -118,6 +118,7 @@ impl SimilarStartsFinder {
             b.similarity
                 .partial_cmp(&a.similarity)
                 .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.address.cmp(&b.address))
         });
         results.truncate(num_starts);
         results

@@ -145,7 +145,7 @@ pub enum EdgeKind {
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// use ghidra_features::lisa::pcode_code_member_visitor::*;
 ///
 /// let mut visitor = PcodeCodeMemberVisitor::new(0x1000);

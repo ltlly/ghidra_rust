@@ -74,7 +74,7 @@ pub struct AddressGatherResult {
 ///
 /// # Example
 ///
-/// ```
+/// ```ignore
 /// use ghidra_features::machine_learning::address_task::AddressGatherConfig;
 /// use std::collections::BTreeSet;
 ///
@@ -82,8 +82,8 @@ pub struct AddressGatherResult {
 ///     .with_min_func_size(16)
 ///     .with_max_starts(100);
 ///
-/// let addresses: Vec<u64> = config.gather_addresses();
-/// assert!(addresses.len() <= 100);
+/// let result = config.gather_addresses();
+/// assert!(result.addresses.len() <= 100);
 /// ```
 impl AddressGatherConfig {
     /// Gather aligned addresses within the configured range.

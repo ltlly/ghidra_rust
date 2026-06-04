@@ -5,7 +5,7 @@
 //! Provides example graph data structures demonstrating Ghidra's
 //! graph visualization framework.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// A vertex in a sample graph.
 #[derive(Debug, Clone)]
@@ -71,11 +71,11 @@ impl SampleEdge {
 #[derive(Debug, Clone)]
 pub struct SampleGraph {
     /// Vertices by ID.
-    vertices: HashMap<u64, SampleVertex>,
+    vertices: BTreeMap<u64, SampleVertex>,
     /// Edges by ID.
-    edges: HashMap<u64, SampleEdge>,
+    edges: BTreeMap<u64, SampleEdge>,
     /// Adjacency list: vertex_id -> list of edge_ids.
-    adjacency: HashMap<u64, Vec<u64>>,
+    adjacency: BTreeMap<u64, Vec<u64>>,
     /// Next vertex ID.
     next_vertex_id: u64,
     /// Next edge ID.
@@ -86,9 +86,9 @@ impl SampleGraph {
     /// Create an empty graph.
     pub fn new() -> Self {
         Self {
-            vertices: HashMap::new(),
-            edges: HashMap::new(),
-            adjacency: HashMap::new(),
+            vertices: BTreeMap::new(),
+            edges: BTreeMap::new(),
+            adjacency: BTreeMap::new(),
             next_vertex_id: 0,
             next_edge_id: 0,
         }

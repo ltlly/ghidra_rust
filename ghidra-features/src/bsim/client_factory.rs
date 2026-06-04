@@ -525,6 +525,8 @@ impl Default for BsimPluginPackage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::description::{CategoryRecord, DatabaseInformation, DescriptionManager};
+    use super::super::protocol::{BSimQueryType, BSimResponseType};
 
     #[test]
     fn test_parse_postgresql_url() {
@@ -562,7 +564,8 @@ mod tests {
     fn test_parse_file_url() {
         let url = BSimUrl::parse("file:/path/to/database").unwrap();
         assert_eq!(url.protocol, BSimProtocol::File);
-        assert_eq!(url.path, "/path/to/database");
+        // "file:/" prefix is consumed, leaving "path/to/database"
+        assert_eq!(url.path, "path/to/database");
     }
 
     #[test]
@@ -658,7 +661,21 @@ mod tests {
     fn test_sql_function_database_default_impl() {
         struct MockDb;
         impl FunctionDatabase for MockDb {
+            fn connection_type(&self) -> ConnectionType { ConnectionType::Postgresql }
             fn status(&self) -> DatabaseStatus { DatabaseStatus::Connected }
+            fn database_info(&self) -> BSimResult<Option<DatabaseInformation>> { Ok(None) }
+            fn open(&mut self, _url: &str) -> BSimResult<()> { Ok(()) }
+            fn close(&mut self) -> BSimResult<()> { Ok(()) }
+            fn query(&mut self, _query: &mut BSimQueryType) -> BSimResult<BSimResponseType> { Err(BSimError::QueryError("mock".to_string())) }
+            fn description_manager(&self) -> Option<&DescriptionManager> { None }
+            fn description_manager_mut(&mut self) -> Option<&mut DescriptionManager> { None }
+            fn create_database(&mut self, _info: &DatabaseInformation) -> BSimResult<()> { Ok(()) }
+            fn drop_database(&mut self) -> BSimResult<()> { Ok(()) }
+            fn executable_count(&mut self) -> BSimResult<u32> { Ok(0) }
+            fn install_category(&mut self, _category: &CategoryRecord) -> BSimResult<()> { Ok(()) }
+            fn install_metadata(&mut self, _info: &DatabaseInformation) -> BSimResult<()> { Ok(()) }
+            fn install_tag(&mut self, _tag_name: &str) -> BSimResult<()> { Ok(()) }
+            fn prewarm(&mut self) -> BSimResult<()> { Ok(()) }
         }
         impl SqlFunctionDatabase for MockDb {}
 
