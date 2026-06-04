@@ -1633,6 +1633,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.18",
  "whoami",
 ]
@@ -1696,6 +1697,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "smallvec",
+ "tempfile",
  "thiserror 2.0.18",
 ]
 

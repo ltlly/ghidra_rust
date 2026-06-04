@@ -10,6 +10,7 @@ pub mod error;
 pub mod filesystem;
 pub mod generic;
 pub mod graph;
+pub mod help;
 pub mod listing;
 pub mod macro_;
 pub mod mem;

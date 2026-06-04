@@ -11,6 +11,9 @@
 //! - `function_id`: Function identification via hash-based signature matching
 //! - `microsoft_code_analyzer`: MSVC RTTI, vtables, and SEH analysis
 //! - `system_emulation`: P-code based emulation and syscall handling
+//! - `ghidra_server`: Ghidra Server -- repository management, authentication, block-stream I/O
+//! - `pyghidra`: PyGhidra -- Python interpreter integration, property bridging
+//! - `ghidra_go`: GhidraGo -- send Ghidra URLs to a running instance via IPC
 //!
 //! # Feature Manager
 //!
@@ -31,13 +34,17 @@ pub mod dwarf;
 pub mod fileformats;
 pub mod function_id;
 pub mod functiongraph;
+pub mod ghidra_go;
+pub mod ghidra_server;
 pub mod graphservices;
 pub mod lisa;
+pub mod loader;
 pub mod machine_learning;
 pub mod microsoft_code_analyzer;
 pub mod objc;
 pub mod pdb;
 pub mod programdiff;
+pub mod pyghidra;
 pub mod sarif;
 pub mod recognizers;
 pub mod rust;
