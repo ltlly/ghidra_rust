@@ -291,8 +291,12 @@ mod tests {
         let base = 0u64;
         let mut data = vec![0u8; 0x400];
 
-        // COL at 0x100: signature=0
+        // COL at 0x100: signature=0, vbOff=0, ctorDisp=0, pRtti0=0x300, pRtti3=0x350
         data[0x100..0x104].copy_from_slice(&0u32.to_le_bytes());
+        data[0x104..0x108].copy_from_slice(&0u32.to_le_bytes());
+        data[0x108..0x10C].copy_from_slice(&0u32.to_le_bytes());
+        data[0x10C..0x110].copy_from_slice(&0x300u32.to_le_bytes()); // pRtti0
+        data[0x110..0x114].copy_from_slice(&0x350u32.to_le_bytes()); // pRtti3
 
         // Meta pointer at 0x200 -> points to 0x100 (the COL)
         data[0x200..0x204].copy_from_slice(&0x100u32.to_le_bytes());

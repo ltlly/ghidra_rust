@@ -199,7 +199,7 @@ pub enum Stmt {
 /// );
 ///
 /// let code = s.render();
-/// assert!(code.contains("local tmp;"));
+/// assert!(code.contains("local tmp:32;"));
 /// assert!(code.contains("tmp = 42;"));
 /// assert!(code.contains("if (tmp == 42)"));
 /// ```
