@@ -50,6 +50,7 @@ pub mod postgresql;
 pub mod protocol;
 pub mod query;
 pub mod search_results;
+pub mod server_info;
 pub mod tables;
 
 pub use description::{

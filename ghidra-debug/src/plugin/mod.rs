@@ -10,6 +10,17 @@
 //! - `taint`: Taint analysis types for emulated execution.
 //! - `mapping`: Static mapping plugin types.
 //! - `gui`: GUI provider data model types (breakpoints, registers, threads, stack frames).
+//! - `gui_colors`: Color management for the debugger GUI.
+//! - `gui_diff`: Trace diff data model types.
+//! - `gui_listing`: Listing integration data model types.
+//! - `gui_memory`: Memory regions panel data model types.
+//! - `gui_modules`: Module/section panel data model types.
+//! - `gui_register`: Register panel data model types.
+//! - `gui_thread`: Thread panel data model types.
+//! - `gui_time`: Snapshot/time panel data model types.
+//! - `gui_timeoverview`: Time overview panel data model types.
+//! - `gui_tracecalltree`: Call tree panel data model types.
+//! - `gui_watch`: Watch panel data model types.
 //! - `stack`: Stack analysis and call stack types.
 //! - `utils`: Memory range, register value, and alignment utilities.
 //! - `platform_opinion`: Platform opinion framework for debugger backends.
@@ -27,6 +38,17 @@ pub mod disassemble;
 pub mod event;
 pub mod export;
 pub mod gui;
+pub mod gui_colors;
+pub mod gui_diff;
+pub mod gui_listing;
+pub mod gui_memory;
+pub mod gui_modules;
+pub mod gui_register;
+pub mod gui_thread;
+pub mod gui_time;
+pub mod gui_timeoverview;
+pub mod gui_tracecalltree;
+pub mod gui_watch;
 pub mod location_tracking;
 pub mod mapping;
 pub mod platform_frida;
@@ -44,6 +66,25 @@ pub use disassemble::*;
 pub use event::*;
 pub use export::*;
 pub use gui::*;
+pub use gui_colors::{DebugColor, DebugColorScheme};
+pub use gui_diff::{DiffKind, MemoryDiffEntry, RegisterDiffEntry, TraceDiffResult};
+pub use gui_listing::{BlendedListingColorModel, DebuggerListingLocation};
+pub use gui_memory::{CachedBytePage, MemoryRegionRow, MemoryRegionTableModel};
+pub use gui_modules::{
+    ModuleColumn, ModuleRow, ModuleTableModel, SectionRow, StaticMappingRow,
+};
+pub use gui_register::{
+    AvailableRegisterRow, RegisterColumn, RegisterRow, RegisterTableModel,
+};
+pub use gui_thread::{ThreadColumn, ThreadRow, ThreadTableModel};
+pub use gui_time::{SnapshotRow, SnapshotTableModel};
+pub use gui_timeoverview::{
+    BreakpointOverviewType, TimeOverviewColorEntry, TimeOverviewColorService, TimeType,
+};
+pub use gui_tracecalltree::{
+    CallTreeNodeKind, TraceCallTreeLogContext, TraceCallTreeNode, TraceCallTreeModel,
+};
+pub use gui_watch::{DefaultWatchRow, SavedWatchSettings, WatchColumn, WatchFormat, WatchTableModel};
 pub use location_tracking::*;
 pub use mapping::*;
 pub use platform_frida::*;

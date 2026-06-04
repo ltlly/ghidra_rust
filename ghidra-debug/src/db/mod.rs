@@ -7,8 +7,10 @@
 //! - `trace_db`: Main trace database.
 //! - `trace_db_manager`: Trait for database managers.
 //! - `trace_db_bookmark`: Bookmark manager.
+//! - `trace_db_breakpoint`: Breakpoint location/specification manager.
 //! - `trace_db_context`: Register context manager.
 //! - `trace_db_data`: Data type manager.
+//! - `trace_db_guest`: Guest platform manager.
 //! - `trace_db_listing`: Code listing manager.
 //! - `trace_db_map`: Address mapping manager.
 //! - `trace_db_memory`: Memory state manager.
@@ -25,8 +27,10 @@
 
 pub mod trace_db;
 pub mod trace_db_bookmark;
+pub mod trace_db_breakpoint;
 pub mod trace_db_context;
 pub mod trace_db_data;
+pub mod trace_db_guest;
 pub mod trace_db_listing;
 pub mod trace_db_manager;
 pub mod trace_db_map;
@@ -43,5 +47,11 @@ pub mod trace_db_time;
 pub mod trace_db_time_viewport;
 
 pub use trace_db::TraceDatabase;
+pub use trace_db_breakpoint::{
+    DbTraceBreakpointLocation, DbTraceBreakpointManager, DbTraceBreakpointSpec,
+};
+pub use trace_db_guest::{
+    DbTraceGuestLanguage, DbTraceGuestPlatform, DbTraceHostPlatform, DbTracePlatformManager,
+};
 pub use trace_db_manager::{DbTraceManager, TraceDbError, TraceDbResult};
 pub use trace_db_time_viewport::{SingleSnapViewport, TraceTimeViewport};

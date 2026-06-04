@@ -100,6 +100,8 @@ pub mod misc;
 pub mod hover;
 pub mod help;
 pub mod check;
+pub mod checksums;
+pub mod marker;
 pub mod data_plugin;
 
 // -- Additional modules ported from Ghidra's Features/Base plugin/core --
