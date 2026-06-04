@@ -23,6 +23,7 @@
 
 pub mod base;
 pub mod bsim;
+pub mod codebrowser;
 pub mod bsim_elastic;
 pub mod byte_patterns;
 pub mod datamgr;
