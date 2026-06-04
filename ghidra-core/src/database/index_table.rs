@@ -48,7 +48,7 @@ impl GhidraIndexTable {
     pub fn add_entry(&self, db: &Database, record: &DBRecord) -> DbResult<()> {
         let indexed_value = record.get_at(self.column_index).cloned().unwrap_or(FieldValue::Null);
         let pk = record.key().cloned().unwrap_or(FieldValue::Null);
-        let index_key = format!("{}", indexed_value);
+        let index_key = field_to_index_key(&indexed_value);
 
         // Check if entry exists
         let existing_blob: Option<Vec<u8>> = {
@@ -89,7 +89,7 @@ impl GhidraIndexTable {
     pub fn delete_entry(&self, db: &Database, record: &DBRecord) -> DbResult<()> {
         let indexed_value = record.get_at(self.column_index).cloned().unwrap_or(FieldValue::Null);
         let pk = record.key().cloned().unwrap_or(FieldValue::Null);
-        let index_key = format!("{}", indexed_value);
+        let index_key = field_to_index_key(&indexed_value);
 
         let existing_blob: Option<Vec<u8>> = {
             let conn = db.read()?;
@@ -122,7 +122,8 @@ impl GhidraIndexTable {
 
     /// Find primary keys for the given indexed field value.
     pub fn find_primary_keys(&self, db: &Database, field: &FieldValue) -> DbResult<Vec<FieldValue>> {
-        let index_key = format!("{}", field);
+        // Use the raw string representation without quotes for lookup
+        let index_key = field_to_index_key(field);
         let conn = db.read()?;
         let blob: Option<Vec<u8>> = conn.query_row(
             &format!("SELECT primary_keys FROM {} WHERE index_key=?1", self.index_table_name),
@@ -249,6 +250,22 @@ impl GhidraIndexTable {
 // PK encoding helpers
 // ============================================================================
 
+/// Convert a FieldValue to a string key for the index table.
+/// Uses raw values without quotes for strings.
+fn field_to_index_key(field: &FieldValue) -> String {
+    match field {
+        FieldValue::String(s) => s.clone(),
+        FieldValue::Int(v) => v.to_string(),
+        FieldValue::Long(v) => v.to_string(),
+        FieldValue::Short(v) => v.to_string(),
+        FieldValue::Boolean(v) => v.to_string(),
+        FieldValue::Float(v) => v.to_string(),
+        FieldValue::Double(v) => v.to_string(),
+        FieldValue::Null => "NULL".to_string(),
+        FieldValue::Binary(b) => format!("{:?}", b),
+    }
+}
+
 fn encode_pk(pk: &FieldValue) -> Vec<u8> {
     match pk {
         FieldValue::Long(v) => v.to_be_bytes().to_vec(),
@@ -341,11 +358,12 @@ mod tests {
         let pk_bytes = encode_pk(&pk_val);
         drop(conn);
 
-        // Manually add to index using parameterized query
+        // Manually add to index using parameterized query (use length-prefixed format)
+        let encoded_pk = encode_pks(&[pk_val]);
         let conn = db.write().unwrap();
         conn.execute(
             &format!("INSERT INTO {} (index_key, primary_keys) VALUES (?1, ?2)", idx.index_table_name()),
-            rusqlite::params![val, pk_bytes],
+            rusqlite::params![val, encoded_pk],
         ).unwrap();
         drop(conn);
 

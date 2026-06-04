@@ -6,10 +6,36 @@
 //! detection, and [`GraphAlgorithms`] for generic graph traversal and analysis.
 //!
 //! Built on top of the [`petgraph`] crate for efficient graph algorithms.
+//!
+//! ## Generic Graph Framework
+//!
+//! Also provides the generic graph framework ported from Ghidra's Java code:
+//! - Core traits: [`traits::GEdge`], [`traits::GDirectedGraph`], [`traits::GImplicitDirectedGraph`]
+//! - Default edge: [`default_edge::DefaultGEdge`]
+//! - Graph implementations: [`hash_graph::HashDirectedGraph`]
+//! - Path types: [`graph_path::GraphPath`], [`graph_path::GraphPathSet`]
+//! - Edge metrics: [`edge_weight::GEdgeWeightMetric`]
+//! - Factory: [`factory::GraphFactory`]
+//! - Tree conversion: [`graph_to_tree::GraphToTreeAlgorithm`]
+//! - Algorithms: [`algo::GraphNavigator`], [`algo::DepthFirstSorter`],
+//!   [`algo::DijkstraShortestPaths`], [`algo::JohnsonCircuitsAlgorithm`],
+//!   [`algo::TarjanSCC`], [`algo::ChkDominanceAlgorithm`]
+//! - Path finding: [`algo::find_paths_iterative`], [`algo::find_paths_recursive`]
+
+// Submodules for the generic graph framework
+pub mod traits;
+pub mod default_edge;
+pub mod edge_weight;
+pub mod graph_path;
+pub mod hash_graph;
+pub mod factory;
+pub mod graph_to_tree;
+pub mod algo;
+mod tests_new;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use petgraph::algo;
+use petgraph::algo as petalgo;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Dfs, EdgeRef};
 use petgraph::Direction;
@@ -1053,7 +1079,7 @@ impl CallGraph {
     /// callers, i.e., leaves first).
     pub fn topological_order(&self) -> Vec<Address> {
         let mut order = Vec::new();
-        if let Ok(sorted) = algo::toposort(&self.graph, None) {
+        if let Ok(sorted) = petalgo::toposort(&self.graph, None) {
             for idx in sorted {
                 order.push(self.graph[idx].address);
             }
@@ -1063,7 +1089,7 @@ impl CallGraph {
 
     /// Returns strongly-connected components (mutually recursive function groups).
     pub fn strongly_connected_components(&self) -> Vec<Vec<Address>> {
-        algo::kosaraju_scc(&self.graph)
+        petalgo::kosaraju_scc(&self.graph)
             .into_iter()
             .map(|scc| scc.iter().map(|&idx| self.graph[idx].address).collect())
             .collect()
@@ -1112,7 +1138,7 @@ impl CallGraph {
     /// Returns `true` if the function is part of a strongly connected
     /// component with more than one node.
     pub fn has_recursion(&self, addr: Address) -> bool {
-        let sccs = algo::tarjan_scc(&self.graph);
+        let sccs = petalgo::tarjan_scc(&self.graph);
         for scc in &sccs {
             if scc.len() > 1 {
                 let addrs: HashSet<Address> = scc
@@ -1873,7 +1899,7 @@ impl GraphAlgorithms {
                 }
             }
         }
-        algo::kosaraju_scc(&graph)
+        petalgo::kosaraju_scc(&graph)
             .into_iter()
             .map(|scc| scc.into_iter().map(|ni| ni.index()).collect())
             .collect()

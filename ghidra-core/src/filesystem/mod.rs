@@ -6,6 +6,13 @@
 //! supporting types: [`FSRL`]/[`FSRLRoot`] resource locators, [`GFile`] file
 //! references, reference-count management via [`FileSystemRefManager`], and
 //! miscellaneous utilities (`FSUtilities`).
+//!
+//! Also provides the [`store`] module for the project-level filesystem store
+//! framework (corresponding to `ghidra.framework.store.*`), including
+//! versioned and non-versioned items, checkout management, local and remote
+//! filesystem implementations.
+
+pub mod store;
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};

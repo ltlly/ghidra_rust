@@ -43,6 +43,7 @@
 
 pub mod analysis;
 pub mod cpp;
+pub mod decompiler;
 pub mod pcode;
 pub mod sleigh;
 
