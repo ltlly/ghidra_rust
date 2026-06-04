@@ -2,10 +2,19 @@
 //!
 //! Provides logging, error reporting, string/numeric utilities, file
 //! operations, collection helpers, date formatting, task monitoring,
-//! and system information.
+//! system information, JSON parsing, expression evaluation, STL containers,
+//! hash digests, caching, iterator utilities, algorithms, and complex numbers.
 
 pub mod system;
 pub mod task;
+pub mod json;
+pub mod expressions;
+pub mod stl;
+pub mod hash;
+pub mod cache;
+pub mod iterators;
+pub mod algorithms;
+pub mod complex;
 
 pub use system::SystemInfo;
 pub use task::{

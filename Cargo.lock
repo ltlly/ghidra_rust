@@ -1614,6 +1614,7 @@ dependencies = [
  "bzip2",
  "chrono",
  "flate2",
+ "hex",
  "indexmap",
  "lazy_static",
  "libc",

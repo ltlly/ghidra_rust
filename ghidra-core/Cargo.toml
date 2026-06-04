@@ -33,3 +33,6 @@ num-bigint = "0.4"
 libc = "0.2"
 whoami = "1"
 rand = "0.8"
+
+[dev-dependencies]
+hex = "0.4"
