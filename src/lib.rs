@@ -4,6 +4,7 @@
 //! package that depends on all sub-crates.
 
 pub use ghidra_core;
+pub use ghidra_debug;
 pub use ghidra_decompile;
 pub use ghidra_emulation;
 pub use ghidra_features;

@@ -22,10 +22,12 @@
 //! instances for loading different binary file formats into [`Program`]s.
 
 pub mod base;
+pub mod bin_format;
 pub mod bsim;
 pub mod codebrowser;
 pub mod decompile_ui;
 pub mod external;
+pub mod exporter;
 pub mod bsim_elastic;
 pub mod byte_patterns;
 pub mod datamgr;
@@ -41,6 +43,7 @@ pub mod functiongraph;
 pub mod ghidra_go;
 pub mod ghidra_server;
 pub mod graphservices;
+pub mod importer;
 pub mod jython;
 pub mod lisa;
 pub mod loader;

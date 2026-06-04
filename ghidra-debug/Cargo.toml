@@ -1,0 +1,25 @@
+[package]
+name = "ghidra-debug"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - Debug extensions: trace modeling, target API, breakpoint management, emulation support"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+log = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rusqlite = { workspace = true, features = ["backup"] }
+indexmap = { workspace = true, features = ["serde"] }
+dashmap = { workspace = true }
+bitflags = { workspace = true }
+regex = { workspace = true }
+lazy_static = { workspace = true }
+tokio = { workspace = true, features = ["sync", "rt"] }
+
+[dev-dependencies]
+tempfile = "3"

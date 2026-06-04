@@ -1044,6 +1044,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "5.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
+dependencies = [
+ "cfg-if",
+ "hashbrown 0.14.5",
+ "lock_api",
+ "once_cell",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "digest"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1641,6 +1654,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidra-debug"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitflags 2.11.1",
+ "chrono",
+ "dashmap",
+ "ghidra-core",
+ "indexmap",
+ "lazy_static",
+ "log",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ghidra-decompile"
 version = "0.1.0"
 dependencies = [
@@ -1748,6 +1783,7 @@ name = "ghidra-rust"
 version = "0.1.0"
 dependencies = [
  "ghidra-core",
+ "ghidra-debug",
  "ghidra-decompile",
  "ghidra-emulation",
  "ghidra-features",

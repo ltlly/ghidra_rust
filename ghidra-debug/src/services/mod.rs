@@ -1,0 +1,238 @@
+//! Service interfaces for the debugger framework.
+//!
+//! Ported from Ghidra's debugger service interfaces in `ghidra.app.services`.
+//! Each service trait defines an interface that plugin components can
+//! implement and register.
+
+use crate::api::breakpoint::LogicalBreakpoint;
+use crate::model::Lifespan;
+
+/// Service for managing the lifecycle of open traces.
+pub trait TraceManagerService {
+    /// Get the currently active trace, if any.
+    fn active_trace(&self) -> Option<&dyn TraceInfo>;
+
+    /// Open a trace for viewing.
+    fn open_trace(&mut self, trace_key: i64) -> Result<(), String>;
+
+    /// Close a trace.
+    fn close_trace(&mut self, trace_key: i64) -> Result<(), String>;
+
+    /// Activate (bring to focus) a trace.
+    fn activate_trace(&mut self, trace_key: i64) -> Result<(), String>;
+}
+
+/// Minimal info about a trace for service communication.
+pub trait TraceInfo {
+    /// A unique key for this trace.
+    fn key(&self) -> i64;
+
+    /// The name of the trace.
+    fn name(&self) -> &str;
+
+    /// Whether the trace is currently active.
+    fn is_active(&self) -> bool;
+}
+
+/// Service for managing static mappings between programs and traces.
+pub trait StaticMappingService {
+    /// Map a program address range to a trace address range.
+    fn add_mapping(
+        &mut self,
+        program_url: &str,
+        program_min: u64,
+        program_max: u64,
+        trace_min: u64,
+        trace_max: u64,
+        lifespan: Lifespan,
+    ) -> Result<(), String>;
+
+    /// Get the trace address for a program address.
+    fn get_trace_address(&self, program_url: &str, program_addr: u64) -> Option<u64>;
+
+    /// Get the program address for a trace address.
+    fn get_program_address(&self, trace_addr: u64) -> Option<(String, u64)>;
+}
+
+/// Service for managing logical breakpoints.
+pub trait LogicalBreakpointService {
+    /// Get all logical breakpoints.
+    fn breakpoints(&self) -> Vec<&LogicalBreakpoint>;
+
+    /// Get a breakpoint at the given address.
+    fn breakpoint_at(&self, offset: u64) -> Option<&LogicalBreakpoint>;
+
+    /// Add a breakpoint.
+    fn add_breakpoint(&mut self, bp: LogicalBreakpoint) -> Result<(), String>;
+
+    /// Delete a breakpoint at the given address.
+    fn delete_breakpoint(&mut self, offset: u64) -> Result<(), String>;
+
+    /// Toggle a breakpoint enabled/disabled.
+    fn toggle_breakpoint(&mut self, offset: u64, enabled: bool) -> Result<(), String>;
+}
+
+/// Service for managing emulation.
+pub trait EmulationService {
+    /// Start emulating from the current state.
+    fn start_emulation(&mut self, trace_key: i64) -> Result<(), String>;
+
+    /// Stop emulation.
+    fn stop_emulation(&mut self, trace_key: i64) -> Result<(), String>;
+
+    /// Whether emulation is active for the given trace.
+    fn is_emulating(&self, trace_key: i64) -> bool;
+}
+
+/// Service for platform management.
+pub trait PlatformService {
+    /// Get the name of the current platform.
+    fn platform_name(&self) -> &str;
+
+    /// Get the language ID.
+    fn language_id(&self) -> &str;
+
+    /// Get the compiler spec ID.
+    fn compiler_spec_id(&self) -> &str;
+}
+
+/// Service for listing (code view) integration.
+pub trait ListingService {
+    /// Go to the given address in the listing.
+    fn go_to(&mut self, offset: u64);
+
+    /// Get the current cursor address.
+    fn current_address(&self) -> Option<u64>;
+}
+
+/// Service for watch (variable watch) integration.
+pub trait WatchService {
+    /// Add a watch expression.
+    fn add_watch(&mut self, expression: String);
+
+    /// Remove a watch expression.
+    fn remove_watch(&mut self, index: usize);
+
+    /// Get all watch expressions.
+    fn watches(&self) -> &[String];
+}
+
+/// Service for the debug console.
+pub trait ConsoleService {
+    /// Print a message to the console.
+    fn print(&mut self, message: &str);
+
+    /// Print an error message to the console.
+    fn print_error(&mut self, message: &str);
+}
+
+/// Service for reporting progress.
+pub trait ProgressService {
+    /// Start a new task with the given name.
+    fn start_task(&mut self, name: &str) -> i64;
+
+    /// Update progress on a task.
+    fn update_progress(&mut self, task_id: i64, progress: f64);
+
+    /// Finish a task.
+    fn finish_task(&mut self, task_id: i64);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct MockTraceInfo {
+        key_val: i64,
+        name_val: String,
+        active: bool,
+    }
+
+    impl TraceInfo for MockTraceInfo {
+        fn key(&self) -> i64 {
+            self.key_val
+        }
+        fn name(&self) -> &str {
+            &self.name_val
+        }
+        fn is_active(&self) -> bool {
+            self.active
+        }
+    }
+
+    struct MockBreakpointService {
+        bps: Vec<LogicalBreakpoint>,
+    }
+
+    impl MockBreakpointService {
+        fn new() -> Self {
+            Self { bps: Vec::new() }
+        }
+    }
+
+    impl LogicalBreakpointService for MockBreakpointService {
+        fn breakpoints(&self) -> Vec<&LogicalBreakpoint> {
+            self.bps.iter().collect()
+        }
+
+        fn breakpoint_at(&self, offset: u64) -> Option<&LogicalBreakpoint> {
+            self.bps.iter().find(|bp| bp.offset == offset)
+        }
+
+        fn add_breakpoint(&mut self, bp: LogicalBreakpoint) -> Result<(), String> {
+            self.bps.push(bp);
+            Ok(())
+        }
+
+        fn delete_breakpoint(&mut self, offset: u64) -> Result<(), String> {
+            let before = self.bps.len();
+            self.bps.retain(|bp| bp.offset != offset);
+            if self.bps.len() < before {
+                Ok(())
+            } else {
+                Err("Breakpoint not found".into())
+            }
+        }
+
+        fn toggle_breakpoint(&mut self, offset: u64, enabled: bool) -> Result<(), String> {
+            if let Some(bp) = self.bps.iter_mut().find(|bp| bp.offset == offset) {
+                bp.state.mode = Some(if enabled {
+                    crate::api::breakpoint::BreakpointMode::Enabled
+                } else {
+                    crate::api::breakpoint::BreakpointMode::Disabled
+                });
+                Ok(())
+            } else {
+                Err("Breakpoint not found".into())
+            }
+        }
+    }
+
+    #[test]
+    fn test_trace_info() {
+        let info = MockTraceInfo {
+            key_val: 1,
+            name_val: "test".into(),
+            active: true,
+        };
+        assert_eq!(info.key(), 1);
+        assert_eq!(info.name(), "test");
+        assert!(info.is_active());
+    }
+
+    #[test]
+    fn test_breakpoint_service() {
+        let mut svc = MockBreakpointService::new();
+        svc.add_breakpoint(LogicalBreakpoint::new(0x400000, "0x400000"))
+            .unwrap();
+        assert_eq!(svc.breakpoints().len(), 1);
+        assert!(svc.breakpoint_at(0x400000).is_some());
+        assert!(svc.breakpoint_at(0x500000).is_none());
+
+        svc.toggle_breakpoint(0x400000, false).unwrap();
+        assert!(!svc.breakpoint_at(0x400000).unwrap().is_enabled());
+
+        svc.delete_breakpoint(0x400000).unwrap();
+        assert!(svc.breakpoints().is_empty());
+    }
+}

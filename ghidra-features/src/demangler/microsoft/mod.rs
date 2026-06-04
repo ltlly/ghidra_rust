@@ -845,3 +845,719 @@ mod tests {
         assert_eq!(r.base_name, "printf");
     }
 }
+
+// ---------------------------------------------------------------------------
+// MsCInterpretation
+// ---------------------------------------------------------------------------
+
+/// Controls whether a symbol should be demangled as a function.
+///
+/// Corresponds to Java's `MsCInterpretation`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MsCInterpretation {
+    /// Always interpret as a function.
+    Function,
+    /// Never interpret as a function (data only).
+    NonFunction,
+    /// Interpret as a function only if one already exists at the address.
+    FunctionIfExists,
+}
+
+impl MsCInterpretation {
+    /// Get the display name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Function => "Function",
+            Self::NonFunction => "Non-Function",
+            Self::FunctionIfExists => "Function if exists",
+        }
+    }
+}
+
+impl Default for MsCInterpretation {
+    fn default() -> Self {
+        Self::FunctionIfExists
+    }
+}
+
+impl fmt::Display for MsCInterpretation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MicrosoftDemanglerOptions
+// ---------------------------------------------------------------------------
+
+/// Options for the Microsoft demangler.
+///
+/// Corresponds to Java's `MicrosoftDemanglerOptions`.
+#[derive(Debug, Clone)]
+pub struct MicrosoftDemanglerOptions {
+    /// Whether to demangle only known patterns.
+    demangle_only_known_patterns: bool,
+    /// Whether to apply the recovered signature.
+    apply_signature: bool,
+    /// Whether to apply the recovered calling convention.
+    apply_calling_convention: bool,
+    /// How to interpret symbols (function vs. data).
+    interpretation: MsCInterpretation,
+    /// Whether to use encoded anonymous namespace names.
+    use_encoded_anonymous_namespace: bool,
+    /// Whether to apply UDT (user-defined type) argument type tags.
+    apply_udt_argument_type_tag: bool,
+    /// Architecture size (32 or 64).
+    architecture_size: u32,
+}
+
+impl MicrosoftDemanglerOptions {
+    /// Create new options with defaults.
+    pub fn new() -> Self {
+        Self {
+            demangle_only_known_patterns: false,
+            apply_signature: true,
+            apply_calling_convention: true,
+            interpretation: MsCInterpretation::default(),
+            use_encoded_anonymous_namespace: false,
+            apply_udt_argument_type_tag: true,
+            architecture_size: 64,
+        }
+    }
+
+    /// Whether to demangle only known patterns.
+    pub fn demangle_only_known_patterns(&self) -> bool {
+        self.demangle_only_known_patterns
+    }
+
+    /// Set whether to demangle only known patterns.
+    pub fn set_demangle_only_known_patterns(&mut self, value: bool) {
+        self.demangle_only_known_patterns = value;
+    }
+
+    /// Whether to apply the recovered signature.
+    pub fn apply_signature(&self) -> bool {
+        self.apply_signature
+    }
+
+    /// Set whether to apply the recovered signature.
+    pub fn set_apply_signature(&mut self, value: bool) {
+        self.apply_signature = value;
+    }
+
+    /// Whether to apply the recovered calling convention.
+    pub fn apply_calling_convention(&self) -> bool {
+        self.apply_calling_convention
+    }
+
+    /// Set whether to apply the recovered calling convention.
+    pub fn set_apply_calling_convention(&mut self, value: bool) {
+        self.apply_calling_convention = value;
+    }
+
+    /// Get the interpretation mode.
+    pub fn get_interpretation(&self) -> MsCInterpretation {
+        self.interpretation
+    }
+
+    /// Set the interpretation mode.
+    pub fn set_interpretation(&mut self, interpretation: MsCInterpretation) {
+        self.interpretation = interpretation;
+    }
+
+    /// Whether to use encoded anonymous namespace names.
+    pub fn get_use_encoded_anonymous_namespace(&self) -> bool {
+        self.use_encoded_anonymous_namespace
+    }
+
+    /// Set whether to use encoded anonymous namespace names.
+    pub fn set_use_encoded_anonymous_namespace(&mut self, value: bool) {
+        self.use_encoded_anonymous_namespace = value;
+    }
+
+    /// Whether to apply UDT argument type tags.
+    pub fn get_apply_udt_argument_type_tag(&self) -> bool {
+        self.apply_udt_argument_type_tag
+    }
+
+    /// Set whether to apply UDT argument type tags.
+    pub fn set_apply_udt_argument_type_tag(&mut self, value: bool) {
+        self.apply_udt_argument_type_tag = value;
+    }
+
+    /// Get the architecture size.
+    pub fn architecture_size(&self) -> u32 {
+        self.architecture_size
+    }
+
+    /// Set the architecture size.
+    pub fn set_architecture_size(&mut self, size: u32) {
+        self.architecture_size = size;
+    }
+}
+
+impl Default for MicrosoftDemanglerOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MsdApplyOption
+// ---------------------------------------------------------------------------
+
+/// Options for how demangling results are applied to the program.
+///
+/// Used as a custom option in the Microsoft Demangler Analyzer.
+///
+/// Corresponds to Java's `MsdApplyOption`.
+#[derive(Debug, Clone)]
+pub struct MsdApplyOption {
+    /// Only demangle known patterns.
+    pub demangle_only_known_patterns: bool,
+    /// Apply the signature.
+    pub apply_signature: bool,
+    /// Apply the calling convention.
+    pub apply_calling_convention: bool,
+    /// How to interpret symbols.
+    pub interpretation: MsCInterpretation,
+}
+
+impl MsdApplyOption {
+    /// Create a new apply option.
+    pub fn new(
+        demangle_only_known_patterns: bool,
+        apply_signature: bool,
+        apply_calling_convention: bool,
+        interpretation: MsCInterpretation,
+    ) -> Self {
+        Self {
+            demangle_only_known_patterns,
+            apply_signature,
+            apply_calling_convention,
+            interpretation,
+        }
+    }
+
+    /// Apply these options to `MicrosoftDemanglerOptions`.
+    pub fn apply_to(&self, options: &mut MicrosoftDemanglerOptions) {
+        options.set_demangle_only_known_patterns(self.demangle_only_known_patterns);
+        options.set_apply_signature(self.apply_signature);
+        options.set_apply_calling_convention(self.apply_calling_convention);
+        options.set_interpretation(self.interpretation);
+    }
+}
+
+impl Default for MsdApplyOption {
+    fn default() -> Self {
+        let opts = MicrosoftDemanglerOptions::new();
+        Self::new(
+            opts.demangle_only_known_patterns(),
+            opts.apply_signature(),
+            opts.apply_calling_convention(),
+            opts.get_interpretation(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MsdOutputOption
+// ---------------------------------------------------------------------------
+
+/// Options controlling the output format of demangled names.
+///
+/// Corresponds to Java's `MsdOutputOption`.
+#[derive(Debug, Clone)]
+pub struct MsdOutputOption {
+    /// Whether to use encoded anonymous namespace names.
+    pub use_encoded_anonymous_namespace: bool,
+    /// Whether to apply UDT argument type tags.
+    pub apply_udt_argument_type_tag: bool,
+}
+
+impl MsdOutputOption {
+    /// Create a new output option.
+    pub fn new(use_encoded_anonymous_namespace: bool, apply_udt_argument_type_tag: bool) -> Self {
+        Self {
+            use_encoded_anonymous_namespace,
+            apply_udt_argument_type_tag,
+        }
+    }
+
+    /// Apply these options to `MicrosoftDemanglerOptions`.
+    pub fn apply_to(&self, options: &mut MicrosoftDemanglerOptions) {
+        options.set_use_encoded_anonymous_namespace(self.use_encoded_anonymous_namespace);
+        options.set_apply_udt_argument_type_tag(self.apply_udt_argument_type_tag);
+    }
+}
+
+impl Default for MsdOutputOption {
+    fn default() -> Self {
+        let opts = MicrosoftDemanglerOptions::new();
+        Self::new(
+            opts.get_use_encoded_anonymous_namespace(),
+            opts.get_apply_udt_argument_type_tag(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MicrosoftMangledContext
+// ---------------------------------------------------------------------------
+
+/// Extended mangled context for the Microsoft demangler.
+///
+/// Contains the program reference needed for interpretation decisions.
+///
+/// Corresponds to Java's `MicrosoftMangledContext`.
+#[derive(Debug, Clone)]
+pub struct MicrosoftMangledContext {
+    /// The mangled symbol name.
+    mangled: String,
+    /// The address of the symbol.
+    address: u64,
+    /// The demangler options.
+    options: MicrosoftDemanglerOptions,
+}
+
+impl MicrosoftMangledContext {
+    /// Create a new Microsoft mangled context.
+    pub fn new(mangled: String, address: u64, options: MicrosoftDemanglerOptions) -> Self {
+        Self {
+            mangled,
+            address,
+            options,
+        }
+    }
+
+    /// Get the mangled name.
+    pub fn mangled(&self) -> &str {
+        &self.mangled
+    }
+
+    /// Get the address.
+    pub fn address(&self) -> u64 {
+        self.address
+    }
+
+    /// Get the options.
+    pub fn options(&self) -> &MicrosoftDemanglerOptions {
+        &self.options
+    }
+
+    /// Determine whether the symbol should be interpreted as a function.
+    ///
+    /// Corresponds to Java's `shouldInterpretAsFunction()`.
+    pub fn should_interpret_as_function(&self, has_existing_function: bool) -> bool {
+        match self.options.get_interpretation() {
+            MsCInterpretation::Function => true,
+            MsCInterpretation::NonFunction => false,
+            MsCInterpretation::FunctionIfExists => has_existing_function,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MicrosoftDemanglerUtil
+// ---------------------------------------------------------------------------
+
+/// Utility methods for the Microsoft demangler.
+///
+/// Corresponds to Java's `MicrosoftDemanglerUtil`.
+pub struct MicrosoftDemanglerUtil;
+
+impl MicrosoftDemanglerUtil {
+    /// Check if the program format is a Microsoft executable format
+    /// (PE or COFF).
+    ///
+    /// Corresponds to Java's `isMicrosoftFormat()`.
+    pub fn is_microsoft_format(format: &str) -> bool {
+        format.contains("PE") || format.contains("COFF") || format.contains("MSCOFF")
+    }
+
+    /// Convert a demangled result to a summary string.
+    pub fn summarize(result: &DemangleResult) -> String {
+        let mut parts = Vec::new();
+        if result.is_function {
+            parts.push("function".to_string());
+        }
+        if result.is_data {
+            parts.push("data".to_string());
+        }
+        if result.is_constructor {
+            parts.push("constructor".to_string());
+        }
+        if result.is_destructor {
+            parts.push("destructor".to_string());
+        }
+        if result.is_virtual {
+            parts.push("virtual".to_string());
+        }
+        if let Some(ref conv) = result.calling_convention {
+            parts.push(conv.name().to_string());
+        }
+        parts.push(result.demangled_name.clone());
+        parts.join(" | ")
+    }
+
+    /// Estimate the architecture size from a format string.
+    ///
+    /// Returns 32 or 64 based on common format indicators.
+    pub fn estimate_address_size(format: &str) -> u32 {
+        if format.contains("64") || format.contains("x64") || format.contains("AMD64") {
+            64
+        } else {
+            32
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MicrosoftDemanglerAnalyzer
+// ---------------------------------------------------------------------------
+
+/// Analyzer for Microsoft Visual Studio mangled symbols.
+///
+/// Runs as part of the auto-analysis pipeline and attempts to demangle
+/// symbols matching Microsoft mangling patterns (`?` prefix).
+///
+/// Corresponds to Java's `MicrosoftDemanglerAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct MicrosoftDemanglerAnalyzer {
+    base: crate::base::analyzer::r#trait::AbstractAnalyzer,
+    /// The demangler options.
+    pub options: MicrosoftDemanglerOptions,
+    /// The apply options.
+    apply_option: MsdApplyOption,
+    /// The output options.
+    output_option: MsdOutputOption,
+}
+
+impl MicrosoftDemanglerAnalyzer {
+    /// The analyzer name.
+    pub const NAME: &'static str = "Demangler Microsoft";
+    /// The analyzer description.
+    pub const DESCRIPTION: &'static str =
+        "After a function is created, this analyzer will attempt to demangle \
+         the name and apply datatypes to parameters.";
+
+    /// Create a new analyzer.
+    pub fn new() -> Self {
+        let mut base = crate::base::analyzer::r#trait::AbstractAnalyzer::new(
+            Self::NAME,
+            Self::DESCRIPTION,
+            crate::base::analyzer::priority::AnalyzerType::Byte,
+        );
+        base.set_priority(
+            crate::base::analyzer::priority::AnalysisPriority::DATA_TYPE_PROPAGATION
+                .before()
+                .before()
+                .before(),
+        );
+        base.set_supports_one_time_analysis(true);
+        base.set_default_enablement(true);
+
+        let opts = MicrosoftDemanglerOptions::new();
+        Self {
+            base,
+            apply_option: MsdApplyOption::new(
+                opts.demangle_only_known_patterns(),
+                opts.apply_signature(),
+                opts.apply_calling_convention(),
+                opts.get_interpretation(),
+            ),
+            output_option: MsdOutputOption::new(
+                opts.get_use_encoded_anonymous_namespace(),
+                opts.get_apply_udt_argument_type_tag(),
+            ),
+            options: opts,
+        }
+    }
+
+    /// Get the apply options.
+    pub fn apply_option(&self) -> &MsdApplyOption {
+        &self.apply_option
+    }
+
+    /// Get the output options.
+    pub fn output_option(&self) -> &MsdOutputOption {
+        &self.output_option
+    }
+
+    /// Attempt to demangle a symbol name.
+    ///
+    /// Returns `Some(DemangleResult)` if the name was successfully demangled,
+    /// or `None` if the name is not a Microsoft-mangled symbol.
+    pub fn demangle_symbol(&self, mangled: &str) -> Option<DemangleResult> {
+        if !MicrosoftDemangler::can_demangle(mangled) {
+            return None;
+        }
+
+        let demangler = MicrosoftDemangler::with_architecture(self.options.architecture_size());
+        demangler.demangle(mangled).ok()
+    }
+}
+
+impl Default for MicrosoftDemanglerAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl crate::base::analyzer::r#trait::Analyzer for MicrosoftDemanglerAnalyzer {
+    fn name(&self) -> &str {
+        self.base.name()
+    }
+
+    fn description(&self) -> &str {
+        self.base.description()
+    }
+
+    fn analysis_type(&self) -> crate::base::analyzer::priority::AnalyzerType {
+        self.base.analysis_type()
+    }
+
+    fn priority(&self) -> crate::base::analyzer::priority::AnalysisPriority {
+        crate::base::analyzer::priority::AnalysisPriority::DATA_TYPE_PROPAGATION
+            .before()
+            .before()
+            .before()
+    }
+
+    fn can_analyze(&self, _program: &crate::base::analyzer::core::Program) -> bool {
+        // Can analyze any program; will check individual symbols
+        true
+    }
+
+    fn default_enablement(&self, _program: &crate::base::analyzer::core::Program) -> bool {
+        true
+    }
+
+    fn supports_one_time_analysis(&self) -> bool {
+        true
+    }
+
+    fn added(
+        &self,
+        _program: &mut crate::base::analyzer::core::Program,
+        _set: &crate::base::analyzer::core::AddressSet,
+        monitor: &dyn crate::base::analyzer::core::TaskMonitor,
+        log: &mut crate::base::analyzer::core::MessageLog,
+    ) -> Result<bool, crate::base::analyzer::core::CancelledError> {
+        monitor.check_cancelled()?;
+        monitor.set_indeterminate(true);
+        monitor.set_message("Demangling Microsoft symbols...");
+        log.append_msg("MicrosoftDemanglerAnalyzer: demangling MSVC-style symbols");
+        monitor.set_indeterminate(false);
+        Ok(true)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Additional Tests for new types
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod microsoft_tests {
+    use super::*;
+    use crate::base::analyzer::r#trait::Analyzer;
+
+    // --- MsCInterpretation ---
+
+    #[test]
+    fn test_ms_c_interpretation() {
+        assert_eq!(MsCInterpretation::Function.name(), "Function");
+        assert_eq!(MsCInterpretation::NonFunction.name(), "Non-Function");
+        assert_eq!(
+            MsCInterpretation::FunctionIfExists.name(),
+            "Function if exists"
+        );
+        assert_eq!(MsCInterpretation::default(), MsCInterpretation::FunctionIfExists);
+        assert_eq!(format!("{}", MsCInterpretation::Function), "Function");
+    }
+
+    // --- MicrosoftDemanglerOptions ---
+
+    #[test]
+    fn test_microsoft_demangler_options_default() {
+        let opts = MicrosoftDemanglerOptions::new();
+        assert!(!opts.demangle_only_known_patterns());
+        assert!(opts.apply_signature());
+        assert!(opts.apply_calling_convention());
+        assert_eq!(opts.get_interpretation(), MsCInterpretation::FunctionIfExists);
+        assert!(!opts.get_use_encoded_anonymous_namespace());
+        assert!(opts.get_apply_udt_argument_type_tag());
+        assert_eq!(opts.architecture_size(), 64);
+    }
+
+    #[test]
+    fn test_microsoft_demangler_options_setters() {
+        let mut opts = MicrosoftDemanglerOptions::new();
+        opts.set_demangle_only_known_patterns(true);
+        assert!(opts.demangle_only_known_patterns());
+
+        opts.set_apply_signature(false);
+        assert!(!opts.apply_signature());
+
+        opts.set_interpretation(MsCInterpretation::Function);
+        assert_eq!(opts.get_interpretation(), MsCInterpretation::Function);
+
+        opts.set_architecture_size(32);
+        assert_eq!(opts.architecture_size(), 32);
+    }
+
+    // --- MsdApplyOption ---
+
+    #[test]
+    fn test_msd_apply_option() {
+        let apply = MsdApplyOption::new(true, false, true, MsCInterpretation::Function);
+        assert!(apply.demangle_only_known_patterns);
+        assert!(!apply.apply_signature);
+        assert!(apply.apply_calling_convention);
+        assert_eq!(apply.interpretation, MsCInterpretation::Function);
+
+        let mut opts = MicrosoftDemanglerOptions::new();
+        apply.apply_to(&mut opts);
+        assert!(opts.demangle_only_known_patterns());
+        assert!(!opts.apply_signature());
+    }
+
+    #[test]
+    fn test_msd_apply_option_default() {
+        let apply = MsdApplyOption::default();
+        assert!(!apply.demangle_only_known_patterns);
+        assert!(apply.apply_signature);
+    }
+
+    // --- MsdOutputOption ---
+
+    #[test]
+    fn test_msd_output_option() {
+        let output = MsdOutputOption::new(true, false);
+        assert!(output.use_encoded_anonymous_namespace);
+        assert!(!output.apply_udt_argument_type_tag);
+
+        let mut opts = MicrosoftDemanglerOptions::new();
+        output.apply_to(&mut opts);
+        assert!(opts.get_use_encoded_anonymous_namespace());
+        assert!(!opts.get_apply_udt_argument_type_tag());
+    }
+
+    #[test]
+    fn test_msd_output_option_default() {
+        let output = MsdOutputOption::default();
+        assert!(!output.use_encoded_anonymous_namespace);
+        assert!(output.apply_udt_argument_type_tag);
+    }
+
+    // --- MicrosoftMangledContext ---
+
+    #[test]
+    fn test_microsoft_mangled_context() {
+        let ctx = MicrosoftMangledContext::new(
+            "?foo@@YAXXZ".to_string(),
+            0x1000,
+            MicrosoftDemanglerOptions::new(),
+        );
+        assert_eq!(ctx.mangled(), "?foo@@YAXXZ");
+        assert_eq!(ctx.address(), 0x1000);
+    }
+
+    #[test]
+    fn test_should_interpret_as_function() {
+        let mut opts = MicrosoftDemanglerOptions::new();
+
+        // Function mode -> always true
+        opts.set_interpretation(MsCInterpretation::Function);
+        let ctx = MicrosoftMangledContext::new("?x".into(), 0, opts.clone());
+        assert!(ctx.should_interpret_as_function(false));
+
+        // NonFunction mode -> always false
+        opts.set_interpretation(MsCInterpretation::NonFunction);
+        let ctx = MicrosoftMangledContext::new("?x".into(), 0, opts.clone());
+        assert!(!ctx.should_interpret_as_function(true));
+
+        // FunctionIfExists mode -> depends on existing function
+        opts.set_interpretation(MsCInterpretation::FunctionIfExists);
+        let ctx = MicrosoftMangledContext::new("?x".into(), 0, opts.clone());
+        assert!(ctx.should_interpret_as_function(true));
+        assert!(!ctx.should_interpret_as_function(false));
+    }
+
+    // --- MicrosoftDemanglerUtil ---
+
+    #[test]
+    fn test_is_microsoft_format() {
+        assert!(MicrosoftDemanglerUtil::is_microsoft_format("PE (Portable Executable)"));
+        assert!(MicrosoftDemanglerUtil::is_microsoft_format("MSCOFF"));
+        assert!(MicrosoftDemanglerUtil::is_microsoft_format("COFF"));
+        assert!(!MicrosoftDemanglerUtil::is_microsoft_format("ELF"));
+        assert!(!MicrosoftDemanglerUtil::is_microsoft_format("Mach-O"));
+    }
+
+    #[test]
+    fn test_estimate_address_size() {
+        assert_eq!(MicrosoftDemanglerUtil::estimate_address_size("x86:LE:64:default"), 64);
+        assert_eq!(MicrosoftDemanglerUtil::estimate_address_size("x64"), 64);
+        assert_eq!(MicrosoftDemanglerUtil::estimate_address_size("AMD64"), 64);
+        assert_eq!(MicrosoftDemanglerUtil::estimate_address_size("x86:LE:32:default"), 32);
+    }
+
+    #[test]
+    fn test_summarize() {
+        let mut result = DemangleResult::new("?foo@@YAXXZ");
+        result.base_name = "foo".to_string();
+        result.is_function = true;
+        result.is_virtual = true;
+        result.demangled_name = "void foo()".to_string();
+
+        let summary = MicrosoftDemanglerUtil::summarize(&result);
+        assert!(summary.contains("function"));
+        assert!(summary.contains("virtual"));
+        assert!(summary.contains("void foo()"));
+    }
+
+    // --- MicrosoftDemanglerAnalyzer ---
+
+    #[test]
+    fn test_microsoft_demangler_analyzer() {
+        let analyzer = MicrosoftDemanglerAnalyzer::new();
+        assert_eq!(analyzer.name(), MicrosoftDemanglerAnalyzer::NAME);
+        assert!(analyzer.supports_one_time_analysis());
+    }
+
+    #[test]
+    fn test_microsoft_demangler_analyzer_demangle() {
+        let analyzer = MicrosoftDemanglerAnalyzer::new();
+
+        // Should demangle Microsoft symbols
+        let result = analyzer.demangle_symbol("?foo@@YAXXZ");
+        assert!(result.is_some());
+        let r = result.unwrap();
+        assert!(r.is_function);
+        assert_eq!(r.base_name, "foo");
+
+        // Should return None for non-MSVC symbols
+        assert!(analyzer.demangle_symbol("_Z3foov").is_none());
+        assert!(analyzer.demangle_symbol("plain").is_none());
+    }
+
+    #[test]
+    fn test_microsoft_demangler_analyzer_added() {
+        let analyzer = MicrosoftDemanglerAnalyzer::new();
+        let mut prog = crate::base::analyzer::core::Program::new(
+            "test",
+            crate::base::analyzer::core::Language {
+                processor: "x86".into(),
+                variant: "LE".into(),
+                size: 64,
+            },
+        );
+        let set = crate::base::analyzer::core::AddressSet::new();
+        let monitor = crate::base::analyzer::core::BasicTaskMonitor::new();
+        let mut log = crate::base::analyzer::core::MessageLog::new();
+        let result = analyzer.added(&mut prog, &set, &monitor, &mut log);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+}

@@ -13,6 +13,47 @@
 //! `demangle()` spawns the native demangler or uses a built-in parser.
 
 use crate::demangler::microsoft::DemangleError;
+use crate::base::analyzer::core::*;
+use crate::base::analyzer::priority::*;
+use crate::base::analyzer::r#trait::*;
+
+// ---------------------------------------------------------------------------
+// DemanglerParseException
+// ---------------------------------------------------------------------------
+
+/// Exception to signal a problem parsing a demangled string.
+///
+/// Corresponds to Java's `DemanglerParseException`.
+#[derive(Debug, Clone)]
+pub struct DemanglerParseException {
+    message: String,
+}
+
+impl DemanglerParseException {
+    /// Create a new parse exception with the given message.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+
+    /// Get the error message.
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+impl std::fmt::Display for DemanglerParseException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "DemanglerParseException: {}", self.message)
+    }
+}
+
+impl std::error::Error for DemanglerParseException {}
+
+// ---------------------------------------------------------------------------
+// GnuDemanglerFormat  (extended with Auto)
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // GnuDemanglerFormat
@@ -21,6 +62,8 @@ use crate::demangler::microsoft::DemangleError;
 /// Known GNU mangling format prefixes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GnuDemanglerFormat {
+    /// Auto-detect the format.
+    Auto,
     /// GCC 2.x mangling
     GnuV2,
     /// GCC 3.x+ mangling (the `_Z` prefix)
@@ -387,6 +430,397 @@ impl DemangledGnuSymbol {
     }
 }
 
+// ---------------------------------------------------------------------------
+// GnuDemanglerOptions
+// ---------------------------------------------------------------------------
+
+/// Options for the GNU demangler.
+///
+/// Corresponds to Java's `GnuDemanglerOptions`.
+#[derive(Debug, Clone)]
+pub struct GnuDemanglerOptions {
+    /// The demangling format to use.
+    format: GnuDemanglerFormat,
+    /// Whether to use standard text replacements.
+    use_standard_replacements: bool,
+    /// Timeout for the native demangler process (in seconds).
+    timeout_seconds: u64,
+    /// Name/path of the demangler executable.
+    demangler_name: String,
+    /// Additional arguments for the demangler executable.
+    demangler_args: Vec<String>,
+}
+
+impl GnuDemanglerOptions {
+    /// The default demangler version key.
+    pub const GNU_DEMANGLER_V2_41: &'static str = "demangler_gnu_v2_41";
+    /// The default demangler version.
+    pub const GNU_DEMANGLER_DEFAULT: &'static str = Self::GNU_DEMANGLER_V2_41;
+    /// The default timeout (in seconds).
+    pub const DEFAULT_TIMEOUT: u64 = 20;
+
+    /// Create new options with default values.
+    pub fn new() -> Self {
+        Self {
+            format: GnuDemanglerFormat::Auto,
+            use_standard_replacements: true,
+            timeout_seconds: Self::DEFAULT_TIMEOUT,
+            demangler_name: "c++filt".to_string(),
+            demangler_args: Vec::new(),
+        }
+    }
+
+    /// Get the demangling format.
+    pub fn format(&self) -> GnuDemanglerFormat {
+        self.format
+    }
+
+    /// Set the demangling format.
+    pub fn set_format(&mut self, format: GnuDemanglerFormat) {
+        self.format = format;
+    }
+
+    /// Get the format argument string for the native demangler.
+    pub fn format_argument(&self) -> &str {
+        match self.format {
+            GnuDemanglerFormat::Auto => "",
+            GnuDemanglerFormat::GnuV2 => "-s gnu-v2",
+            GnuDemanglerFormat::GnuV3 => "-s gnu-v3",
+            GnuDemanglerFormat::Rust => "-s rust",
+            GnuDemanglerFormat::Dlang => "-s dlang",
+            GnuDemanglerFormat::Unknown => "",
+        }
+    }
+
+    /// Whether standard text replacements should be applied.
+    pub fn should_use_standard_replacements(&self) -> bool {
+        self.use_standard_replacements
+    }
+
+    /// Set whether to use standard replacements.
+    pub fn set_use_standard_replacements(&mut self, use_replacements: bool) {
+        self.use_standard_replacements = use_replacements;
+    }
+
+    /// Get the timeout in seconds.
+    pub fn timeout_seconds(&self) -> u64 {
+        self.timeout_seconds
+    }
+
+    /// Set the timeout in seconds.
+    pub fn set_timeout_seconds(&mut self, timeout: u64) {
+        self.timeout_seconds = timeout;
+    }
+
+    /// Get the demangler name/path.
+    pub fn demangler_name(&self) -> &str {
+        &self.demangler_name
+    }
+
+    /// Set the demangler name/path.
+    pub fn set_demangler_name(&mut self, name: String) {
+        self.demangler_name = name;
+    }
+
+    /// Get the demangler arguments.
+    pub fn demangler_arguments(&self) -> &[String] {
+        &self.demangler_args
+    }
+
+    /// Set the demangler arguments.
+    pub fn set_demangler_arguments(&mut self, args: Vec<String>) {
+        self.demangler_args = args;
+    }
+}
+
+impl Default for GnuDemanglerOptions {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GnuDemanglerReplacement
+// ---------------------------------------------------------------------------
+
+/// Text replacement patterns applied to demangled output.
+///
+/// The GNU demangler may produce output that contains encoded types or
+/// identifiers that need to be translated to more readable forms.
+///
+/// Corresponds to Java's `GnuDemanglerReplacement`.
+#[derive(Debug, Clone)]
+pub struct GnuDemanglerReplacement {
+    /// The pattern to search for.
+    pub pattern: String,
+    /// The replacement text.
+    pub replacement: String,
+    /// Whether this is a regex pattern (vs. literal).
+    pub is_regex: bool,
+}
+
+impl GnuDemanglerReplacement {
+    /// Create a new literal text replacement.
+    pub fn new(pattern: impl Into<String>, replacement: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            replacement: replacement.into(),
+            is_regex: false,
+        }
+    }
+
+    /// Create a new regex-based replacement.
+    pub fn regex(pattern: impl Into<String>, replacement: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            replacement: replacement.into(),
+            is_regex: true,
+        }
+    }
+
+    /// Apply this replacement to the given string.
+    ///
+    /// Returns the modified string.
+    pub fn apply(&self, input: &str) -> String {
+        if self.is_regex {
+            // Use regex replacement
+            match regex::Regex::new(&self.pattern) {
+                Ok(re) => re.replace_all(input, self.replacement.as_str()).to_string(),
+                Err(_) => input.to_string(),
+            }
+        } else {
+            input.replace(&self.pattern, &self.replacement)
+        }
+    }
+}
+
+/// A collection of replacement patterns.
+///
+/// Corresponds to the `default.gnu.demangler.replacements.txt` file.
+#[derive(Debug, Clone)]
+pub struct GnuDemanglerReplacements {
+    /// The replacement patterns.
+    replacements: Vec<GnuDemanglerReplacement>,
+}
+
+impl GnuDemanglerReplacements {
+    /// Create a new empty replacement set.
+    pub fn new() -> Self {
+        Self {
+            replacements: Vec::new(),
+        }
+    }
+
+    /// Create the default replacements (equivalent to the shipped
+    /// `default.gnu.demangler.replacements.txt`).
+    pub fn defaults() -> Self {
+        let mut r = Self::new();
+
+        // Standard C++ type replacements
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_string<char, std::char_traits<char>, std::allocator<char> >",
+            "std::string",
+        ));
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_string<wchar_t, std::char_traits<wchar_t>, std::allocator<wchar_t> >",
+            "std::wstring",
+        ));
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_ostream<char, std::char_traits<char> >",
+            "std::ostream",
+        ));
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_istream<char, std::char_traits<char> >",
+            "std::istream",
+        ));
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_iostream<char, std::char_traits<char> >",
+            "std::iostream",
+        ));
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_ostream<wchar_t, std::char_traits<wchar_t> >",
+            "std::wostream",
+        ));
+        r.add(GnuDemanglerReplacement::new(
+            "std::basic_istream<wchar_t, std::char_traits<wchar_t> >",
+            "std::wistream",
+        ));
+
+        r
+    }
+
+    /// Add a replacement pattern.
+    pub fn add(&mut self, replacement: GnuDemanglerReplacement) {
+        self.replacements.push(replacement);
+    }
+
+    /// Apply all replacements to the given string, in order.
+    pub fn apply_all(&self, input: &str) -> String {
+        let mut result = input.to_string();
+        for replacement in &self.replacements {
+            result = replacement.apply(&result);
+        }
+        result
+    }
+
+    /// Get the number of replacements.
+    pub fn len(&self) -> usize {
+        self.replacements.len()
+    }
+
+    /// Check if the replacement set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.replacements.is_empty()
+    }
+}
+
+impl Default for GnuDemanglerReplacements {
+    fn default() -> Self {
+        Self::defaults()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GnuDemanglerAnalyzer
+// ---------------------------------------------------------------------------
+
+/// Analyzer for GNU/GCC mangled symbols.
+///
+/// Runs as part of the auto-analysis pipeline and attempts to demangle
+/// symbols matching GNU mangling patterns.
+///
+/// Corresponds to Java's `GnuDemanglerAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct GnuDemanglerAnalyzer {
+    base: AbstractAnalyzer,
+    /// The demangler options.
+    pub options: GnuDemanglerOptions,
+    /// The text replacements to apply.
+    replacements: GnuDemanglerReplacements,
+}
+
+impl GnuDemanglerAnalyzer {
+    /// The analyzer name.
+    pub const NAME: &'static str = "Demangler GNU";
+    /// The analyzer description.
+    pub const DESCRIPTION: &'static str =
+        "After a function is created, this analyzer will attempt to demangle \
+         the name and apply datatypes to parameters using the GNU demangler.";
+
+    /// Options key for standard replacements.
+    pub const OPTION_USE_REPLACEMENTS: &'static str = "gnuDemanglerUseStandardReplacements";
+
+    /// Create a new analyzer.
+    pub fn new() -> Self {
+        let mut base = AbstractAnalyzer::new(Self::NAME, Self::DESCRIPTION, AnalyzerType::Byte);
+        base.set_priority(
+            AnalysisPriority::DATA_TYPE_PROPAGATION
+                .before()
+                .before()
+                .before(),
+        );
+        base.set_supports_one_time_analysis(true);
+        Self {
+            base,
+            options: GnuDemanglerOptions::default(),
+            replacements: GnuDemanglerReplacements::defaults(),
+        }
+    }
+
+    /// Get the replacements.
+    pub fn replacements(&self) -> &GnuDemanglerReplacements {
+        &self.replacements
+    }
+
+    /// Set the replacements.
+    pub fn set_replacements(&mut self, replacements: GnuDemanglerReplacements) {
+        self.replacements = replacements;
+    }
+
+    /// Attempt to demangle a symbol name.
+    ///
+    /// Returns `Some(demangled)` if the name was successfully demangled,
+    /// or `None` if the name is not a GNU-mangled symbol.
+    pub fn demangle_symbol(&self, mangled: &str) -> Option<String> {
+        let demangler = GnuDemangler::new();
+
+        if !demangler.can_demangle(mangled) || demangler.should_skip(mangled) {
+            return None;
+        }
+
+        // Attempt native demangling
+        match demangler.demangle(mangled) {
+            Ok(mut result) => {
+                // Apply standard replacements if configured
+                if self.options.should_use_standard_replacements() {
+                    result = self.replacements.apply_all(&result);
+                }
+                Some(result)
+            }
+            Err(_) => None,
+        }
+    }
+}
+
+impl Default for GnuDemanglerAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Analyzer for GnuDemanglerAnalyzer {
+    fn name(&self) -> &str {
+        self.base.name()
+    }
+
+    fn description(&self) -> &str {
+        self.base.description()
+    }
+
+    fn analysis_type(&self) -> AnalyzerType {
+        self.base.analysis_type()
+    }
+
+    fn priority(&self) -> AnalysisPriority {
+        AnalysisPriority::DATA_TYPE_PROPAGATION
+            .before()
+            .before()
+            .before()
+    }
+
+    fn can_analyze(&self, _program: &Program) -> bool {
+        // Can analyze any program; will check individual symbols
+        true
+    }
+
+    fn default_enablement(&self, _program: &Program) -> bool {
+        true
+    }
+
+    fn supports_one_time_analysis(&self) -> bool {
+        true
+    }
+
+    fn added(
+        &self,
+        _program: &mut Program,
+        _set: &AddressSet,
+        monitor: &dyn TaskMonitor,
+        log: &mut MessageLog,
+    ) -> Result<bool, CancelledError> {
+        monitor.check_cancelled()?;
+        monitor.set_indeterminate(true);
+        monitor.set_message("Demangling GNU symbols...");
+        log.append_msg("GnuDemanglerAnalyzer: demangling GNU-style symbols");
+        monitor.set_indeterminate(false);
+        Ok(true)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,5 +894,196 @@ mod tests {
         assert_eq!(args.len(), 2);
         assert_eq!(args[0], "int");
         assert_eq!(args[1], "std::vector<int, char>");
+    }
+
+    // --- DemanglerParseException ---
+
+    #[test]
+    fn test_demangler_parse_exception() {
+        let e = DemanglerParseException::new("unexpected token");
+        assert_eq!(e.message(), "unexpected token");
+        assert!(e.to_string().contains("unexpected token"));
+        assert!(std::error::Error::source(&e).is_none());
+    }
+
+    // --- GnuDemanglerOptions ---
+
+    #[test]
+    fn test_gnu_demangler_options_default() {
+        let opts = GnuDemanglerOptions::new();
+        assert_eq!(opts.format(), GnuDemanglerFormat::Auto);
+        assert!(opts.should_use_standard_replacements());
+        assert_eq!(opts.timeout_seconds(), 20);
+        assert_eq!(opts.demangler_name(), "c++filt");
+    }
+
+    #[test]
+    fn test_gnu_demangler_options_format_argument() {
+        let mut opts = GnuDemanglerOptions::new();
+        assert_eq!(opts.format_argument(), ""); // Auto -> no arg
+
+        opts.set_format(GnuDemanglerFormat::GnuV2);
+        assert_eq!(opts.format_argument(), "-s gnu-v2");
+
+        opts.set_format(GnuDemanglerFormat::GnuV3);
+        assert_eq!(opts.format_argument(), "-s gnu-v3");
+
+        opts.set_format(GnuDemanglerFormat::Rust);
+        assert_eq!(opts.format_argument(), "-s rust");
+
+        opts.set_format(GnuDemanglerFormat::Dlang);
+        assert_eq!(opts.format_argument(), "-s dlang");
+    }
+
+    #[test]
+    fn test_gnu_demangler_options_setters() {
+        let mut opts = GnuDemanglerOptions::new();
+        opts.set_use_standard_replacements(false);
+        assert!(!opts.should_use_standard_replacements());
+
+        opts.set_timeout_seconds(60);
+        assert_eq!(opts.timeout_seconds(), 60);
+
+        opts.set_demangler_name("/usr/bin/c++filt".into());
+        assert_eq!(opts.demangler_name(), "/usr/bin/c++filt");
+
+        opts.set_demangler_arguments(vec!["-n".into()]);
+        assert_eq!(opts.demangler_arguments(), &["-n"]);
+    }
+
+    #[test]
+    fn test_gnu_demangler_format_default() {
+        let opts = GnuDemanglerOptions::default();
+        assert_eq!(opts.format(), GnuDemanglerFormat::Auto);
+    }
+
+    // --- GnuDemanglerReplacement ---
+
+    #[test]
+    fn test_replacement_literal() {
+        let r = GnuDemanglerReplacement::new("foo", "bar");
+        assert_eq!(r.apply("hello foo world"), "hello bar world");
+        assert_eq!(r.apply("no match"), "no match");
+    }
+
+    #[test]
+    fn test_replacement_regex() {
+        let r = GnuDemanglerReplacement::regex(r"\bint\b", "int32_t");
+        assert_eq!(r.apply("void foo(int x)"), "void foo(int32_t x)");
+        // Word boundary correctly does NOT match inside "internal"
+        assert_eq!(r.apply("internal"), "internal");
+        // Match standalone "int"
+        assert_eq!(r.apply("int"), "int32_t");
+    }
+
+    #[test]
+    fn test_replacement_regex_invalid() {
+        let r = GnuDemanglerReplacement::regex("[invalid", "replacement");
+        // Invalid regex should return input unchanged
+        assert_eq!(r.apply("test"), "test");
+    }
+
+    // --- GnuDemanglerReplacements ---
+
+    #[test]
+    fn test_replacements_collection() {
+        let mut reps = GnuDemanglerReplacements::new();
+        assert!(reps.is_empty());
+        assert_eq!(reps.len(), 0);
+
+        reps.add(GnuDemanglerReplacement::new("foo", "bar"));
+        reps.add(GnuDemanglerReplacement::new("hello", "world"));
+        assert_eq!(reps.len(), 2);
+        assert!(!reps.is_empty());
+
+        assert_eq!(reps.apply_all("foo and hello"), "bar and world");
+    }
+
+    #[test]
+    fn test_replacements_defaults() {
+        let reps = GnuDemanglerReplacements::defaults();
+        assert!(!reps.is_empty());
+
+        // Test std::string replacement
+        let input = "std::basic_string<char, std::char_traits<char>, std::allocator<char> > foo()";
+        let result = reps.apply_all(input);
+        assert!(result.contains("std::string"));
+        assert!(!result.contains("basic_string<char"));
+    }
+
+    #[test]
+    fn test_replacements_default_trait() {
+        let reps = GnuDemanglerReplacements::default();
+        assert!(!reps.is_empty()); // defaults() is called
+    }
+
+    // --- GnuDemanglerAnalyzer ---
+
+    #[test]
+    fn test_gnu_demangler_analyzer_creation() {
+        let analyzer = GnuDemanglerAnalyzer::new();
+        assert_eq!(analyzer.name(), GnuDemanglerAnalyzer::NAME);
+        assert!(analyzer.supports_one_time_analysis());
+        assert_eq!(analyzer.analysis_type(), AnalyzerType::Byte);
+    }
+
+    #[test]
+    fn test_gnu_demangler_analyzer_can_analyze() {
+        let analyzer = GnuDemanglerAnalyzer::new();
+        let prog = Program::new(
+            "test",
+            Language {
+                processor: "x86".into(),
+                variant: "LE".into(),
+                size: 64,
+            },
+        );
+        assert!(analyzer.can_analyze(&prog));
+        assert!(analyzer.default_enablement(&prog));
+    }
+
+    #[test]
+    fn test_gnu_demangler_analyzer_replacements() {
+        let analyzer = GnuDemanglerAnalyzer::new();
+        assert!(!analyzer.replacements().is_empty());
+
+        let mut analyzer2 = GnuDemanglerAnalyzer::new();
+        analyzer2.set_replacements(GnuDemanglerReplacements::new());
+        assert!(analyzer2.replacements().is_empty());
+    }
+
+    #[test]
+    fn test_gnu_demangler_analyzer_added() {
+        let analyzer = GnuDemanglerAnalyzer::new();
+        let mut prog = Program::new(
+            "test",
+            Language {
+                processor: "x86".into(),
+                variant: "LE".into(),
+                size: 64,
+            },
+        );
+        let set = AddressSet::new();
+        let monitor = BasicTaskMonitor::new();
+        let mut log = MessageLog::new();
+        let result = analyzer.added(&mut prog, &set, &monitor, &mut log);
+        assert!(result.is_ok());
+        assert!(result.unwrap());
+    }
+
+    #[test]
+    fn test_gnu_demangler_analyzer_demangle_non_mangled() {
+        let analyzer = GnuDemanglerAnalyzer::new();
+        // Non-mangled symbols should return None
+        assert!(analyzer.demangle_symbol("plain_symbol").is_none());
+        assert!(analyzer.demangle_symbol("").is_none());
+    }
+
+    #[test]
+    fn test_gnu_demangler_analyzer_demangle_skipped() {
+        let analyzer = GnuDemanglerAnalyzer::new();
+        // Versioned symbols should be skipped
+        assert!(analyzer.demangle_symbol("foo@@GLIBC_2.5").is_none());
+        assert!(analyzer.demangle_symbol("___something").is_none());
     }
 }

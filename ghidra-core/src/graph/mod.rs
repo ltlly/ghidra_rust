@@ -21,6 +21,26 @@
 //!   [`algo::DijkstraShortestPaths`], [`algo::JohnsonCircuitsAlgorithm`],
 //!   [`algo::TarjanSCC`], [`algo::ChkDominanceAlgorithm`]
 //! - Path finding: [`algo::find_paths_iterative`], [`algo::find_paths_recursive`]
+//!
+//! ## Graph Service Layer (ported from `ghidra.service.graph`)
+//!
+//! Provides attributed graph types for graph visualization:
+//! - [`service::AttributedGraph`], [`service::AttributedVertex`], [`service::AttributedEdge`]
+//! - [`service::GraphType`], [`service::GraphDisplayOptions`]
+//! - [`service::GraphLabelPosition`], [`service::VertexShape`]
+//! - [`service::LayoutAlgorithmNames`]
+//!
+//! ## Graph Events (ported from `ghidra.graph.event`)
+//!
+//! - [`event::VisualGraphChangeListener`], [`event::VisualGraphEvent`]
+//!
+//! ## Graph Jobs (ported from `ghidra.graph.job`)
+//!
+//! - [`job::GraphJob`], [`job::GraphJobRunner`], [`job::GraphJobListener`]
+//!
+//! ## Graph Viewer (ported from `ghidra.graph.viewer`)
+//!
+//! - [`viewer::PathHighlightMode`], [`viewer::ViewState`], [`viewer::GraphViewerConfig`]
 
 // Submodules for the generic graph framework
 pub mod traits;
@@ -31,6 +51,10 @@ pub mod hash_graph;
 pub mod factory;
 pub mod graph_to_tree;
 pub mod algo;
+pub mod service;
+pub mod event;
+pub mod job;
+pub mod viewer;
 mod tests_new;
 
 use std::collections::{HashMap, HashSet, VecDeque};
