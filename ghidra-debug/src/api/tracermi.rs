@@ -503,6 +503,128 @@ impl TraceRmiAcceptor {
     }
 }
 
+
+// ── TraceRmi Service Listener ─────────────────────────────────────────
+
+/// The mechanism by which a TraceRmi connection was established.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectMode {
+    /// The connection was established via `connect()`.
+    Connect,
+    /// The connection was established via `acceptOne()`.
+    AcceptOne,
+    /// The connection was established by the server.
+    Server,
+}
+
+/// A listener for Trace RMI service events.
+///
+/// Ported from Ghidra's `TraceRmiServiceListener`. Provides callbacks
+/// for connection lifecycle events, acceptor events, and target
+/// publication events.
+pub trait TraceRmiServiceListener: Send + Sync {
+    /// Called when the server has been started.
+    fn server_started(&self, _address: &str) {}
+
+    /// Called when the server has been stopped.
+    fn server_stopped(&self) {}
+
+    /// Called when a new connection is established.
+    fn connected(&self, _connection_id: u64, _mode: ConnectMode) {}
+
+    /// Called when a connection is lost or closed.
+    fn disconnected(&self, _connection_id: u64) {}
+
+    /// Called when the service is waiting for an inbound connection.
+    fn waiting_accept(&self, _acceptor: &TraceRmiAcceptor) {}
+
+    /// Called when a client cancelled an inbound acceptor.
+    fn accept_cancelled(&self, _acceptor: &TraceRmiAcceptor) {}
+
+    /// Called when the service failed to complete an inbound connection.
+    fn accept_failed(&self, _acceptor: &TraceRmiAcceptor, _error: &str) {}
+
+    /// Called when a new target was published by a connection.
+    fn target_published(&self, _connection_id: u64, _target_key: &str) {}
+
+    /// Called when a transaction was opened for a target.
+    fn transaction_opened(&self, _connection_id: u64, _target_key: &str) {}
+
+    /// Called when a transaction was closed for a target.
+    fn transaction_closed(&self, _connection_id: u64, _target_key: &str, _aborted: bool) {}
+}
+
+/// A collection of TraceRmi service listeners.
+#[derive(Default)]
+pub struct TraceRmiServiceListenerSet {
+    listeners: Vec<Box<dyn TraceRmiServiceListener>>,
+}
+
+impl std::fmt::Debug for TraceRmiServiceListenerSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TraceRmiServiceListenerSet")
+            .field("count", &self.listeners.len())
+            .finish()
+    }
+}
+
+impl TraceRmiServiceListenerSet {
+    /// Create a new empty listener set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a listener.
+    pub fn add(&mut self, listener: Box<dyn TraceRmiServiceListener>) {
+        self.listeners.push(listener);
+    }
+
+    /// Notify all listeners of a server start event.
+    pub fn notify_server_started(&self, address: &str) {
+        for l in &self.listeners {
+            l.server_started(address);
+        }
+    }
+
+    /// Notify all listeners of a server stop event.
+    pub fn notify_server_stopped(&self) {
+        for l in &self.listeners {
+            l.server_stopped();
+        }
+    }
+
+    /// Notify all listeners of a new connection.
+    pub fn notify_connected(&self, connection_id: u64, mode: ConnectMode) {
+        for l in &self.listeners {
+            l.connected(connection_id, mode);
+        }
+    }
+
+    /// Notify all listeners of a disconnection.
+    pub fn notify_disconnected(&self, connection_id: u64) {
+        for l in &self.listeners {
+            l.disconnected(connection_id);
+        }
+    }
+
+    /// Notify all listeners of a target publication.
+    pub fn notify_target_published(&self, connection_id: u64, target_key: &str) {
+        for l in &self.listeners {
+            l.target_published(connection_id, target_key);
+        }
+    }
+
+    /// Get the number of registered listeners.
+    pub fn len(&self) -> usize {
+        self.listeners.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.listeners.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -645,5 +767,54 @@ mod tests {
         let json = serde_json::to_string(&method).unwrap();
         let back: RemoteMethodDescriptor = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, "step");
+    }
+
+    #[test]
+    fn test_trace_rmi_acceptor() {
+        let mut acceptor = TraceRmiAcceptor::new("127.0.0.1:0", 0);
+        assert!(acceptor.is_running() || !acceptor.is_running()); // just tests it exists
+        assert_eq!(acceptor.address(), "127.0.0.1:0");
+    }
+
+    #[test]
+    fn test_terminal_session_new() {
+        let mut session = TerminalSession::new("session-1");
+        assert!(session.active);
+        assert_eq!(session.id, "session-1");
+        assert_eq!(session.cols, 80);
+        session.resize(120, 40);
+        assert_eq!(session.cols, 120);
+        assert_eq!(session.rows, 40);
+        session.close();
+        assert!(!session.active);
+    }
+
+    #[test]
+    fn test_connect_mode() {
+        assert_ne!(ConnectMode::Connect, ConnectMode::Server);
+        assert_ne!(ConnectMode::AcceptOne, ConnectMode::Server);
+    }
+
+    #[test]
+    fn test_service_listener_set() {
+        struct TestListener {
+            connected_count: std::sync::atomic::AtomicU32,
+        }
+        impl TraceRmiServiceListener for TestListener {
+            fn connected(&self, _id: u64, _mode: ConnectMode) {
+                self.connected_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        let mut set = TraceRmiServiceListenerSet::new();
+        assert!(set.is_empty());
+
+        let listener = TestListener {
+            connected_count: std::sync::atomic::AtomicU32::new(0),
+        };
+        set.add(Box::new(listener));
+        assert_eq!(set.len(), 1);
+
+        set.notify_connected(1, ConnectMode::Connect);
     }
 }

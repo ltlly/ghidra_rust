@@ -136,6 +136,65 @@ impl Default for DataDisplaySettings {
     }
 }
 
+/// An adapter for reading instruction data from a prototype description.
+///
+/// Ported from Ghidra's `ghidra.trace.util.InstructionAdapterFromPrototype`.
+/// Used when disassembling to provide instruction bytes and mnemonic from
+/// a prototype instruction, rather than reading from memory directly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InstructionAdapterFromPrototype {
+    /// The address of the instruction.
+    pub address: u64,
+    /// The mnemonic (e.g., "MOV", "ADD", "JMP").
+    pub mnemonic: String,
+    /// The raw instruction bytes.
+    pub bytes: Vec<u8>,
+    /// The length override, if any.
+    pub length_override: Option<u32>,
+    /// Whether this instruction has fall-through.
+    pub has_fall_through: bool,
+}
+
+impl InstructionAdapterFromPrototype {
+    /// Create a new instruction adapter from a prototype.
+    pub fn new(
+        address: u64,
+        mnemonic: impl Into<String>,
+        bytes: Vec<u8>,
+    ) -> Self {
+        let len = bytes.len() as u32;
+        Self {
+            address,
+            mnemonic: mnemonic.into(),
+            bytes,
+            length_override: None,
+            has_fall_through: true,
+        }
+    }
+
+    /// Get the instruction length in bytes.
+    pub fn length(&self) -> u32 {
+        self.length_override.unwrap_or(self.bytes.len() as u32)
+    }
+
+    /// Set a length override.
+    pub fn with_length_override(mut self, length: u32) -> Self {
+        self.length_override = Some(length);
+        self
+    }
+
+    /// Set whether this instruction has fall-through.
+    pub fn with_fall_through(mut self, has_fall_through: bool) -> Self {
+        self.has_fall_through = has_fall_through;
+        self
+    }
+
+    /// Get the end address of this instruction (exclusive).
+    pub fn end_address(&self) -> u64 {
+        self.address + self.length() as u64
+    }
+}
+
 /// Utility functions for byte array manipulation.
 pub mod byte_utils {
     /// XOR two byte slices.
@@ -243,5 +302,39 @@ mod tests {
         let typed = DataAdapterFromDataType::new(minimal, "uint32", 4);
         assert_eq!(typed.type_name, "uint32");
         assert_eq!(typed.type_size, 4);
+    }
+
+    #[test]
+    fn test_instruction_adapter_basic() {
+        let adapter = InstructionAdapterFromPrototype::new(0x1000, "NOP", vec![0x90]);
+        assert_eq!(adapter.address, 0x1000);
+        assert_eq!(adapter.mnemonic, "NOP");
+        assert_eq!(adapter.length(), 1);
+        assert_eq!(adapter.end_address(), 0x1001);
+        assert!(adapter.has_fall_through);
+    }
+
+    #[test]
+    fn test_instruction_adapter_multi_byte() {
+        let adapter = InstructionAdapterFromPrototype::new(
+            0x2000, "MOV EAX, 0x42", vec![0xB8, 0x42, 0x00, 0x00, 0x00],
+        );
+        assert_eq!(adapter.length(), 5);
+        assert_eq!(adapter.end_address(), 0x2005);
+    }
+
+    #[test]
+    fn test_instruction_adapter_length_override() {
+        let adapter = InstructionAdapterFromPrototype::new(0, "TEST", vec![0x01])
+            .with_length_override(4);
+        assert_eq!(adapter.length(), 4);
+        assert_eq!(adapter.end_address(), 4);
+    }
+
+    #[test]
+    fn test_instruction_adapter_no_fall_through() {
+        let adapter = InstructionAdapterFromPrototype::new(0, "JMP", vec![0xE9, 0x00, 0x00, 0x00, 0x00])
+            .with_fall_through(false);
+        assert!(!adapter.has_fall_through);
     }
 }

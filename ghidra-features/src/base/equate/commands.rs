@@ -677,4 +677,146 @@ mod tests {
         let cmd = RemoveEquateCmd::single("A");
         assert_eq!(cmd.name(), "Remove Equate");
     }
+
+    #[test]
+    fn test_create_equate_cmd_name() {
+        let scalar = Scalar::unsigned(8, 0x42);
+        let locs = vec![(Address::new(0x1000), 0, 0x42)];
+        let cmd = CreateEquateCmd::new(&scalar, locs, "ANSWER", false);
+        assert_eq!(cmd.name(), "Create New Equate");
+    }
+
+    #[test]
+    fn test_rename_equate_cmd_name() {
+        let cmd = RenameEquateCmd::new("OLD", "NEW", Address::new(0x1000), 0);
+        assert_eq!(cmd.name(), "Rename Equate");
+    }
+
+    #[test]
+    fn test_rename_equates_cmd_name() {
+        let cmd = RenameEquatesCmd::new("OLD", "NEW");
+        assert_eq!(cmd.name(), "Rename Equates");
+    }
+
+    #[test]
+    fn test_create_enum_equate_command_name() {
+        let vals = HashSet::new();
+        let locs = vec![];
+        let cmd = CreateEnumEquateCommand::new(locs, "uuid", vals, false);
+        assert_eq!(cmd.name(), "Create Enum Equate Command");
+    }
+
+    #[test]
+    fn test_convert_command_name() {
+        let locs = vec![(Address::new(0x1000), 0, 255)];
+        let cmd = ConvertCommand::new(locs, FormatChoice::Hex, false, false);
+        assert_eq!(cmd.name(), "Convert Command");
+    }
+
+    #[test]
+    fn test_create_equate_cmd_status_msg() {
+        let scalar = Scalar::unsigned(8, 0x42);
+        let locs = vec![(Address::new(0x1000), 0, 0x42)];
+        let mut cmd = CreateEquateCmd::new(&scalar, locs, "TEST", false);
+        // Before apply, status should be None
+        assert!(cmd.status_msg().is_none());
+        let mut table = make_table();
+        cmd.apply(&mut table).unwrap();
+        // After successful apply, status might be None or Some
+        // Just verify it doesn't panic
+        let _ = cmd.status_msg();
+    }
+
+    #[test]
+    fn test_create_equate_already_exists() {
+        let mut table = make_table();
+        table.create_equate("EXISTING", 0x42).unwrap();
+
+        let scalar = Scalar::unsigned(8, 0x42);
+        let locs = vec![(Address::new(0x1000), 0, 0x42)];
+        let mut cmd = CreateEquateCmd::new(&scalar, locs, "EXISTING", false);
+        // Should succeed even if equate already exists
+        cmd.apply(&mut table).unwrap();
+        let eq = table.get_equate("EXISTING").unwrap();
+        assert_eq!(eq.reference_count(), 1);
+    }
+
+    #[test]
+    fn test_convert_command_binary_format() {
+        use crate::base::equate::format::format_scalar;
+        let mut table = make_table();
+        // Compute expected name using format_scalar directly
+        let scalar = Scalar::unsigned(64, 10);
+        let expected_name = format_scalar(&scalar, FormatChoice::Binary, false).unwrap();
+
+        let locs = vec![(Address::new(0x1000), 0, 10)];
+        let mut cmd = ConvertCommand::new(locs, FormatChoice::Binary, false, false);
+        cmd.apply(&mut table).unwrap();
+
+        let eq = table.get_equate(&expected_name);
+        assert!(eq.is_some(), "Expected equate '{}' not found", expected_name);
+    }
+
+    #[test]
+    fn test_convert_command_octal_format() {
+        use crate::base::equate::format::format_scalar;
+        let mut table = make_table();
+        // Compute expected name using format_scalar directly
+        let scalar = Scalar::unsigned(64, 63);
+        let expected_name = format_scalar(&scalar, FormatChoice::Octal, false).unwrap();
+
+        let locs = vec![(Address::new(0x1000), 0, 63)];
+        let mut cmd = ConvertCommand::new(locs, FormatChoice::Octal, false, false);
+        cmd.apply(&mut table).unwrap();
+
+        let eq = table.get_equate(&expected_name);
+        assert!(eq.is_some(), "Expected equate '{}' not found", expected_name);
+    }
+
+    #[test]
+    fn test_convert_command_char_format() {
+        use crate::base::equate::format::format_scalar;
+        let mut table = make_table();
+        // Compute expected name using format_scalar directly
+        let scalar = Scalar::unsigned(64, 65);
+        let expected_name = format_scalar(&scalar, FormatChoice::Char, false).unwrap();
+
+        let locs = vec![(Address::new(0x1000), 0, 65)];
+        let mut cmd = ConvertCommand::new(locs, FormatChoice::Char, false, false);
+        cmd.apply(&mut table).unwrap();
+
+        let eq = table.get_equate(&expected_name);
+        assert!(eq.is_some(), "Expected equate '{}' not found", expected_name);
+    }
+
+    #[test]
+    fn test_create_enum_equate_with_nonexistent_values() {
+        let mut table = make_table();
+        let mut vals = HashSet::new();
+        vals.insert(1);
+        vals.insert(2);
+
+        let locs = vec![
+            (Address::new(0x1000), 0, 1),
+            (Address::new(0x2000), 0, 5),  // not in enum
+        ];
+
+        let mut cmd = CreateEnumEquateCommand::new(locs, "my-uuid", vals, false);
+        cmd.apply(&mut table).unwrap();
+
+        // Only value 1 should have an equate created
+        let eq1_name = EquateManager::format_name_for_equate("my-uuid", 1);
+        let eq5_name = EquateManager::format_name_for_equate("my-uuid", 5);
+        assert!(table.get_equate(&eq1_name).is_some());
+        assert!(table.get_equate(&eq5_name).is_none());
+    }
+
+    #[test]
+    fn test_equate_table_contains_key() {
+        let mut table = make_table();
+        assert!(!table.contains_key("TEST"));
+        table.create_equate("TEST", 42).unwrap();
+        assert!(table.contains_key("TEST"));
+        assert!(!table.contains_key("OTHER"));
+    }
 }

@@ -324,3 +324,286 @@ mod tests {
         assert_eq!(iter.next(), None);
     }
 }
+
+// ── Wrapping Iterator Adapters ──────────────────────────────────────
+//
+// These adapters convert between iterator types, mirroring Ghidra's
+// WrappingCodeUnitIterator, WrappingDataIterator, etc.
+
+/// An adapter that wraps an instruction iterator to produce code unit entries.
+///
+/// Ported from Ghidra's `WrappingCodeUnitIterator`.
+#[derive(Debug)]
+pub struct WrappingCodeUnitIterator<I> {
+    inner: I,
+}
+
+impl<I> WrappingCodeUnitIterator<I> {
+    /// Wrap an instruction iterator.
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I> Iterator for WrappingCodeUnitIterator<I>
+where
+    I: Iterator<Item = InstructionEntry>,
+{
+    type Item = CodeUnitEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let entry = self.inner.next()?;
+        Some(CodeUnitEntry {
+            address: entry.address,
+            unit_type: IteratorCodeUnitType::Instruction,
+            length: entry.length,
+            label: entry.mnemonic,
+        })
+    }
+}
+
+/// An adapter that wraps a data iterator to produce code unit entries.
+///
+/// Ported from Ghidra's `WrappingDataIterator`.
+#[derive(Debug)]
+pub struct WrappingDataIterator<I> {
+    inner: I,
+}
+
+impl<I> WrappingDataIterator<I> {
+    /// Wrap a data iterator.
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I> Iterator for WrappingDataIterator<I>
+where
+    I: Iterator<Item = (u64, u32, String)>, // (address, size, type_name)
+{
+    type Item = CodeUnitEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (address, size, type_name) = self.inner.next()?;
+        Some(CodeUnitEntry::new(
+            address,
+            IteratorCodeUnitType::Data,
+            size,
+            type_name,
+        ))
+    }
+}
+
+/// An adapter that filters and adapts code unit entries to produce only instructions.
+///
+/// Ported from Ghidra's `WrappingInstructionIterator`.
+#[derive(Debug)]
+pub struct WrappingInstructionIterator<I> {
+    inner: I,
+}
+
+impl<I> WrappingInstructionIterator<I> {
+    /// Wrap a code unit iterator, filtering for instructions.
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I> Iterator for WrappingInstructionIterator<I>
+where
+    I: Iterator<Item = CodeUnitEntry>,
+{
+    type Item = CodeUnitEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let entry = self.inner.next()?;
+            if entry.unit_type == IteratorCodeUnitType::Instruction {
+                return Some(entry);
+            }
+        }
+    }
+}
+
+/// An adapter that filters code unit entries to produce only functions.
+///
+/// Ported from Ghidra's `WrappingFunctionIterator`.
+#[derive(Debug)]
+pub struct WrappingFunctionIterator<I> {
+    inner: I,
+}
+
+impl<I> WrappingFunctionIterator<I> {
+    /// Wrap a code unit iterator, filtering for function entries.
+    pub fn new(inner: I) -> Self {
+        Self { inner }
+    }
+}
+
+impl<I, T> Iterator for WrappingFunctionIterator<I>
+where
+    I: Iterator<Item = T>,
+    T: Into<FunctionEntry>,
+{
+    type Item = FunctionEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next().map(|t| t.into())
+    }
+}
+
+/// A composed iterator that merges multiple code unit iterators.
+///
+/// This is used when iterating over code units that span multiple
+/// address spaces or memory regions.
+#[derive(Debug)]
+pub struct ComposedCodeUnitIterator<I> {
+    iters: Vec<I>,
+    current: usize,
+}
+
+impl<I> ComposedCodeUnitIterator<I> {
+    /// Create a composed iterator from multiple iterators.
+    pub fn new(iters: Vec<I>) -> Self {
+        Self { iters, current: 0 }
+    }
+}
+
+impl<I> Iterator for ComposedCodeUnitIterator<I>
+where
+    I: Iterator<Item = CodeUnitEntry>,
+{
+    type Item = CodeUnitEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.current < self.iters.len() {
+            if let Some(item) = self.iters[self.current].next() {
+                return Some(item);
+            }
+            self.current += 1;
+        }
+        None
+    }
+}
+
+/// A filtering iterator that yields only entries within a given address range.
+#[derive(Debug)]
+pub struct AddressRangeFilter<I> {
+    inner: I,
+    min_address: u64,
+    max_address: u64,
+}
+
+impl<I> AddressRangeFilter<I> {
+    /// Create a new range-filtered iterator.
+    pub fn new(inner: I, min_address: u64, max_address: u64) -> Self {
+        Self {
+            inner,
+            min_address,
+            max_address,
+        }
+    }
+}
+
+impl<I, T> Iterator for AddressRangeFilter<I>
+where
+    I: Iterator<Item = T>,
+    T: HasAddress,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let item = self.inner.next()?;
+            let addr = item.address();
+            if addr >= self.min_address && addr <= self.max_address {
+                return Some(item);
+            }
+        }
+    }
+}
+
+/// Trait for items that have an address.
+pub trait HasAddress {
+    /// Get the address of this item.
+    fn address(&self) -> u64;
+}
+
+impl HasAddress for CodeUnitEntry {
+    fn address(&self) -> u64 {
+        self.address
+    }
+}
+
+impl HasAddress for InstructionEntry {
+    fn address(&self) -> u64 {
+        self.address
+    }
+}
+
+impl HasAddress for FunctionEntry {
+    fn address(&self) -> u64 {
+        self.entry
+    }
+}
+
+#[cfg(test)]
+mod wrapping_tests {
+    use super::*;
+
+    #[test]
+    fn test_wrapping_code_unit_iterator() {
+        let instructions = vec![
+            InstructionEntry::new(0x1000, "NOP", 1, vec![0x90]),
+            InstructionEntry::new(0x1001, "RET", 1, vec![0xC3]),
+        ];
+        let mut iter = WrappingCodeUnitIterator::new(instructions.into_iter());
+        let entry = iter.next().unwrap();
+        assert_eq!(entry.address, 0x1000);
+        assert_eq!(entry.unit_type, IteratorCodeUnitType::Instruction);
+        assert_eq!(entry.label, "NOP");
+        let entry = iter.next().unwrap();
+        assert_eq!(entry.label, "RET");
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_wrapping_instruction_iterator() {
+        let entries = vec![
+            CodeUnitEntry::new(0x1000, IteratorCodeUnitType::Instruction, 1, "NOP"),
+            CodeUnitEntry::new(0x1001, IteratorCodeUnitType::Data, 4, "dword"),
+            CodeUnitEntry::new(0x1005, IteratorCodeUnitType::Instruction, 1, "RET"),
+        ];
+        let mut iter = WrappingInstructionIterator::new(entries.into_iter());
+        assert_eq!(iter.next().unwrap().address, 0x1000);
+        assert_eq!(iter.next().unwrap().address, 0x1005);
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_composed_code_unit_iterator() {
+        let i1 = vec![
+            CodeUnitEntry::new(0x1000, IteratorCodeUnitType::Instruction, 1, "NOP"),
+        ];
+        let i2 = vec![
+            CodeUnitEntry::new(0x2000, IteratorCodeUnitType::Instruction, 1, "RET"),
+        ];
+        let mut composed = ComposedCodeUnitIterator::new(vec![i1.into_iter(), i2.into_iter()]);
+        assert_eq!(composed.next().unwrap().address, 0x1000);
+        assert_eq!(composed.next().unwrap().address, 0x2000);
+        assert!(composed.next().is_none());
+    }
+
+    #[test]
+    fn test_address_range_filter() {
+        let entries = vec![
+            InstructionEntry::new(0x1000, "NOP", 1, vec![0x90]),
+            InstructionEntry::new(0x2000, "MOV", 2, vec![0x89, 0xC3]),
+            InstructionEntry::new(0x3000, "RET", 1, vec![0xC3]),
+        ];
+        let mut iter = AddressRangeFilter::new(entries.into_iter(), 0x1000, 0x2FFF);
+        assert_eq!(iter.next().unwrap().address, 0x1000);
+        assert_eq!(iter.next().unwrap().address, 0x2000);
+        assert!(iter.next().is_none()); // 0x3000 is out of range
+    }
+}

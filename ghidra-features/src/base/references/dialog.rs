@@ -54,7 +54,7 @@ impl EditPanelType {
 ///
 /// ```
 /// use ghidra_features::base::references::{EditReferenceDialog, EditPanelType};
-/// use ghidra_features::base::analyzer::core::Address;
+/// use ghidra_core::addr::Address;
 /// use ghidra_core::symbol::{RefType, DataRefType};
 ///
 /// let mut dialog = EditReferenceDialog::new(
@@ -215,7 +215,7 @@ impl EditReferenceDialog {
 ///
 /// ```
 /// use ghidra_features::base::references::InstructionPanel;
-/// use ghidra_features::base::analyzer::core::Address;
+/// use ghidra_core::addr::Address;
 ///
 /// let mut panel = InstructionPanel::new();
 /// panel.set_address(Address::new(0x1000));

@@ -327,4 +327,117 @@ mod tests {
         let compound = CompoundRegisterCmd::new("empty");
         assert!(compound.is_empty());
     }
+
+    #[test]
+    fn test_set_register_value_accessors() {
+        let cmd = SetRegisterValueCmd::new("ESP", addr(0x2000), addr(0x200F), Some(0x100));
+        assert_eq!(cmd.register_name(), "ESP");
+        assert_eq!(cmd.start(), addr(0x2000));
+        assert_eq!(cmd.end(), addr(0x200F));
+        assert_eq!(cmd.value(), Some(0x100));
+    }
+
+    #[test]
+    fn test_clear_command_accessors() {
+        let cmd = SetRegisterValueCmd::clear("EAX", addr(0x100), addr(0x200));
+        assert_eq!(cmd.register_name(), "EAX");
+        assert_eq!(cmd.value(), None);
+    }
+
+    #[test]
+    fn test_command_status_msg() {
+        let cmd = SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(1));
+        assert!(cmd.status_msg().is_none());
+    }
+
+    #[test]
+    fn test_compound_register_cmd_name() {
+        let compound = CompoundRegisterCmd::new("Batch Register Update");
+        assert_eq!(compound.name(), "Batch Register Update");
+    }
+
+    #[test]
+    fn test_compound_register_cmd_apply_all() {
+        let mut ctx = InMemoryRegisterContext::new();
+        let mut compound = CompoundRegisterCmd::new("test");
+        compound.add(SetRegisterValueCmd::new("RAX", addr(0x1000), addr(0x1007), Some(0xDEAD)));
+        compound.add(SetRegisterValueCmd::new("RBX", addr(0x1000), addr(0x1007), Some(0xBEEF)));
+        compound.add(SetRegisterValueCmd::new("RCX", addr(0x1000), addr(0x1007), Some(0xCAFE)));
+        assert_eq!(compound.len(), 3);
+        assert!(!compound.is_empty());
+        assert!(compound.apply(&mut ctx));
+        assert_eq!(ctx.get_register_value("RAX", &addr(0x1000)), Some(0xDEAD));
+        assert_eq!(ctx.get_register_value("RBX", &addr(0x1004)), Some(0xBEEF));
+        assert_eq!(ctx.get_register_value("RCX", &addr(0x1007)), Some(0xCAFE));
+    }
+
+    #[test]
+    fn test_compound_commands_accessor() {
+        let mut compound = CompoundRegisterCmd::new("test");
+        compound.add(SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(1)));
+        compound.add(SetRegisterValueCmd::new("EBX", addr(0x1000), addr(0x1000), Some(2)));
+        let cmds = compound.commands();
+        assert_eq!(cmds.len(), 2);
+        assert_eq!(cmds[0].register_name(), "EAX");
+        assert_eq!(cmds[1].register_name(), "EBX");
+    }
+
+    #[test]
+    fn test_in_memory_context_default() {
+        let ctx = InMemoryRegisterContext::default();
+        assert_eq!(ctx.get_register_value("EAX", &addr(0x1000)), None);
+        assert_eq!(ctx.get_default_register_value("EAX"), None);
+    }
+
+    #[test]
+    fn test_overwrite_register_value() {
+        let mut ctx = InMemoryRegisterContext::new();
+        let cmd1 = SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(42));
+        cmd1.apply(&mut ctx);
+        assert_eq!(ctx.get_register_value("EAX", &addr(0x1000)), Some(42));
+
+        let cmd2 = SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(99));
+        cmd2.apply(&mut ctx);
+        assert_eq!(ctx.get_register_value("EAX", &addr(0x1000)), Some(99));
+    }
+
+    #[test]
+    fn test_clear_nonexistent_register() {
+        let mut ctx = InMemoryRegisterContext::new();
+        let cmd = SetRegisterValueCmd::clear("NOEXIST", addr(0x1000), addr(0x1000));
+        assert!(cmd.apply(&mut ctx));
+        assert_eq!(ctx.get_register_value("NOEXIST", &addr(0x1000)), None);
+    }
+
+    #[test]
+    fn test_command_clone() {
+        let cmd = SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(42));
+        let cloned = cmd.clone();
+        assert_eq!(cloned.register_name(), "EAX");
+        assert_eq!(cloned.value(), Some(42));
+    }
+
+    #[test]
+    fn test_compound_command_clone() {
+        let mut compound = CompoundRegisterCmd::new("test");
+        compound.add(SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(1)));
+        let cloned = compound.clone();
+        assert_eq!(cloned.len(), 1);
+        assert_eq!(cloned.name(), "test");
+    }
+
+    #[test]
+    fn test_debug_traits() {
+        let cmd = SetRegisterValueCmd::new("EAX", addr(0x1000), addr(0x1000), Some(42));
+        let debug = format!("{:?}", cmd);
+        assert!(debug.contains("SetRegisterValueCmd"));
+
+        let compound = CompoundRegisterCmd::new("test");
+        let debug = format!("{:?}", compound);
+        assert!(debug.contains("CompoundRegisterCmd"));
+
+        let ctx = InMemoryRegisterContext::new();
+        let debug = format!("{:?}", ctx);
+        assert!(debug.contains("InMemoryRegisterContext"));
+    }
 }

@@ -36,6 +36,9 @@ pub const MAIN_ACTION_GROUP: &str = "MainActions";
 /// The bit-field action group name.
 pub const BITFIELD_ACTION_GROUP: &str = "BitFieldActions";
 
+/// The basic action group name.
+pub const BASIC_ACTION_GROUP: &str = "BasicActions";
+
 // ---------------------------------------------------------------------------
 // CompositeEditorTableAction
 // ---------------------------------------------------------------------------
@@ -634,6 +637,475 @@ impl Default for LockAction {
 }
 
 // ---------------------------------------------------------------------------
+// AddBitFieldAction
+// ---------------------------------------------------------------------------
+
+/// Action to add a new bit-field component to a composite.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.AddBitFieldAction`.
+#[derive(Debug, Clone)]
+pub struct AddBitFieldAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+    /// The bit offset for the new bit-field.
+    pub bit_offset: u32,
+    /// The bit size for the new bit-field.
+    pub bit_size: u32,
+    /// The base type mnemonic (e.g., "uint").
+    pub base_type: String,
+}
+
+impl AddBitFieldAction {
+    /// Create a new add-bit-field action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Add Bit Field",
+                BITFIELD_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Add Bit Field".into()])
+            .with_key_binding("Ctrl+B")
+            .with_description("Add a new bit-field component at the selected position"),
+            bit_offset: 0,
+            bit_size: 1,
+            base_type: "uint".into(),
+        }
+    }
+
+    /// Set the bit-field parameters.
+    pub fn with_params(mut self, offset: u32, size: u32, base_type: impl Into<String>) -> Self {
+        self.bit_offset = offset;
+        self.bit_size = size;
+        self.base_type = base_type.into();
+        self
+    }
+
+    /// Validate the bit-field parameters.
+    pub fn is_valid(&self) -> bool {
+        self.bit_size > 0 && self.bit_size <= 64 && !self.base_type.is_empty()
+    }
+}
+
+impl Default for AddBitFieldAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EditBitFieldAction
+// ---------------------------------------------------------------------------
+
+/// Action to edit an existing bit-field component.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.EditBitFieldAction`.
+#[derive(Debug, Clone)]
+pub struct EditBitFieldAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+    /// The ordinal of the bit-field to edit.
+    pub ordinal: usize,
+}
+
+impl EditBitFieldAction {
+    /// Create a new edit-bit-field action.
+    pub fn new(ordinal: usize) -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Edit Bit Field",
+                BITFIELD_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Edit Bit Field".into()])
+            .with_description("Edit the selected bit-field component"),
+            ordinal,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EditComponentAction
+// ---------------------------------------------------------------------------
+
+/// Action to edit the selected component (type, name, or comment).
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.EditComponentAction`.
+#[derive(Debug, Clone)]
+pub struct EditComponentAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl EditComponentAction {
+    /// Create a new edit-component action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Edit Component",
+                COMPONENT_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Edit Component".into()])
+            .with_key_binding("Enter")
+            .with_description("Edit the selected component"),
+        }
+    }
+}
+
+impl Default for EditComponentAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FavoritesAction
+// ---------------------------------------------------------------------------
+
+/// Action to apply a favorite data type to the selected component.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.FavoritesAction`.
+#[derive(Debug, Clone)]
+pub struct FavoritesAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+    /// The favorite data type name.
+    pub data_type_name: String,
+}
+
+impl FavoritesAction {
+    /// Create a new favorites action for a specific data type.
+    pub fn new(data_type_name: impl Into<String>) -> Self {
+        let name_str = data_type_name.into();
+        Self {
+            base: CompositeEditorTableAction::new(
+                format!("Apply Favorite: {}", name_str),
+                DATA_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Favorites".into(), name_str.clone()])
+            .with_description(format!("Apply favorite data type '{}' to selected component", name_str)),
+            data_type_name: name_str,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FindReferencesToStructureFieldAction
+// ---------------------------------------------------------------------------
+
+/// Action to find references to a structure field.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.FindReferencesToStructureFieldAction`.
+#[derive(Debug, Clone)]
+pub struct FindReferencesToStructureFieldAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+    /// The field name to find references for (if known).
+    pub field_name: Option<String>,
+    /// The composite type path.
+    pub composite_type_path: String,
+}
+
+impl FindReferencesToStructureFieldAction {
+    /// Create a new find-references action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Find Uses of",
+                BASIC_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Find Uses of".into()])
+            .with_description("Find uses of the field in the selected row"),
+            field_name: None,
+            composite_type_path: String::new(),
+        }
+    }
+
+    /// Update the menu name with the field name.
+    pub fn update_menu_name(&mut self, field_name: impl Into<String>) {
+        let name = field_name.into();
+        self.base.name = format!("Find Uses of {}", name);
+        self.base.popup_path = vec![self.base.name.clone()];
+        self.field_name = Some(name);
+    }
+}
+
+impl Default for FindReferencesToStructureFieldAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CreateInternalStructureAction
+// ---------------------------------------------------------------------------
+
+/// Action to create a new structure from the selected components.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CreateInternalStructureAction`.
+#[derive(Debug, Clone)]
+pub struct CreateInternalStructureAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl CreateInternalStructureAction {
+    /// Create a new create-internal-structure action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Create Structure From Selection",
+                COMPONENT_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Create Structure From Selection".into()])
+            .with_description(
+                "Create a new structure from the selected components and replace them with it",
+            ),
+        }
+    }
+}
+
+impl Default for CreateInternalStructureAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PointerAction
+// ---------------------------------------------------------------------------
+
+/// Action to create a pointer to the selected component's type.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.PointerAction`.
+#[derive(Debug, Clone)]
+pub struct PointerAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl PointerAction {
+    /// Create a new pointer action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Make Pointer",
+                DATA_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Make Pointer".into()])
+            .with_key_binding("Ctrl+P")
+            .with_description("Replace selected component with a pointer to its type"),
+        }
+    }
+}
+
+impl Default for PointerAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UndoChangeAction / RedoChangeAction
+// ---------------------------------------------------------------------------
+
+/// Action to undo the last change.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.UndoChangeAction`.
+#[derive(Debug, Clone)]
+pub struct UndoChangeAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl UndoChangeAction {
+    /// Create a new undo action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Undo",
+                UNDO_REDO_ACTION_GROUP,
+            )
+            .with_key_binding("Ctrl+Z")
+            .with_description("Undo the last change"),
+        }
+    }
+}
+
+impl Default for UndoChangeAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to redo the last undone change.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.RedoChangeAction`.
+#[derive(Debug, Clone)]
+pub struct RedoChangeAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl RedoChangeAction {
+    /// Create a new redo action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Redo",
+                UNDO_REDO_ACTION_GROUP,
+            )
+            .with_key_binding("Ctrl+Y")
+            .with_description("Redo the last undone change"),
+        }
+    }
+}
+
+impl Default for RedoChangeAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ShowComponentPathAction
+// ---------------------------------------------------------------------------
+
+/// Action to show the full path of the selected component.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.ShowComponentPathAction`.
+#[derive(Debug, Clone)]
+pub struct ShowComponentPathAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl ShowComponentPathAction {
+    /// Create a new show-component-path action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Show Component Path",
+                COMPONENT_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Show Component Path".into()])
+            .with_description("Show the full data type path of the selected component"),
+        }
+    }
+}
+
+impl Default for ShowComponentPathAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ShowDataTypeInTreeAction
+// ---------------------------------------------------------------------------
+
+/// Action to show the selected component's data type in the data type tree.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.ShowDataTypeInTreeAction`.
+#[derive(Debug, Clone)]
+pub struct ShowDataTypeInTreeAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl ShowDataTypeInTreeAction {
+    /// Create a new show-data-type-in-tree action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Show Data Type In Tree",
+                COMPONENT_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Show Data Type In Tree".into()])
+            .with_description("Navigate to the data type in the Data Type Manager tree"),
+        }
+    }
+}
+
+impl Default for ShowDataTypeInTreeAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// UnpackageAction
+// ---------------------------------------------------------------------------
+
+/// Action to unpackage a data type from its category.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.UnpackageAction`.
+#[derive(Debug, Clone)]
+pub struct UnpackageAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+}
+
+impl UnpackageAction {
+    /// Create a new unpackage action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Unpackage",
+                DATA_ACTION_GROUP,
+            )
+            .with_popup_path(vec!["Unpackage".into()])
+            .with_description("Remove the selected component's data type from its category package"),
+        }
+    }
+}
+
+impl Default for UnpackageAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ToggleHexUseAction
+// ---------------------------------------------------------------------------
+
+/// Action to toggle whether hex numbers are shown in the editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.HexNumbersAction` (toggle variant).
+#[derive(Debug, Clone)]
+pub struct ToggleHexUseAction {
+    /// The base action.
+    pub base: CompositeEditorTableAction,
+    /// Whether hex is currently active.
+    pub hex_active: bool,
+}
+
+impl ToggleHexUseAction {
+    /// Create a new toggle-hex action.
+    pub fn new() -> Self {
+        Self {
+            base: CompositeEditorTableAction::new(
+                "Show Hex Numbers",
+                MAIN_ACTION_GROUP,
+            )
+            .with_key_binding("Ctrl+H")
+            .with_description("Toggle display of hexadecimal numbers"),
+            hex_active: false,
+        }
+    }
+
+    /// Toggle the hex display state.
+    pub fn toggle(&mut self) {
+        self.hex_active = !self.hex_active;
+    }
+}
+
+impl Default for ToggleHexUseAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -775,5 +1247,122 @@ mod tests {
         assert_eq!(action.key_binding.as_deref(), Some("Ctrl+T"));
         assert_eq!(action.description, "Test action");
         assert!(action.enabled);
+    }
+
+    #[test]
+    fn test_add_bitfield_action() {
+        let action = AddBitFieldAction::new();
+        assert_eq!(action.base.name, "Add Bit Field");
+        assert_eq!(action.base.key_binding.as_deref(), Some("Ctrl+B"));
+        assert!(action.is_valid());
+
+        let custom = AddBitFieldAction::new().with_params(3, 5, "uint");
+        assert_eq!(custom.bit_offset, 3);
+        assert_eq!(custom.bit_size, 5);
+        assert_eq!(custom.base_type, "uint");
+        assert!(custom.is_valid());
+    }
+
+    #[test]
+    fn test_add_bitfield_action_invalid() {
+        let action = AddBitFieldAction {
+            bit_size: 0,
+            ..AddBitFieldAction::new()
+        };
+        assert!(!action.is_valid());
+
+        let action2 = AddBitFieldAction {
+            bit_size: 65,
+            ..AddBitFieldAction::new()
+        };
+        assert!(!action2.is_valid());
+    }
+
+    #[test]
+    fn test_edit_bitfield_action() {
+        let action = EditBitFieldAction::new(3);
+        assert_eq!(action.base.name, "Edit Bit Field");
+        assert_eq!(action.ordinal, 3);
+    }
+
+    #[test]
+    fn test_edit_component_action() {
+        let action = EditComponentAction::new();
+        assert_eq!(action.base.name, "Edit Component");
+        assert_eq!(action.base.key_binding.as_deref(), Some("Enter"));
+    }
+
+    #[test]
+    fn test_favorites_action() {
+        let action = FavoritesAction::new("float");
+        assert_eq!(action.data_type_name, "float");
+        assert!(action.base.name.contains("float"));
+    }
+
+    #[test]
+    fn test_find_references_to_structure_field_action() {
+        let action = FindReferencesToStructureFieldAction::new();
+        assert_eq!(action.base.name, "Find Uses of");
+        assert!(action.field_name.is_none());
+
+        let mut action2 = FindReferencesToStructureFieldAction::new();
+        action2.update_menu_name("myField");
+        assert_eq!(action2.base.name, "Find Uses of myField");
+        assert_eq!(action2.field_name.as_deref(), Some("myField"));
+    }
+
+    #[test]
+    fn test_create_internal_structure_action() {
+        let action = CreateInternalStructureAction::new();
+        assert_eq!(action.base.name, "Create Structure From Selection");
+    }
+
+    #[test]
+    fn test_pointer_action() {
+        let action = PointerAction::new();
+        assert_eq!(action.base.name, "Make Pointer");
+        assert_eq!(action.base.key_binding.as_deref(), Some("Ctrl+P"));
+    }
+
+    #[test]
+    fn test_undo_redo_change_actions() {
+        let undo = UndoChangeAction::new();
+        assert_eq!(undo.base.name, "Undo");
+        assert_eq!(undo.base.key_binding.as_deref(), Some("Ctrl+Z"));
+
+        let redo = RedoChangeAction::new();
+        assert_eq!(redo.base.name, "Redo");
+        assert_eq!(redo.base.key_binding.as_deref(), Some("Ctrl+Y"));
+    }
+
+    #[test]
+    fn test_show_component_path_action() {
+        let action = ShowComponentPathAction::new();
+        assert_eq!(action.base.name, "Show Component Path");
+    }
+
+    #[test]
+    fn test_show_data_type_in_tree_action() {
+        let action = ShowDataTypeInTreeAction::new();
+        assert_eq!(action.base.name, "Show Data Type In Tree");
+    }
+
+    #[test]
+    fn test_unpackage_action() {
+        let action = UnpackageAction::new();
+        assert_eq!(action.base.name, "Unpackage");
+    }
+
+    #[test]
+    fn test_toggle_hex_use_action() {
+        let mut action = ToggleHexUseAction::new();
+        assert!(!action.hex_active);
+        assert_eq!(action.base.key_binding.as_deref(), Some("Ctrl+H"));
+
+        action.toggle();
+        assert!(action.hex_active);
+
+        action.toggle();
+        assert!(!action.hex_active);
     }
 }

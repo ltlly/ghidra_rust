@@ -96,3 +96,89 @@ pub enum ReferenceResult {
     /// The operation failed with a message.
     Error(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_reference_class_default() {
+        let rc = ReferenceClass::default();
+        assert_eq!(rc, ReferenceClass::Unknown);
+    }
+
+    #[test]
+    fn test_reference_class_variants() {
+        assert_ne!(ReferenceClass::Memory, ReferenceClass::Stack);
+        assert_ne!(ReferenceClass::Register, ReferenceClass::Unknown);
+        assert_eq!(ReferenceClass::Memory, ReferenceClass::Memory);
+    }
+
+    #[test]
+    fn test_reference_class_clone_and_debug() {
+        let rc = ReferenceClass::Stack;
+        let cloned = rc.clone();
+        assert_eq!(rc, cloned);
+        let debug = format!("{:?}", rc);
+        assert_eq!(debug, "Stack");
+    }
+
+    #[test]
+    fn test_reference_class_serialization_roundtrip() {
+        let rc = ReferenceClass::Register;
+        let json = serde_json::to_string(&rc).unwrap();
+        let deserialized: ReferenceClass = serde_json::from_str(&json).unwrap();
+        assert_eq!(rc, deserialized);
+    }
+
+    #[test]
+    fn test_reference_result_success() {
+        let r = ReferenceResult::Success;
+        assert_eq!(r, ReferenceResult::Success);
+        assert_ne!(r, ReferenceResult::Cancelled);
+    }
+
+    #[test]
+    fn test_reference_result_cancelled() {
+        let r = ReferenceResult::Cancelled;
+        assert_eq!(r, ReferenceResult::Cancelled);
+    }
+
+    #[test]
+    fn test_reference_result_error() {
+        let r = ReferenceResult::Error("bad address".into());
+        match &r {
+            ReferenceResult::Error(msg) => assert_eq!(msg, "bad address"),
+            _ => panic!("Expected Error variant"),
+        }
+    }
+
+    #[test]
+    fn test_reference_result_clone_and_debug() {
+        let r = ReferenceResult::Error("test".into());
+        let cloned = r.clone();
+        assert_eq!(r, cloned);
+        let debug = format!("{:?}", ReferenceResult::Success);
+        assert_eq!(debug, "Success");
+    }
+
+    #[test]
+    fn test_constants() {
+        assert_eq!(SUBMENU_NAME, "References");
+        assert_eq!(REFS_GROUP, "references");
+        assert_eq!(SHOW_REFS_GROUP, "ShowReferences");
+    }
+
+    #[test]
+    fn test_reference_result_inequality() {
+        assert_ne!(ReferenceResult::Success, ReferenceResult::Cancelled);
+        assert_ne!(
+            ReferenceResult::Error("a".into()),
+            ReferenceResult::Error("b".into())
+        );
+        assert_ne!(
+            ReferenceResult::Success,
+            ReferenceResult::Error("test".into())
+        );
+    }
+}

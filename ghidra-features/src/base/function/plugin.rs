@@ -364,4 +364,85 @@ mod tests {
         assert_eq!(plugin.action_count(), 0);
         assert_eq!(plugin.favorites_count(), 0);
     }
+
+    #[test]
+    fn test_plugin_name() {
+        let plugin = FunctionPlugin::new();
+        assert_eq!(plugin.name(), "FunctionPlugin");
+    }
+
+    #[test]
+    fn test_plugin_default_trait() {
+        let plugin = FunctionPlugin::default();
+        assert_eq!(plugin.action_count(), 0);
+        assert_eq!(plugin.name(), "FunctionPlugin");
+    }
+
+    #[test]
+    fn test_favorites_ordering_preserved() {
+        let mut plugin = FunctionPlugin::new();
+        plugin.add_favorite("char".to_string());
+        plugin.add_favorite("int".to_string());
+        plugin.add_favorite("float".to_string());
+        let favs = plugin.favorites();
+        assert_eq!(favs[0], "char");
+        assert_eq!(favs[1], "int");
+        assert_eq!(favs[2], "float");
+    }
+
+    #[test]
+    fn test_get_function_at_no_symbols() {
+        let symbols: Vec<Symbol> = vec![];
+        assert!(FunctionPlugin::get_function_at(&symbols, Address::new(0x1000)).is_none());
+    }
+
+    #[test]
+    fn test_get_function_at_wrong_kind() {
+        let symbols = vec![
+            Symbol::label("data", Address::new(0x1000)),
+        ];
+        assert!(FunctionPlugin::get_function_at(&symbols, Address::new(0x1000)).is_none());
+    }
+
+    #[test]
+    fn test_get_function_containing_no_functions() {
+        let symbols = vec![
+            Symbol::label("data", Address::new(0x1000)),
+        ];
+        assert!(FunctionPlugin::get_function_containing(&symbols, Address::new(0x1000)).is_none());
+    }
+
+    #[test]
+    fn test_get_function_containing_before_first() {
+        let symbols = vec![
+            Symbol::function("main", Address::new(0x401000)),
+        ];
+        assert!(FunctionPlugin::get_function_containing(&symbols, Address::new(0x100000)).is_none());
+    }
+
+    #[test]
+    fn test_all_menu_constants() {
+        assert!(!FUNCTION_MENU_SUBGROUP.is_empty());
+        assert!(!THUNK_FUNCTION_MENU_SUBGROUP.is_empty());
+        assert!(!FUNCTION_MENU_PULLRIGHT.is_empty());
+        assert!(!VARIABLE_MENU_PULLRIGHT.is_empty());
+        assert!(!SET_DATA_TYPE_PULLRIGHT.is_empty());
+        assert!(!SET_RETURN_TYPE_MENU_PATH.is_empty());
+        assert!(!SET_PARAMETER_TYPE_MENU_PATH.is_empty());
+        assert!(!FUNCTION_SUBGROUP_BEGINNING.is_empty());
+        assert!(!FUNCTION_SUBGROUP_MIDDLE.is_empty());
+        assert!(!STACK_MENU_SUBGROUP.is_empty());
+        assert!(!VARIABLE_MENU_SUBGROUP.is_empty());
+        assert!(!SET_DATA_TYPE_MENU_SUBGROUP.is_empty());
+        assert!(!SET_RETURN_TYPE_SUBGROUP.is_empty());
+        assert!(!SET_PARAMETER_TYPE_SUBGROUP.is_empty());
+        assert!(!COMMENT_SUBGROUP.is_empty());
+    }
+
+    #[test]
+    fn test_debug_trait() {
+        let plugin = FunctionPlugin::new();
+        let debug = format!("{:?}", plugin);
+        assert!(debug.contains("FunctionPlugin"));
+    }
 }

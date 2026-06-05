@@ -1,6 +1,13 @@
 //! Graph element picking (hit-testing) support.
 //!
 //! Ports `ghidra.graph.viewer.event.picking` and related packages.
+//!
+//! Includes:
+//! - [`GraphPicker`]: performs hit-testing on visual graph elements.
+//! - [`GPickedState`]: tracks the set of currently picked (selected) vertices.
+//! - [`PickListener`]: trait for receiving pick events.
+
+use std::collections::HashSet;
 
 use crate::graph::viewer::{Point2D, Rect2D, VisualEdge, VisualGraph, VisualVertex};
 use crate::graph::viewer::shape::ShapePath;
@@ -171,6 +178,137 @@ fn rects_overlap(a: &Rect2D, b: &Rect2D) -> bool {
         && a.y + a.height > b.y
 }
 
+// ============================================================================
+// PickListener (port of ghidra.graph.viewer.event.picking.PickListener)
+// ============================================================================
+
+/// Origin of a pick event.
+///
+/// Ported from `ghidra.graph.viewer.event.picking.PickListener.EventSource`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PickEventSource {
+    /// Originated from outside the graph API (e.g., an external location change).
+    External,
+    /// Originated from the graph API (e.g., a user click, a graph grouping).
+    Internal,
+}
+
+/// Trait for receiving vertex pick events.
+///
+/// Ported from `ghidra.graph.viewer.event.picking.PickListener<V>`.
+pub trait PickListener: Send + Sync + std::fmt::Debug {
+    /// Called when vertices are picked (selected or deselected).
+    fn vertices_picked(&self, vertex_ids: &HashSet<String>, source: PickEventSource);
+}
+
+/// A no-op pick listener.
+#[derive(Debug, Clone, Default)]
+pub struct NullPickListener;
+
+impl PickListener for NullPickListener {
+    fn vertices_picked(&self, _vertex_ids: &HashSet<String>, _source: PickEventSource) {}
+}
+
+// ============================================================================
+// GPickedState (port of ghidra.graph.viewer.picking.GPickedState)
+// ============================================================================
+
+/// Tracks the set of currently picked (selected) vertices and notifies
+/// listeners when the selection changes.
+///
+/// Ported from `ghidra.graph.viewer.picking.GPickedState<V>`.
+#[derive(Debug)]
+pub struct GPickedState {
+    /// The currently selected vertex IDs.
+    selected: HashSet<String>,
+    /// Registered pick listeners.
+    listeners: Vec<Box<dyn PickListener>>,
+}
+
+impl GPickedState {
+    /// Create a new empty picked state.
+    pub fn new() -> Self {
+        Self {
+            selected: HashSet::new(),
+            listeners: Vec::new(),
+        }
+    }
+
+    /// Register a pick listener.
+    pub fn add_listener(&mut self, listener: Box<dyn PickListener>) {
+        self.listeners.push(listener);
+    }
+
+    /// Pick (select) a single vertex, clearing any previous selection.
+    pub fn pick_vertex(&mut self, vertex_id: &str, source: PickEventSource) {
+        self.selected.clear();
+        self.selected.insert(vertex_id.to_string());
+        self.fire_event(source);
+    }
+
+    /// Add a vertex to the current selection (multi-select).
+    pub fn add_to_pick(&mut self, vertex_id: &str, source: PickEventSource) {
+        self.selected.insert(vertex_id.to_string());
+        self.fire_event(source);
+    }
+
+    /// Remove a vertex from the current selection.
+    pub fn remove_from_pick(&mut self, vertex_id: &str, source: PickEventSource) {
+        self.selected.remove(vertex_id);
+        self.fire_event(source);
+    }
+
+    /// Clear all selections.
+    pub fn clear(&mut self, source: PickEventSource) {
+        if !self.selected.is_empty() {
+            self.selected.clear();
+            self.fire_event(source);
+        }
+    }
+
+    /// Whether a vertex is currently picked.
+    pub fn is_picked(&self, vertex_id: &str) -> bool {
+        self.selected.contains(vertex_id)
+    }
+
+    /// Get the set of currently picked vertex IDs.
+    pub fn picked_vertices(&self) -> &HashSet<String> {
+        &self.selected
+    }
+
+    /// Get the number of currently picked vertices.
+    pub fn pick_count(&self) -> usize {
+        self.selected.len()
+    }
+
+    /// Whether exactly one vertex is picked.
+    pub fn has_single_pick(&self) -> bool {
+        self.selected.len() == 1
+    }
+
+    /// Get the single picked vertex (if exactly one is selected).
+    pub fn single_pick(&self) -> Option<&str> {
+        if self.selected.len() == 1 {
+            self.selected.iter().next().map(|s| s.as_str())
+        } else {
+            None
+        }
+    }
+
+    /// Fire a pick event to all listeners.
+    fn fire_event(&self, source: PickEventSource) {
+        for listener in &self.listeners {
+            listener.vertices_picked(&self.selected, source);
+        }
+    }
+}
+
+impl Default for GPickedState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,5 +406,85 @@ mod tests {
         let b = Point2D::new(100.0, 0.0);
         let dist = point_to_segment_distance(&p, &a, &b);
         assert!((dist - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn g_picked_state_new() {
+        let state = GPickedState::new();
+        assert!(state.picked_vertices().is_empty());
+        assert_eq!(state.pick_count(), 0);
+    }
+
+    #[test]
+    fn g_picked_state_pick_vertex() {
+        let mut state = GPickedState::new();
+        state.pick_vertex("v1", PickEventSource::Internal);
+        assert!(state.is_picked("v1"));
+        assert!(!state.is_picked("v2"));
+        assert_eq!(state.pick_count(), 1);
+    }
+
+    #[test]
+    fn g_picked_state_single_pick() {
+        let mut state = GPickedState::new();
+        state.pick_vertex("v1", PickEventSource::Internal);
+        assert!(state.has_single_pick());
+        assert_eq!(state.single_pick(), Some("v1"));
+    }
+
+    #[test]
+    fn g_picked_state_pick_replaces() {
+        let mut state = GPickedState::new();
+        state.pick_vertex("v1", PickEventSource::Internal);
+        state.pick_vertex("v2", PickEventSource::Internal);
+        assert!(!state.is_picked("v1"));
+        assert!(state.is_picked("v2"));
+        assert_eq!(state.pick_count(), 1);
+    }
+
+    #[test]
+    fn g_picked_state_multi_select() {
+        let mut state = GPickedState::new();
+        state.add_to_pick("v1", PickEventSource::Internal);
+        state.add_to_pick("v2", PickEventSource::Internal);
+        assert_eq!(state.pick_count(), 2);
+        assert!(state.is_picked("v1"));
+        assert!(state.is_picked("v2"));
+        assert!(!state.has_single_pick());
+        assert!(state.single_pick().is_none());
+    }
+
+    #[test]
+    fn g_picked_state_remove_from_pick() {
+        let mut state = GPickedState::new();
+        state.add_to_pick("v1", PickEventSource::Internal);
+        state.add_to_pick("v2", PickEventSource::Internal);
+        state.remove_from_pick("v1", PickEventSource::Internal);
+        assert_eq!(state.pick_count(), 1);
+        assert!(!state.is_picked("v1"));
+        assert!(state.is_picked("v2"));
+    }
+
+    #[test]
+    fn g_picked_state_clear() {
+        let mut state = GPickedState::new();
+        state.add_to_pick("v1", PickEventSource::Internal);
+        state.add_to_pick("v2", PickEventSource::Internal);
+        state.clear(PickEventSource::Internal);
+        assert_eq!(state.pick_count(), 0);
+    }
+
+    #[test]
+    fn pick_event_source_variants() {
+        assert_ne!(PickEventSource::External, PickEventSource::Internal);
+    }
+
+    #[test]
+    fn null_pick_listener() {
+        let listener = NullPickListener;
+        let mut set = HashSet::new();
+        set.insert("v1".to_string());
+        listener.vertices_picked(&set, PickEventSource::Internal);
+        // No panic -- no-op.
     }
 }

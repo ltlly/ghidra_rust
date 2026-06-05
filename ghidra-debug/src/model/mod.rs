@@ -41,6 +41,7 @@ pub mod time;
 pub mod time_schedule;
 pub mod trace;
 pub mod trace_location;
+pub mod trace_method;
 pub mod trace_span;
 
 pub use address_snap::{AddressSnap, TraceAddressSnapRange};
@@ -88,4 +89,7 @@ pub use time::{TraceSchedule, TraceSnapshot, TraceTimeManager};
 pub use time_schedule::{CompareResult, PatchStep, ScheduleSequence, ScheduleStep, Scheduler, StepKind, TickStep};
 pub use trace::{Trace, TraceOptionsManager, TraceTimeViewport, TraceUserData};
 pub use trace_location::{TraceClosedException, TraceLocation, TraceUniqueObject, UniqueObjectBase};
+pub use trace_method::{
+    ArgValue, MethodArguments, MethodParameter, MethodResult, MethodValue, TraceMethodDescriptor,
+};
 pub use trace_span::TraceSpan;

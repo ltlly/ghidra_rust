@@ -104,4 +104,65 @@ mod tests {
         assert!(display.contains("lib"));
         assert!(display.contains("reserved"));
     }
+
+    #[test]
+    fn test_parameter_conflict_clone_eq() {
+        let e1 = ParameterConflictException::new("conflict");
+        let e2 = e1.clone();
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn test_parameter_conflict_debug() {
+        let e = ParameterConflictException::new("debug test");
+        let debug = format!("{:?}", e);
+        assert!(debug.contains("ParameterConflictException"));
+        assert!(debug.contains("debug test"));
+    }
+
+    #[test]
+    fn test_parameter_conflict_empty_message() {
+        let e = ParameterConflictException::new("");
+        assert_eq!(e.message(), "");
+        assert!(format!("{}", e).contains("Parameter conflict"));
+    }
+
+    #[test]
+    fn test_reserved_name_clone_eq() {
+        let e1 = ReservedNameException::new("Global", "reserved");
+        let e2 = e1.clone();
+        assert_eq!(e1, e2);
+    }
+
+    #[test]
+    fn test_reserved_name_debug() {
+        let e = ReservedNameException::new("test", "msg");
+        let debug = format!("{:?}", e);
+        assert!(debug.contains("ReservedNameException"));
+        assert!(debug.contains("test"));
+        assert!(debug.contains("msg"));
+    }
+
+    #[test]
+    fn test_reserved_name_is_error() {
+        let e = ReservedNameException::new("name", "msg");
+        let err: &dyn std::error::Error = &e;
+        let display = format!("{}", err);
+        assert!(display.contains("name"));
+    }
+
+    #[test]
+    fn test_parameter_conflict_is_error_trait() {
+        let e = ParameterConflictException::new("test");
+        let err: &dyn std::error::Error = &e;
+        // source() should return None for this error type
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn test_reserved_name_is_error_trait() {
+        let e = ReservedNameException::new("name", "msg");
+        let err: &dyn std::error::Error = &e;
+        assert!(err.source().is_none());
+    }
 }

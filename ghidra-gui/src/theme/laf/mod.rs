@@ -13,9 +13,11 @@ pub mod component_font_registry;
 pub mod font_non_ui_resource;
 pub mod ui_defaults_mapper;
 pub mod concrete_managers;
+pub mod nimbus;
 
 pub use laf_manager::LookAndFeelManager;
 pub use component_font_registry::ComponentFontRegistry;
 pub use font_non_ui_resource::FontNonUiResource;
 pub use ui_defaults_mapper::UiDefaultsMapper;
 pub use concrete_managers::*;
+pub use nimbus::{SelectedTreePainter, NimbusLafManager, PaintContext, PaintInsets, CacheMode};

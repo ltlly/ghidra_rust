@@ -34,6 +34,7 @@
 
 pub mod api;
 pub mod db;
+mod debug_integration_test;
 pub mod framework;
 pub mod isf;
 pub mod jdi;

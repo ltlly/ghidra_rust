@@ -8,6 +8,7 @@ pub mod filter_types;
 pub mod overview;
 pub mod search_dialog;
 pub mod search_results;
+pub mod server_cache;
 pub mod value_editors;
 
 /// BSim search settings.

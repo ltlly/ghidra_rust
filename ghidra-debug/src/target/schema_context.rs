@@ -341,18 +341,240 @@ impl SchemaContextBuilder {
 
 /// An XML-based schema context loader.
 ///
-/// Ported from Ghidra's `XmlSchemaContext`. Provides parsing of XML
-/// schema definitions into a `DefaultSchemaContext`.
-pub struct XmlSchemaContext;
+/// Ported from Ghidra's `XmlSchemaContext`. Parses XML schema definitions
+/// into a `DefaultSchemaContext`. Supports the same XML elements and
+/// attributes as Ghidra's implementation: `<context>`, `<schema>`,
+/// `<interface>`, `<element>`, `<attribute>`, and `<attribute-alias>`.
+pub struct XmlSchemaContext {
+    context: DefaultSchemaContext,
+    names: HashMap<String, SchemaName>,
+}
 
 impl XmlSchemaContext {
     /// Parse schema definitions from an XML string.
     ///
-    /// This is a simplified parser; the real Ghidra uses XML DOM parsing.
-    pub fn from_xml(_xml: &str) -> Result<DefaultSchemaContext, String> {
-        // Simplified: in a full port, this would parse XML schema definitions.
-        // For now, return a default context with basic schemas.
-        Ok(DefaultSchemaContext::with_defaults())
+    /// Expects XML in the Ghidra schema format:
+    /// ```xml
+    /// <context>
+    ///   <schema name="PROCESS">
+    ///     <interface name="TraceProcess"/>
+    ///     <element index="Threads" schema="OBJECT"/>
+    ///     <attribute name="pid" schema="OBJECT" required="yes"/>
+    ///     <attribute-alias from="process_id" to="pid"/>
+    ///   </schema>
+    /// </context>
+    /// ```
+    pub fn from_xml(xml: &str) -> Result<DefaultSchemaContext, String> {
+        let mut parser = Self {
+            context: DefaultSchemaContext::with_defaults(),
+            names: HashMap::new(),
+        };
+        parser.parse(xml)?;
+        Ok(parser.context)
+    }
+
+    fn parse(&mut self, xml: &str) -> Result<(), String> {
+        let xml = xml.trim();
+        // Find the <context> root element
+        let context_start = xml.find("<context")
+            .ok_or_else(|| "Missing <context> root element".to_string())?;
+        let context_end_tag = xml[context_start..].find('>')
+            .ok_or_else(|| "Unclosed <context> tag".to_string())?;
+        let inner_start = context_start + context_end_tag + 1;
+        let context_close = xml.rfind("</context>")
+            .ok_or_else(|| "Missing </context> closing tag".to_string())?;
+        let inner = &xml[inner_start..context_close];
+
+        // Parse each <schema> element
+        let mut remaining = inner;
+        while let Some(start) = remaining.find("<schema") {
+            remaining = &remaining[start..];
+            let end = remaining.find("</schema>")
+                .ok_or_else(|| "Unclosed <schema> tag".to_string())?;
+            let schema_xml = &remaining[..end + "</schema>".len()];
+            self.parse_schema(schema_xml)?;
+            remaining = &remaining[end + "</schema>".len()..];
+        }
+
+        Ok(())
+    }
+
+    fn get_or_create_name(&mut self, name: &str) -> SchemaName {
+        if let Some(sn) = self.names.get(name) {
+            return sn.clone();
+        }
+        let sn = SchemaName::new(name);
+        self.names.insert(name.to_string(), sn.clone());
+        sn
+    }
+
+    fn parse_schema(&mut self, xml: &str) -> Result<(), String> {
+        let tag_end = xml.find('>').ok_or("Unclosed schema tag")?;
+        let tag_content = if xml.as_bytes().get(tag_end - 1) == Some(&b'/') {
+            &xml[..tag_end - 1]
+        } else {
+            &xml[..tag_end]
+        };
+
+        let schema_name = Self::get_attr(tag_content, "name").unwrap_or_default();
+        let is_canonical = Self::get_attr(tag_content, "canonical")
+            .map(|v| Self::parse_bool(v))
+            .unwrap_or(false);
+
+        let sn = self.get_or_create_name(&schema_name);
+        let mut schema = DefaultTraceObjectSchema::new("XmlLoaded", sn, schema_name.to_string());
+
+        // Parse inner elements
+        let inner_start = tag_end + 1;
+        let inner_end = xml.rfind("</schema>").unwrap_or(xml.len());
+        let inner = &xml[inner_start..inner_end];
+
+        // Parse <interface> elements
+        let mut remaining = inner;
+        while let Some(start) = Self::find_element(remaining, "interface") {
+            let (elem, rest) = Self::extract_element(remaining, start, "interface");
+            if let Some(name) = Self::get_attr(&elem, "name") {
+                schema.add_interface(name);
+            }
+            remaining = rest;
+        }
+
+        // Parse <element> elements
+        remaining = inner;
+        while let Some(start) = Self::find_element(remaining, "element") {
+            let (elem, rest) = Self::extract_element(remaining, start, "element");
+            if let Some(schema_ref) = Self::get_attr(&elem, "schema") {
+                let _ = self.get_or_create_name(schema_ref);
+                // Element schemas define what types of children are allowed
+                if let Some(index) = Self::get_attr(&elem, "index") {
+                    let attr = AttributeSchema::new(
+                        format!("[{}]", index),
+                        SchemaName::new(schema_ref),
+                    );
+                    schema.add_attribute(attr);
+                }
+            }
+            remaining = rest;
+        }
+
+        // Parse <attribute> elements
+        remaining = inner;
+        while let Some(start) = Self::find_element(remaining, "attribute") {
+            let (elem, rest) = Self::extract_element(remaining, start, "attribute");
+            if let Some(schema_ref) = Self::get_attr(&elem, "schema") {
+                let name = Self::get_attr(&elem, "name").unwrap_or("");
+                let required = Self::get_attr(&elem, "required")
+                    .map(Self::parse_bool)
+                    .unwrap_or(false);
+                let hidden = Self::get_attr(&elem, "hidden")
+                    .map(Self::parse_bool)
+                    .unwrap_or(false);
+
+                let mut attr = AttributeSchema::new(name, SchemaName::new(schema_ref));
+                if required {
+                    attr = attr.required();
+                }
+                if hidden {
+                    attr = attr.hidden();
+                }
+                schema.add_attribute(attr);
+            }
+            remaining = rest;
+        }
+
+        // Parse <attribute-alias> elements
+        remaining = inner;
+        while let Some(start) = Self::find_element(remaining, "attribute-alias") {
+            let (elem, rest) = Self::extract_element(remaining, start, "attribute-alias");
+            if let (Some(from), Some(to)) = (
+                Self::get_attr(&elem, "from"),
+                Self::get_attr(&elem, "to"),
+            ) {
+                let mut attr = AttributeSchema::new(from, SchemaName::object());
+                attr = attr.alias_for(to);
+                schema.add_attribute(attr);
+            }
+            remaining = rest;
+        }
+
+        if is_canonical {
+            schema.set_canonical_key("key");
+        }
+
+        self.context.add_schema(schema);
+        Ok(())
+    }
+
+    fn get_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+        let pattern = format!("{}=\"", name);
+        let start = tag.find(&pattern)? + pattern.len();
+        let rest = &tag[start..];
+        let end = rest.find('"')?;
+        Some(&rest[..end])
+    }
+
+    fn parse_bool(value: &str) -> bool {
+        matches!(
+            value.to_lowercase().as_str(),
+            "true" | "yes" | "y" | "1"
+        )
+    }
+
+    fn find_element(haystack: &str, tag: &str) -> Option<usize> {
+        let open = format!("<{}", tag);
+        haystack.find(&open)
+    }
+
+    fn extract_element<'a>(haystack: &'a str, start: usize, tag: &str) -> (String, &'a str) {
+        let close_tag = format!("</{}>", tag);
+        let self_close = "/>";
+        let rest = &haystack[start..];
+
+        // Check if self-closing
+        if let Some(end_pos) = rest.find(self_close) {
+            let tag_end = rest.find('>').unwrap_or(end_pos);
+            let elem = rest[..tag_end + 1].to_string();
+            let after = &haystack[start + tag_end + 1..];
+            return (elem, after);
+        }
+
+        if let Some(end_pos) = rest.find(&close_tag) {
+            let elem = rest[..end_pos + close_tag.len()].to_string();
+            let after = &haystack[start + end_pos + close_tag.len()..];
+            return (elem, after);
+        }
+
+        // Fallback: take everything
+        (rest.to_string(), "")
+    }
+
+    /// Serialize a schema context to an XML string.
+    pub fn to_xml(context: &DefaultSchemaContext) -> String {
+        let mut xml = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<context>\n");
+        for name in context.schema_names() {
+            if let Some(schema) = context.get_schema(name) {
+                xml.push_str(&format!("  <schema name=\"{}\">\n", schema.name));
+                for iface in &schema.interfaces {
+                    xml.push_str(&format!("    <interface name=\"{}\"/>\n", iface));
+                }
+                for (_, attr) in &schema.attributes {
+                    xml.push_str(&format!(
+                        "    <attribute name=\"{}\" schema=\"{}\"",
+                        attr.name, attr.schema
+                    ));
+                    if attr.required {
+                        xml.push_str(" required=\"yes\"");
+                    }
+                    if attr.hidden {
+                        xml.push_str(" hidden=\"yes\"");
+                    }
+                    xml.push_str("/>\n");
+                }
+                xml.push_str("  </schema>\n");
+            }
+        }
+        xml.push_str("</context>\n");
+        xml
     }
 }
 
@@ -440,5 +662,77 @@ mod tests {
         let ifaces = ctx.get_interfaces(&SchemaName::new("PROC"));
         assert_eq!(ifaces.len(), 2);
         assert!(ifaces.contains(&"TraceProcess".to_string()));
+    }
+
+    #[test]
+    fn test_xml_schema_context_parse() {
+        let xml = r#"<context>
+  <schema name="PROCESS">
+    <interface name="TraceProcess"/>
+    <interface name="TraceActivatable"/>
+    <element index="Threads" schema="OBJECT"/>
+    <attribute name="pid" schema="OBJECT" required="yes"/>
+    <attribute name="name" schema="OBJECT"/>
+    <attribute-alias from="process_id" to="pid"/>
+  </schema>
+</context>"#;
+
+        let ctx = XmlSchemaContext::from_xml(xml).unwrap();
+        assert!(ctx.has_schema(&SchemaName::new("PROCESS")));
+        let schema = ctx.get_schema(&SchemaName::new("PROCESS")).unwrap();
+        assert_eq!(schema.interfaces.len(), 2);
+        assert!(schema.interfaces.contains(&"TraceProcess".to_string()));
+    }
+
+    #[test]
+    fn test_xml_schema_context_roundtrip() {
+        let ctx = SchemaContextBuilder::new("Test")
+            .schema("PROC", "Process")
+            .attribute("pid", "OBJECT")
+            .interface("TraceProcess")
+            .build();
+
+        let xml = XmlSchemaContext::to_xml(&ctx);
+        assert!(xml.contains("PROC"), "XML should contain PROC schema: {}", xml);
+        assert!(xml.contains("TraceProcess"), "XML should contain TraceProcess: {}", xml);
+        assert!(xml.contains("pid"), "XML should contain pid: {}", xml);
+    }
+
+    #[test]
+    fn test_xml_schema_context_empty() {
+        let xml = "<context></context>";
+        let ctx = XmlSchemaContext::from_xml(xml).unwrap();
+        // Should at least have the default OBJECT schema
+        assert!(ctx.has_schema(&SchemaName::object()));
+    }
+
+    #[test]
+    fn test_xml_schema_context_hidden_attribute() {
+        let xml = r#"<context>
+  <schema name="TEST">
+    <attribute name="secret" schema="OBJECT" hidden="yes"/>
+  </schema>
+</context>"#;
+
+        let ctx = XmlSchemaContext::from_xml(xml).unwrap();
+        let schema = ctx.get_schema(&SchemaName::new("TEST")).unwrap();
+        let attr = schema.get_attribute("secret").unwrap();
+        assert!(attr.hidden);
+    }
+
+    #[test]
+    fn test_xml_schema_context_self_closing() {
+        let xml = r#"<context>
+  <schema name="EMPTY">
+  </schema>
+</context>"#;
+        let ctx = XmlSchemaContext::from_xml(xml).unwrap();
+        assert!(ctx.has_schema(&SchemaName::new("EMPTY")));
+    }
+
+    #[test]
+    fn test_xml_bad_schema_error() {
+        let xml = "not xml at all";
+        assert!(XmlSchemaContext::from_xml(xml).is_err());
     }
 }

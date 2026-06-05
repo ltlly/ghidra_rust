@@ -6,6 +6,9 @@
 //! component.  In the Rust port, we provide the data types and trait
 //! definitions only (no Swing/AWT).
 
+pub mod hover;
+pub mod margin;
+
 use super::clang_node::{ClangNodeId, SyntaxType};
 use super::decompile_results::DecompileResults;
 

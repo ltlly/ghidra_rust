@@ -37,6 +37,8 @@ pub mod trace_db_content;
 pub mod trace_db_content_handler;
 pub mod trace_db_context;
 pub mod trace_db_data;
+pub mod trace_db_data_settings;
+pub mod trace_db_data_type_mgr;
 pub mod trace_db_guest;
 pub mod trace_db_instruction;
 pub mod trace_db_label;
@@ -61,6 +63,8 @@ pub mod trace_db_util;
 pub mod trace_db_visitor_ext;
 
 pub use trace_db::TraceDatabase;
+pub use trace_db_data_settings::{DataSettingsAdapter, DataSettingsOperations, SettingsValue};
+pub use trace_db_data_type_mgr::{DataTypeConflictHandler, DataTypeEntry, TraceDataTypeManager};
 pub use trace_db_address::{
     AddressSpaceManager, AddressSpaceType, OverlaySpaceInfo, TraceAddressSpace,
 };

@@ -308,3 +308,329 @@ pub mod layout_names {
     /// Organic layout.
     pub const ORGANIC: &str = "Organic";
 }
+
+// ============================================================================
+// GraphDisplayOptionsBuilder
+// ============================================================================
+
+/// Builder for constructing [`GraphDisplayOptions`] with a fluent API.
+///
+/// Ports `ghidra.service.graph.GraphDisplayOptionsBuilder`.
+///
+/// # Example
+///
+/// ```
+/// use ghidra_gui::graph::service::{GraphDisplayOptionsBuilder, GraphLabelPosition};
+///
+/// let opts = GraphDisplayOptionsBuilder::new("cfg")
+///     .default_vertex_color("#FFE0E0")
+///     .default_edge_color("#333333")
+///     .label_position(GraphLabelPosition::Top)
+///     .show_edge_labels(true)
+///     .build();
+/// assert_eq!(opts.default_vertex_color, "#FFE0E0");
+/// ```
+pub struct GraphDisplayOptionsBuilder {
+    graph_type_name: String,
+    options: GraphDisplayOptions,
+}
+
+impl GraphDisplayOptionsBuilder {
+    /// Create a new builder for the given graph type.
+    pub fn new(graph_type_name: impl Into<String>) -> Self {
+        Self {
+            graph_type_name: graph_type_name.into(),
+            options: GraphDisplayOptions::default(),
+        }
+    }
+
+    /// Set the default vertex fill color.
+    pub fn default_vertex_color(mut self, color: impl Into<String>) -> Self {
+        self.options.default_vertex_color = color.into();
+        self
+    }
+
+    /// Set the default edge color.
+    pub fn default_edge_color(mut self, color: impl Into<String>) -> Self {
+        self.options.default_edge_color = color.into();
+        self
+    }
+
+    /// Set the label position.
+    pub fn label_position(mut self, position: GraphLabelPosition) -> Self {
+        self.options.label_position = position;
+        self
+    }
+
+    /// Set whether to show edge labels.
+    pub fn show_edge_labels(mut self, show: bool) -> Self {
+        self.options.show_edge_labels = show;
+        self
+    }
+
+    /// Build the final [`GraphDisplayOptions`].
+    pub fn build(self) -> GraphDisplayOptions {
+        self.options
+    }
+
+    /// Get the graph type name.
+    pub fn graph_type_name(&self) -> &str {
+        &self.graph_type_name
+    }
+}
+
+/// Pre-configured default display options for common graph types.
+pub struct DefaultGraphDisplayOptions;
+
+impl DefaultGraphDisplayOptions {
+    /// Default display options for control-flow graphs.
+    pub fn cfg_options() -> GraphDisplayOptions {
+        GraphDisplayOptionsBuilder::new("cfg")
+            .default_vertex_color("#FFFFFF")
+            .default_edge_color("#000000")
+            .label_position(GraphLabelPosition::Center)
+            .show_edge_labels(false)
+            .build()
+    }
+
+    /// Default display options for data-flow graphs.
+    pub fn dfg_options() -> GraphDisplayOptions {
+        GraphDisplayOptionsBuilder::new("dfg")
+            .default_vertex_color("#E0F0FF")
+            .default_edge_color("#0066CC")
+            .label_position(GraphLabelPosition::Center)
+            .show_edge_labels(true)
+            .build()
+    }
+
+    /// Default display options for call graphs.
+    pub fn call_graph_options() -> GraphDisplayOptions {
+        GraphDisplayOptionsBuilder::new("callgraph")
+            .default_vertex_color("#E0FFE0")
+            .default_edge_color("#336633")
+            .label_position(GraphLabelPosition::Bottom)
+            .show_edge_labels(false)
+            .build()
+    }
+}
+
+/// Builder for constructing [`GraphType`] with a fluent API.
+///
+/// Ports `ghidra.service.graph.GraphTypeBuilder`.
+pub struct GraphTypeBuilder {
+    name: String,
+    display_name: String,
+    vertex_types: Vec<String>,
+}
+
+impl GraphTypeBuilder {
+    /// Create a new graph type builder.
+    pub fn new(name: impl Into<String>, display_name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            display_name: display_name.into(),
+            vertex_types: Vec::new(),
+        }
+    }
+
+    /// Add a vertex type.
+    pub fn vertex_type(mut self, vtype: impl Into<String>) -> Self {
+        self.vertex_types.push(vtype.into());
+        self
+    }
+
+    /// Build the [`GraphType`].
+    pub fn build(self) -> GraphType {
+        GraphType {
+            name: self.name,
+            display_name: self.display_name,
+            vertex_types: self.vertex_types,
+        }
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Attributed tests ---
+
+    #[test]
+    fn attributed_basic() {
+        let mut a = Attributed::new();
+        assert!(a.is_empty());
+        a.set("color", "red");
+        assert_eq!(a.get("color"), Some("red"));
+        assert_eq!(a.len(), 1);
+    }
+
+    #[test]
+    fn attributed_keys() {
+        let mut a = Attributed::new();
+        a.set("x", "1");
+        a.set("y", "2");
+        let keys = a.keys();
+        assert_eq!(keys.len(), 2);
+    }
+
+    // --- AttributedVertex tests ---
+
+    #[test]
+    fn attributed_vertex() {
+        let v = AttributedVertex::new("n1", "Node 1");
+        assert_eq!(v.id, "n1");
+        assert_eq!(v.label, "Node 1");
+    }
+
+    // --- AttributedEdge tests ---
+
+    #[test]
+    fn attributed_edge() {
+        let e = AttributedEdge::new("e1", "n1", "n2");
+        assert_eq!(e.from_id, "n1");
+        assert_eq!(e.to_id, "n2");
+    }
+
+    // --- AttributedGraph tests ---
+
+    #[test]
+    fn graph_add_vertex_and_edge() {
+        let mut g = AttributedGraph::new("test", "cfg");
+        g.add_vertex(AttributedVertex::new("a", "A"));
+        g.add_vertex(AttributedVertex::new("b", "B"));
+        g.add_edge(AttributedEdge::new("ab", "a", "b"));
+        assert_eq!(g.vertex_count(), 2);
+        assert_eq!(g.edge_count(), 1);
+    }
+
+    #[test]
+    fn graph_successors_predecessors() {
+        let mut g = AttributedGraph::new("test", "cfg");
+        g.add_vertex(AttributedVertex::new("a", "A"));
+        g.add_vertex(AttributedVertex::new("b", "B"));
+        g.add_edge(AttributedEdge::new("ab", "a", "b"));
+        let succ = g.successors("a");
+        assert_eq!(succ, vec!["b"]);
+        let pred = g.predecessors("b");
+        assert_eq!(pred, vec!["a"]);
+    }
+
+    // --- GraphLabelPosition tests ---
+
+    #[test]
+    fn label_position_variants() {
+        assert_ne!(GraphLabelPosition::Top, GraphLabelPosition::Bottom);
+    }
+
+    // --- GraphDisplayOptions tests ---
+
+    #[test]
+    fn display_options_default() {
+        let opts = GraphDisplayOptions::default();
+        assert_eq!(opts.default_vertex_color, "#FFFFFF");
+        assert_eq!(opts.label_position, GraphLabelPosition::Center);
+    }
+
+    // --- VertexShape tests ---
+
+    #[test]
+    fn vertex_shape_default() {
+        assert_eq!(VertexShape::default(), VertexShape::RoundedRectangle);
+    }
+
+    // --- GraphType tests ---
+
+    #[test]
+    fn graph_type_new() {
+        let mut gt = GraphType::new("cfg", "Control Flow Graph");
+        gt.add_vertex_type("basic_block");
+        assert_eq!(gt.name, "cfg");
+        assert_eq!(gt.vertex_types.len(), 1);
+    }
+
+    // --- GraphDisplayOptionsBuilder tests ---
+
+    #[test]
+    fn builder_fluent_api() {
+        let opts = GraphDisplayOptionsBuilder::new("dfg")
+            .default_vertex_color("#E0F0FF")
+            .default_edge_color("#0066CC")
+            .label_position(GraphLabelPosition::Top)
+            .show_edge_labels(true)
+            .build();
+        assert_eq!(opts.default_vertex_color, "#E0F0FF");
+        assert_eq!(opts.default_edge_color, "#0066CC");
+        assert_eq!(opts.label_position, GraphLabelPosition::Top);
+        assert!(opts.show_edge_labels);
+    }
+
+    #[test]
+    fn builder_defaults_preserved() {
+        let opts = GraphDisplayOptionsBuilder::new("test").build();
+        assert_eq!(opts.default_vertex_color, "#FFFFFF");
+        assert_eq!(opts.label_position, GraphLabelPosition::Center);
+        assert!(!opts.show_edge_labels);
+    }
+
+    #[test]
+    fn builder_graph_type_name() {
+        let builder = GraphDisplayOptionsBuilder::new("cfg");
+        assert_eq!(builder.graph_type_name(), "cfg");
+    }
+
+    // --- DefaultGraphDisplayOptions tests ---
+
+    #[test]
+    fn default_cfg_options() {
+        let opts = DefaultGraphDisplayOptions::cfg_options();
+        assert_eq!(opts.default_vertex_color, "#FFFFFF");
+    }
+
+    #[test]
+    fn default_dfg_options() {
+        let opts = DefaultGraphDisplayOptions::dfg_options();
+        assert_eq!(opts.default_vertex_color, "#E0F0FF");
+        assert!(opts.show_edge_labels);
+    }
+
+    #[test]
+    fn default_call_graph_options() {
+        let opts = DefaultGraphDisplayOptions::call_graph_options();
+        assert_eq!(opts.label_position, GraphLabelPosition::Bottom);
+    }
+
+    // --- GraphTypeBuilder tests ---
+
+    #[test]
+    fn graph_type_builder() {
+        let gt = GraphTypeBuilder::new("cfg", "Control Flow Graph")
+            .vertex_type("basic_block")
+            .vertex_type("entry")
+            .vertex_type("exit")
+            .build();
+        assert_eq!(gt.name, "cfg");
+        assert_eq!(gt.display_name, "Control Flow Graph");
+        assert_eq!(gt.vertex_types.len(), 3);
+        assert_eq!(gt.vertex_types[0], "basic_block");
+    }
+
+    // --- empty_graph_type ---
+
+    #[test]
+    fn test_empty_graph_type() {
+        let gt = super::empty_graph_type();
+        assert_eq!(gt.name, "Empty");
+    }
+
+    // --- layout_names ---
+
+    #[test]
+    fn layout_names_present() {
+        assert_eq!(layout_names::HIERARCHICAL, "Hierarchical");
+        assert_eq!(layout_names::FORCE_DIRECTED, "ForceDirected");
+    }
+}

@@ -54,7 +54,7 @@ impl Default for PluginInfo {
 /// # Example
 ///
 /// ```
-/// use ghidra_features::base::console::ConsolePlugin;
+/// use ghidra_features::base::console::{ConsolePlugin, ConsoleService};
 ///
 /// let mut plugin = ConsolePlugin::new("Console");
 /// plugin.init();

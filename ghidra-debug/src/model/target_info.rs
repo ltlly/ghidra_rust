@@ -187,6 +187,107 @@ pub mod builtin {
             .with_attribute("_sp")
             .with_attribute("_pc")
     }
+
+    /// Activatable object info (objects that can be activated/deactivated).
+    pub fn activatable() -> TraceObjectInfo {
+        TraceObjectInfo::new("Activatable", "activatable")
+            .with_attribute("_active")
+    }
+
+    /// Aggregate object info (objects that group children).
+    pub fn aggregate() -> TraceObjectInfo {
+        TraceObjectInfo::new("Aggregate", "aggregate")
+            .with_attribute("_display")
+    }
+
+    /// Event scope object info (objects that define event scopes).
+    pub fn event_scope() -> TraceObjectInfo {
+        TraceObjectInfo::new("EventScope", "event scope")
+            .with_attribute("_display")
+    }
+
+    /// Execution stateful object info (objects with execution state).
+    pub fn execution_stateful() -> TraceObjectInfo {
+        TraceObjectInfo::new("ExecutionStateful", "execution stateful")
+            .with_attribute("_state")
+    }
+
+    /// Focus scope object info (objects that define focus scopes).
+    pub fn focus_scope() -> TraceObjectInfo {
+        TraceObjectInfo::new("FocusScope", "focus scope")
+            .with_attribute("_display")
+    }
+
+    /// Method object info (objects representing methods).
+    pub fn method() -> TraceObjectInfo {
+        TraceObjectInfo::new("Method", "method")
+            .with_attribute("_display")
+            .with_attribute("_name")
+            .with_attribute("_parameters")
+    }
+
+    /// Togglable object info (objects that can be toggled on/off).
+    pub fn togglable() -> TraceObjectInfo {
+        TraceObjectInfo::new("Togglable", "togglable")
+            .with_attribute("_enabled")
+    }
+
+    /// Stack object info (call stack).
+    pub fn stack() -> TraceObjectInfo {
+        TraceObjectInfo::new("Stack", "stack")
+            .with_attribute("_display")
+            .with_attribute("_depth")
+    }
+
+    /// Section object info (binary section within a module).
+    pub fn section() -> TraceObjectInfo {
+        TraceObjectInfo::new("Section", "section")
+            .with_attribute("_display")
+            .with_attribute("_name")
+            .with_attribute("_range")
+    }
+
+    /// Breakpoint location object info.
+    pub fn breakpoint_location() -> TraceObjectInfo {
+        TraceObjectInfo::new("BreakpointLocation", "breakpoint location")
+            .with_attribute("_display")
+            .with_attribute("_range")
+            .with_attribute("_enabled")
+    }
+
+    /// Register register object info (register value in the target tree).
+    pub fn register_value() -> TraceObjectInfo {
+        TraceObjectInfo::new("RegisterValue", "register value")
+            .with_attribute("_length")
+            .with_attribute("_value")
+            .with_attribute("_state")
+    }
+
+    /// Get all built-in object infos.
+    pub fn all_builtins() -> Vec<TraceObjectInfo> {
+        vec![
+            process(),
+            thread(),
+            module(),
+            register(),
+            register_container(),
+            memory_region(),
+            breakpoint_spec(),
+            environment(),
+            stack_frame(),
+            activatable(),
+            aggregate(),
+            event_scope(),
+            execution_stateful(),
+            focus_scope(),
+            method(),
+            togglable(),
+            stack(),
+            section(),
+            breakpoint_location(),
+            register_value(),
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -294,5 +395,106 @@ mod tests {
         let json = serde_json::to_string(&info).unwrap();
         let back: TraceObjectInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.schema_name, "Thread");
+    }
+
+    #[test]
+    fn test_builtin_activatable() {
+        let info = builtin::activatable();
+        assert_eq!(info.schema_name, "Activatable");
+        assert!(info.attributes.contains(&"_active".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_aggregate() {
+        let info = builtin::aggregate();
+        assert_eq!(info.schema_name, "Aggregate");
+    }
+
+    #[test]
+    fn test_builtin_event_scope() {
+        let info = builtin::event_scope();
+        assert_eq!(info.schema_name, "EventScope");
+    }
+
+    #[test]
+    fn test_builtin_execution_stateful() {
+        let info = builtin::execution_stateful();
+        assert_eq!(info.schema_name, "ExecutionStateful");
+        assert!(info.attributes.contains(&"_state".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_focus_scope() {
+        let info = builtin::focus_scope();
+        assert_eq!(info.schema_name, "FocusScope");
+    }
+
+    #[test]
+    fn test_builtin_method() {
+        let info = builtin::method();
+        assert_eq!(info.schema_name, "Method");
+        assert!(info.attributes.contains(&"_name".to_string()));
+        assert!(info.attributes.contains(&"_parameters".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_togglable() {
+        let info = builtin::togglable();
+        assert_eq!(info.schema_name, "Togglable");
+        assert!(info.attributes.contains(&"_enabled".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_stack() {
+        let info = builtin::stack();
+        assert_eq!(info.schema_name, "Stack");
+        assert!(info.attributes.contains(&"_depth".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_section() {
+        let info = builtin::section();
+        assert_eq!(info.schema_name, "Section");
+        assert!(info.attributes.contains(&"_name".to_string()));
+        assert!(info.attributes.contains(&"_range".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_breakpoint_location() {
+        let info = builtin::breakpoint_location();
+        assert_eq!(info.schema_name, "BreakpointLocation");
+        assert!(info.attributes.contains(&"_range".to_string()));
+    }
+
+    #[test]
+    fn test_builtin_register_value() {
+        let info = builtin::register_value();
+        assert_eq!(info.schema_name, "RegisterValue");
+        assert!(info.attributes.contains(&"_value".to_string()));
+    }
+
+    #[test]
+    fn test_all_builtins_count() {
+        let all = builtin::all_builtins();
+        assert!(all.len() >= 20);
+        // Verify no duplicates
+        let mut names: Vec<&str> = all.iter().map(|i| i.schema_name.as_str()).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), all.len());
+    }
+
+    #[test]
+    fn test_registry_with_all_builtins() {
+        let mut registry = TraceObjectInterfaceRegistry::new();
+        for info in builtin::all_builtins() {
+            registry.register(info);
+        }
+        assert!(registry.len() >= 20);
+        assert!(registry.get("Process").is_some());
+        assert!(registry.get("Thread").is_some());
+        assert!(registry.get("Activatable").is_some());
+        assert!(registry.get("Method").is_some());
+        assert!(registry.get("NonExistent").is_none());
     }
 }

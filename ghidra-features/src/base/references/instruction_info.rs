@@ -209,4 +209,124 @@ mod tests {
         assert_eq!(info.operand_representation(0), Some("%eax"));
         assert_eq!(info.operand_representation(1), None);
     }
+
+    #[test]
+    fn test_operand_info_new_defaults() {
+        let op = OperandInfo::new(2, "[rbp-8]");
+        assert_eq!(op.index, 2);
+        assert_eq!(op.representation, "[rbp-8]");
+        assert!(op.address.is_none());
+        assert!(op.primary_ref_type.is_none());
+    }
+
+    #[test]
+    fn test_operand_info_with_address() {
+        let mut op = OperandInfo::new(0, "0x401000");
+        op.address = Some(Address::new(0x401000));
+        assert!(op.address.is_some());
+        assert_eq!(op.address.unwrap().offset, 0x401000);
+    }
+
+    #[test]
+    fn test_operand_info_clone() {
+        let op = OperandInfo::new(1, "test");
+        let cloned = op.clone();
+        assert_eq!(cloned.index, 1);
+        assert_eq!(cloned.representation, "test");
+    }
+
+    #[test]
+    fn test_instruction_operand_info_empty_operands() {
+        let info = InstructionOperandInfo::new(Address::new(0x100), "NOP", 0);
+        // With no operands, cycling should stay at MNEMONIC
+        assert_eq!(info.next_operand_index(), MNEMONIC);
+        assert_eq!(info.previous_operand_index(), MNEMONIC);
+    }
+
+    #[test]
+    fn test_instruction_operand_info_set_selected() {
+        let mut info = InstructionOperandInfo::new(Address::new(0x1000), "MOV", 2);
+        info.add_operand(OperandInfo::new(0, "%eax"));
+        info.add_operand(OperandInfo::new(1, "%ebx"));
+
+        info.set_selected(1, 3);
+        assert_eq!(info.selected_operand_index(), 1);
+        assert_eq!(info.selected_sub_operand_index(), 3);
+    }
+
+    #[test]
+    fn test_instruction_operand_info_previous_from_first() {
+        let mut info = InstructionOperandInfo::new(Address::new(0x1000), "ADD", 2);
+        info.add_operand(OperandInfo::new(0, "eax"));
+        info.add_operand(OperandInfo::new(1, "ebx"));
+
+        info.set_selected(0, -1);
+        assert_eq!(info.previous_operand_index(), MNEMONIC);
+    }
+
+    #[test]
+    fn test_instruction_operand_info_clone() {
+        let mut info = InstructionOperandInfo::new(Address::new(0x500), "JMP", 1);
+        info.add_operand(OperandInfo::new(0, "0x1000"));
+        info.locked = true;
+        let cloned = info.clone();
+        assert_eq!(cloned.address, info.address);
+        assert_eq!(cloned.mnemonic, "JMP");
+        assert!(cloned.locked);
+        assert_eq!(cloned.operands.len(), 1);
+    }
+
+    #[test]
+    fn test_instruction_operand_info_serialization() {
+        let mut info = InstructionOperandInfo::new(Address::new(0x1000), "MOV", 1);
+        info.add_operand(OperandInfo::new(0, "%rax"));
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: InstructionOperandInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.mnemonic, "MOV");
+        assert_eq!(deserialized.address, Address::new(0x1000));
+        assert_eq!(deserialized.operands.len(), 1);
+    }
+
+    #[test]
+    fn test_instruction_panel_listener_trait() {
+        #[derive(Debug)]
+        struct MockListener {
+            last_op: Option<(i32, i32)>,
+            drop_count: usize,
+        }
+
+        impl InstructionPanelListener for MockListener {
+            fn operand_selected(&mut self, op_index: i32, sub_index: i32) {
+                self.last_op = Some((op_index, sub_index));
+            }
+            fn selection_dropped(&mut self, _from: Address, _to: Address, _op: i32) {
+                self.drop_count += 1;
+            }
+            fn drop_supported(&self) -> bool {
+                true
+            }
+        }
+
+        let mut listener = MockListener {
+            last_op: None,
+            drop_count: 0,
+        };
+        assert!(listener.drop_supported());
+        listener.operand_selected(1, 0);
+        assert_eq!(listener.last_op, Some((1, 0)));
+        listener.selection_dropped(Address::new(0x100), Address::new(0x200), 0);
+        assert_eq!(listener.drop_count, 1);
+    }
+
+    #[test]
+    fn test_operand_info_with_primary_ref_type() {
+        use ghidra_core::symbol::{DataRefType, FlowType};
+        let mut op = OperandInfo::new(0, "CALL 0x2000");
+        op.primary_ref_type = Some(RefType::Flow(FlowType::UnconditionalCall));
+        assert!(op.primary_ref_type.is_some());
+
+        let mut op2 = OperandInfo::new(1, "MOV [eax]");
+        op2.primary_ref_type = Some(RefType::Data(DataRefType::Read));
+        assert!(op2.primary_ref_type.is_some());
+    }
 }
