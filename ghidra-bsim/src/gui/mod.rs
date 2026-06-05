@@ -4,6 +4,7 @@
 
 pub mod filters;
 pub mod overview;
+pub mod results;
 pub mod search;
 
 /// BSim search configuration.

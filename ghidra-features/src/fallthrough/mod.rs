@@ -284,3 +284,250 @@ mod tests {
         assert_eq!(ov.effective_fallthrough(), Some(Address::new(0x2000)));
     }
 }
+
+// ---------------------------------------------------------------------------
+// FallThroughDialog model -- UI model for the fallthrough edit dialog
+//
+// Ported from `ghidra.app.plugin.core.fallthrough.FallThroughDialog.java`.
+// ---------------------------------------------------------------------------
+
+/// Model for the fall-through edit dialog.
+///
+/// Ported from `ghidra.app.plugin.core.fallthrough.FallThroughDialog`.
+///
+/// This dialog allows users to view and edit the fall-through address
+/// for a specific instruction.
+#[derive(Debug, Clone)]
+pub struct FallThroughDialogModel {
+    /// The instruction address being edited.
+    pub instruction_address: Address,
+    /// The current default fall-through address.
+    pub default_fallthrough: Option<Address>,
+    /// The user-entered new fall-through address.
+    pub new_fallthrough: Option<Address>,
+    /// Whether the dialog has been confirmed.
+    pub confirmed: bool,
+    /// Validation error message, if any.
+    pub error_message: Option<String>,
+}
+
+impl FallThroughDialogModel {
+    /// Create a new dialog model.
+    pub fn new(
+        instruction_address: Address,
+        default_fallthrough: Option<Address>,
+    ) -> Self {
+        Self {
+            instruction_address,
+            default_fallthrough,
+            new_fallthrough: None,
+            confirmed: false,
+            error_message: None,
+        }
+    }
+
+    /// Set the new fall-through address from a user input.
+    pub fn set_new_fallthrough(&mut self, address: Address) {
+        self.new_fallthrough = Some(address);
+        self.error_message = None;
+    }
+
+    /// Validate the current state.
+    pub fn validate(&self) -> Result<(), String> {
+        if let Some(new_addr) = self.new_fallthrough {
+            if new_addr == self.instruction_address {
+                return Err("Fall-through cannot be the instruction itself".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Confirm the dialog (validate and mark as confirmed).
+    pub fn confirm(&mut self) -> Result<(), String> {
+        self.validate()?;
+        self.confirmed = true;
+        Ok(())
+    }
+
+    /// Cancel the dialog.
+    pub fn cancel(&mut self) {
+        self.confirmed = false;
+        self.new_fallthrough = None;
+    }
+
+    /// Apply the fall-through change to the model.
+    pub fn apply_to(&self, model: &mut FallThroughModel) -> bool {
+        if let Some(new_addr) = self.new_fallthrough {
+            model.set_fallthrough(self.instruction_address, new_addr)
+        } else {
+            false
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FallThroughPlugin model -- the plugin lifecycle
+//
+// Ported from `ghidra.app.plugin.core.fallthrough.FallThroughPlugin.java`.
+// ---------------------------------------------------------------------------
+
+/// Plugin model for fall-through management.
+///
+/// Ported from `ghidra.app.plugin.core.fallthrough.FallThroughPlugin`.
+#[derive(Debug)]
+pub struct FallThroughPlugin {
+    /// The underlying fall-through model.
+    pub model: FallThroughModel,
+    /// Whether the plugin is enabled.
+    enabled: bool,
+    /// The number of overrides applied since initialization.
+    pub overrides_applied: usize,
+    /// The number of overrides cleared since initialization.
+    pub overrides_cleared: usize,
+}
+
+impl FallThroughPlugin {
+    /// Create a new plugin.
+    pub fn new() -> Self {
+        Self {
+            model: FallThroughModel::new(),
+            enabled: true,
+            overrides_applied: 0,
+            overrides_cleared: 0,
+        }
+    }
+
+    /// Set the fall-through for an instruction (delegates to model).
+    pub fn set_fallthrough(
+        &mut self,
+        instruction_address: Address,
+        new_fallthrough: Address,
+    ) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let result = self.model.set_fallthrough(instruction_address, new_fallthrough);
+        if result {
+            self.overrides_applied += 1;
+        }
+        result
+    }
+
+    /// Clear the fall-through override for an instruction.
+    pub fn clear_fallthrough(&mut self, instruction_address: Address) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let result = self.model.clear_fallthrough(instruction_address);
+        if result {
+            self.overrides_cleared += 1;
+        }
+        result
+    }
+
+    /// Enable or disable the plugin.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    /// Whether the plugin is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+}
+
+impl Default for FallThroughPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod fallthrough_extended_tests {
+    use super::*;
+
+    #[test]
+    fn test_fallthrough_dialog_model() {
+        let mut dialog = FallThroughDialogModel::new(
+            Address::new(0x1000),
+            Some(Address::new(0x1004)),
+        );
+        assert!(!dialog.confirmed);
+        assert!(dialog.error_message.is_none());
+
+        dialog.set_new_fallthrough(Address::new(0x2000));
+        assert!(dialog.confirm().is_ok());
+        assert!(dialog.confirmed);
+    }
+
+    #[test]
+    fn test_fallthrough_dialog_validate_self_ref() {
+        let mut dialog = FallThroughDialogModel::new(
+            Address::new(0x1000),
+            Some(Address::new(0x1004)),
+        );
+        dialog.set_new_fallthrough(Address::new(0x1000));
+        assert!(dialog.validate().is_err());
+        assert!(dialog.confirm().is_err());
+    }
+
+    #[test]
+    fn test_fallthrough_dialog_cancel() {
+        let mut dialog = FallThroughDialogModel::new(
+            Address::new(0x1000),
+            Some(Address::new(0x1004)),
+        );
+        dialog.set_new_fallthrough(Address::new(0x2000));
+        dialog.cancel();
+        assert!(!dialog.confirmed);
+        assert!(dialog.new_fallthrough.is_none());
+    }
+
+    #[test]
+    fn test_fallthrough_dialog_apply_to() {
+        let mut dialog = FallThroughDialogModel::new(
+            Address::new(0x1000),
+            Some(Address::new(0x1004)),
+        );
+        dialog.set_new_fallthrough(Address::new(0x2000));
+
+        let mut model = FallThroughModel::new();
+        model.register_instruction(Address::new(0x1000), Some(Address::new(0x1004)));
+
+        assert!(dialog.apply_to(&mut model));
+        assert!(model.is_overridden(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_fallthrough_plugin() {
+        let mut plugin = FallThroughPlugin::new();
+        assert!(plugin.is_enabled());
+
+        plugin.model.register_instruction(
+            Address::new(0x1000),
+            Some(Address::new(0x1004)),
+        );
+
+        plugin.set_fallthrough(Address::new(0x1000), Address::new(0x2000));
+        assert_eq!(plugin.overrides_applied, 1);
+        assert!(plugin.model.is_overridden(Address::new(0x1000)));
+
+        plugin.clear_fallthrough(Address::new(0x1000));
+        assert_eq!(plugin.overrides_cleared, 1);
+        assert!(!plugin.model.is_overridden(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_fallthrough_plugin_disabled() {
+        let mut plugin = FallThroughPlugin::new();
+        plugin.set_enabled(false);
+        plugin.model.register_instruction(
+            Address::new(0x1000),
+            Some(Address::new(0x1004)),
+        );
+        assert!(!plugin.set_fallthrough(Address::new(0x1000), Address::new(0x2000)));
+        assert!(!plugin.clear_fallthrough(Address::new(0x1000)));
+        assert_eq!(plugin.overrides_applied, 0);
+        assert_eq!(plugin.overrides_cleared, 0);
+    }
+}

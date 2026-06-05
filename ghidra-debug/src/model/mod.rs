@@ -160,6 +160,7 @@ pub mod trace_overlay;
 pub mod trace_register;
 pub mod trace_stack_manager;
 pub mod trace_thread_manager;
+pub mod trace_model_extras;
 
 pub use trace_data_viewport::TraceDataViewport;
 pub use trace_span::TraceSpan;
@@ -215,3 +216,10 @@ pub use trace_stack_manager::TraceStack as TraceCallStack;
 pub use trace_stack_manager::TraceStackFrame as TraceCallStackFrame;
 pub use trace_stack_manager::TraceStackManager as TraceStackManagerExt;
 pub use trace_thread_manager::TraceThreadManager as TraceThreadManagerExt;
+
+pub use trace_model_extras::{
+    TraceAddressPropertyManager as TraceAddrPropMgr, TraceDataUnit, TraceMemoryObject as TraceMemObj,
+    TraceMemoryRegionEntry as TraceMemRegionEntry, TracePropertyMapOperations, TracePropertyMapSpace,
+    TraceReferenceEntry as TraceRefEntry, TraceReferenceManagerOps as TraceRefMgrOps,
+    TraceReferenceType as TraceRefType,
+};

@@ -234,6 +234,15 @@ pub use service_platform_ext::{
 pub use service_tracemgr_ext::{
     SaveKind, SaveTaskManager, SaveTraceTask,
 };
+// Additional service plugin implementations
+pub mod service_plugin_impls;
+pub use service_plugin_impls::{
+    BreakpointServicePluginData, ControlServiceMode, ControlServicePluginData,
+    DebuggerServicePluginDataContainer, EmulationServicePluginData,
+    PlatformServicePluginData, ServicePluginPhase, ServicePluginConfig,
+    StaticMappingServicePluginData, TargetServicePluginData, TraceManagerServicePluginData,
+};
+
 pub use gui_calltree_ext::*;
 pub use gui_memview_ext::*;
 pub use gui_pcode_ext::*;

@@ -36,6 +36,7 @@ pub mod target_impl;
 pub mod tracemgr_impl;
 pub mod url_impl;
 pub mod program_indexer;
+pub mod breakpoint_extras;
 
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
@@ -63,6 +64,13 @@ pub use emulation_utils::{
     DefaultEmulatorFactory, DefaultPcodeDebuggerMemoryAccess, DefaultPcodeDebuggerRegistersAccess,
     EmulationMode, EmulatorOutOfMemoryException, ProgramEmulationUtils, BLOCK_NAME_STACK,
     EMULATION_STARTED_AT, EMU_CTX_XML,
+};
+
+// Re-exports from breakpoint extras module
+pub use breakpoint_extras::{
+    BreakpointActionEntry, BreakpointActionKind, BreakpointActionSet,
+    BreakpointKindEntry, LoneLogicalBreakpoint, MappedLogicalBreakpoint,
+    ProgramBreakpoint, TraceBreakpointMode, TrackedTooSoonException,
 };
 
 use crate::api::breakpoint::LogicalBreakpoint;

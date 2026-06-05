@@ -31,3 +31,8 @@ pub use execution::{
 pub use integration::{PieceDomain, PieceHandler, TraceWriter, WriteStrategy};
 pub use memory_state::{StateSpanMap, TraceMemoryStatePiece};
 pub use sleigh_utils::TraceSleighUtils;
+
+pub mod trace_thread_access;
+pub use trace_thread_access::{
+    DefaultPcodeTraceThreadAccess, PcodeTraceAccessScope, PcodeTraceDataAccessConfig,
+};

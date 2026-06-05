@@ -339,3 +339,299 @@ mod tests {
         assert!((layout.printable_width - 504.0).abs() < 1.0);
     }
 }
+
+// ---------------------------------------------------------------------------
+// CodeUnitPrintable -- prepares code units for printing
+//
+// Ported from `ghidra.app.plugin.core.printing.CodeUnitPrintable.java`.
+// ---------------------------------------------------------------------------
+
+/// Represents a single code unit (instruction or data) prepared for printing.
+///
+/// Ported from `ghidra.app.plugin.core.printing.CodeUnitPrintable`.
+#[derive(Debug, Clone)]
+pub struct CodeUnitPrintable {
+    /// The address of the code unit.
+    pub address: Address,
+    /// The mnemonic (e.g., "MOV", "DB").
+    pub mnemonic: String,
+    /// The operands as formatted text.
+    pub operands: String,
+    /// The full listing line (address + bytes + mnemonic + operands).
+    pub listing_line: String,
+    /// Any comment associated with this code unit.
+    pub comment: Option<String>,
+    /// The byte representation of the code unit.
+    pub bytes: Vec<u8>,
+    /// The length of the code unit in bytes.
+    pub length: usize,
+}
+
+impl CodeUnitPrintable {
+    /// Create a new printable code unit.
+    pub fn new(
+        address: Address,
+        mnemonic: impl Into<String>,
+        operands: impl Into<String>,
+        length: usize,
+    ) -> Self {
+        let mnemonic_str = mnemonic.into();
+        let operands_str = operands.into();
+        let listing_line = format!("{:08X}  {:<8} {}", address.offset, mnemonic_str, operands_str);
+        Self {
+            address,
+            mnemonic: mnemonic_str,
+            operands: operands_str,
+            listing_line,
+            comment: None,
+            bytes: Vec::new(),
+            length,
+        }
+    }
+
+    /// Create a printable with raw bytes.
+    pub fn with_bytes(
+        address: Address,
+        mnemonic: impl Into<String>,
+        operands: impl Into<String>,
+        bytes: Vec<u8>,
+    ) -> Self {
+        let length = bytes.len();
+        let mut cu = Self::new(address, mnemonic, operands, length);
+        cu.bytes = bytes;
+        cu
+    }
+
+    /// Format the bytes as a hex string.
+    pub fn bytes_hex(&self) -> String {
+        self.bytes
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Format for printing (with optional line number).
+    pub fn format_for_print(&self, line_number: Option<u32>) -> String {
+        let mut result = String::new();
+        if let Some(ln) = line_number {
+            result.push_str(&format!("{:>4}  ", ln));
+        }
+        result.push_str(&self.listing_line);
+        if let Some(ref comment) = self.comment {
+            result.push_str(&format!("  // {}", comment));
+        }
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PrintOptionsDialog model -- configure print options
+//
+// Ported from `ghidra.app.plugin.core.printing.PrintOptionsDialog.java`.
+// ---------------------------------------------------------------------------
+
+/// Model for the print options dialog.
+///
+/// Ported from `ghidra.app.plugin.core.printing.PrintOptionsDialog`.
+#[derive(Debug, Clone)]
+pub struct PrintOptionsDialogModel {
+    /// The current print settings.
+    pub settings: PrintSettings,
+    /// The selected address range mode.
+    pub range_mode: AddressRangeMode,
+    /// Start address (for custom range).
+    pub custom_start: Option<Address>,
+    /// End address (for custom range).
+    pub custom_end: Option<Address>,
+    /// Font name.
+    pub font_name: String,
+    /// Whether to use monospace font.
+    pub monospace: bool,
+}
+
+/// How to select the address range for printing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressRangeMode {
+    /// Print the entire program.
+    All,
+    /// Print the current selection.
+    Selection,
+    /// Print a custom address range.
+    CustomRange,
+    /// Print the current function.
+    CurrentFunction,
+    /// Print the visible range in the listing.
+    VisibleRange,
+}
+
+impl AddressRangeMode {
+    /// Display name.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::All => "Entire Program",
+            Self::Selection => "Current Selection",
+            Self::CustomRange => "Custom Range",
+            Self::CurrentFunction => "Current Function",
+            Self::VisibleRange => "Visible Range",
+        }
+    }
+}
+
+impl PrintOptionsDialogModel {
+    /// Create a new dialog model.
+    pub fn new() -> Self {
+        Self {
+            settings: PrintSettings::new(),
+            range_mode: AddressRangeMode::All,
+            custom_start: None,
+            custom_end: None,
+            font_name: "Courier New".to_string(),
+            monospace: true,
+        }
+    }
+
+    /// Set the custom range.
+    pub fn set_custom_range(&mut self, start: Address, end: Address) {
+        self.custom_start = Some(start);
+        self.custom_end = Some(end);
+        self.range_mode = AddressRangeMode::CustomRange;
+        self.settings.start_address = Some(start);
+        self.settings.end_address = Some(end);
+    }
+
+    /// Validate the dialog state.
+    pub fn validate(&self) -> Result<(), String> {
+        match self.range_mode {
+            AddressRangeMode::CustomRange => {
+                if self.custom_start.is_none() || self.custom_end.is_none() {
+                    return Err("Custom range requires both start and end addresses".into());
+                }
+                if let (Some(start), Some(end)) = (self.custom_start, self.custom_end) {
+                    if start.offset > end.offset {
+                        return Err("Start address must be before end address".into());
+                    }
+                }
+            }
+            _ => {}
+        }
+        if self.settings.copies == 0 {
+            return Err("Number of copies must be at least 1".into());
+        }
+        Ok(())
+    }
+}
+
+impl Default for PrintOptionsDialogModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod extended_printing_tests {
+    use super::*;
+
+    #[test]
+    fn test_code_unit_printable() {
+        let cu = CodeUnitPrintable::new(
+            Address::new(0x1000),
+            "MOV",
+            "EAX, EBX",
+            2,
+        );
+        assert_eq!(cu.mnemonic, "MOV");
+        assert_eq!(cu.operands, "EAX, EBX");
+        assert_eq!(cu.length, 2);
+        assert!(cu.listing_line.contains("MOV"));
+    }
+
+    #[test]
+    fn test_code_unit_printable_with_bytes() {
+        let cu = CodeUnitPrintable::with_bytes(
+            Address::new(0x1000),
+            "NOP",
+            "",
+            vec![0x90],
+        );
+        assert_eq!(cu.bytes_hex(), "90");
+        assert_eq!(cu.length, 1);
+    }
+
+    #[test]
+    fn test_code_unit_printable_format() {
+        let mut cu = CodeUnitPrintable::new(
+            Address::new(0x1000),
+            "INT",
+            "0x80",
+            2,
+        );
+        cu.comment = Some("syscall".into());
+        let formatted = cu.format_for_print(Some(1));
+        assert!(formatted.contains("   1"));
+        assert!(formatted.contains("syscall"));
+    }
+
+    #[test]
+    fn test_code_unit_printable_no_line_number() {
+        let cu = CodeUnitPrintable::new(Address::new(0x1000), "NOP", "", 1);
+        let formatted = cu.format_for_print(None);
+        assert!(!formatted.contains("  1"));
+    }
+
+    #[test]
+    fn test_print_options_dialog_model() {
+        let model = PrintOptionsDialogModel::new();
+        assert_eq!(model.range_mode, AddressRangeMode::All);
+        assert_eq!(model.font_name, "Courier New");
+        assert!(model.monospace);
+    }
+
+    #[test]
+    fn test_print_options_dialog_custom_range() {
+        let mut model = PrintOptionsDialogModel::new();
+        model.set_custom_range(Address::new(0x1000), Address::new(0x2000));
+        assert_eq!(model.range_mode, AddressRangeMode::CustomRange);
+        assert!(model.validate().is_ok());
+    }
+
+    #[test]
+    fn test_print_options_dialog_validate_bad_range() {
+        let mut model = PrintOptionsDialogModel::new();
+        model.set_custom_range(Address::new(0x2000), Address::new(0x1000));
+        assert!(model.validate().is_err());
+    }
+
+    #[test]
+    fn test_print_options_dialog_validate_zero_copies() {
+        let mut model = PrintOptionsDialogModel::new();
+        model.settings.copies = 0;
+        assert!(model.validate().is_err());
+    }
+
+    #[test]
+    fn test_address_range_mode_display() {
+        assert_eq!(AddressRangeMode::All.display_name(), "Entire Program");
+        assert_eq!(
+            AddressRangeMode::CurrentFunction.display_name(),
+            "Current Function"
+        );
+    }
+
+    #[test]
+    fn test_code_unit_bytes_hex_empty() {
+        let cu = CodeUnitPrintable::new(Address::new(0x1000), "NOP", "", 1);
+        assert_eq!(cu.bytes_hex(), "");
+    }
+
+    #[test]
+    fn test_code_unit_bytes_hex_multi() {
+        let cu = CodeUnitPrintable::with_bytes(
+            Address::new(0x1000),
+            "DB",
+            "0x41, 0x42",
+            vec![0x41, 0x42, 0x43],
+        );
+        assert_eq!(cu.bytes_hex(), "41 42 43");
+    }
+}

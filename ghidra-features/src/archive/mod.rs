@@ -517,3 +517,193 @@ mod tests {
         plugin.cancel();
     }
 }
+
+// ============================================================================
+// ArchiveDialog / RestoreDialog -- UI model layer
+//
+// Ported from Ghidra's `ArchiveDialog.java` and `RestoreDialog.java`.
+// Provides the data model backing the archive/restore dialog UI.
+// ============================================================================
+
+/// Model for the Archive dialog.
+///
+/// Ported from `ghidra.app.plugin.core.archive.ArchiveDialog`.
+#[derive(Debug, Clone)]
+pub struct ArchiveDialogModel {
+    /// The selected output path for the archive.
+    pub output_path: PathBuf,
+    /// Whether to compress the archive.
+    pub compress: bool,
+    /// The compression level (0-9).
+    pub compression_level: u32,
+    /// Whether to include hidden files.
+    pub include_hidden: bool,
+    /// Whether to verify the archive after creation.
+    pub verify_after_archive: bool,
+    /// Whether to overwrite an existing archive file.
+    pub overwrite_existing: bool,
+    /// The archive description (stored in metadata).
+    pub description: String,
+}
+
+impl ArchiveDialogModel {
+    /// Create a new dialog model with default settings.
+    pub fn new(output_path: impl Into<PathBuf>) -> Self {
+        Self {
+            output_path: output_path.into(),
+            compress: true,
+            compression_level: 6,
+            include_hidden: false,
+            verify_after_archive: true,
+            overwrite_existing: false,
+            description: String::new(),
+        }
+    }
+
+    /// Validate the dialog state.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.output_path.as_os_str().is_empty() {
+            return Err("Output path is required".into());
+        }
+        if self.compression_level > 9 {
+            return Err("Compression level must be 0-9".into());
+        }
+        if !self.overwrite_existing && self.output_path.exists() {
+            return Err("Archive file already exists. Enable overwrite to replace.".into());
+        }
+        Ok(())
+    }
+
+    /// Generate the archive options from the dialog state.
+    pub fn to_archive_options(&self) -> ArchiveOptions {
+        ArchiveOptions {
+            include_repository: true,
+            include_properties: true,
+            files_only: false,
+            include_paths: Vec::new(),
+            exclude_paths: if !self.include_hidden {
+                vec![PathBuf::from(".")]
+            } else {
+                Vec::new()
+            },
+            max_size_bytes: 0,
+        }
+    }
+}
+
+impl Default for ArchiveDialogModel {
+    fn default() -> Self {
+        Self::new("project.zip")
+    }
+}
+
+/// Model for the Restore dialog.
+///
+/// Ported from `ghidra.app.plugin.core.archive.RestoreDialog`.
+#[derive(Debug, Clone)]
+pub struct RestoreDialogModel {
+    /// The archive file to restore from.
+    pub archive_path: PathBuf,
+    /// The target project directory.
+    pub target_dir: PathBuf,
+    /// Whether to overwrite existing files.
+    pub overwrite_existing: bool,
+    /// Whether to create a backup before restoring.
+    pub create_backup: bool,
+    /// Whether to verify the archive integrity before restoring.
+    pub verify_before_restore: bool,
+}
+
+impl RestoreDialogModel {
+    /// Create a new restore dialog model.
+    pub fn new(
+        archive_path: impl Into<PathBuf>,
+        target_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            archive_path: archive_path.into(),
+            target_dir: target_dir.into(),
+            overwrite_existing: false,
+            create_backup: true,
+            verify_before_restore: true,
+        }
+    }
+
+    /// Validate the dialog state.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.archive_path.exists() {
+            return Err(format!(
+                "Archive file not found: {:?}",
+                self.archive_path
+            ));
+        }
+        if self.target_dir.as_os_str().is_empty() {
+            return Err("Target directory is required".into());
+        }
+        Ok(())
+    }
+
+    /// Create a restore task from the dialog state.
+    pub fn to_restore_task(&self) -> RestoreTask {
+        let mut task = RestoreTask::new(&self.archive_path, &self.target_dir);
+        task.overwrite_existing = self.overwrite_existing;
+        task
+    }
+}
+
+#[cfg(test)]
+mod dialog_tests {
+    use super::*;
+
+    #[test]
+    fn test_archive_dialog_model_defaults() {
+        let model = ArchiveDialogModel::new("/tmp/out.zip");
+        assert!(model.compress);
+        assert_eq!(model.compression_level, 6);
+        assert!(!model.include_hidden);
+        assert!(model.verify_after_archive);
+        assert!(!model.overwrite_existing);
+    }
+
+    #[test]
+    fn test_archive_dialog_validate_empty_path() {
+        let model = ArchiveDialogModel::new("");
+        assert!(model.validate().is_err());
+    }
+
+    #[test]
+    fn test_archive_dialog_validate_bad_compression() {
+        let mut model = ArchiveDialogModel::new("/tmp/out.zip");
+        model.compression_level = 15;
+        assert!(model.validate().is_err());
+    }
+
+    #[test]
+    fn test_archive_dialog_to_options() {
+        let model = ArchiveDialogModel::new("/tmp/out.zip");
+        let opts = model.to_archive_options();
+        assert!(opts.include_repository);
+        assert!(opts.include_properties);
+    }
+
+    #[test]
+    fn test_restore_dialog_model() {
+        let model = RestoreDialogModel::new("/tmp/archive.zip", "/tmp/project");
+        assert!(!model.overwrite_existing);
+        assert!(model.create_backup);
+        assert!(model.verify_before_restore);
+    }
+
+    #[test]
+    fn test_restore_dialog_validate_missing_archive() {
+        let model = RestoreDialogModel::new("/nonexistent/archive.zip", "/tmp");
+        assert!(model.validate().is_err());
+    }
+
+    #[test]
+    fn test_restore_dialog_to_task() {
+        // Use a path that won't fail validation but test the task creation
+        let model = RestoreDialogModel::new("/tmp/test.zip", "/tmp/output");
+        let _task = model.to_restore_task();
+    }
+}

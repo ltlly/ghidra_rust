@@ -260,7 +260,35 @@ pub use trace_db_target_storage_ext::{
     ObjectValueWriteBehindCache, TraceObjectValueStorage,
 };
 
+// Additional modules from remaining Debug module ports
+pub mod trace_db_listing_extras;
+pub mod trace_db_target_extras;
+pub mod trace_db_symbol_extras;
+
 pub use trace_db_field_codec::{
     DBTraceFieldCodec, EncodedField, FieldDataType, FieldValue, TraceObjectFieldCodecSet,
 };
 pub use trace_db_spatial_tree::{RStarEntry, RStarTree, SpatialRect};
+
+// Re-exports from listing extras
+pub use trace_db_listing_extras::{
+    CodeUnitProperties, CodeUnitViewEntry as ListingCodeUnitEntry,
+    CodeUnitsMemoryView as ListingCodeUnitsView, DBTraceCodeUnitAdapter,
+    DBTraceCommentAdapter, DBTraceDataAdapter, DataComponent, FlowOverride,
+    TraceCodeComment, TraceCommentType,
+};
+
+// Re-exports from target extras
+pub use trace_db_target_extras::{
+    CacheKey as TargetCacheKey, DBTraceObject as TraceDbObject,
+    DBTraceObjectFieldCodec, DBTraceObjectManager as TraceDbObjectMgr,
+    DBTraceObjectValueAddressSetView, DBTraceObjectValueWriteBehindCache,
+    ObjectValue as TraceObjectValue, ObjectValueType,
+};
+
+// Re-exports from symbol extras
+pub use trace_db_symbol_extras::{
+    DBTraceClassSymbolView, DBTraceEquate, DBTraceLabelSymbolView,
+    MultiTypeSymbolView, SourceType as SymSourceType, SymbolType as SymType,
+    TraceDbSymbolManager as SymManager, TraceSymbolEntry as SymEntry,
+};

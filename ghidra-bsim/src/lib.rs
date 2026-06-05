@@ -39,3 +39,18 @@ pub use query::server_config::ServerConfig;
 pub use query::bsim_server_info::BSimServerInfo;
 pub use query::function_database::FunctionDatabase;
 pub use query::lsh::LSHException;
+pub use query::protocol::{
+    AdjustVectorIndexRequest, BSimFilter, BSimRequest, BSimResponse,
+    ChildAtom, ClusterNoteData, CreateDatabaseRequest, DatabaseInfoData,
+    DropDatabaseRequest, ExeResultData, ExeSpecifier, FilterAtom,
+    FilterAtomEntry, FilterType, FunctionEntryData, InsertOptionalValues,
+    InsertRequestData, NullStaging, PairInputData, PairNoteData,
+    PasswordChangeRequest, PreFilter, QueryChildren, QueryCluster,
+    QueryDelete, QueryInfo, QueryInfoData, QueryName, QueryNearest,
+    QueryPair, QueryResponseRecord, ResponseNearest, SimilarityNoteData,
+    StagingManager, VectorResultData,
+};
+pub use gui::results::{
+    BSimApplyAction, BSimApplyResult, BSimMatchResult, BSimOverviewRowObject,
+    BSimResultStatus, BSimSearchSettings, FunctionComparisonException,
+};

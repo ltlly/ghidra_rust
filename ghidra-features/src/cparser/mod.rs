@@ -566,3 +566,252 @@ mod tests {
         assert!(org.char_signed);
     }
 }
+
+// ---------------------------------------------------------------------------
+// IncludeFileFinder -- locate header files for #include directives
+// ---------------------------------------------------------------------------
+
+/// Searches for include files across configured search paths.
+///
+/// Ported from `ghidra.app.plugin.core.cparser.IncludeFileFinder`.
+///
+/// Resolves `#include <file>` (system) and `#include "file"` (user) directives
+/// by searching through the configured include paths.
+#[derive(Debug)]
+pub struct IncludeFileFinder {
+    /// System include paths (searched for angle-bracket includes).
+    system_paths: Vec<PathBuf>,
+    /// User include paths (searched for quoted includes).
+    user_paths: Vec<PathBuf>,
+    /// Cache of resolved files: include name -> full path.
+    cache: HashMap<String, Option<PathBuf>>,
+}
+
+impl IncludeFileFinder {
+    /// Create a new finder with the given search paths.
+    pub fn new(system_paths: Vec<PathBuf>, user_paths: Vec<PathBuf>) -> Self {
+        Self {
+            system_paths,
+            user_paths,
+            cache: HashMap::new(),
+        }
+    }
+
+    /// Create a finder from parser options.
+    pub fn from_options(options: &CParserOptions) -> Self {
+        let mut system_paths = Vec::new();
+        let mut user_paths = Vec::new();
+        for inc in &options.include_paths {
+            match inc {
+                IncludePath::System(p) => system_paths.push(p.clone()),
+                IncludePath::User(p) => user_paths.push(p.clone()),
+            }
+        }
+        Self::new(system_paths, user_paths)
+    }
+
+    /// Find a system include file (`#include <file>`).
+    ///
+    /// Searches system paths first, then user paths as fallback.
+    pub fn find_system(&mut self, filename: &str) -> Option<PathBuf> {
+        self.find_internal(filename, true)
+    }
+
+    /// Find a user include file (`#include "file"`).
+    ///
+    /// Searches user paths first (relative to the including file's directory),
+    /// then system paths as fallback.
+    pub fn find_user(&mut self, filename: &str) -> Option<PathBuf> {
+        self.find_internal(filename, false)
+    }
+
+    /// Find an include file, checking the cache first.
+    fn find_internal(&mut self, filename: &str, is_system: bool) -> Option<PathBuf> {
+        if let Some(cached) = self.cache.get(filename) {
+            return cached.clone();
+        }
+
+        let result = if is_system {
+            self.search_paths(filename, &self.system_paths.clone())
+                .or_else(|| self.search_paths(filename, &self.user_paths.clone()))
+        } else {
+            self.search_paths(filename, &self.user_paths.clone())
+                .or_else(|| self.search_paths(filename, &self.system_paths.clone()))
+        };
+
+        self.cache.insert(filename.to_string(), result.clone());
+        result
+    }
+
+    /// Search a list of directories for a file.
+    fn search_paths(&self, filename: &str, paths: &[PathBuf]) -> Option<PathBuf> {
+        for dir in paths {
+            let candidate = dir.join(filename);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+        None
+    }
+
+    /// Clear the resolution cache.
+    pub fn clear_cache(&mut self) {
+        self.cache.clear();
+    }
+
+    /// Get the number of cached entries.
+    pub fn cache_size(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Add a system path at runtime.
+    pub fn add_system_path(&mut self, path: PathBuf) {
+        self.system_paths.push(path);
+    }
+
+    /// Add a user path at runtime.
+    pub fn add_user_path(&mut self, path: PathBuf) {
+        self.user_paths.push(path);
+    }
+
+    /// Get all system paths.
+    pub fn system_paths(&self) -> &[PathBuf] {
+        &self.system_paths
+    }
+
+    /// Get all user paths.
+    pub fn user_paths(&self) -> &[PathBuf] {
+        &self.user_paths
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CPreprocessorArgs -- structured preprocessor arguments
+// ---------------------------------------------------------------------------
+
+/// Structured representation of C preprocessor arguments.
+///
+/// Ported from the argument-building logic in `CParserPlugin.parse()`.
+#[derive(Debug, Clone)]
+pub struct CPreprocessorArgs {
+    /// Source files to parse.
+    pub source_files: Vec<PathBuf>,
+    /// Include paths.
+    pub include_paths: Vec<IncludePath>,
+    /// Preprocessor definitions.
+    pub defines: HashMap<String, Option<String>>,
+    /// Additional raw arguments.
+    pub extra_args: Vec<String>,
+    /// Target language ID (e.g., "x86:LE:64:default").
+    pub language_id: Option<String>,
+    /// Target compiler spec ID (e.g., "default").
+    pub compiler_spec_id: Option<String>,
+    /// Output data file path (for parsing to a saved database).
+    pub output_file: Option<PathBuf>,
+}
+
+impl CPreprocessorArgs {
+    /// Build args from parser options and source files.
+    pub fn from_options(source_files: Vec<PathBuf>, options: &CParserOptions) -> Self {
+        Self {
+            source_files,
+            include_paths: options.include_paths.clone(),
+            defines: options.defines.clone(),
+            extra_args: Vec::new(),
+            language_id: None,
+            compiler_spec_id: None,
+            output_file: None,
+        }
+    }
+
+    /// Convert to command-line argument strings.
+    pub fn to_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
+        for path in &self.include_paths {
+            args.push("-I".to_string());
+            args.push(path.path().to_string_lossy().to_string());
+        }
+        for (name, value) in &self.defines {
+            args.push("-D".to_string());
+            match value {
+                Some(v) => args.push(format!("{}={}", name, v)),
+                None => args.push(name.clone()),
+            }
+        }
+        args.extend(self.extra_args.clone());
+        args
+    }
+}
+
+// ===========================================================================
+// Tests for IncludeFileFinder and CPreprocessorArgs
+// ===========================================================================
+
+#[cfg(test)]
+mod finder_tests {
+    use super::*;
+
+    #[test]
+    fn test_include_file_finder_from_options() {
+        let mut opts = CParserOptions::default();
+        opts.add_system_include("/usr/include");
+        opts.add_user_include("./local");
+        let finder = IncludeFileFinder::from_options(&opts);
+        assert_eq!(finder.system_paths().len(), 1);
+        assert_eq!(finder.user_paths().len(), 1);
+    }
+
+    #[test]
+    fn test_include_file_finder_cache() {
+        let finder = IncludeFileFinder::new(vec![], vec![]);
+        assert_eq!(finder.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_include_file_finder_not_found() {
+        let mut finder = IncludeFileFinder::new(vec![], vec![]);
+        assert!(finder.find_system("nonexistent.h").is_none());
+        assert!(finder.find_user("nonexistent.h").is_none());
+    }
+
+    #[test]
+    fn test_include_file_finder_add_paths() {
+        let mut finder = IncludeFileFinder::new(vec![], vec![]);
+        finder.add_system_path(PathBuf::from("/usr/include"));
+        finder.add_user_path(PathBuf::from("./local"));
+        assert_eq!(finder.system_paths().len(), 1);
+        assert_eq!(finder.user_paths().len(), 1);
+    }
+
+    #[test]
+    fn test_include_file_finder_clear_cache() {
+        let mut finder = IncludeFileFinder::new(vec![], vec![]);
+        finder.find_system("test.h"); // cached miss
+        assert_eq!(finder.cache_size(), 1);
+        finder.clear_cache();
+        assert_eq!(finder.cache_size(), 0);
+    }
+
+    #[test]
+    fn test_c_preprocessor_args_from_options() {
+        let mut opts = CParserOptions::default();
+        opts.add_system_include("/usr/include");
+        opts.add_define("DEBUG", None);
+        let args = CPreprocessorArgs::from_options(vec![PathBuf::from("test.h")], &opts);
+        assert_eq!(args.source_files.len(), 1);
+        let cli_args = args.to_args();
+        assert!(cli_args.contains(&"-I".to_string()));
+        assert!(cli_args.contains(&"/usr/include".to_string()));
+        assert!(cli_args.contains(&"-D".to_string()));
+        assert!(cli_args.contains(&"DEBUG".to_string()));
+    }
+
+    #[test]
+    fn test_c_preprocessor_args_with_value_define() {
+        let mut opts = CParserOptions::default();
+        opts.add_define("VERSION", Some("2.0".into()));
+        let args = CPreprocessorArgs::from_options(vec![], &opts);
+        let cli_args = args.to_args();
+        assert!(cli_args.contains(&"VERSION=2.0".to_string()));
+    }
+}

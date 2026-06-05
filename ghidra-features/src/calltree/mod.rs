@@ -22,6 +22,8 @@ pub mod options;
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use options::CallTreeOptions;
+
 // ============================================================================
 // CallTreeDirection -- incoming or outgoing
 // ============================================================================
@@ -559,5 +561,344 @@ mod tests {
         let stats = CallTreeStatistics::from_tree(&tree);
         assert_eq!(stats.direct_calls, 1);
         assert_eq!(stats.references, 1);
+    }
+}
+
+// ============================================================================
+// CallNode hierarchy -- ported from Java CallNode, IncomingCallNode, etc.
+// ============================================================================
+
+/// A reference to a function in the call tree, including source address
+/// and whether the reference is a call or a data reference.
+///
+/// Ported from Ghidra's `CallNode`, `IncomingCallNode`, `OutgoingCallNode`,
+/// `ExternalCallNode`, and `DeadEndNode` Java classes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CallRefNode {
+    /// The name of the referenced function.
+    pub name: String,
+    /// The entry point address of the referenced function.
+    pub address: Address,
+    /// The source address where the reference originates.
+    pub source_address: Address,
+    /// Whether this is a call reference (vs. a data reference).
+    pub is_call_reference: bool,
+    /// The kind of call node.
+    pub kind: CallNodeKind,
+    /// Whether this node is a leaf (external or dead-end).
+    pub is_leaf: bool,
+}
+
+/// The kind of call tree node.
+///
+/// Ported from the different `CallNode` subclasses in Java.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CallNodeKind {
+    /// An incoming (caller) node.
+    Incoming,
+    /// An outgoing (callee) node.
+    Outgoing,
+    /// An external library function.
+    External,
+    /// A dead-end reference (no target function found).
+    DeadEnd,
+}
+
+impl CallRefNode {
+    /// Create an incoming call node.
+    pub fn incoming(
+        name: impl Into<String>,
+        address: Address,
+        source_address: Address,
+        is_call_reference: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            source_address,
+            is_call_reference,
+            kind: CallNodeKind::Incoming,
+            is_leaf: false,
+        }
+    }
+
+    /// Create an outgoing call node.
+    pub fn outgoing(
+        name: impl Into<String>,
+        address: Address,
+        source_address: Address,
+        is_call_reference: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            source_address,
+            is_call_reference,
+            kind: CallNodeKind::Outgoing,
+            is_leaf: false,
+        }
+    }
+
+    /// Create an external call node.
+    pub fn external(
+        name: impl Into<String>,
+        address: Address,
+        source_address: Address,
+        is_call_reference: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            source_address,
+            is_call_reference,
+            kind: CallNodeKind::External,
+            is_leaf: true,
+        }
+    }
+
+    /// Create a dead-end node.
+    pub fn dead_end(
+        name: impl Into<String>,
+        address: Address,
+        source_address: Address,
+        is_call_reference: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            source_address,
+            is_call_reference,
+            kind: CallNodeKind::DeadEnd,
+            is_leaf: true,
+        }
+    }
+
+    /// Tooltip text for this node.
+    pub fn tooltip(&self) -> String {
+        let prefix = match self.kind {
+            CallNodeKind::External => "(External) ",
+            _ => "",
+        };
+        let ref_str = if self.is_call_reference {
+            "Called from "
+        } else {
+            "Referenced from "
+        };
+        format!("{}{}{}", prefix, ref_str, self.source_address)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CallNodeConflictResolver -- resolves conflicting reference types
+// ---------------------------------------------------------------------------
+
+/// Resolves conflicts when both a call reference and a non-call reference
+/// exist for the same source address to the same target function.
+///
+/// Ported from `CallNode.resovleConflictingReferenceTypes()`.
+///
+/// Returns `true` if the conflict was resolved (the new node was handled),
+/// meaning the caller should not add it again.
+pub fn resolve_conflicting_reference_types(
+    nodes: &mut Vec<CallRefNode>,
+    existing_idx: usize,
+    new_node: &CallRefNode,
+) -> bool {
+    if existing_idx >= nodes.len() {
+        return false;
+    }
+    let existing = &nodes[existing_idx];
+
+    // Different source addresses -- nothing to do
+    if existing.source_address != new_node.source_address {
+        return false;
+    }
+
+    // Same reference type -- nothing to do
+    if existing.is_call_reference == new_node.is_call_reference {
+        return false;
+    }
+
+    // Same source address, same target, different reference types.
+    // Prefer the call reference over the non-call reference.
+    if !existing.is_call_reference && new_node.is_call_reference {
+        // Swap: replace existing non-call with new call reference
+        nodes[existing_idx] = new_node.clone();
+    }
+    // else: existing is already a call reference, discard the new non-call reference
+    true
+}
+
+/// Add a node to a collection of call ref nodes, resolving duplicates
+/// and conflicts according to the call tree options.
+///
+/// Ported from `CallNode.addNode()`.
+pub fn add_call_ref_node(
+    nodes: &mut Vec<CallRefNode>,
+    new_node: CallRefNode,
+    options: &CallTreeOptions,
+) -> bool {
+    // If the new node is a non-call reference and references are filtered, skip it
+    if !new_node.is_call_reference && !options.show_references {
+        return false;
+    }
+
+    // Check for duplicates
+    for i in 0..nodes.len() {
+        if nodes[i].address == new_node.address
+            && nodes[i].source_address == new_node.source_address
+            && nodes[i].is_call_reference == new_node.is_call_reference
+        {
+            return false; // exact duplicate, skip
+        }
+
+        // Resolve call vs. non-call conflicts
+        if resolve_conflicting_reference_types(nodes, i, &new_node) {
+            return true;
+        }
+    }
+
+    // If duplicates are allowed or this is the first node for this function, add it
+    if options.show_references || new_node.is_call_reference {
+        nodes.push(new_node);
+        return true;
+    }
+    false
+}
+
+/// Sort call ref nodes by source address, then by reference type.
+///
+/// Ported from `CallNodeComparator`.
+pub fn sort_call_ref_nodes(nodes: &mut [CallRefNode]) {
+    nodes.sort_by(|a, b| {
+        a.source_address
+            .offset
+            .cmp(&b.source_address.offset)
+            .then_with(|| a.is_call_reference.cmp(&b.is_call_reference))
+    });
+}
+
+// ===========================================================================
+// Tests for CallNode hierarchy
+// ===========================================================================
+
+#[cfg(test)]
+mod call_node_tests {
+    use super::*;
+
+    #[test]
+    fn test_call_ref_node_incoming() {
+        let node = CallRefNode::incoming(
+            "main",
+            Address::new(0x1000),
+            Address::new(0x2000),
+            true,
+        );
+        assert_eq!(node.kind, CallNodeKind::Incoming);
+        assert!(!node.is_leaf);
+        assert!(node.is_call_reference);
+        assert!(node.tooltip().contains("Called from"));
+    }
+
+    #[test]
+    fn test_call_ref_node_outgoing() {
+        let node = CallRefNode::outgoing(
+            "foo",
+            Address::new(0x2000),
+            Address::new(0x1000),
+            true,
+        );
+        assert_eq!(node.kind, CallNodeKind::Outgoing);
+        assert!(!node.is_leaf);
+    }
+
+    #[test]
+    fn test_call_ref_node_external() {
+        let node = CallRefNode::external(
+            "printf",
+            Address::new(0x3000),
+            Address::new(0x1000),
+            true,
+        );
+        assert_eq!(node.kind, CallNodeKind::External);
+        assert!(node.is_leaf);
+        assert!(node.tooltip().contains("(External)"));
+    }
+
+    #[test]
+    fn test_call_ref_node_dead_end() {
+        let node = CallRefNode::dead_end(
+            "0xdeadbeef",
+            Address::new(0xdeadbeef),
+            Address::new(0x1000),
+            true,
+        );
+        assert_eq!(node.kind, CallNodeKind::DeadEnd);
+        assert!(node.is_leaf);
+    }
+
+    #[test]
+    fn test_tooltip_reference() {
+        let node = CallRefNode::incoming(
+            "main",
+            Address::new(0x1000),
+            Address::new(0x2000),
+            false,
+        );
+        assert!(node.tooltip().contains("Referenced from"));
+    }
+
+    #[test]
+    fn test_resolve_conflicting_reference_types_prefers_call() {
+        let existing = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1000), false);
+        let new_node = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1000), true);
+        let mut nodes = vec![existing];
+        let resolved = resolve_conflicting_reference_types(&mut nodes, 0, &new_node);
+        assert!(resolved);
+        assert!(nodes[0].is_call_reference);
+    }
+
+    #[test]
+    fn test_resolve_conflicting_different_source_returns_false() {
+        let existing = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1000), false);
+        let new_node = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x3000), true);
+        let mut nodes = vec![existing];
+        let resolved = resolve_conflicting_reference_types(&mut nodes, 0, &new_node);
+        assert!(!resolved);
+    }
+
+    #[test]
+    fn test_add_call_ref_node_dedup() {
+        let mut nodes = Vec::new();
+        let opts = CallTreeOptions::default();
+        let node1 = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1000), true);
+        let node2 = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1000), true);
+        assert!(add_call_ref_node(&mut nodes, node1, &opts));
+        assert!(!add_call_ref_node(&mut nodes, node2, &opts));
+        assert_eq!(nodes.len(), 1);
+    }
+
+    #[test]
+    fn test_add_call_ref_node_different_source() {
+        let mut nodes = Vec::new();
+        let opts = CallTreeOptions::default();
+        let node1 = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1000), true);
+        let node2 = CallRefNode::incoming("foo", Address::new(0x2000), Address::new(0x1500), true);
+        assert!(add_call_ref_node(&mut nodes, node1, &opts));
+        assert!(add_call_ref_node(&mut nodes, node2, &opts));
+        assert_eq!(nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_sort_call_ref_nodes() {
+        let mut nodes = vec![
+            CallRefNode::incoming("b", Address::new(0x2000), Address::new(0x3000), true),
+            CallRefNode::incoming("a", Address::new(0x1000), Address::new(0x1000), true),
+            CallRefNode::incoming("c", Address::new(0x3000), Address::new(0x2000), false),
+        ];
+        sort_call_ref_nodes(&mut nodes);
+        assert_eq!(nodes[0].source_address.offset, 0x1000);
+        assert_eq!(nodes[1].source_address.offset, 0x2000);
+        assert_eq!(nodes[2].source_address.offset, 0x3000);
     }
 }
