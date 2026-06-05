@@ -26,6 +26,12 @@ pub mod ngram;
 /// `ghidra.app.plugin.core.string.StringEvent`.
 pub mod events;
 
+/// String table plugin, table model, options, MakeStringsTask.
+///
+/// Ported from `ghidra.app.plugin.core.string.StringTablePlugin`,
+/// `StringTableModel`, `StringTableOptions`, and `MakeStringsTask`.
+pub mod plugin;
+
 /// Word analysis and string scoring.
 ///
 /// Ported from `ghidra.app.plugin.core.string` word analysis classes.

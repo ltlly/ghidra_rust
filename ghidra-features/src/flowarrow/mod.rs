@@ -14,6 +14,12 @@
 //! - [`FlowArrowPanel`] -- renderable panel model for arrow display.
 //! - [`FlowArrowLayout`] -- assigns column lanes to prevent overlaps.
 
+/// Flow arrow margin provider and plugin.
+///
+/// Ported from `ghidra.app.plugin.core.flowarrow.FlowArrowMarginProvider`
+/// and `FlowArrowPlugin`.
+pub mod provider;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

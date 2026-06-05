@@ -43,6 +43,13 @@ pub mod breakpoint_extras;
 pub mod trace_data_viewport_impl;
 pub mod sync_service;
 
+// New modules from remaining Debug module ports
+pub mod static_mapping_utils;
+pub mod module_region_matcher;
+pub mod map_background_commands;
+pub mod progress_monitor_impl;
+pub mod breakpoint_lifecycle_impl;
+
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
     DebuggerAutoMappingService as AutoMappingServiceExt,

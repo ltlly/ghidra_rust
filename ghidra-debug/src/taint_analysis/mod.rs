@@ -14,3 +14,5 @@ pub mod gui;
 pub mod model;
 pub mod pcode_emu;
 pub mod sarif_writer;
+pub mod taint_space;
+pub use taint_space::{TaintSet as TaintSpaceSet, TaintSpace};

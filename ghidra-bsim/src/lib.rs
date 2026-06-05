@@ -41,6 +41,12 @@ pub use query::server_config::ServerConfig;
 pub use query::bsim_server_info::BSimServerInfo;
 pub use query::function_database::FunctionDatabase;
 pub use query::lsh::LSHException;
+pub use query::client_sql::{
+    CancelledSqlException, Configuration as BSimConfiguration, CosineScorer,
+    ExecutableComparison, ExecutableScorer, EuclideanScorer, FileScoreCache, IdHistogram,
+    IdSqlResolution, NoDatabaseException, RowKeySql, ScoreCache, SqlEffects, TableScoreCache,
+    TemporaryScoreCache,
+};
 pub use query::protocol::{
     AdjustVectorIndexRequest, BSimFilter, BSimRequest, BSimResponse,
     ChildAtom, ClusterNoteData, CreateDatabaseRequest, DatabaseInfoData,

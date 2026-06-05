@@ -271,3 +271,12 @@ pub use action_specs::{
     builtin_location_tracking_specs, register_builtin_auto_map_specs,
     register_builtin_auto_read_specs,
 };
+
+// New modules from remaining Debug module ports
+pub mod trace_disassembly_ext;
+pub mod trace_export_ext;
+pub mod platform_mapper_ext;
+pub mod stack_analysis_ext;
+pub mod debugger_utils_ext;
+pub mod platform_override_ext;
+pub mod gui_model_ext;

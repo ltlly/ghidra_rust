@@ -326,3 +326,7 @@ pub use trace_db_content_handler_impl::{
 pub use trace_db_module_impl::{
     DbTraceModuleManager, TraceModuleEntry, TraceSectionEntry,
 };
+
+// Additional modules from remaining Debug module ports
+pub mod trace_db_transaction;
+pub use trace_db_transaction::{TraceTransaction, TraceTransactionManager};

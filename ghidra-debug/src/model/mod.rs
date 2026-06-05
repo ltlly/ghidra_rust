@@ -237,3 +237,8 @@ pub use trace_model_extras::{
     TraceReferenceEntry as TraceRefEntry, TraceReferenceManagerOps as TraceRefMgrOps,
     TraceReferenceType as TraceRefType,
 };
+
+pub mod trace_emulation_state;
+pub use trace_emulation_state::{
+    TraceByteState, TraceMemoryStateArithmetic, TraceMemoryStatePiece,
+};

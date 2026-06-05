@@ -13,6 +13,7 @@
 //! - [`iterators`] -- address iterators for different field types
 
 pub mod databasesearcher;
+pub mod dialog;
 pub mod iterators;
 pub mod plugin;
 

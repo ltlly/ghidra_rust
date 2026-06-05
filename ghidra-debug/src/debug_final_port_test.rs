@@ -17,6 +17,7 @@ mod tests {
     use crate::model::trace_address_snap_space::*;
     use crate::framework::rstar_diagnostics::*;
     use crate::services::program_indexer::*;
+    use crate::services::module_region_matcher::*;
     use crate::plugin::utils_extras::*;
 
     // === TraceAddressSnapSpace tests ===
@@ -290,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_program_indexer_full_workflow() {
-        let mut indexer = ProgramModuleIndexer::new("file:///app", "x86:LE:64:default");
+        let mut indexer = ProgramModuleIndexer::new_with_config("file:///app", "x86:LE:64:default");
 
         // Add modules
         let mut libc = IndexedModule::new("libc.so.6", "/usr/lib/libc.so.6", 0x7f000000, 0x20000);
@@ -319,11 +320,11 @@ mod tests {
 
     #[test]
     fn test_module_region_matcher_comprehensive() {
-        let mut indexer = ProgramModuleIndexer::new("file:///app", "x86:LE:64:default");
+        let mut indexer = ProgramModuleIndexer::new_with_config("file:///app", "x86:LE:64:default");
         indexer.add_module(IndexedModule::new("libc.so.6", "/usr/lib/libc.so.6", 0x7f000000, 0x20000));
         indexer.add_module(IndexedModule::new("libpthread.so.0", "/usr/lib/libpthread.so.0", 0x7f030000, 0x10000));
 
-        let matcher = ModuleRegionMatcher::new(indexer);
+        let matcher = ModuleRegionMatcher::with_indexer(indexer);
 
         // Exact match
         let results = matcher.match_by_name("app", &vec!["app", "other"]);
@@ -476,7 +477,7 @@ mod tests {
         let mut tree = RStarTree::<String>::new();
 
         // 3. Add indexed modules to the tree
-        let mut indexer = ProgramModuleIndexer::new("file:///app", "x86:LE:64:default");
+        let mut indexer = ProgramModuleIndexer::new_with_config("file:///app", "x86:LE:64:default");
 
         let libc = IndexedModule::new("libc.so.6", "/usr/lib/libc.so.6", 0x7f000000, 0x20000);
         indexer.add_module(libc.clone());
@@ -486,11 +487,11 @@ mod tests {
 
         // Add entries to the tree
         tree.insert(RStarEntry::new(
-            SpatialRect::new(libc.base_address, libc.end_address(), 0, 10000),
+            SpatialRect::new(libc.base_address(), libc.end_address(), 0, 10000),
             "libc.so.6".to_string(),
         ));
         tree.insert(RStarEntry::new(
-            SpatialRect::new(app.base_address, app.end_address(), 0, 10000),
+            SpatialRect::new(app.base_address(), app.end_address(), 0, 10000),
             "app".to_string(),
         ));
 
@@ -518,7 +519,7 @@ mod tests {
         assert_eq!(results[0].key, "libc.so.6");
 
         // 7. Match modules
-        let matcher = ModuleRegionMatcher::new(indexer);
+        let matcher = ModuleRegionMatcher::with_indexer(indexer);
         let matches = matcher.match_by_name("app", &vec!["app", "other"]);
         assert!(!matches.is_empty());
         assert_eq!(matches[0].confidence, 1.0);

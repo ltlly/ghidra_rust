@@ -36,3 +36,6 @@ pub mod trace_thread_access;
 pub use trace_thread_access::{
     DefaultPcodeTraceThreadAccess, PcodeTraceAccessScope, PcodeTraceDataAccessConfig,
 };
+
+pub mod addresses_read_state;
+pub use addresses_read_state::AddressesReadStatePiece;

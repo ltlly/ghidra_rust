@@ -26,6 +26,12 @@ pub mod view;
 /// and the string scanning logic in Ghidra's string viewing plugin.
 pub mod scanner;
 
+/// Defined strings plugin, StringInfo, Trigram, CharacterScriptUtils.
+///
+/// Ported from `ghidra.app.plugin.core.strings.DefinedStringsPlugin`,
+/// `StringInfo`, `Trigram`, `StringTrigramIterator`, and `CharacterScriptUtils`.
+pub mod defined;
+
 /// Defined strings table model with sorting and filtering.
 ///
 /// Ported from `ghidra.app.plugin.core.strings.DefinedStringsTableModel`.

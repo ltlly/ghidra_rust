@@ -12,6 +12,12 @@
 //! - [`CommentTableModel`] -- sortable/filterable table model.
 //! - [`CommentWindowModel`] -- high-level model with CRUD operations.
 //! - [`CommentSortField`] -- columns by which comments can be sorted.
+//! - [`context`] -- action context for the comment window.
+//! - [`plugin`] -- the plugin and provider.
+
+pub mod context;
+pub mod plugin;
+pub mod row_object;
 
 use ghidra_core::Address;
 use std::collections::BTreeMap;

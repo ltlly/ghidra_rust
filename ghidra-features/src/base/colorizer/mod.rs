@@ -6,6 +6,11 @@
 //! addresses in the listing view. Color data is stored per-address and can
 //! be used for visual annotation of interesting code regions.
 //!
+//! # Sub-modules
+//!
+//! - [`commands`] -- [`SetColorCommand`] and [`ClearColorCommand`]
+//! - [`plugin`] -- [`ColorizingPlugin`], [`NextColorRangeAction`], [`PreviousColorRangeAction`]
+//!
 //! # Usage
 //!
 //! ```rust
@@ -17,6 +22,9 @@
 //! svc.clear_background_color(0x400000, 0x4000FF);
 //! assert_eq!(svc.get_background_color(0x400050), None);
 //! ```
+
+pub mod commands;
+pub mod plugin;
 
 use std::collections::BTreeMap;
 

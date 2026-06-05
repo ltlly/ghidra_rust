@@ -18,6 +18,18 @@
 /// Ported from `ghidra.app.plugin.core.datawindow.DataWindowProvider`.
 pub mod provider;
 
+/// Action context and filter actions for the data window.
+///
+/// Ported from `ghidra.app.plugin.core.datawindow.DataWindowContext`
+/// and `ghidra.app.plugin.core.datawindow.FilterAction`.
+pub mod context;
+
+/// Table mappers for data row objects.
+///
+/// Ported from `ghidra.app.plugin.core.datawindow.DataRowObjectToAddressTableRowMapper`
+/// and `DataRowObjectToProgramLocationTableRowMapper`.
+pub mod mappers;
+
 use std::collections::{BTreeMap, HashMap};
 
 /// Display name for the data value column.

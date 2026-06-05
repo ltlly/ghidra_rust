@@ -28,6 +28,7 @@ pub mod plugin;
 pub mod provider;
 pub mod editor;
 pub mod reference;
+pub mod row_object;
 pub mod dnd;
 
 /// Symbol renderer, transient table model, and row-object mappers.

@@ -2,6 +2,8 @@
 //!
 //! Port of Ghidra's `generic.test.AbstractGuiTest` and `ghidra.test.GhidraTestCase`.
 
+pub mod abstract_gui_test;
+
 use std::time::{Duration, Instant};
 
 /// Maximum time to wait for a GUI condition before timing out.

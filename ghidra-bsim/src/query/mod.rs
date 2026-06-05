@@ -4,6 +4,7 @@
 
 pub mod bsim_server_info;
 pub mod client;
+pub mod client_sql;
 pub mod compare_signatures;
 pub mod decompile_function_task;
 pub mod description;
