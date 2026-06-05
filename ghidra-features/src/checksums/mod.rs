@@ -14,6 +14,12 @@
 //!   [`Adler32Algorithm`], [`Checksum8Algorithm`], [`Checksum16Algorithm`],
 //!   [`Checksum32Algorithm`], [`Crc16CcittAlgorithm`], [`Md2Algorithm`].
 
+/// Checksum computation commands.
+///
+/// Ported from `ghidra.app.plugin.core.checksums.ComputeChecksumCommand` and
+/// `ghidra.app.plugin.core.checksums.ComputeAllChecksumsCommand`.
+pub mod commands;
+
 use std::fmt;
 
 // ============================================================================

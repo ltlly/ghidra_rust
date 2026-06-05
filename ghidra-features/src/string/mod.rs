@@ -14,6 +14,18 @@
 //! - [`StringTableModel`] -- Table model for found strings
 //! - [`StringTableOptions`] -- Configuration for string search
 
+/// NGram scoring utilities for string identification.
+///
+/// Ported from `ghidra.app.plugin.core.string.NGramUtils` and
+/// `ghidra.app.plugin.core.string.StringAndScores`.
+pub mod ngram;
+
+/// String events and translation services.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate` and
+/// `ghidra.app.plugin.core.string.StringEvent`.
+pub mod events;
+
 /// Minimum default string length to find.
 pub const DEFAULT_MIN_LENGTH: usize = 5;
 

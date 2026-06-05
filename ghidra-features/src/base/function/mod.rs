@@ -22,6 +22,10 @@ pub mod thunk;
 pub mod stack;
 pub mod editor;
 pub mod analyzers;
+pub mod data_actions;
+pub mod extra_analyzers;
+pub mod editor_ui;
+pub mod tags_ui;
 
 pub use plugin::*;
 pub use actions::*;
@@ -31,3 +35,7 @@ pub use thunk::*;
 pub use stack::*;
 pub use editor::*;
 pub use analyzers::*;
+pub use data_actions::*;
+pub use extra_analyzers::*;
+pub use editor_ui::*;
+pub use tags_ui::*;

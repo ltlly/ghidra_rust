@@ -7,6 +7,7 @@
 //! metadata only (no Swing/AWT integration).
 
 pub mod edit_actions;
+pub mod extra_actions;
 
 use ghidra_core::addr::Address;
 

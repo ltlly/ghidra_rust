@@ -6,14 +6,11 @@
 //! debugger API, intended for use by RMI clients and automated scripts.
 
 use crate::api::breakpoint::LogicalBreakpoint;
-use crate::api::flat_api::{FlatApiResult, ProgramLocation};
+use crate::api::flat_api::{FlatApiError, FlatApiResult, ProgramLocation};
 use crate::api::tracemgr::DebuggerCoordinates;
 
 /// The flat RMI API provides a high-level scripting interface
 /// specifically for RMI (Remote Method Invocation) clients.
-///
-/// Unlike the full `FlatDebuggerApi`, this is designed for remote
-/// invocations where operations may cross process boundaries.
 pub trait FlatDebuggerRmiApi {
     /// Get the current coordinates (trace, snap, thread, frame).
     fn current_coordinates(&self) -> &DebuggerCoordinates;
@@ -28,7 +25,7 @@ pub trait FlatDebuggerRmiApi {
     fn current_snap(&self) -> Option<i64>;
 
     /// Get the current thread ID.
-    fn current_thread_id(&self) -> Option<u64>;
+    fn current_thread_id(&self) -> Option<i64>;
 
     /// Go to a specific address in the listing.
     fn go_to_address(&mut self, offset: u64) -> FlatApiResult<()>;
@@ -151,26 +148,27 @@ impl FlatDebuggerRmiApi for StubRmiApi {
     }
 
     fn current_trace_key(&self) -> Option<i64> {
-        self.coordinates.trace_key()
+        self.coordinates.trace_key
     }
 
     fn current_snap(&self) -> Option<i64> {
-        self.coordinates.snap()
+        self.coordinates.snap
     }
 
-    fn current_thread_id(&self) -> Option<u64> {
-        self.coordinates.thread_id()
+    fn current_thread_id(&self) -> Option<i64> {
+        self.coordinates.thread_key
     }
 
     fn go_to_address(&mut self, offset: u64) -> FlatApiResult<()> {
-        self.coordinates = self.coordinates.with_snap(offset as i64);
+        self.coordinates.snap = Some(offset as i64);
         Ok(())
     }
 
     fn get_current_location(&self) -> Option<ProgramLocation> {
         Some(ProgramLocation {
-            offset: 0,
-            space_name: "ram".into(),
+            program_url: None,
+            address: 0,
+            is_dynamic: true,
         })
     }
 
@@ -186,7 +184,7 @@ impl FlatDebuggerRmiApi for StubRmiApi {
         if self.breakpoints.len() < before {
             Ok(())
         } else {
-            Err(crate::api::flat_api::FlatApiError::NotConnected)
+            Err(FlatApiError::NoActiveTrace)
         }
     }
 
@@ -216,7 +214,7 @@ impl FlatDebuggerRmiApi for StubRmiApi {
         if end <= self.memory.len() {
             Ok(self.memory[start..end].to_vec())
         } else {
-            Err(crate::api::flat_api::FlatApiError::NotConnected)
+            Err(FlatApiError::InvalidArgument("Address out of range".into()))
         }
     }
 
@@ -227,7 +225,7 @@ impl FlatDebuggerRmiApi for StubRmiApi {
             self.memory[start..end].copy_from_slice(data);
             Ok(())
         } else {
-            Err(crate::api::flat_api::FlatApiError::NotConnected)
+            Err(FlatApiError::InvalidArgument("Address out of range".into()))
         }
     }
 
@@ -240,7 +238,7 @@ impl FlatDebuggerRmiApi for StubRmiApi {
     }
 
     fn activate_trace(&mut self, trace_key: i64) -> FlatApiResult<()> {
-        self.coordinates = DebuggerCoordinates::with_key(trace_key);
+        self.coordinates = DebuggerCoordinates::trace(trace_key);
         Ok(())
     }
 
@@ -249,7 +247,7 @@ impl FlatDebuggerRmiApi for StubRmiApi {
     }
 
     fn close_trace(&mut self, _trace_key: i64) -> FlatApiResult<()> {
-        self.coordinates = DebuggerCoordinates::default();
+        self.coordinates = DebuggerCoordinates::none();
         Ok(())
     }
 

@@ -10,6 +10,9 @@
 //! - [`DisassemblerAction`] -- types of disassembly actions.
 //! - [`DisassemblerModel`] -- business logic for disassembly.
 //! - [`DisassemblyResult`] -- the result of a disassembly operation.
+//! - [`actions`] -- disassembly action identifiers, flow overrides, dialogs, contexts, and call fixups.
+
+pub mod actions;
 
 use ghidra_core::Address;
 use std::collections::{BTreeMap, HashSet};

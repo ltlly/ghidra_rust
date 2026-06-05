@@ -30,6 +30,7 @@ pub mod default_ref_action;
 pub mod dialog;
 pub mod edit_model;
 pub mod edit_panels;
+pub mod edit_provider;
 pub mod exceptions;
 pub mod external_provider;
 pub mod instruction_info;
@@ -44,6 +45,7 @@ pub use commands::{
 };
 pub use dialog::{EditPanelType, EditReferenceDialog, InstructionPanel};
 pub use edit_model::{EditReferencesModel, REFERENCE_COLUMNS};
+pub use edit_provider::{EditReferencesAction, EditReferencesProviderModel, EditorMode};
 pub use edit_panels::{
     ExternalRefState, MemoryRefState, RegisterRefState, ReferenceEditPanel, StackRefState,
 };

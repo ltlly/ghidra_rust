@@ -30,7 +30,7 @@ use ghidra_features::commentwindow::{CommentEntry, CommentWindowModel};
 use ghidra_features::printing::PrintModel;
 use ghidra_features::misc::{AddressDisplayFormat, ImportType};
 use ghidra_features::hover::{HoverElementType, HoverInfo, HoverModel};
-use ghidra_features::help::{HelpLocation, HelpModel, HelpTopic};
+use ghidra_features::help::{HelpLocation, HelpModel, HelpService, HelpTopic};
 use ghidra_features::check::{ValidationCheck, ValidationModel, ValidationResult, ValidationSeverity};
 use ghidra_features::data_plugin::{DataAction, DataPluginModel};
 
@@ -280,6 +280,7 @@ fn test_validation_and_help() {
         name: "Memory Check Help".into(),
         content: "Checks for memory block overlaps...".into(),
         children: Vec::new(),
+        help_set: None,
     });
     let topic = help.get_topic("MemoryCheck").unwrap();
     assert_eq!(topic.name, "Memory Check Help");

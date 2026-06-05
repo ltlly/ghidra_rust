@@ -25,6 +25,7 @@ pub mod platform_impl;
 pub mod progress_impl;
 pub mod target_impl;
 pub mod tracemgr_impl;
+pub mod url_impl;
 
 use crate::api::breakpoint::LogicalBreakpoint;
 use crate::model::Lifespan;

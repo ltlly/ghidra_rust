@@ -32,6 +32,127 @@ impl Default for EmulationMode {
     }
 }
 
+/// A write flag for target-associated emulator states.
+///
+/// Ported from Ghidra's `Mode` enum in `ghidra.app.plugin.core.debug.service.emulation`.
+/// Controls whether an emulated state can write back to the live target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WriteMode {
+    /// The state can write the target directly.
+    Rw,
+    /// The state will never write the target.
+    Ro,
+}
+
+impl WriteMode {
+    /// Check if the mode permits writing the target.
+    pub fn is_write_target(&self) -> bool {
+        matches!(self, Self::Rw)
+    }
+}
+
+impl Default for WriteMode {
+    fn default() -> Self {
+        Self::Rw
+    }
+}
+
+/// An out-of-memory exception during emulation.
+///
+/// Ported from Ghidra's `EmulatorOutOfMemoryException`.
+#[derive(Debug, Clone)]
+pub struct EmulatorOutOfMemoryError {
+    /// The address that was accessed.
+    pub address: u64,
+    /// Whether this was a write (vs. read).
+    pub is_write: bool,
+    /// A description of the error.
+    pub message: String,
+}
+
+impl EmulatorOutOfMemoryError {
+    /// Create a new out-of-memory error.
+    pub fn new(address: u64, is_write: bool, message: impl Into<String>) -> Self {
+        Self {
+            address,
+            is_write,
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for EmulatorOutOfMemoryError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op = if self.is_write { "write" } else { "read" };
+        write!(
+            f,
+            "Emulator out-of-memory {} at 0x{:x}: {}",
+            op, self.address, self.message
+        )
+    }
+}
+
+impl std::error::Error for EmulatorOutOfMemoryError {}
+
+/// The default emulator factory for the debugger.
+///
+/// Ported from Ghidra's `DefaultEmulatorFactory`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DefaultEmulatorFactory {
+    /// The title.
+    pub title: String,
+    /// The language ID.
+    pub language_id: String,
+    /// The compiler spec ID.
+    pub compiler_spec_id: String,
+}
+
+impl DefaultEmulatorFactory {
+    /// The title of the default concrete P-code emulator.
+    pub const TITLE: &'static str = "Default Concrete P-code Emulator";
+
+    /// Create a new default emulator factory.
+    pub fn new(
+        language_id: impl Into<String>,
+        compiler_spec_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: Self::TITLE.into(),
+            language_id: language_id.into(),
+            compiler_spec_id: compiler_spec_id.into(),
+        }
+    }
+}
+
+/// Debugger emulation integration utilities.
+///
+/// Ported from Ghidra's `DebuggerEmulationIntegration`.
+#[derive(Debug)]
+pub struct DebuggerEmulationIntegration;
+
+impl DebuggerEmulationIntegration {
+    /// Compute the initial emulation state from a trace snapshot.
+    ///
+    /// Sets up memory and register state from the trace at the given snap.
+    pub fn compute_initial_state(
+        trace_id: &str,
+        snap: i64,
+        thread_key: Option<i64>,
+    ) -> EmulationSession {
+        let session = EmulationSession::new(0, trace_id, snap);
+        if let Some(tk) = thread_key {
+            session.with_thread(tk)
+        } else {
+            session
+        }
+    }
+
+    /// Check whether emulation should write back to the trace.
+    pub fn should_write_back(mode: WriteMode) -> bool {
+        mode.is_write_target()
+    }
+}
+
 /// Configuration for p-code emulation execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EmulationExecutionConfig {
@@ -624,5 +745,61 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let back: EmulationExecutionConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(back.mode, EmulationMode::Hybrid);
+    }
+
+    #[test]
+    fn test_write_mode() {
+        assert!(WriteMode::Rw.is_write_target());
+        assert!(!WriteMode::Ro.is_write_target());
+        assert_eq!(WriteMode::default(), WriteMode::Rw);
+    }
+
+    #[test]
+    fn test_write_mode_serde() {
+        let mode = WriteMode::Ro;
+        let json = serde_json::to_string(&mode).unwrap();
+        let back: WriteMode = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, WriteMode::Ro);
+    }
+
+    #[test]
+    fn test_emulator_out_of_memory_error() {
+        let err = EmulatorOutOfMemoryError::new(0xdeadbeef, true, "unmapped address");
+        assert_eq!(err.address, 0xdeadbeef);
+        assert!(err.is_write);
+        assert!(err.to_string().contains("write"));
+        assert!(err.to_string().contains("deadbeef"));
+    }
+
+    #[test]
+    fn test_default_emulator_factory() {
+        let factory = DefaultEmulatorFactory::new("x86:LE:64:default", "default");
+        assert_eq!(factory.title, DefaultEmulatorFactory::TITLE);
+        assert_eq!(factory.language_id, "x86:LE:64:default");
+    }
+
+    #[test]
+    fn test_default_emulator_factory_serde() {
+        let factory = DefaultEmulatorFactory::new("x86:LE:64:default", "default");
+        let json = serde_json::to_string(&factory).unwrap();
+        let back: DefaultEmulatorFactory = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.title, DefaultEmulatorFactory::TITLE);
+    }
+
+    #[test]
+    fn test_debugger_emulation_integration() {
+        let session = DebuggerEmulationIntegration::compute_initial_state("trace1", 0, Some(42));
+        assert_eq!(session.trace_id, "trace1");
+        assert_eq!(session.thread_key, Some(42));
+
+        let session = DebuggerEmulationIntegration::compute_initial_state("trace1", 5, None);
+        assert!(session.thread_key.is_none());
+        assert_eq!(session.snap, 5);
+    }
+
+    #[test]
+    fn test_should_write_back() {
+        assert!(DebuggerEmulationIntegration::should_write_back(WriteMode::Rw));
+        assert!(!DebuggerEmulationIntegration::should_write_back(WriteMode::Ro));
     }
 }

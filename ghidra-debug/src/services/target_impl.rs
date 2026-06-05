@@ -151,6 +151,129 @@ impl TargetService for DefaultTargetService {
     }
 }
 
+/// Abstract base for debug targets.
+///
+/// Ported from Ghidra's `AbstractTarget`. Provides a common framework
+/// for implementing debug target types (GDB, LLDB, etc.) with a
+/// standardized lifecycle model.
+#[derive(Debug, Clone)]
+pub struct AbstractTarget {
+    /// The target key (unique identifier).
+    pub key: i64,
+    /// The target type (e.g., "gdb", "lldb").
+    pub target_type: String,
+    /// The display name.
+    pub display_name: String,
+    /// The current execution state.
+    pub state: TargetExecutionState,
+    /// The process ID (if attached).
+    pub pid: Option<i64>,
+    /// The thread IDs.
+    pub threads: Vec<i64>,
+    /// The current thread ID.
+    pub current_thread: Option<i64>,
+    /// Environment variables.
+    pub env: HashMap<String, String>,
+    /// Command-line arguments.
+    pub args: Vec<String>,
+    /// The working directory.
+    pub working_dir: Option<String>,
+}
+
+/// The execution state of a debug target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TargetExecutionState {
+    /// The target is not started.
+    NotStarted,
+    /// The target is running.
+    Running,
+    /// The target is paused (breakpoint hit, step complete, etc.).
+    Paused,
+    /// The target has terminated.
+    Terminated,
+    /// The target is in an error state.
+    Error,
+}
+
+impl AbstractTarget {
+    /// Create a new abstract target.
+    pub fn new(key: i64, target_type: impl Into<String>, display_name: impl Into<String>) -> Self {
+        Self {
+            key,
+            target_type: target_type.into(),
+            display_name: display_name.into(),
+            state: TargetExecutionState::NotStarted,
+            pid: None,
+            threads: Vec::new(),
+            current_thread: None,
+            env: HashMap::new(),
+            args: Vec::new(),
+            working_dir: None,
+        }
+    }
+
+    /// Whether the target is currently alive (not terminated or errored).
+    pub fn is_alive(&self) -> bool {
+        matches!(
+            self.state,
+            TargetExecutionState::Running
+                | TargetExecutionState::Paused
+                | TargetExecutionState::NotStarted
+        )
+    }
+
+    /// Whether the target is currently running.
+    pub fn is_running(&self) -> bool {
+        self.state == TargetExecutionState::Running
+    }
+
+    /// Whether the target is paused.
+    pub fn is_paused(&self) -> bool {
+        self.state == TargetExecutionState::Paused
+    }
+
+    /// Set the execution state.
+    pub fn set_state(&mut self, state: TargetExecutionState) {
+        self.state = state;
+    }
+
+    /// Add a thread ID.
+    pub fn add_thread(&mut self, thread_id: i64) {
+        self.threads.push(thread_id);
+        if self.current_thread.is_none() {
+            self.current_thread = Some(thread_id);
+        }
+    }
+
+    /// Remove a thread ID.
+    pub fn remove_thread(&mut self, thread_id: i64) {
+        self.threads.retain(|&t| t != thread_id);
+        if self.current_thread == Some(thread_id) {
+            self.current_thread = self.threads.first().copied();
+        }
+    }
+
+    /// Set the current thread.
+    pub fn set_current_thread(&mut self, thread_id: Option<i64>) {
+        self.current_thread = thread_id;
+    }
+
+    /// Set an environment variable.
+    pub fn set_env(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.env.insert(key.into(), value.into());
+    }
+
+    /// Set command-line arguments.
+    pub fn set_args(&mut self, args: Vec<String>) {
+        self.args = args;
+    }
+
+    /// Set the working directory.
+    pub fn set_working_dir(&mut self, dir: impl Into<String>) {
+        self.working_dir = Some(dir.into());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,5 +318,61 @@ mod tests {
         svc.disconnect_target(key).unwrap();
         let info = svc.active_target_info(key).unwrap();
         assert!(!info.connected);
+    }
+
+    #[test]
+    fn test_abstract_target() {
+        let mut target = AbstractTarget::new(1, "gdb", "GDB Session");
+        assert_eq!(target.key, 1);
+        assert_eq!(target.target_type, "gdb");
+        assert_eq!(target.state, TargetExecutionState::NotStarted);
+        assert!(target.is_alive());
+        assert!(!target.is_running());
+        assert!(!target.is_paused());
+    }
+
+    #[test]
+    fn test_abstract_target_state_transitions() {
+        let mut target = AbstractTarget::new(1, "gdb", "GDB Session");
+        target.set_state(TargetExecutionState::Running);
+        assert!(target.is_running());
+        assert!(target.is_alive());
+
+        target.set_state(TargetExecutionState::Paused);
+        assert!(target.is_paused());
+        assert!(target.is_alive());
+
+        target.set_state(TargetExecutionState::Terminated);
+        assert!(!target.is_alive());
+    }
+
+    #[test]
+    fn test_abstract_target_threads() {
+        let mut target = AbstractTarget::new(1, "gdb", "GDB");
+        target.add_thread(100);
+        target.add_thread(200);
+        assert_eq!(target.threads.len(), 2);
+        assert_eq!(target.current_thread, Some(100));
+
+        target.set_current_thread(Some(200));
+        assert_eq!(target.current_thread, Some(200));
+
+        target.remove_thread(200);
+        assert_eq!(target.threads.len(), 1);
+        assert_eq!(target.current_thread, Some(100));
+
+        target.remove_thread(100);
+        assert!(target.current_thread.is_none());
+    }
+
+    #[test]
+    fn test_abstract_target_env() {
+        let mut target = AbstractTarget::new(1, "gdb", "GDB");
+        target.set_env("PATH", "/usr/bin");
+        target.set_args(vec!["--args".into(), "prog".into()]);
+        target.set_working_dir("/home/user");
+        assert_eq!(target.env.get("PATH"), Some(&"/usr/bin".to_string()));
+        assert_eq!(target.args.len(), 2);
+        assert_eq!(target.working_dir, Some("/home/user".to_string()));
     }
 }

@@ -3,6 +3,7 @@
 //! Port of `ghidra.app.cmd.function`:
 //! - [`DecompilerParameterIdCmd`]: identify function parameters via decompilation
 //! - [`DecompilerParallelConventionAnalysisCmd`]: parallel calling convention analysis
+//! - [`DecompilerSwitchAnalysisCmd`]: decompiler-based switch analysis
 
 use std::collections::HashMap;
 
@@ -147,6 +148,118 @@ impl DecompilerConventionAnalysisCmd {
     }
 }
 
+// ============================================================================
+// DecompilerSwitchAnalysisCmd
+// ============================================================================
+
+/// Information about a single case in a switch statement.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SwitchCaseInfo {
+    /// The case value (the constant that is matched).
+    pub case_value: i64,
+    /// The target address for this case.
+    pub target_address: u64,
+    /// Whether this is the default case.
+    pub is_default: bool,
+}
+
+/// Command to perform decompiler-based switch analysis.
+///
+/// Analyzes a switch statement by decompiling the function and
+/// extracting the switch structure (number of cases, targets,
+/// jump table address, etc.).
+///
+/// Port of `ghidra.app.plugin.core.analysis.DecompilerSwitchAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct DecompilerSwitchAnalysisCmd {
+    /// Function address containing the switch.
+    pub function_address: u64,
+    /// Address of the switch body (the indirect jump instruction).
+    pub body_address: u64,
+    /// Whether this is an indirect (computed) switch.
+    indirect: bool,
+    /// Jump table address (for indirect switches).
+    jump_table_address: Option<u64>,
+    /// Discovered switch cases.
+    cases: Vec<SwitchCaseInfo>,
+    /// The switch analysis style (e.g., "computed goto", "jump table").
+    analysis_style: Option<String>,
+}
+
+impl DecompilerSwitchAnalysisCmd {
+    /// Create a new switch analysis command.
+    pub fn new(function_address: u64, body_address: u64) -> Self {
+        Self {
+            function_address,
+            body_address,
+            indirect: false,
+            jump_table_address: None,
+            cases: Vec::new(),
+            analysis_style: None,
+        }
+    }
+
+    /// Whether this is an indirect (computed) switch.
+    pub fn is_indirect(&self) -> bool {
+        self.indirect
+    }
+
+    /// Set whether this is an indirect switch.
+    pub fn set_indirect(&mut self, indirect: bool) {
+        self.indirect = indirect;
+    }
+
+    /// Get the jump table address (if any).
+    pub fn jump_table_address(&self) -> Option<u64> {
+        self.jump_table_address
+    }
+
+    /// Set the jump table address.
+    pub fn set_jump_table_address(&mut self, addr: Option<u64>) {
+        self.jump_table_address = addr;
+    }
+
+    /// Get the discovered switch cases.
+    pub fn cases(&self) -> &[SwitchCaseInfo] {
+        &self.cases
+    }
+
+    /// Add a switch case.
+    pub fn add_case(&mut self, case: SwitchCaseInfo) {
+        self.cases.push(case);
+    }
+
+    /// Get the analysis style.
+    pub fn analysis_style(&self) -> Option<&str> {
+        self.analysis_style.as_deref()
+    }
+
+    /// Set the analysis style.
+    pub fn set_analysis_style(&mut self, style: impl Into<String>) {
+        self.analysis_style = Some(style.into());
+    }
+
+    /// Get the number of cases (including default).
+    pub fn case_count(&self) -> usize {
+        self.cases.len()
+    }
+
+    /// Get the default case (if any).
+    pub fn default_case(&self) -> Option<&SwitchCaseInfo> {
+        self.cases.iter().find(|c| c.is_default)
+    }
+
+    /// Get all non-default cases.
+    pub fn non_default_cases(&self) -> Vec<&SwitchCaseInfo> {
+        self.cases.iter().filter(|c| !c.is_default).collect()
+    }
+
+    /// Sort cases by their value.
+    pub fn sort_cases(&mut self) {
+        self.cases.sort_by_key(|c| c.case_value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +301,47 @@ mod tests {
         assert!(cmd.detected_convention().is_none());
         cmd.set_convention("__fastcall");
         assert_eq!(cmd.detected_convention(), Some("__fastcall"));
+    }
+
+    #[test]
+    fn test_switch_analysis_cmd() {
+        let mut cmd = DecompilerSwitchAnalysisCmd::new(0x1000, 0x2000);
+        assert_eq!(cmd.function_address, 0x1000);
+        assert_eq!(cmd.body_address, 0x2000);
+
+        cmd.add_case(SwitchCaseInfo {
+            case_value: 1,
+            target_address: 0x3000,
+            is_default: false,
+        });
+        cmd.add_case(SwitchCaseInfo {
+            case_value: 0,
+            target_address: 0x4000,
+            is_default: true,
+        });
+
+        assert_eq!(cmd.cases().len(), 2);
+        assert!(cmd.cases()[1].is_default);
+        assert!(!cmd.cases()[0].is_default);
+    }
+
+    #[test]
+    fn test_switch_analysis_with_indirection() {
+        let mut cmd = DecompilerSwitchAnalysisCmd::new(0x1000, 0x2000);
+        cmd.set_indirect(true);
+        assert!(cmd.is_indirect());
+        cmd.set_jump_table_address(Some(0x5000));
+        assert_eq!(cmd.jump_table_address(), Some(0x5000));
+    }
+
+    #[test]
+    fn test_switch_case_info() {
+        let case = SwitchCaseInfo {
+            case_value: 5,
+            target_address: 0x6000,
+            is_default: false,
+        };
+        assert_eq!(case.case_value, 5);
+        assert_eq!(case.target_address, 0x6000);
     }
 }

@@ -13,6 +13,7 @@
 mod commands;
 mod dialog;
 mod manager;
+pub mod plugin;
 mod tree;
 mod value_range;
 mod values_panel;
@@ -20,6 +21,9 @@ mod values_panel;
 pub use commands::{RegisterCommand, SetRegisterValueCmd};
 pub use dialog::{RegisterDialogError, RegisterDialogMode, RegisterValueDialogModel};
 pub use manager::RegisterManager;
+pub use plugin::{
+    RegisterActionType, RegisterPluginAction, RegisterPluginModel, RegisterTransitionInfo,
+};
 pub use tree::{RegisterGroupNode, RegisterNode, RegisterTree};
 pub use value_range::RegisterValueRange;
 pub use values_panel::{RegisterValuesPanel, SortDirection};

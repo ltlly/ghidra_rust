@@ -14,6 +14,12 @@
 //! - [`EncodedStringFilter`] -- Filter for encoded strings
 //! - [`DefinedStringsTableModel`] -- Table model for defined strings
 
+/// View Strings provider, table model, column constraints, and iterator.
+///
+/// Ported from `ghidra.app.plugin.core.strings.ViewStringsPlugin` and
+/// related classes.
+pub mod view;
+
 use std::collections::HashMap;
 
 /// Column header for string value.

@@ -68,7 +68,13 @@ impl KeyPath {
                         result.push(current.clone());
                         current.clear();
                     }
-                    result.push(index);
+                    if index.is_empty() {
+                        // Empty brackets `[]` is the wildcard for "any index"
+                        result.push("[]".to_string());
+                    } else {
+                        // Specific index like [3] -> stored as bare "3"
+                        result.push(index);
+                    }
                 }
                 _ => current.push(c),
             }

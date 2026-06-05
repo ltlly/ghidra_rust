@@ -15,6 +15,16 @@
 //! - [`ComponentRow`] -- A single row in the composite editor table
 //! - [`EditTransaction`] -- A batch of changes to apply atomically
 
+/// Composite editor actions (delete, insert, duplicate, etc.).
+///
+/// Ported from individual action classes in `ghidra.app.plugin.core.compositeeditor`.
+pub mod actions;
+
+/// Bidirectional ID mapping between view and original data type managers.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.IDMapDB`.
+pub mod idmap;
+
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of components allowed in a composite type.

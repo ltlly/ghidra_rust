@@ -238,6 +238,80 @@ impl ImageUtils {
             _ => None,
         }
     }
+
+    /// Create a padded version of an image.
+    pub fn pad_image(
+        image: &ImageBuffer,
+        bg_color: RgbaPixel,
+        top: usize,
+        left: usize,
+        right: usize,
+        bottom: usize,
+    ) -> ImageBuffer {
+        let new_w = image.width + left + right;
+        let new_h = image.height + top + bottom;
+        let mut result = ImageBuffer::new(new_w, new_h, bg_color);
+        for y in 0..image.height {
+            for x in 0..image.width {
+                if let Some(px) = image.get_pixel(x, y) {
+                    result.set_pixel(x + left, y + top, px);
+                }
+            }
+        }
+        result
+    }
+
+    /// Crop a sub-image from an image.
+    pub fn sub_image(
+        image: &ImageBuffer,
+        x: usize,
+        y: usize,
+        w: usize,
+        h: usize,
+    ) -> ImageBuffer {
+        let mut result = ImageBuffer::transparent(w, h);
+        for dy in 0..h {
+            for dx in 0..w {
+                if let Some(px) = image.get_pixel(x + dx, y + dy) {
+                    result.set_pixel(dx, dy, px);
+                }
+            }
+        }
+        result
+    }
+
+    /// Flip an image horizontally.
+    pub fn flip_horizontal(image: &ImageBuffer) -> ImageBuffer {
+        let mut result = ImageBuffer::transparent(image.width, image.height);
+        for y in 0..image.height {
+            for x in 0..image.width {
+                if let Some(px) = image.get_pixel(x, y) {
+                    result.set_pixel(image.width - 1 - x, y, px);
+                }
+            }
+        }
+        result
+    }
+
+    /// Flip an image vertically.
+    pub fn flip_vertical(image: &ImageBuffer) -> ImageBuffer {
+        let mut result = ImageBuffer::transparent(image.width, image.height);
+        for y in 0..image.height {
+            for x in 0..image.width {
+                if let Some(px) = image.get_pixel(x, y) {
+                    result.set_pixel(x, image.height - 1 - y, px);
+                }
+            }
+        }
+        result
+    }
+
+    /// Create a scaled image with specific target dimensions.
+    pub fn create_scaled_image(image: &ImageBuffer, width: usize, height: usize) -> ImageBuffer {
+        let scale_x = width as f64 / image.width.max(1) as f64;
+        let scale_y = height as f64 / image.height.max(1) as f64;
+        image.scale_nearest(scale_x, scale_y)
+    }
 }
 
 #[cfg(test)]

@@ -36,9 +36,13 @@ pub mod auto_map;
 pub mod breakpoint_actions;
 pub mod disassemble;
 pub mod event;
+pub mod experiments;
 pub mod export;
 pub mod gui;
 pub mod gui_breakpoint;
+pub mod gui_model;
+pub mod gui_model_columns;
+pub mod gui_program_location;
 pub mod gui_breakpoint_timeline;
 pub mod gui_colors;
 pub mod gui_console;
@@ -78,6 +82,7 @@ pub use breakpoint_actions::*;
 pub use disassemble::*;
 pub use event::*;
 pub use export::*;
+pub use experiments::*;
 pub use gui::*;
 pub use gui_breakpoint::{
     BreakpointActionContext, BreakpointDisplayState, BreakpointKindSet,
@@ -97,7 +102,17 @@ pub use gui_control::{ControlAction, ControlActionBuilder, ControlActionKind, Co
 pub use gui_copy::{CopyDirection, CopyEndpoint, CopyEntry, CopyPlan};
 pub use gui_internal::{RStarTreeDiagnosticsModel, RStarTreeNode, RStarTreeStats};
 pub use gui_memview::{MemviewBoxType, MemviewMap, MemviewModel, MemoryBox};
+pub use gui_model::{
+    AttributeValue, DisplaysModified, ModelQuery, ModelValue, ModelValueEntry,
+    ObjectModelRow, PathModelRow, TreeState, ValueDisplay,
+};
+pub use gui_model_columns::{
+    ColumnDescriptor, ColumnKind, ColumnRenderConfig, EditableColumn, ModelColumn,
+};
 pub use gui_pcode::{PcodeRow, PcodeRowKind, PcodeStepperModel, PcodeVarnode};
+pub use gui_program_location::{
+    AutoReadMemorySpec, GoToAction, GoToContext, LocationTracker, ProgramLocationContext,
+};
 pub use gui_platform::{
     DisassemblyResult, Endianness, PlatformChangedEvent, PlatformDisplayInfo, PlatformMapperData,
     PlatformProviderModel, RegisterMappingEntry,

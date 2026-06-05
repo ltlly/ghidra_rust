@@ -17,6 +17,7 @@ pub mod application_theme_manager;
 pub mod builtin;
 pub mod color_value;
 pub mod discoverable_theme;
+pub mod laf;
 pub mod font_modifier;
 pub mod font_value;
 pub mod g_color;

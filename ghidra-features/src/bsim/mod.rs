@@ -41,6 +41,7 @@ pub mod client_factory;
 pub mod configuration;
 pub mod description;
 pub mod elastic_db;
+pub mod executable_comparison;
 pub mod facade;
 pub mod file;
 pub mod function_database;
@@ -145,6 +146,13 @@ pub use scoring::{
 pub use staging::{
     ExeSpecifier as StagingExeSpecifier,
     StagingManager as StagingManagerTrait,
+};
+
+// Re-export executable comparison types (prefixed to avoid conflicts with client re-exports).
+pub use executable_comparison::{
+    ComparisonConfig, ComparisonResult as ClusterComparisonResult,
+    ExecutableComparison as ClusterExecutableComparison, IdHistogram as ClusterIdHistogram,
+    SingleExecutableComparison, VectorCluster,
 };
 
 // Re-export table types.

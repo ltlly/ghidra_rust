@@ -14,6 +14,7 @@
 
 pub mod databasesearcher;
 pub mod iterators;
+pub mod plugin;
 
 use ghidra_core::Address;
 

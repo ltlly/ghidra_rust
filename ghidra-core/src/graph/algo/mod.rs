@@ -8,7 +8,9 @@
 //! - [`find_paths_iterative`] and [`find_paths_recursive`] for path finding
 //! - [`TarjanSCC`] for strongly-connected components on generic graphs
 //! - [`ChkDominanceAlgorithm`] / [`ChkPostDominanceAlgorithm`] for dominance
+//! - [`astar`] for A* search and topological sort
 
+pub mod astar;
 pub mod graph_navigator;
 pub mod depth_first_sorter;
 pub mod dijkstra;
@@ -17,6 +19,7 @@ pub mod find_paths;
 pub mod tarjan_scc;
 pub mod chk_dominance;
 
+pub use astar::{AStarSearch, AddressHeuristic, EuclideanHeuristic, find_sccs, topological_sort};
 pub use graph_navigator::GraphNavigator;
 pub use depth_first_sorter::DepthFirstSorter;
 pub use dijkstra::DijkstraShortestPaths;

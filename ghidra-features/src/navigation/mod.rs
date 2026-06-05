@@ -14,6 +14,7 @@
 
 pub mod function_utils;
 pub mod locationreferences;
+pub mod location_service;
 pub mod starting_location;
 
 use std::collections::HashMap;
