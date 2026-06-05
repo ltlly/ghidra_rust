@@ -81,6 +81,22 @@ pub mod tracemgr_service_plugin;
 pub mod dynamic_static_sync;
 pub mod program_emulation_utils;
 
+// Service interfaces from Debugger-api / Debugger
+pub mod debugger_auto_mapping_service;
+pub mod debugger_console_service;
+pub mod debugger_control_service;
+pub mod debugger_emulation_service;
+pub mod debugger_listing_service;
+pub mod debugger_logical_breakpoint_service;
+pub mod debugger_platform_service;
+pub mod debugger_static_mapping_service;
+pub mod debugger_target_service;
+pub mod debugger_trace_manager_service;
+pub mod debugger_watches_service;
+pub mod progress_service;
+pub mod trace_rmi_service;
+pub mod trace_rmi_launcher_service;
+
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
     DebuggerAutoMappingService as AutoMappingServiceExt,

@@ -249,3 +249,30 @@ pub mod trace_program_view_ext;
 pub mod trace_memory_space_input_stream;
 pub mod trace_data_type_ops;
 pub mod memory_stream;
+
+// Symbol view modules (ported from trace/model/symbol)
+pub mod trace_label_symbol_view;
+pub mod trace_namespace_symbol_view;
+pub mod trace_class_symbol_view;
+pub mod trace_symbol_view;
+pub mod trace_symbol_no_duplicates_view;
+pub mod trace_equate_reference;
+pub mod trace_equate_operations;
+pub mod trace_reference_operations;
+pub mod trace_symbol_with_lifespan;
+
+// Listing view modules (ported from trace/model/listing)
+pub mod trace_code_space;
+pub mod trace_code_operations;
+pub mod trace_data_view;
+
+// Memory modules (ported from trace/model/memory)
+pub mod trace_memory_operations;
+
+// Core model modules (ported from trace/model)
+pub mod trace_change_set;
+pub mod trace_user_data;
+pub mod trace_time_viewport;
+pub mod trace_closed_exception;
+pub mod default_trace_location;
+pub mod trace_unique_object;

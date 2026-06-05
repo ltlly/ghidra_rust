@@ -367,3 +367,7 @@ pub mod trace_db_abstract_view_memory;
 // New modules from remaining Debug port (deep listing views and target iface)
 pub mod trace_db_listing_views;
 pub mod target_iface_impl;
+
+// Core DB modules (ported from trace/database)
+pub mod trace_db_main;
+pub mod trace_db_manager_impl;

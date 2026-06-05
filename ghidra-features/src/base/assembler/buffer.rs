@@ -114,3 +114,193 @@ impl AssemblyBuffer {
         self.asm.as_mut()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::base::analyzer::core::{Language, Program};
+    use crate::base::assembler::assembler_trait::{AssembledInstructions, Assembler};
+    use crate::base::assembler::errors::AssemblerResult;
+    use crate::base::assembler::selector::AssemblySelector;
+    use crate::base::assembler::sleigh::parse::AssemblyParseResult;
+    use crate::base::assembler::sleigh::sem::{AssemblyPatternBlock, AssemblyResolutionResults};
+
+    /// A mock assembler for testing.
+    struct MockAssembler {
+        /// Each NOP-like instruction emits one byte (0x90).
+        /// Instructions starting with "0x" emit that hex byte.
+        nop_byte: u8,
+    }
+
+    impl MockAssembler {
+        fn new() -> Self {
+            Self { nop_byte: 0x90 }
+        }
+    }
+
+    impl std::fmt::Debug for MockAssembler {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("MockAssembler").finish()
+        }
+    }
+
+    impl Assembler for MockAssembler {
+        fn get_language(&self) -> &Language {
+            unimplemented!("not needed for buffer tests")
+        }
+
+        fn get_program(&self) -> Option<&Program> {
+            None
+        }
+
+        fn assemble(
+            &mut self,
+            _addr: Address,
+            _lines: &[&str],
+        ) -> AssemblerResult<AssembledInstructions> {
+            unimplemented!()
+        }
+
+        fn assemble_line(&mut self, _addr: Address, line: &str) -> AssemblerResult<Vec<u8>> {
+            if line.starts_with("0x") {
+                let byte = u8::from_str_radix(&line[2..4], 16)
+                    .map_err(|e| crate::base::assembler::errors::AssemblyError(e.to_string()))?;
+                Ok(vec![byte])
+            } else {
+                Ok(vec![self.nop_byte])
+            }
+        }
+
+        fn assemble_line_with_context(
+            &mut self,
+            addr: Address,
+            line: &str,
+            _ctx: &AssemblyPatternBlock,
+        ) -> AssemblerResult<Vec<u8>> {
+            self.assemble_line(addr, line)
+        }
+
+        fn parse_line(&self, _line: &str) -> Vec<AssemblyParseResult> {
+            vec![]
+        }
+
+        fn resolve_tree(
+            &self,
+            _parse: &AssemblyParseResult,
+            _addr: Address,
+            _ctx: &AssemblyPatternBlock,
+        ) -> AssemblyResolutionResults {
+            AssemblyResolutionResults::new()
+        }
+
+        fn resolve_line(
+            &mut self,
+            _addr: Address,
+            _line: &str,
+            _ctx: &AssemblyPatternBlock,
+        ) -> AssemblerResult<AssemblyResolutionResults> {
+            Ok(AssemblyResolutionResults::new())
+        }
+
+        fn get_context_at(&self, _addr: Address) -> AssemblyPatternBlock {
+            AssemblyPatternBlock::new_empty(0)
+        }
+    }
+
+    fn mock_buffer(addr: u64) -> AssemblyBuffer {
+        AssemblyBuffer::new(Box::new(MockAssembler::new()), Address::new(addr))
+    }
+
+    #[test]
+    fn test_new_buffer_is_empty() {
+        let buf = mock_buffer(0x400000);
+        assert!(buf.is_empty());
+        assert_eq!(buf.len(), 0);
+        assert_eq!(buf.get_bytes(), &[] as &[u8]);
+    }
+
+    #[test]
+    fn test_next_address_initial() {
+        let buf = mock_buffer(0x400000);
+        assert_eq!(buf.next_address().offset, 0x400000);
+    }
+
+    #[test]
+    fn test_assemble_appends_bytes() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("NOP").unwrap();
+        assert_eq!(buf.get_bytes(), &[0x90]);
+        assert_eq!(buf.len(), 1);
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn test_assemble_multiple() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("NOP").unwrap();
+        buf.assemble("NOP").unwrap();
+        buf.assemble("NOP").unwrap();
+        assert_eq!(buf.get_bytes(), &[0x90, 0x90, 0x90]);
+        assert_eq!(buf.len(), 3);
+    }
+
+    #[test]
+    fn test_next_address_advances() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("NOP").unwrap();
+        assert_eq!(buf.next_address().offset, 0x400001);
+        buf.assemble("NOP").unwrap();
+        assert_eq!(buf.next_address().offset, 0x400002);
+    }
+
+    #[test]
+    fn test_assemble_custom_byte() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("0xCC").unwrap();
+        assert_eq!(buf.get_bytes(), &[0xCC]);
+    }
+
+    #[test]
+    fn test_assemble_at_patches() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("NOP").unwrap();
+        buf.assemble("NOP").unwrap();
+        buf.assemble("NOP").unwrap();
+
+        // Patch second instruction
+        buf.assemble_at(Address::new(0x400001), "0xCC").unwrap();
+        assert_eq!(buf.get_bytes(), &[0x90, 0xCC, 0x90]);
+    }
+
+    #[test]
+    fn test_assemble_at_out_of_bounds() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("NOP").unwrap();
+
+        // Try to patch at an address beyond the buffer
+        let result = buf.assemble_at(Address::new(0x400010), "0xCC");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_into_bytes_consumes() {
+        let mut buf = mock_buffer(0x400000);
+        buf.assemble("NOP").unwrap();
+        buf.assemble("0xAA").unwrap();
+
+        let bytes = buf.into_bytes();
+        assert_eq!(bytes, vec![0x90, 0xAA]);
+    }
+
+    #[test]
+    fn test_assembler_ref() {
+        let buf = mock_buffer(0x400000);
+        let _ = buf.assembler();
+    }
+
+    #[test]
+    fn test_assembler_mut_ref() {
+        let mut buf = mock_buffer(0x400000);
+        let _ = buf.assembler_mut();
+    }
+}

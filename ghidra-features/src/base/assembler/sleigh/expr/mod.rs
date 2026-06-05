@@ -974,3 +974,506 @@ fn solve_sub(
     let solver = RecursiveDescentSolver::new();
     solver.solve(goal, tree, vals, hint)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---- SolverHint ----
+
+    #[test]
+    fn test_solver_hint_none() {
+        assert_eq!(default_hint(), SolverHint::None);
+    }
+
+    #[test]
+    fn test_solver_hint_clone() {
+        let h = SolverHint::Default(MaskedLong::from_u64(42));
+        let h2 = h.clone();
+        assert_eq!(h, h2);
+    }
+
+    #[test]
+    fn test_solver_hint_relative() {
+        let h = SolverHint::RelativeOffset(0x1000);
+        if let SolverHint::RelativeOffset(off) = h {
+            assert_eq!(off, 0x1000);
+        } else {
+            panic!("expected RelativeOffset");
+        }
+    }
+
+    // ---- NeedsBackfillException ----
+
+    #[test]
+    fn test_needs_backfill_display() {
+        let e = NeedsBackfillException("forward ref".to_string());
+        assert_eq!(format!("{}", e), "Needs backfill: forward ref");
+    }
+
+    #[test]
+    fn test_needs_backfill_is_error() {
+        let e = NeedsBackfillException("test".to_string());
+        let _: &dyn std::error::Error = &e;
+    }
+
+    // ---- SolverException ----
+
+    #[test]
+    fn test_solver_exception_display() {
+        let e = SolverException("bad expr".to_string());
+        assert_eq!(format!("{}", e), "Solver error: bad expr");
+    }
+
+    #[test]
+    fn test_solver_error_display() {
+        let e = SolverError::Error(SolverException("oops".to_string()));
+        assert!(format!("{}", e).contains("oops"));
+
+        let e2 = SolverError::NeedsBackfill(NeedsBackfillException("fb".to_string()));
+        assert!(format!("{}", e2).contains("fb"));
+    }
+
+    // ---- ExpressionTree variants ----
+
+    #[test]
+    fn test_expression_tree_variants() {
+        let c = ExpressionTree::Constant(MaskedLong::from_u64(0x42));
+        let o = ExpressionTree::OperandValue(0);
+        let tf = ExpressionTree::TokenField { lsb: 0, msb: 7, signed: false, shift: 0 };
+        let cf = ExpressionTree::ContextField { lsb: 8, msb: 15, signed: true, shift: 2 };
+        let si = ExpressionTree::StartInstruction;
+        let ei = ExpressionTree::EndInstruction;
+        let n2 = ExpressionTree::Next2Instruction;
+
+        assert!(matches!(c, ExpressionTree::Constant(_)));
+        assert!(matches!(o, ExpressionTree::OperandValue(0)));
+        assert!(matches!(tf, ExpressionTree::TokenField { msb: 7, .. }));
+        assert!(matches!(cf, ExpressionTree::ContextField { signed: true, .. }));
+        assert!(matches!(si, ExpressionTree::StartInstruction));
+        assert!(matches!(ei, ExpressionTree::EndInstruction));
+        assert!(matches!(n2, ExpressionTree::Next2Instruction));
+    }
+
+    #[test]
+    fn test_expression_tree_binary_ops() {
+        let l = Box::new(ExpressionTree::Constant(MaskedLong::from_u64(1)));
+        let r = Box::new(ExpressionTree::Constant(MaskedLong::from_u64(2)));
+
+        let plus = ExpressionTree::Plus(l.clone(), r.clone());
+        let minus = ExpressionTree::Minus(l.clone(), r.clone());
+        let mult = ExpressionTree::Mult(l.clone(), r.clone());
+        let div = ExpressionTree::Div(l.clone(), r.clone());
+        let and = ExpressionTree::And(l.clone(), r.clone());
+        let or = ExpressionTree::Or(l.clone(), r.clone());
+        let xor = ExpressionTree::Xor(l.clone(), r.clone());
+        let lsh = ExpressionTree::LeftShift(l.clone(), r.clone());
+        let rsh = ExpressionTree::RightShift(l.clone(), r.clone());
+        let not = ExpressionTree::Not(l.clone());
+
+        assert!(matches!(plus, ExpressionTree::Plus(_, _)));
+        assert!(matches!(minus, ExpressionTree::Minus(_, _)));
+        assert!(matches!(mult, ExpressionTree::Mult(_, _)));
+        assert!(matches!(div, ExpressionTree::Div(_, _)));
+        assert!(matches!(and, ExpressionTree::And(_, _)));
+        assert!(matches!(or, ExpressionTree::Or(_, _)));
+        assert!(matches!(xor, ExpressionTree::Xor(_, _)));
+        assert!(matches!(lsh, ExpressionTree::LeftShift(_, _)));
+        assert!(matches!(rsh, ExpressionTree::RightShift(_, _)));
+        assert!(matches!(not, ExpressionTree::Not(_)));
+    }
+
+    #[test]
+    fn test_expression_tree_clone_eq() {
+        let t1 = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(10))),
+            Box::new(ExpressionTree::OperandValue(1)),
+        );
+        let t2 = t1.clone();
+        assert_eq!(t1, t2);
+    }
+
+    // ---- ConstantValueSolver ----
+
+    #[test]
+    fn test_constant_solver_handles() {
+        let s = ConstantValueSolver;
+        let c = ExpressionTree::Constant(MaskedLong::from_u64(5));
+        let o = ExpressionTree::OperandValue(0);
+        assert!(s.handles(&c));
+        assert!(!s.handles(&o));
+    }
+
+    #[test]
+    fn test_constant_solver_compute() {
+        let s = ConstantValueSolver;
+        let c = ExpressionTree::Constant(MaskedLong::from_u64(0xAB));
+        let result = s.compute(&c, &[]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_unsigned(), 0xAB);
+    }
+
+    #[test]
+    fn test_constant_solver_compute_wrong_type() {
+        let s = ConstantValueSolver;
+        let o = ExpressionTree::OperandValue(0);
+        assert!(s.compute(&o, &[]).is_err());
+    }
+
+    #[test]
+    fn test_constant_solver_solve_match() {
+        let s = ConstantValueSolver;
+        let c = ExpressionTree::Constant(MaskedLong::from_u64(42));
+        let goal = MaskedLong::from_u64(42);
+        let result = s.solve(goal, &c, &[], &SolverHint::None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_constant_solver_solve_mismatch() {
+        let s = ConstantValueSolver;
+        let c = ExpressionTree::Constant(MaskedLong::from_u64(42));
+        let goal = MaskedLong::from_u64(99);
+        assert!(s.solve(goal, &c, &[], &SolverHint::None).is_err());
+    }
+
+    // ---- OperandValueSolver ----
+
+    #[test]
+    fn test_operand_solver_handles() {
+        let s = OperandValueSolver;
+        let o = ExpressionTree::OperandValue(3);
+        let c = ExpressionTree::Constant(MaskedLong::from_u64(1));
+        assert!(s.handles(&o));
+        assert!(!s.handles(&c));
+    }
+
+    #[test]
+    fn test_operand_solver_compute_known() {
+        let s = OperandValueSolver;
+        let o = ExpressionTree::OperandValue(1);
+        let vals = vec![None, Some(MaskedLong::from_u64(0xFF))];
+        let result = s.compute(&o, &vals);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().get_unsigned(), 0xFF);
+    }
+
+    #[test]
+    fn test_operand_solver_compute_unknown() {
+        let s = OperandValueSolver;
+        let o = ExpressionTree::OperandValue(1);
+        let vals = vec![None, None];
+        let result = s.compute(&o, &vals);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SolverError::NeedsBackfill(_)));
+    }
+
+    #[test]
+    fn test_operand_solver_solve_assign() {
+        let s = OperandValueSolver;
+        let o = ExpressionTree::OperandValue(2);
+        let goal = MaskedLong::from_u64(0x1000);
+        let vals = vec![None, None, None];
+        let result = s.solve(goal, &o, &vals, &SolverHint::None);
+        assert!(result.is_ok());
+        let assignments = result.unwrap();
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].0, 2);
+        assert_eq!(assignments[0].1.get_unsigned(), 0x1000);
+    }
+
+    #[test]
+    fn test_operand_solver_solve_already_set_match() {
+        let s = OperandValueSolver;
+        let o = ExpressionTree::OperandValue(0);
+        let goal = MaskedLong::from_u64(42);
+        let vals = vec![Some(MaskedLong::from_u64(42))];
+        let result = s.solve(goal, &o, &vals, &SolverHint::None);
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_operand_solver_solve_already_set_mismatch() {
+        let s = OperandValueSolver;
+        let o = ExpressionTree::OperandValue(0);
+        let goal = MaskedLong::from_u64(42);
+        let vals = vec![Some(MaskedLong::from_u64(99))];
+        assert!(s.solve(goal, &o, &vals, &SolverHint::None).is_err());
+    }
+
+    // ---- PlusExpressionSolver ----
+
+    #[test]
+    fn test_plus_solver_handles() {
+        let s = PlusExpressionSolver;
+        let p = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(1))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(2))),
+        );
+        assert!(s.handles(&p));
+        assert!(!s.handles(&ExpressionTree::Constant(MaskedLong::from_u64(1))));
+    }
+
+    #[test]
+    fn test_plus_solver_compute() {
+        let s = PlusExpressionSolver;
+        let tree = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(10))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(20))),
+        );
+        let result = s.compute(&tree, &[]);
+        assert_eq!(result.unwrap().get_unsigned(), 30);
+    }
+
+    #[test]
+    fn test_plus_solver_solve_one_known() {
+        let s = PlusExpressionSolver;
+        // goal = 10 + operand[0]  =>  operand[0] = goal - 10
+        let tree = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(10))),
+            Box::new(ExpressionTree::OperandValue(0)),
+        );
+        let goal = MaskedLong::from_u64(30);
+        let result = s.solve(goal, &tree, &[], &SolverHint::None);
+        assert!(result.is_ok());
+        let assignments = result.unwrap();
+        assert_eq!(assignments.len(), 1);
+        assert_eq!(assignments[0].0, 0);
+        assert_eq!(assignments[0].1.get_unsigned(), 20);
+    }
+
+    #[test]
+    fn test_plus_solver_needs_backfill() {
+        let s = PlusExpressionSolver;
+        let tree = ExpressionTree::Plus(
+            Box::new(ExpressionTree::OperandValue(0)),
+            Box::new(ExpressionTree::OperandValue(1)),
+        );
+        let goal = MaskedLong::from_u64(30);
+        let result = s.solve(goal, &tree, &[None, None], &SolverHint::None);
+        assert!(matches!(result.unwrap_err(), SolverError::NeedsBackfill(_)));
+    }
+
+    // ---- MinusExpressionSolver ----
+
+    #[test]
+    fn test_minus_solver_compute() {
+        let s = MinusExpressionSolver;
+        let tree = ExpressionTree::Minus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(50))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(20))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 30);
+    }
+
+    // ---- AndExpressionSolver ----
+
+    #[test]
+    fn test_and_solver_compute() {
+        let s = AndExpressionSolver;
+        let tree = ExpressionTree::And(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0xFF))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0x0F))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 0x0F);
+    }
+
+    // ---- OrExpressionSolver ----
+
+    #[test]
+    fn test_or_solver_compute() {
+        let s = OrExpressionSolver;
+        let tree = ExpressionTree::Or(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0xF0))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0x0F))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 0xFF);
+    }
+
+    // ---- XorExpressionSolver ----
+
+    #[test]
+    fn test_xor_solver_compute() {
+        let s = XorExpressionSolver;
+        let tree = ExpressionTree::Xor(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0xFF))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0x0F))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 0xF0);
+    }
+
+    // ---- LeftShiftExpressionSolver ----
+
+    #[test]
+    fn test_left_shift_solver_compute() {
+        let s = LeftShiftExpressionSolver;
+        let tree = ExpressionTree::LeftShift(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(1))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(4))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 16);
+    }
+
+    // ---- RightShiftExpressionSolver ----
+
+    #[test]
+    fn test_right_shift_solver_compute() {
+        let s = RightShiftExpressionSolver;
+        let tree = ExpressionTree::RightShift(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(256))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(4))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 16);
+    }
+
+    // ---- NotExpressionSolver ----
+
+    #[test]
+    fn test_not_solver_compute() {
+        let s = NotExpressionSolver;
+        let tree = ExpressionTree::Not(Box::new(ExpressionTree::Constant(
+            MaskedLong::from_u64(0xFF00),
+        )));
+        let result = s.compute(&tree, &[]);
+        // NOT of 0xFF00 in 64-bit = 0xFFFFFFFFFFFF00FF
+        assert_eq!(result.unwrap().get_unsigned(), !0xFF00u64);
+    }
+
+    // ---- MultExpressionSolver ----
+
+    #[test]
+    fn test_mult_solver_compute() {
+        let s = MultExpressionSolver;
+        let tree = ExpressionTree::Mult(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(6))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(7))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 42);
+    }
+
+    // ---- DivExpressionSolver ----
+
+    #[test]
+    fn test_div_solver_compute() {
+        let s = DivExpressionSolver;
+        let tree = ExpressionTree::Div(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(100))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(5))),
+        );
+        assert_eq!(s.compute(&tree, &[]).unwrap().get_unsigned(), 20);
+    }
+
+    #[test]
+    fn test_div_solver_division_by_zero() {
+        let s = DivExpressionSolver;
+        let tree = ExpressionTree::Div(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(100))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0))),
+        );
+        assert!(s.compute(&tree, &[]).is_err());
+    }
+
+    // ---- RecursiveDescentSolver ----
+
+    #[test]
+    fn test_recursive_solver_dispatches_constant() {
+        let solver = RecursiveDescentSolver::new();
+        let tree = ExpressionTree::Constant(MaskedLong::from_u64(99));
+        let result = solver.compute(&tree, &[]);
+        assert_eq!(result.unwrap().get_unsigned(), 99);
+    }
+
+    #[test]
+    fn test_recursive_solver_dispatches_plus() {
+        let solver = RecursiveDescentSolver::new();
+        let tree = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(3))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(4))),
+        );
+        assert_eq!(solver.compute(&tree, &[]).unwrap().get_unsigned(), 7);
+    }
+
+    #[test]
+    fn test_recursive_solver_dispatches_operand() {
+        let solver = RecursiveDescentSolver::new();
+        let tree = ExpressionTree::OperandValue(0);
+        let vals = vec![Some(MaskedLong::from_u64(0xABC))];
+        assert_eq!(solver.compute(&tree, &vals).unwrap().get_unsigned(), 0xABC);
+    }
+
+    #[test]
+    fn test_recursive_solver_unknown_expression() {
+        let solver = RecursiveDescentSolver::new();
+        let tree = ExpressionTree::StartInstruction;
+        let result = solver.compute(&tree, &[]);
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), SolverError::Error(_)));
+    }
+
+    #[test]
+    fn test_recursive_solver_nested() {
+        let solver = RecursiveDescentSolver::new();
+        // (1 + 2) * 3 = 9
+        let tree = ExpressionTree::Mult(
+            Box::new(ExpressionTree::Plus(
+                Box::new(ExpressionTree::Constant(MaskedLong::from_u64(1))),
+                Box::new(ExpressionTree::Constant(MaskedLong::from_u64(2))),
+            )),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(3))),
+        );
+        assert_eq!(solver.compute(&tree, &[]).unwrap().get_unsigned(), 9);
+    }
+
+    #[test]
+    fn test_recursive_solver_solve_plus() {
+        let solver = RecursiveDescentSolver::new();
+        // 10 + x = 25  =>  x = 15
+        let tree = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(10))),
+            Box::new(ExpressionTree::OperandValue(0)),
+        );
+        let goal = MaskedLong::from_u64(25);
+        let result = solver.solve(goal, &tree, &[], &SolverHint::None).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, 0);
+        assert_eq!(result[0].1.get_unsigned(), 15);
+    }
+
+    #[test]
+    fn test_recursive_solver_default() {
+        let solver = RecursiveDescentSolver::default();
+        let tree = ExpressionTree::Constant(MaskedLong::from_u64(7));
+        assert_eq!(solver.compute(&tree, &[]).unwrap().get_unsigned(), 7);
+    }
+
+    // ---- Error handling ----
+
+    #[test]
+    fn test_wrong_solver_for_tree() {
+        let s = PlusExpressionSolver;
+        let tree = ExpressionTree::Constant(MaskedLong::from_u64(5));
+        assert!(s.compute(&tree, &[]).is_err());
+
+        let s2 = ConstantValueSolver;
+        let tree2 = ExpressionTree::Plus(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(1))),
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(2))),
+        );
+        assert!(s2.compute(&tree2, &[]).is_err());
+    }
+
+    #[test]
+    fn test_mult_solve_by_zero() {
+        let s = MultExpressionSolver;
+        let tree = ExpressionTree::Mult(
+            Box::new(ExpressionTree::Constant(MaskedLong::from_u64(0))),
+            Box::new(ExpressionTree::OperandValue(0)),
+        );
+        let goal = MaskedLong::from_u64(42);
+        // When left is 0, solving for right would require division by 0
+        let result = s.solve(goal, &tree, &[], &SolverHint::None);
+        assert!(result.is_err());
+    }
+}
