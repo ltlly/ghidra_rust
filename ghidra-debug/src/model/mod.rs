@@ -149,7 +149,9 @@ pub use trace_method::{
 };
 pub mod defaults;
 pub mod operations_ext;
+pub mod register_value_convert;
 pub mod trace_address_snap_range;
+pub mod trace_conflicted_mapping;
 pub mod trace_data_type;
 pub mod trace_memory_manager;
 pub mod trace_module_manager;

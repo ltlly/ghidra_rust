@@ -67,3 +67,9 @@ pub use trace_rmi_connection::{
     TraceRmiError, TraceRmiLaunchOffer,
 };
 pub use watch::{ValStr, ValueFormat, WatchRow};
+
+// Factory modules from remaining Debugger-api port
+pub use action::factories::{
+    AutoReadMemorySpecConfig, AutoReadMemorySpecFactory,
+    LocationTrackingSpecConfig, LocationTrackingSpecFactory,
+};

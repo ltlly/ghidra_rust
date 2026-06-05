@@ -2,6 +2,8 @@
 //!
 //! Ported from Ghidra's `ghidra.debug.api.action` package.
 
+pub mod factories;
+
 use serde::{Deserialize, Serialize};
 
 /// Possible sources that drive actions or method invocations.

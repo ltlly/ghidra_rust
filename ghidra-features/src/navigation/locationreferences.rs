@@ -1372,4 +1372,754 @@ impl DescriptorFactory {
     pub fn program_name(&self) -> &str {
         &self.program_name
     }
+
+    /// Create a descriptor for a function definition.
+    pub fn create_for_function_definition(
+        &self,
+        func_name: &str,
+        address: Address,
+    ) -> LocationDescriptor {
+        LocationDescriptor::new(
+            DescriptorKind::FunctionDefinition,
+            address,
+            func_name,
+            &self.program_name,
+        )
+    }
+
+    /// Create a descriptor for a function parameter type.
+    pub fn create_for_function_parameter_type(
+        &self,
+        param_type: &str,
+        func_name: &str,
+        address: Address,
+    ) -> LocationDescriptor {
+        LocationDescriptor::new(
+            DescriptorKind::FunctionParameterType,
+            address,
+            format!("{}::{}", func_name, param_type),
+            &self.program_name,
+        )
+    }
+
+    /// Create a descriptor for a union member.
+    pub fn create_for_union_member(
+        &self,
+        union_name: &str,
+        field_name: &str,
+        address: Address,
+    ) -> LocationDescriptor {
+        LocationDescriptor::new(
+            DescriptorKind::UnionMember,
+            address,
+            format!("{}.{}", union_name, field_name),
+            &self.program_name,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Additional descriptor types
+// ---------------------------------------------------------------------------
+
+/// Descriptor for a generic data type (any usage of a data type in the listing).
+///
+/// Ported from `GenericDataTypeLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct GenericDataTypeLocationDescriptor {
+    inner: LocationDescriptor,
+    data_type_name: String,
+    /// The category path of the data type (e.g., "/BuiltInTypes").
+    category_path: String,
+}
+
+impl GenericDataTypeLocationDescriptor {
+    /// Create a new generic data type descriptor.
+    pub fn new(
+        data_type_name: &str,
+        category_path: &str,
+        address: Address,
+        program_name: &str,
+    ) -> Self {
+        let label = if category_path.is_empty() {
+            data_type_name.to_string()
+        } else {
+            format!("{}/{}", category_path, data_type_name)
+        };
+        Self {
+            inner: LocationDescriptor::new(
+                DescriptorKind::DataType,
+                address,
+                label,
+                program_name,
+            ),
+            data_type_name: data_type_name.to_string(),
+            category_path: category_path.to_string(),
+        }
+    }
+
+    /// The data type name.
+    pub fn data_type_name(&self) -> &str { &self.data_type_name }
+
+    /// The category path.
+    pub fn category_path(&self) -> &str { &self.category_path }
+
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a generic composite data type (struct/union usage).
+///
+/// Ported from `GenericCompositeDataTypeLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct GenericCompositeDataTypeLocationDescriptor {
+    inner: LocationDescriptor,
+    composite_name: String,
+    is_structure: bool,
+}
+
+impl GenericCompositeDataTypeLocationDescriptor {
+    /// Create a new composite data type descriptor.
+    pub fn new(
+        composite_name: &str,
+        is_structure: bool,
+        address: Address,
+        program_name: &str,
+    ) -> Self {
+        Self {
+            inner: LocationDescriptor::new(
+                if is_structure {
+                    DescriptorKind::StructureMember
+                } else {
+                    DescriptorKind::UnionMember
+                },
+                address,
+                composite_name,
+                program_name,
+            ),
+            composite_name: composite_name.to_string(),
+            is_structure,
+        }
+    }
+
+    /// The composite type name.
+    pub fn composite_name(&self) -> &str { &self.composite_name }
+    /// Whether this is a structure (vs union).
+    pub fn is_structure(&self) -> bool { self.is_structure }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a cross-reference (xref).
+///
+/// Ported from `XRefLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct XRefLocationDescriptor {
+    inner: LocationDescriptor,
+    ref_type: String,
+}
+
+impl XRefLocationDescriptor {
+    /// Create a new xref descriptor.
+    pub fn new(ref_type: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(
+                DescriptorKind::Address,
+                address,
+                format!("XRef[{}]", ref_type),
+                program_name,
+            ),
+            ref_type: ref_type.to_string(),
+        }
+    }
+
+    /// The reference type.
+    pub fn ref_type(&self) -> &str { &self.ref_type }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a function definition.
+///
+/// Ported from `FunctionDefinitionLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct FunctionDefinitionLocationDescriptor {
+    inner: LocationDescriptor,
+    function_name: String,
+}
+
+impl FunctionDefinitionLocationDescriptor {
+    /// Create a new function definition descriptor.
+    pub fn new(function_name: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(
+                DescriptorKind::FunctionDefinition,
+                address,
+                function_name,
+                program_name,
+            ),
+            function_name: function_name.to_string(),
+        }
+    }
+
+    /// The function name.
+    pub fn function_name(&self) -> &str { &self.function_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a function parameter type.
+///
+/// Ported from `FunctionParameterTypeLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct FunctionParameterTypeDescriptor {
+    inner: LocationDescriptor,
+    function_name: String,
+    parameter_type: String,
+    parameter_index: usize,
+}
+
+impl FunctionParameterTypeDescriptor {
+    /// Create a new function parameter type descriptor.
+    pub fn new(
+        parameter_type: &str,
+        function_name: &str,
+        parameter_index: usize,
+        address: Address,
+        program_name: &str,
+    ) -> Self {
+        Self {
+            inner: LocationDescriptor::new(
+                DescriptorKind::FunctionParameterType,
+                address,
+                format!("{}[{}]: {}", function_name, parameter_index, parameter_type),
+                program_name,
+            ),
+            function_name: function_name.to_string(),
+            parameter_type: parameter_type.to_string(),
+            parameter_index,
+        }
+    }
+
+    /// The function name.
+    pub fn function_name(&self) -> &str { &self.function_name }
+    /// The parameter type.
+    pub fn parameter_type(&self) -> &str { &self.parameter_type }
+    /// The parameter index (0-based).
+    pub fn parameter_index(&self) -> usize { self.parameter_index }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a union member.
+///
+/// Ported from `UnionLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct UnionLocationDescriptor {
+    inner: LocationDescriptor,
+    union_name: String,
+    field_name: String,
+}
+
+impl UnionLocationDescriptor {
+    /// Create a new union member descriptor.
+    pub fn new(
+        union_name: &str,
+        field_name: &str,
+        address: Address,
+        program_name: &str,
+    ) -> Self {
+        let label = format!("{}.{}", union_name, field_name);
+        Self {
+            inner: LocationDescriptor::new(
+                DescriptorKind::UnionMember,
+                address,
+                label,
+                program_name,
+            ),
+            union_name: union_name.to_string(),
+            field_name: field_name.to_string(),
+        }
+    }
+
+    /// The union name.
+    pub fn union_name(&self) -> &str { &self.union_name }
+    /// The field name.
+    pub fn field_name(&self) -> &str { &self.field_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+// ---------------------------------------------------------------------------
+// LocationReferencesHighlighter -- highlights matching references in listing
+// ---------------------------------------------------------------------------
+
+/// Highlight specification for a range in a text field.
+///
+/// Ported from `Highlight` in `docking.widgets.fieldpanel.support`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HighlightRange {
+    /// Start offset (inclusive).
+    pub start: usize,
+    /// End offset (inclusive).
+    pub end: usize,
+    /// The highlight color name.
+    pub color: String,
+}
+
+impl HighlightRange {
+    /// Create a new highlight range.
+    pub fn new(start: usize, end: usize, color: impl Into<String>) -> Self {
+        Self { start, end, color: color.into() }
+    }
+
+    /// The length of the highlighted region.
+    pub fn length(&self) -> usize {
+        if self.end >= self.start { self.end - self.start + 1 } else { 0 }
+    }
+}
+
+/// Highlights matching references in the code listing.
+///
+/// Ported from `LocationReferencesHighlighter.java`.
+#[derive(Debug, Default)]
+pub struct LocationReferencesHighlighter {
+    /// The descriptor whose references are being highlighted.
+    descriptor: Option<LocationDescriptor>,
+    /// The highlight color name.
+    highlight_color: String,
+    /// Whether the highlighter is active.
+    active: bool,
+}
+
+impl LocationReferencesHighlighter {
+    /// Create a new highlighter.
+    pub fn new() -> Self {
+        Self { descriptor: None, highlight_color: "GREEN".to_string(), active: false }
+    }
+
+    /// Set the descriptor to highlight.
+    pub fn set_descriptor(&mut self, descriptor: Option<LocationDescriptor>) {
+        self.descriptor = descriptor;
+        self.active = self.descriptor.is_some();
+    }
+
+    /// Get the current descriptor.
+    pub fn descriptor(&self) -> Option<&LocationDescriptor> { self.descriptor.as_ref() }
+
+    /// Get the highlight color.
+    pub fn highlight_color(&self) -> &str { &self.highlight_color }
+
+    /// Set the highlight color.
+    pub fn set_highlight_color(&mut self, color: impl Into<String>) {
+        self.highlight_color = color.into();
+    }
+
+    /// Whether the highlighter is active.
+    pub fn is_active(&self) -> bool { self.active }
+
+    /// Deactivate the highlighter.
+    pub fn deactivate(&mut self) { self.active = false; }
+
+    /// Compute highlights for the given text at the given address.
+    pub fn get_highlights(
+        &self,
+        text: &str,
+        address: &Address,
+        label: &str,
+    ) -> Vec<HighlightRange> {
+        if !self.active { return Vec::new(); }
+        let desc = match &self.descriptor {
+            Some(d) => d,
+            None => return Vec::new(),
+        };
+        if !desc.contains_address(address) { return Vec::new(); }
+        if let Some(offset) = text.find(label) {
+            vec![HighlightRange::new(offset, offset + label.len() - 1, &self.highlight_color)]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocationReferencesProvider -- component provider model
+// ---------------------------------------------------------------------------
+
+/// The state of the location references provider.
+///
+/// Ported from `LocationReferencesProvider.java`.
+#[derive(Debug)]
+pub struct LocationReferencesProvider {
+    descriptor: Option<LocationDescriptor>,
+    table_model: Option<LocationReferencesTableModel>,
+    highlighter: LocationReferencesHighlighter,
+    title: String,
+    visible: bool,
+    status: String,
+}
+
+impl LocationReferencesProvider {
+    /// Create a new provider.
+    pub fn new() -> Self {
+        Self {
+            descriptor: None,
+            table_model: None,
+            highlighter: LocationReferencesHighlighter::new(),
+            title: "References".to_string(),
+            visible: false,
+            status: String::new(),
+        }
+    }
+
+    /// Show references for a descriptor.
+    pub fn show_references(&mut self, descriptor: LocationDescriptor, program_name: &str) {
+        self.title = format!("References to {}", descriptor.label());
+        let mut model = LocationReferencesTableModel::new(descriptor.clone(), program_name);
+        model.set_references(Vec::new());
+        self.highlighter.set_descriptor(Some(descriptor.clone()));
+        self.descriptor = Some(descriptor);
+        self.table_model = Some(model);
+        self.visible = true;
+        self.status = "Loading references...".to_string();
+    }
+
+    /// Set the references (when loading completes).
+    pub fn set_references(&mut self, refs: Vec<LocationReference>) {
+        if let Some(ref mut model) = self.table_model {
+            model.set_references(refs);
+            self.status = format!("{} references found", model.row_count());
+        }
+    }
+
+    /// Close the provider.
+    pub fn close(&mut self) {
+        self.visible = false;
+        self.highlighter.deactivate();
+        self.descriptor = None;
+        self.table_model = None;
+    }
+
+    /// The title.
+    pub fn title(&self) -> &str { &self.title }
+    /// Whether visible.
+    pub fn is_visible(&self) -> bool { self.visible }
+    /// The status message.
+    pub fn status(&self) -> &str { &self.status }
+    /// Get the highlighter.
+    pub fn highlighter(&self) -> &LocationReferencesHighlighter { &self.highlighter }
+    /// Get the table model.
+    pub fn table_model(&self) -> Option<&LocationReferencesTableModel> { self.table_model.as_ref() }
+    /// Get the current descriptor.
+    pub fn descriptor(&self) -> Option<&LocationDescriptor> { self.descriptor.as_ref() }
+}
+
+impl Default for LocationReferencesProvider {
+    fn default() -> Self { Self::new() }
+}
+
+// ---------------------------------------------------------------------------
+// LocationReferenceTo*TableRowMapper -- map references to table columns
+// ---------------------------------------------------------------------------
+
+/// Maps a `LocationReference` to an address column value.
+///
+/// Ported from `LocationReferenceToAddressTableRowMapper.java`.
+#[derive(Debug)]
+pub struct LocationReferenceToAddressMapper;
+
+impl LocationReferenceToAddressMapper {
+    /// Get the address value for a row.
+    pub fn get_value(reference: &LocationReference) -> Address {
+        reference.location_of_use()
+    }
+}
+
+/// Maps a `LocationReference` to the function containing the reference.
+///
+/// Ported from `LocationReferenceToFunctionContainingTableRowMapper.java`.
+#[derive(Debug)]
+pub struct LocationReferenceToFunctionContainingMapper;
+
+impl LocationReferenceToFunctionContainingMapper {
+    /// Get the function name for a row (returns None if not in a function).
+    pub fn get_function_name(reference: &LocationReference) -> Option<&str> {
+        reference.context()
+    }
+}
+
+/// Maps a `LocationReference` to a program location.
+///
+/// Ported from `LocationReferenceToProgramLocationTableRowMapper.java`.
+#[derive(Debug)]
+pub struct LocationReferenceToProgramLocationMapper;
+
+impl LocationReferenceToProgramLocationMapper {
+    /// Get the address for a program location mapping.
+    pub fn get_address(reference: &LocationReference) -> Address {
+        reference.location_of_use()
+    }
+
+    /// Get the ref type string.
+    pub fn get_ref_type(reference: &LocationReference) -> &str {
+        reference.ref_type_string()
+    }
+}
+
+// ===========================================================================
+// Tests for new types
+// ===========================================================================
+
+#[cfg(test)]
+mod new_types_tests {
+    use super::*;
+
+    fn addr(offset: u64) -> Address { Address::new(offset) }
+
+    #[test]
+    fn test_generic_data_type_descriptor() {
+        let desc = GenericDataTypeLocationDescriptor::new("int", "/BuiltIn", addr(0x1000), "test.exe");
+        assert_eq!(desc.kind(), &DescriptorKind::DataType);
+        assert_eq!(desc.data_type_name(), "int");
+        assert_eq!(desc.category_path(), "/BuiltIn");
+        assert!(desc.label().contains("int"));
+    }
+
+    #[test]
+    fn test_generic_data_type_descriptor_no_category() {
+        let desc = GenericDataTypeLocationDescriptor::new("uint32", "", addr(0x1000), "test.exe");
+        assert_eq!(desc.label(), "uint32");
+    }
+
+    #[test]
+    fn test_generic_composite_descriptor() {
+        let desc = GenericCompositeDataTypeLocationDescriptor::new("MyStruct", true, addr(0x1000), "test.exe");
+        assert_eq!(desc.composite_name(), "MyStruct");
+        assert!(desc.is_structure());
+        assert_eq!(desc.kind(), &DescriptorKind::StructureMember);
+    }
+
+    #[test]
+    fn test_generic_composite_descriptor_union() {
+        let desc = GenericCompositeDataTypeLocationDescriptor::new("MyUnion", false, addr(0x1000), "test.exe");
+        assert!(!desc.is_structure());
+        assert_eq!(desc.kind(), &DescriptorKind::UnionMember);
+    }
+
+    #[test]
+    fn test_xref_location_descriptor() {
+        let desc = XRefLocationDescriptor::new("READ", addr(0x2000), "test.exe");
+        assert_eq!(desc.ref_type(), "READ");
+        assert_eq!(desc.kind(), &DescriptorKind::Address);
+        assert!(desc.label().contains("READ"));
+    }
+
+    #[test]
+    fn test_function_definition_descriptor() {
+        let desc = FunctionDefinitionLocationDescriptor::new("my_func", addr(0x1000), "test.exe");
+        assert_eq!(desc.function_name(), "my_func");
+        assert_eq!(desc.kind(), &DescriptorKind::FunctionDefinition);
+    }
+
+    #[test]
+    fn test_function_parameter_type_descriptor() {
+        let desc = FunctionParameterTypeDescriptor::new("int", "my_func", 0, addr(0x1000), "test.exe");
+        assert_eq!(desc.function_name(), "my_func");
+        assert_eq!(desc.parameter_type(), "int");
+        assert_eq!(desc.parameter_index(), 0);
+        assert_eq!(desc.kind(), &DescriptorKind::FunctionParameterType);
+    }
+
+    #[test]
+    fn test_union_location_descriptor() {
+        let desc = UnionLocationDescriptor::new("MyUnion", "field_a", addr(0x1000), "test.exe");
+        assert_eq!(desc.union_name(), "MyUnion");
+        assert_eq!(desc.field_name(), "field_a");
+        assert_eq!(desc.kind(), &DescriptorKind::UnionMember);
+        assert!(desc.label().contains("MyUnion"));
+        assert!(desc.label().contains("field_a"));
+    }
+
+    #[test]
+    fn test_highlight_range() {
+        let hr = HighlightRange::new(5, 10, "YELLOW");
+        assert_eq!(hr.length(), 6);
+        assert_eq!(hr.start, 5);
+        assert_eq!(hr.end, 10);
+    }
+
+    #[test]
+    fn test_highlight_range_empty() {
+        let hr = HighlightRange::new(10, 5, "RED");
+        assert_eq!(hr.length(), 0);
+    }
+
+    #[test]
+    fn test_location_references_highlighter_inactive() {
+        let hl = LocationReferencesHighlighter::new();
+        assert!(!hl.is_active());
+        let ranges = hl.get_highlights("text", &addr(0x1000), "label");
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn test_location_references_highlighter_active() {
+        let mut hl = LocationReferencesHighlighter::new();
+        let desc = LocationDescriptor::new(
+            DescriptorKind::Label,
+            addr(0x1000),
+            "main",
+            "test.exe",
+        );
+        let mut refs = vec![LocationReference::new(addr(0x2000))];
+        let mut desc_mut = desc.clone();
+        desc_mut.set_references(refs);
+        hl.set_descriptor(Some(desc_mut));
+        assert!(hl.is_active());
+
+        // Address in references should produce a highlight
+        let ranges = hl.get_highlights("call main", &addr(0x2000), "main");
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].start, 5);
+        assert_eq!(ranges[0].end, 8);
+    }
+
+    #[test]
+    fn test_location_references_highlighter_no_match() {
+        let mut hl = LocationReferencesHighlighter::new();
+        let desc = LocationDescriptor::new(
+            DescriptorKind::Label,
+            addr(0x1000),
+            "main",
+            "test.exe",
+        );
+        hl.set_descriptor(Some(desc));
+        // Address not in references
+        let ranges = hl.get_highlights("call main", &addr(0x5000), "main");
+        assert!(ranges.is_empty());
+    }
+
+    #[test]
+    fn test_location_references_highlighter_deactivate() {
+        let mut hl = LocationReferencesHighlighter::new();
+        hl.set_descriptor(Some(LocationDescriptor::new(
+            DescriptorKind::Address, addr(0x1000), "x", "test.exe",
+        )));
+        assert!(hl.is_active());
+        hl.deactivate();
+        assert!(!hl.is_active());
+    }
+
+    #[test]
+    fn test_location_references_provider_basic() {
+        let provider = LocationReferencesProvider::new();
+        assert!(!provider.is_visible());
+        assert_eq!(provider.title(), "References");
+        assert!(provider.descriptor().is_none());
+    }
+
+    #[test]
+    fn test_location_references_provider_show() {
+        let mut provider = LocationReferencesProvider::new();
+        let desc = LocationDescriptor::new(
+            DescriptorKind::Label,
+            addr(0x1000),
+            "main",
+            "test.exe",
+        );
+        provider.show_references(desc, "test.exe");
+        assert!(provider.is_visible());
+        assert!(provider.title().contains("main"));
+        assert!(provider.descriptor().is_some());
+        assert!(provider.table_model().is_some());
+        assert!(provider.highlighter().is_active());
+    }
+
+    #[test]
+    fn test_location_references_provider_set_refs() {
+        let mut provider = LocationReferencesProvider::new();
+        let desc = LocationDescriptor::new(
+            DescriptorKind::Address, addr(0x1000), "main", "test.exe",
+        );
+        provider.show_references(desc, "test.exe");
+        provider.set_references(vec![
+            LocationReference::new(addr(0x2000)),
+            LocationReference::new(addr(0x3000)),
+        ]);
+        assert!(provider.status().contains("2"));
+        assert_eq!(provider.table_model().unwrap().row_count(), 2);
+    }
+
+    #[test]
+    fn test_location_references_provider_close() {
+        let mut provider = LocationReferencesProvider::new();
+        let desc = LocationDescriptor::new(
+            DescriptorKind::Address, addr(0x1000), "main", "test.exe",
+        );
+        provider.show_references(desc, "test.exe");
+        assert!(provider.is_visible());
+        provider.close();
+        assert!(!provider.is_visible());
+        assert!(provider.descriptor().is_none());
+        assert!(!provider.highlighter().is_active());
+    }
+
+    #[test]
+    fn test_address_mapper() {
+        let lr = LocationReference::new(addr(0x401000));
+        assert_eq!(LocationReferenceToAddressMapper::get_value(&lr), addr(0x401000));
+    }
+
+    #[test]
+    fn test_function_containing_mapper() {
+        let lr = LocationReference::with_context(addr(0x401000), "main");
+        assert_eq!(
+            LocationReferenceToFunctionContainingMapper::get_function_name(&lr),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn test_program_location_mapper() {
+        let lr = LocationReference::with_ref_type(addr(0x401000), "READ", false);
+        assert_eq!(LocationReferenceToProgramLocationMapper::get_address(&lr), addr(0x401000));
+        assert_eq!(LocationReferenceToProgramLocationMapper::get_ref_type(&lr), "READ");
+    }
+
+    #[test]
+    fn test_descriptor_factory_extended() {
+        let factory = DescriptorFactory::new("test.exe");
+        let desc = factory.create_for_function_definition("my_func", addr(0x1000));
+        assert_eq!(desc.kind(), &DescriptorKind::FunctionDefinition);
+
+        let desc = factory.create_for_function_parameter_type("int", "my_func", addr(0x1000));
+        assert_eq!(desc.kind(), &DescriptorKind::FunctionParameterType);
+
+        let desc = factory.create_for_union_member("MyUnion", "field", addr(0x1000));
+        assert_eq!(desc.kind(), &DescriptorKind::UnionMember);
+    }
 }

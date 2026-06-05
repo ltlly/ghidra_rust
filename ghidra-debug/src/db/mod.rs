@@ -116,6 +116,11 @@ pub mod trace_db_symbol_views_ext;
 pub mod trace_db_target_iface_ext;
 pub mod trace_db_target_storage_ext;
 
+// Additional modules from remaining Debug module ports
+pub mod trace_db_value_box;
+pub mod trace_db_value_query;
+pub mod trace_db_object_aggregate;
+
 pub use trace_db::TraceDatabase;
 pub use trace_db_database::{
     DBTrace, DBTraceChangeSet as TraceDatabaseChangeSet, TraceDatabaseConfig,

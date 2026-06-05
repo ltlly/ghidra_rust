@@ -5,6 +5,7 @@
 
 pub mod data;
 pub mod data_access;
+pub mod debugger_pcode_utils;
 pub mod default_trace_access;
 pub mod execution;
 pub mod integration;

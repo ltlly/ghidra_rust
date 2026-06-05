@@ -38,6 +38,12 @@ pub mod operations;
 /// Ported from Ghidra's symbol tree filter-related classes.
 pub mod filter;
 
+/// GTree widget model, drag-and-drop handler, and disconnected snapshot provider.
+///
+/// Ported from `SymbolGTree`, `SymbolGTreeDragNDropHandler`, and
+/// `DisconnectedSymbolTreeProvider` in Ghidra's symbol tree package.
+pub mod gtree;
+
 use std::collections::BTreeMap;
 
 /// Options category name.
