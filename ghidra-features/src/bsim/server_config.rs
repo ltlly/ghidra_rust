@@ -256,7 +256,7 @@ impl IdentLine {
 /// # Example
 ///
 /// ```no_run
-/// use ghidra_features::bsim::server_config::ServerConfig;
+/// use ghidra_features::bsim::server_config::{ServerConfig, ConnectLine};
 ///
 /// let mut config = ServerConfig::new("/etc/postgresql/14/main");
 /// config.set("listen_addresses", "'*'");

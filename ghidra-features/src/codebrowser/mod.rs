@@ -39,6 +39,7 @@
 //! ```
 //! use ghidra_features::codebrowser::plugin::CodeBrowserPlugin;
 //! use ghidra_features::codebrowser::provider::CodeViewerProvider;
+//! use ghidra_features::codebrowser::plugin_interface::CodeBrowserPluginInterface;
 //!
 //! let mut plugin = CodeBrowserPlugin::new();
 //! assert_eq!(plugin.name(), "CodeBrowserPlugin");

@@ -95,7 +95,7 @@ impl Ord for CategoryRecord {
 ///   body and address (and a corresponding feature vector).
 /// - **Library executables**: functions that can only be identified by name
 ///   (no body or feature vector).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExecutableRecord {
     /// The MD5 hash of the executable (32 hex characters).
     pub md5: String,

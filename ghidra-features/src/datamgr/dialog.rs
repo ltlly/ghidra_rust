@@ -26,9 +26,19 @@ pub enum SyncDialogLayout {
 /// ```
 /// use ghidra_features::datamgr::dialog::*;
 /// use ghidra_features::datamgr::sync::DataTypeSyncInfo;
+/// use ghidra_core::data::{DataTypePath, CategoryPath};
 ///
 /// let mut dialog = DataTypeSyncDialog::new("Sync Status");
-/// dialog.add_sync_info(DataTypeSyncInfo::new("int", "program", "builtins"));
+/// let builtin_path = CategoryPath::new("/builtins");
+/// let info = DataTypeSyncInfo::new(
+///     DataTypePath::new(builtin_path.clone(), "int"),
+///     "program",
+///     100, 100, "desc",
+///     DataTypePath::new(builtin_path, "int"),
+///     100, "desc",
+///     true, false, true,
+/// );
+/// dialog.add_sync_info(info);
 /// assert_eq!(dialog.row_count(), 1);
 /// ```
 #[derive(Debug)]

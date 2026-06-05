@@ -19,16 +19,21 @@ pub mod auto_map_impl;
 pub mod breakpoint_impl;
 pub mod console_impl;
 pub mod control_impl;
+pub mod debugger_service_impls;
+pub mod emulation_extras;
 pub mod emulation_impl;
 pub mod listing_impl;
+pub mod mapping_proposals;
+pub mod mapping_utils;
 pub mod modules_impl;
 pub mod platform_impl;
+pub mod progress_extras;
 pub mod progress_impl;
+pub mod save_trace_tasks;
 pub mod service_interfaces;
 pub mod target_impl;
 pub mod tracemgr_impl;
 pub mod url_impl;
-pub mod debugger_service_impls;
 
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,

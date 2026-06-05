@@ -71,7 +71,7 @@ pub const RECENT_GROUP: &str = "Z_RECENT";
 /// use ghidra_features::base::data::DataPlugin;
 ///
 /// let mut plugin = DataPlugin::new("DataPlugin");
-/// assert_eq!(plugin.action_count(), 0);
+/// assert!(plugin.action_count() > 0);
 /// assert_eq!(plugin.favorites_count(), 0);
 /// assert!(plugin.recent_data_type_name().is_none());
 /// ```

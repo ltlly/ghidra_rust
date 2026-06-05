@@ -177,7 +177,7 @@ impl LabelHistoryInputDialog {
 ///
 /// ```
 /// use ghidra_features::base::label::{LabelHistoryPanel, LabelHistoryEntry, LabelHistoryAction};
-/// use ghidra_features::base::analyzer::core::Address;
+/// use ghidra_core::addr::Address;
 ///
 /// let mut panel = LabelHistoryPanel::new();
 /// panel.set_entries(vec![
@@ -289,7 +289,7 @@ impl Default for LabelHistoryPanel {
 ///
 /// ```
 /// use ghidra_features::base::label::LabelHistoryTask;
-/// use ghidra_features::base::analyzer::core::Address;
+/// use ghidra_core::addr::Address;
 ///
 /// let task = LabelHistoryTask::for_address(Address::new(0x1000));
 /// assert_eq!(task.task_name(), "Label History");

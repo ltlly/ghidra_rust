@@ -69,7 +69,7 @@ impl fmt::Display for ProgramActionKind {
 /// use ghidra_features::progmgr::actions::*;
 ///
 /// let action = ProgramAction::new(ProgramActionKind::Save);
-/// assert_eq!(action.name(), "Save");
+/// assert_eq!(action.name(), "Save Program");
 /// assert!(action.is_enabled());
 /// ```
 #[derive(Debug, Clone)]

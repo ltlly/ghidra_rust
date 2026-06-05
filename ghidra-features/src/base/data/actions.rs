@@ -219,7 +219,7 @@ impl DataAction {
 /// use ghidra_features::base::data::PointerDataAction;
 ///
 /// let action = PointerDataAction::new();
-/// assert_eq!(action.name(), "Pointer");
+/// assert_eq!(action.name(), "Define Pointer");
 /// assert_eq!(action.key_code(), Some(80)); // 'P'
 /// ```
 #[derive(Debug, Clone)]

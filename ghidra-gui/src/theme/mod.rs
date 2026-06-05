@@ -48,6 +48,8 @@ pub mod g_icon_ui_resource;
 pub mod g_color_ui_resource;
 pub mod property_file_theme_defaults;
 pub mod g_attributes;
+pub mod g_theme_defaults;
+pub mod theme_preferences;
 
 pub use application_theme_manager::{ApplicationThemeManager, ThemePreferences};
 pub use color_value::ColorValue;

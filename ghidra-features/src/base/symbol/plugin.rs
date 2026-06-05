@@ -20,7 +20,7 @@ use super::service::SymbolTreeService;
 /// # Example
 ///
 /// ```
-/// use ghidra_features::base::symbol::{SymbolTreePlugin, SymbolTreeConfig};
+/// use ghidra_features::base::symbol::{SymbolTreePlugin, SymbolTreeConfig, SymbolTreeService};
 /// use ghidra_core::symbol::Symbol;
 /// use ghidra_core::addr::Address;
 ///

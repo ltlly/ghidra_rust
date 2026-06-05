@@ -13,6 +13,7 @@ pub mod breakpoint_spec;
 pub mod changeset;
 pub mod code_ops;
 pub mod context;
+pub mod data;
 pub mod data_type;
 pub mod domain_object_listener;
 pub mod duplicate_key;

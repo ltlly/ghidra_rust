@@ -26,7 +26,7 @@ use super::model::{Bookmark, BookmarkManager, BookmarkRowObject};
 ///
 /// ```
 /// use ghidra_features::base::bookmark::*;
-/// use ghidra_features::base::analyzer::core::Address;
+/// use ghidra_core::addr::Address;
 ///
 /// let mapper = BookmarkRowObjectToAddressTableRowMapper;
 /// let bookmark = Bookmark::new(1, Address::new(0x401000), "Note", "Cat", "Msg");
@@ -62,7 +62,7 @@ impl BookmarkRowObjectToAddressTableRowMapper {
 ///
 /// ```
 /// use ghidra_features::base::bookmark::*;
-/// use ghidra_features::base::analyzer::core::Address;
+/// use ghidra_core::addr::Address;
 ///
 /// let mapper = BookmarkRowObjectToProgramLocationTableRowMapper;
 /// let bookmark = Bookmark::new(5, Address::new(0x401000), "Note", "Cat", "Msg");

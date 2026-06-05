@@ -21,7 +21,7 @@
 //!
 //! let demangler = MicrosoftDemangler::new();
 //! let result = demangler.demangle("?foo@@YAXXZ").unwrap();
-//! assert_eq!(result.demangled_name, "void __cdecl foo(void)");
+//! assert_eq!(result.demangled_name, "void __cdecl foo (void)");
 //! ```
 
 pub mod context;

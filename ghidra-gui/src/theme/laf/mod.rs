@@ -13,6 +13,7 @@ pub mod component_font_registry;
 pub mod font_non_ui_resource;
 pub mod ui_defaults_mapper;
 pub mod concrete_managers;
+pub mod font_change_listener;
 pub mod nimbus;
 
 pub use laf_manager::LookAndFeelManager;

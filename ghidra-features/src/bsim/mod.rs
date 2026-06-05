@@ -58,6 +58,7 @@ pub mod query;
 pub mod scoring;
 pub mod search_results;
 pub mod server_info;
+pub mod initializer;
 pub mod staging;
 pub mod tables;
 

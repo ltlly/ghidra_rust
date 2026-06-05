@@ -13,7 +13,7 @@ use crate::base::analyzer::core::Address;
 ///
 /// ```
 /// # use ghidra_features::base::assembler::buffer::AssemblyBuffer;
-/// # use ghidra_features::base::assembler::assembler_trait::Assembler;
+/// # use ghidra_features::base::assembler::assembler_trait::{Assembler, AssembledInstructions};
 /// # use ghidra_features::base::assembler::selector::AssemblySelector;
 /// # use ghidra_features::base::assembler::sleigh::sem::AssemblyPatternBlock;
 /// # use ghidra_features::base::assembler::errors::AssemblerResult;

@@ -16,6 +16,7 @@ pub mod row_key_sql;
 pub mod sql_effects;
 pub mod id_sql_resolution;
 pub mod exceptions;
+pub mod scoring;
 pub mod tables;
 
 // Re-export core client types from the parent bsim module.
