@@ -82,59 +82,6 @@ impl VariableDeleteAction {
 }
 
 // ---------------------------------------------------------------------------
-// VariableCommentAction
-// ---------------------------------------------------------------------------
-
-/// Action to edit a comment on a function variable.
-///
-/// Ported from `VariableCommentAction.java`.  Opens a dialog to edit
-/// the comment text for the variable at the current cursor position.
-///
-/// # Menu Path
-///
-/// The action appears under `Variable > Edit Comment...`.
-#[derive(Debug, Clone)]
-pub struct VariableCommentAction {
-    pub name: String,
-    pub key_binding: Option<KeyBindingData>,
-    pub menu_data: Option<MenuData>,
-    pub enabled: bool,
-}
-
-impl VariableCommentAction {
-    /// Creates a new variable comment action.
-    pub fn new() -> Self {
-        Self {
-            name: "Edit Variable Comment".to_string(),
-            key_binding: None,
-            menu_data: Some(MenuData::new(
-                vec!["Variable".into(), "Edit Comment...".into()],
-                "Variable",
-                "Variable",
-            )),
-            enabled: true,
-        }
-    }
-
-    /// Enabled when the cursor is on a variable location.
-    pub fn is_enabled_for_context(&self, ctx: &ActionContext) -> bool {
-        if !self.enabled {
-            return false;
-        }
-        match ctx {
-            ActionContext::Listing(listing) => {
-                listing.is_variable_location && listing.address.is_some()
-            }
-            ActionContext::Symbol(ctx) => {
-                ctx.symbols.iter().any(|s| {
-                    matches!(s.kind(), SymbolType::Parameter | SymbolType::LocalVar)
-                })
-            }
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // VariableCommentDeleteAction
 // ---------------------------------------------------------------------------
 
@@ -294,26 +241,6 @@ mod tests {
         action.set_popup_menu_path(false);
         let md = action.menu_data.as_ref().unwrap();
         assert!(md.menu_path.contains(&"Delete Local".to_string()));
-    }
-
-    // -- VariableCommentAction --
-
-    #[test]
-    fn test_variable_comment_enabled_at_variable() {
-        let action = VariableCommentAction::new();
-        assert!(action.is_enabled_for_context(&variable_listing_ctx()));
-    }
-
-    #[test]
-    fn test_variable_comment_disabled_at_non_variable() {
-        let action = VariableCommentAction::new();
-        assert!(!action.is_enabled_for_context(&non_variable_listing_ctx()));
-    }
-
-    #[test]
-    fn test_variable_comment_enabled_for_parameter_symbol() {
-        let action = VariableCommentAction::new();
-        assert!(action.is_enabled_for_context(&parameter_symbol_ctx()));
     }
 
     // -- VariableCommentDeleteAction --

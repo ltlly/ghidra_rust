@@ -1,19 +1,16 @@
 //! Extended data actions -- additional actions for data management.
 //!
-//! Ported from `PointerDataAction.java`, `VoidDataAction.java`,
-//! `RecentlyUsedAction.java`, `CreateArrayAction.java`,
-//! `CreateStructureAction.java`, and `CycleGroupAction.java` in
-//! Ghidra's `ghidra.app.plugin.core.data`.
+//! Ported from `VoidDataAction.java`, `CycleGroupAction.java`,
+//! and recently-used data type tracking in Ghidra's
+//! `ghidra.app.plugin.core.data`.
 //!
 //! This module provides:
-//! - [`PointerDataAction`] -- converts data to a pointer type
+//! - [`PointerSize`] -- pointer size enum for data type conversions
 //! - [`VoidDataAction`] -- clears/undefined data
-//! - [`CreateArrayAction`] -- creates an array from selected data
-//! - [`CreateStructureAction`] -- creates a structure from selected data
-//! - [`CycleGroupAction`] -- cycles through data type representations
-//! - [`RecentlyUsedAction`] -- applies the most recently used data type
+//! - [`CycleGroup`] -- a named sequence of data types to cycle through
+//! - [`RecentlyUsedTypes`] -- MRU list of recently used data types
+//! - [`default_cycle_groups`] -- Ghidra's built-in cycle groups
 
-use ghidra_core::Address;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fmt;
@@ -53,30 +50,6 @@ impl fmt::Display for PointerSize {
     }
 }
 
-/// An action that converts data to a pointer type.
-///
-/// Ported from `PointerDataAction.java`.
-#[derive(Debug, Clone)]
-pub struct PointerDataAction {
-    /// The pointer size to use.
-    pub pointer_size: PointerSize,
-    /// Whether the action is enabled.
-    pub enabled: bool,
-    /// The menu label.
-    pub menu_label: String,
-}
-
-impl PointerDataAction {
-    /// Creates a new pointer data action for the given size.
-    pub fn new(pointer_size: PointerSize) -> Self {
-        Self {
-            pointer_size,
-            enabled: true,
-            menu_label: format!("Pointer ({})", pointer_size.byte_size() * 8),
-        }
-    }
-}
-
 /// An action that converts data to undefined (clears the data type).
 ///
 /// Ported from `VoidDataAction.java`.
@@ -99,60 +72,6 @@ impl VoidDataAction {
 }
 
 impl Default for VoidDataAction {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// An action that creates an array from the selected data.
-///
-/// Ported from `CreateArrayAction.java`.
-#[derive(Debug, Clone)]
-pub struct CreateArrayAction {
-    /// Whether the action is enabled.
-    pub enabled: bool,
-    /// The menu label.
-    pub menu_label: String,
-}
-
-impl CreateArrayAction {
-    /// Creates a new create-array action.
-    pub fn new() -> Self {
-        Self {
-            enabled: true,
-            menu_label: "Array...".to_string(),
-        }
-    }
-}
-
-impl Default for CreateArrayAction {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-/// An action that creates a structure from selected data.
-///
-/// Ported from `CreateStructureAction.java`.
-#[derive(Debug, Clone)]
-pub struct CreateStructureAction {
-    /// Whether the action is enabled.
-    pub enabled: bool,
-    /// The menu label.
-    pub menu_label: String,
-}
-
-impl CreateStructureAction {
-    /// Creates a new create-structure action.
-    pub fn new() -> Self {
-        Self {
-            enabled: true,
-            menu_label: "Structure...".to_string(),
-        }
-    }
-}
-
-impl Default for CreateStructureAction {
     fn default() -> Self {
         Self::new()
     }
@@ -316,45 +235,9 @@ impl Default for RecentlyUsedTypes {
     }
 }
 
-/// An action model for applying the most recently used data type.
-#[derive(Debug, Clone)]
-pub struct RecentlyUsedAction {
-    /// The recently used types list.
-    pub recently_used: RecentlyUsedTypes,
-    /// Whether the action is enabled.
-    pub enabled: bool,
-    /// The menu label.
-    pub menu_label: String,
-}
-
-impl RecentlyUsedAction {
-    /// Creates a new recently-used action.
-    pub fn new() -> Self {
-        Self {
-            recently_used: RecentlyUsedTypes::new(),
-            enabled: true,
-            menu_label: "Recently Used".to_string(),
-        }
-    }
-}
-
-impl Default for RecentlyUsedAction {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_pointer_data_action() {
-        let action = PointerDataAction::new(PointerSize::Pointer64);
-        assert!(action.enabled);
-        assert_eq!(action.pointer_size.byte_size(), 8);
-        assert!(action.menu_label.contains("64"));
-    }
 
     #[test]
     fn test_pointer_size_display() {
@@ -375,20 +258,6 @@ mod tests {
         let action = VoidDataAction::new();
         assert!(action.enabled);
         assert_eq!(action.menu_label, "Undefined");
-    }
-
-    #[test]
-    fn test_create_array_action() {
-        let action = CreateArrayAction::new();
-        assert!(action.enabled);
-        assert!(action.menu_label.contains("Array"));
-    }
-
-    #[test]
-    fn test_create_structure_action() {
-        let action = CreateStructureAction::new();
-        assert!(action.enabled);
-        assert!(action.menu_label.contains("Structure"));
     }
 
     #[test]
@@ -484,13 +353,6 @@ mod tests {
     }
 
     #[test]
-    fn test_recently_used_action() {
-        let action = RecentlyUsedAction::new();
-        assert!(action.enabled);
-        assert!(action.recently_used.is_empty());
-    }
-
-    #[test]
     fn test_integration_cycle_group_with_recently_used() {
         let group = CycleGroup::new(
             "Dword",
@@ -527,12 +389,4 @@ mod tests {
         assert_eq!(group.previous_type("boolean"), Some("boolean"));
     }
 
-    #[test]
-    fn test_pointer_data_action_all_sizes() {
-        for size in [PointerSize::Pointer16, PointerSize::Pointer32, PointerSize::Pointer64] {
-            let action = PointerDataAction::new(size);
-            assert!(action.enabled);
-            assert!(action.menu_label.contains(&format!("{}", size.byte_size() * 8)));
-        }
-    }
 }

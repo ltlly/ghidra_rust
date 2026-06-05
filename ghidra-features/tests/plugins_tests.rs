@@ -540,13 +540,13 @@ mod function_tests {
         assert!(analyze.create_params);
 
         let purge = EditFunctionPurgeAction::new();
-        assert!(!purge.name.is_empty());
+        assert!(purge.enabled);
 
         let set_depth = SetStackDepthChangeAction::new();
-        assert!(!set_depth.name.is_empty());
+        assert!(set_depth.enabled);
 
         let remove_depth = RemoveStackDepthChangeAction::new();
-        assert!(!remove_depth.name.is_empty());
+        assert!(remove_depth.enabled);
     }
 
     #[test]

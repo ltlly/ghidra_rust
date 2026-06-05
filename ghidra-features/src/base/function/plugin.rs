@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use super::actions::*;
 use super::variable::*;
+use super::variable_comment::VariableCommentAction;
 use super::thunk::*;
 use super::stack::*;
+use super::stack_depth::EditFunctionPurgeAction;
 
 // ---------------------------------------------------------------------------
 // FunctionPlugin constants (menu groups, subgroups)

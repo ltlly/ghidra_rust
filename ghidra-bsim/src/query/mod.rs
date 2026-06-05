@@ -12,6 +12,7 @@ pub mod compare_signatures;
 pub mod decompile_function_task;
 pub mod description;
 pub mod elastic;
+pub mod error_info;
 pub mod facade;
 pub mod file;
 pub mod function_database;

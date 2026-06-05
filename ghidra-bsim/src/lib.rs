@@ -62,3 +62,6 @@ pub use gui::results::{
     BSimApplyAction, BSimApplyResult, BSimMatchResult, BSimOverviewRowObject,
     BSimResultStatus, BSimSearchSettings, FunctionComparisonException,
 };
+pub use query::error_info::{
+    BSimHTMLGenerator, BSimServerInformation, BSimSettings, ErrorCode, ErrorInfo,
+};

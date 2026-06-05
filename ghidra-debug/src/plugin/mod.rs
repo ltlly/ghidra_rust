@@ -320,3 +320,27 @@ pub use gui_action_specs_ext::{
     BasicLocationTrackingSpecFactory, DebuggerReadsMemoryTrait, DebuggerTrackLocationTrait,
     LocationTrackingSpecResult, LocationTrackingStrategy, WatchLocationTrackingSpecFactory,
 };
+
+// New modules ported from remaining Debugger GUI types
+pub mod gui_action_contexts;
+pub mod gui_sleigh_dialog;
+pub mod gui_search_region;
+
+pub use gui_action_contexts::{
+    AvailableRegisterEntry, BreakpointLocationEntry, BreakpointLocationsActionContext,
+    CallTreeActionNode, CallTreeActionNodeKind, DebuggerAvailableRegistersActionContext,
+    DebuggerListingActionContext, DebuggerMemoryBytesActionContext, DebuggerModuleActionContext,
+    DebuggerProviderModel, DebuggerRegisterActionContext, DebuggerRegionActionContext,
+    DebuggerSectionActionContext, DebuggerSnapActionContext, DebuggerStaticMappingActionContext,
+    DebuggerTraceFileActionContext, DebuggerWatchActionContext, InvokeActionEntry,
+    LogicalBreakpointEntry, LogicalBreakpointsActionContext, ModuleActionEntry,
+    SaveBehavior, RegionActionEntry, RegisterActionEntry,
+    SectionActionEntry, StaticMappingActionEntry, TraceCallTreeActionContext, WatchActionEntry,
+};
+pub use gui_sleigh_dialog::{
+    PlaceBreakpointDialogResult, SleighInputConfig, SleighInputResult, SleighInputType,
+};
+pub use gui_search_region::{
+    DefaultEmulatorFactory, SearchRegion, SearchRegionFilter,
+    ALL_SEARCH_REGION_FILTERS, create_search_regions,
+};

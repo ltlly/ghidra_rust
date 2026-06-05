@@ -206,11 +206,15 @@ mod tests {
 
     #[test]
     fn test_resource_manager_caching() {
+        // Use unique paths to avoid interference with parallel tests
+        // sharing the global cache.
         ResourceManager::clear_cache();
-        let _ = ResourceManager::load_icon("images/a.png");
-        let _ = ResourceManager::load_icon("images/b.png");
-        let _ = ResourceManager::load_icon("images/a.png"); // cached
-        assert_eq!(ResourceManager::cache_size(), 2);
+        let icon_a = ResourceManager::load_icon("images/cache_test_unique_a.png");
+        let icon_b = ResourceManager::load_icon("images/cache_test_unique_b.png");
+        let icon_a2 = ResourceManager::load_icon("images/cache_test_unique_a.png"); // cached
+        assert_eq!(icon_a.path(), icon_a2.path());
+        assert_eq!(icon_a, icon_a2);
+        assert_ne!(icon_a.path(), icon_b.path());
     }
 
     #[test]

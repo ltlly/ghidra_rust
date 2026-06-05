@@ -444,7 +444,8 @@ mod tests {
     // ========================================================================
     // Cross-module integration: combining stack + GUI types
     // ========================================================================
-    use crate::stack::{UnwindWarningSet, UnwindInfo, ReturnLocation};
+    use crate::stack::unwind_info::{ReturnLocation, UnwindInfo};
+    use crate::stack::UnwindWarningSet;
 
     #[test]
     fn test_full_variable_hover_with_unwind_info() {

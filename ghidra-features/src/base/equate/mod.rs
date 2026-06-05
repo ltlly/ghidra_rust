@@ -45,7 +45,7 @@ pub use convert_actions::{
 };
 pub use format::{format_scalar, FormatChoice};
 pub use manager::{EquateManager, EquateTable};
-pub use plugin::{EquateInfo, EquatePlugin, SelectionType};
+pub use plugin::{EquateInfo, EquatePlugin, EquateTablePluginState, SelectionType};
 pub use table::{
     EquateColumnDef, EquateNameColumn, EquateRefCountColumn, EquateTableModel, EquateValueColumn,
     IsEnumBasedColumn, ReferenceAddressColumn, ReferenceColumnDef, ReferenceOpIndexColumn,
