@@ -30,6 +30,13 @@ pub mod editor;
 pub mod reference;
 pub mod dnd;
 
+/// Symbol renderer, transient table model, and row-object mappers.
+///
+/// Ported from `SymbolRenderer`, `TransientSymbolTableModel`,
+/// `SymbolRowObjectToAddressTableRowMapper`, and
+/// `SymbolRowObjectToProgramLocationTableRowMapper`.
+pub mod renderer;
+
 pub use filter::*;
 pub use model::*;
 pub use plugin::*;

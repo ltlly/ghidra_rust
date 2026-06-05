@@ -16,6 +16,9 @@ use super::action_name::ActionName;
 
 // ── Errors ────────────────────────────────────────────────────────────────
 
+/// Result type for TraceRmi operations.
+pub type TraceRmiResult<T> = Result<T, TraceRmiError>;
+
 /// Error type for TraceRmi operations.
 ///
 /// Ported from Ghidra's `TraceRmiError`.

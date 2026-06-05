@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// Ported from Ghidra's `TraceMemoryFlag`. These flags describe the
 /// accessibility and state of a memory region in a debug trace.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum TraceMemoryFlag {
     /// Memory is readable.
     Read,

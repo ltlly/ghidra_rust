@@ -23,6 +23,14 @@ pub mod transaction_monitor;
 pub mod save_manager;
 pub mod plugin;
 
+/// Program tab actions -- dynamic-name actions and multi-tab management.
+///
+/// Ported from `AbstractProgramNameSwitchingAction`, `AbstractUndoRedoAction`,
+/// `CloseProgramAction`, `SaveAsProgramAction`, `ProgramOptionsAction`,
+/// `UndoAction`, `RedoAction`, `MultiTabListener`, `MultiTabPlugin`,
+/// and `ProgramTabActionContext`.
+pub mod tab_actions;
+
 pub use actions::{ProgramAction, ProgramActionKind, ProgramActionContext};
 pub use program_locator::ProgramLocator;
 pub use program_cache::ProgramCache;

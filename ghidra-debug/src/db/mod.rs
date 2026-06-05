@@ -29,6 +29,8 @@ pub mod listing;
 pub mod target_impl;
 pub mod trace_db;
 pub mod trace_db_address;
+pub mod trace_db_listing_deep;
+pub mod trace_db_register_context_deep;
 pub mod trace_db_cache;
 pub mod trace_db_addr_property;
 pub mod trace_db_bookmark;

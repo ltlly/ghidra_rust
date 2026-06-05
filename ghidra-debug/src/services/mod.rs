@@ -33,6 +33,7 @@ pub mod progress_extras;
 pub mod progress_impl;
 pub mod save_trace_tasks;
 pub mod service_interfaces;
+pub mod service_trace_rmi_impl;
 pub mod target_impl;
 pub mod tracemgr_impl;
 pub mod url_impl;

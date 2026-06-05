@@ -33,7 +33,9 @@ pub mod gui;
 // Re-export key types
 pub use query::description::{
     BSimExecutableInfo, BSimFunctionDescription, BSimResultSet,
-    FunctionSignatureInfo, SimilarityMetric,
+    CallgraphEntry, CategoryRecord, DatabaseInformation, DescriptionManager,
+    FunctionDescriptionMapper, FunctionSignatureInfo, RowKey,
+    SignatureRecord, SimilarityMetric, VectorResult,
 };
 pub use query::server_config::ServerConfig;
 pub use query::bsim_server_info::BSimServerInfo;

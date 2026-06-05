@@ -196,6 +196,8 @@ pub use map_proposal::{
 };
 
 pub mod trace_address_snap_space;
+pub mod trace_code_manager_impl;
+pub mod trace_memory_space;
 pub use trace_address_snap_space::{
     AddressSnapRange, TraceAddressSnapSpace, for_address_space,
 };

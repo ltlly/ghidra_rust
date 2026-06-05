@@ -61,6 +61,11 @@ pub mod provider;
 pub mod selection_plugin;
 pub mod listing_model;
 
+/// Middle-mouse highlight provider for the code listing.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.ListingMiddleMouseHighlightProvider`.
+pub mod middle_mouse_highlight;
+
 // Re-export key types at the module root for convenience.
 pub use action_context::{CodeViewerActionContext, OtherPanelContext};
 pub use address_range_info::AddressRangeInfo;
