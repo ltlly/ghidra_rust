@@ -129,6 +129,41 @@ pub mod vscode;
 pub mod functionwindow;
 pub mod processors;
 
+// -- Top-level re-exports of base plugin modules --
+// These modules live under `base::` (ported from `ghidra.app.plugin.core.*`)
+// but are re-exported here for direct access via `ghidra_features::<module>`.
+
+/// Equate management: named constants applied to operands, format conversion,
+/// equate table CRUD, and the EquateTablePlugin UI model.
+///
+/// Ported from `ghidra.app.plugin.core.equate`.
+pub use base::equate;
+
+/// Cross-reference (xref) management: viewing, editing, adding, and deleting
+/// references between code/data units.  Includes the ReferencesPlugin,
+/// ExternalReferencesProvider, OffsetTablePlugin, and edit dialog model.
+///
+/// Ported from `ghidra.app.plugin.core.references`.
+pub use base::references;
+
+/// Register value management: register tree navigation, value range display,
+/// set/clear register value commands, and the RegisterManager UI model.
+///
+/// Ported from `ghidra.app.plugin.core.register`.
+pub use base::register;
+
+/// Function plugin: actions for creating, editing, deleting, and managing
+/// functions and their variables, tags, thunk detection, and stack analysis.
+///
+/// Ported from `ghidra.app.plugin.core.function`.
+pub use base::function;
+
+/// Console plugin: scripting console service, message display, code
+/// completion, and console word-at-cursor navigation.
+///
+/// Ported from `ghidra.app.plugin.core.console`.
+pub use base::console;
+
 pub use base::analyzer::*;
 pub use dwarf::*;
 pub use fileformats::*;

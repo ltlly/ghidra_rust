@@ -123,6 +123,11 @@ impl RegisterManager {
         &self.value_ranges
     }
 
+    /// Set the value ranges directly (for testing and programmatic use).
+    pub fn set_value_ranges(&mut self, ranges: Vec<RegisterValueRange>) {
+        self.value_ranges = ranges;
+    }
+
     /// Whether to include default values in the display.
     pub fn include_default_values(&self) -> bool {
         self.include_default_values

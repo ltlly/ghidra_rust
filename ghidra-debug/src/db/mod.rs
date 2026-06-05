@@ -31,6 +31,8 @@ pub mod trace_db_breakpoint;
 pub mod trace_db_context;
 pub mod trace_db_data;
 pub mod trace_db_guest;
+pub mod trace_db_instruction;
+pub mod trace_db_label;
 pub mod trace_db_listing;
 pub mod trace_db_manager;
 pub mod trace_db_map;

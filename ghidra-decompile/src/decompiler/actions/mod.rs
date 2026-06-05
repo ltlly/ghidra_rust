@@ -6,6 +6,8 @@
 //! decompiler view. In the Rust port, we provide the action definitions and
 //! metadata only (no Swing/AWT integration).
 
+pub mod edit_actions;
+
 use ghidra_core::addr::Address;
 
 use super::clang_node::{ClangNodeId, SyntaxType};
@@ -233,7 +235,7 @@ impl SliceHighlightColorProvider {
 // ============================================================================
 
 /// Format for displaying numeric constants.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ConstantFormat {
     /// Hexadecimal (0x1234).
     Hex,

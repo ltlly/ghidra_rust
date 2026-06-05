@@ -49,8 +49,10 @@ pub mod ingest;
 pub mod postgresql;
 pub mod protocol;
 pub mod query;
+pub mod scoring;
 pub mod search_results;
 pub mod server_info;
+pub mod staging;
 pub mod tables;
 
 pub use description::{
@@ -131,6 +133,19 @@ pub use elastic_db::{
 
 // Re-export bulk signature types.
 pub use bulk_signatures::{BulkIngestStats, BulkSignatureGenerator};
+
+// Re-export scoring types (unique names to avoid conflicts with client re-exports).
+pub use scoring::{
+    ExecutableScorerSingle, FunctionPair as ScoringFunctionPair,
+    TableScoreCaching as ScoringTableCache,
+    TemporaryScoreCaching as ScoringTempCache,
+};
+
+// Re-export staging types (unique names to avoid conflicts with description re-exports).
+pub use staging::{
+    ExeSpecifier as StagingExeSpecifier,
+    StagingManager as StagingManagerTrait,
+};
 
 // Re-export table types.
 pub use tables::vector_store::{VectorStore, VectorStoreEntry, VectorStoreManager};

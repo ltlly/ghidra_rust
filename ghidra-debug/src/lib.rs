@@ -38,5 +38,6 @@ pub mod model;
 pub mod pcode;
 pub mod plugin;
 pub mod services;
+pub mod stack;
 pub mod target;
 pub mod util;

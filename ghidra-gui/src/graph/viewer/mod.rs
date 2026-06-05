@@ -3,8 +3,10 @@
 //! Ports Ghidra's `ghidra.graph.viewer` and related packages.
 
 pub mod actions;
+pub mod animation;
 pub mod edge;
 pub mod event;
+pub mod grid;
 pub mod layout;
 pub mod options;
 pub mod picking;
