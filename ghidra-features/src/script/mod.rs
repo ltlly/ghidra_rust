@@ -20,6 +20,27 @@
 /// Ported from `ghidra.app.plugin.core.script` manager classes.
 pub mod manager;
 
+/// Script file list management with lazy loading and change notification.
+///
+/// Ported from `ghidra.app.plugin.core.script.ScriptList`.
+pub mod script_list;
+
+/// Script grouping and categorization.
+///
+/// Ported from `ghidra.app.plugin.core.script.ScriptGroup`,
+/// `ScriptCategoryNode`, `RootNode`.
+pub mod script_groups;
+
+/// Script key binding management.
+///
+/// Ported from `ghidra.app.plugin.core.script.KeyBindingsInfo`.
+pub mod key_bindings;
+
+/// Script execution task management.
+///
+/// Ported from `ghidra.app.plugin.core.script.RunScriptTask`.
+pub mod run_task;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

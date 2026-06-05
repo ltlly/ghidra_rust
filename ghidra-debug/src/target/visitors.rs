@@ -185,6 +185,238 @@ pub fn ancestor_paths(path: &KeyPath) -> Vec<KeyPath> {
     result
 }
 
+// ---------------------------------------------------------------------------
+// Additional visitor types ported from Framework-TraceModeling visitors
+// ---------------------------------------------------------------------------
+
+/// Walk all paths from a seed to all reachable ancestors (prepending values).
+///
+/// Ported from Java `AllPathsVisitor`. Traverses upward from a value to
+/// discover all root paths. Excludes values without parents, includes
+/// values whose parent is root (they may have other parents).
+pub struct AllPathsVisitor;
+
+impl TreeVisitor for AllPathsVisitor {
+    fn compose_span(&self, pre: &Lifespan, value_snap: i64) -> Option<Lifespan> {
+        let point = Lifespan::span(value_snap, value_snap);
+        let result = pre.intersect(&point);
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn visit_child(
+        &self,
+        parent: &TraceObject,
+        _child_key: &str,
+        _child_path: &KeyPath,
+        _span: &Lifespan,
+    ) -> VisitResult {
+        if parent.path.is_root() {
+            VisitResult::IncludeDescend
+        } else {
+            VisitResult::ExcludeDescend
+        }
+    }
+}
+
+/// Traverse ancestors of a value, filtering by path pattern.
+///
+/// Ported from Java `AncestorsRelativeVisitor`. Walks up the object tree
+/// from a seed value, composing paths by prepending, and checking against
+/// a path filter to decide inclusion/exclusion at each step.
+pub struct AncestorsRelativeVisitor {
+    /// The set of key prefixes to match against.
+    pub match_keys: Vec<String>,
+}
+
+impl AncestorsRelativeVisitor {
+    /// Create a new ancestor visitor with the given key prefixes.
+    pub fn new(match_keys: Vec<String>) -> Self {
+        Self { match_keys }
+    }
+
+    /// Create a visitor matching any ancestor.
+    pub fn any() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl TreeVisitor for AncestorsRelativeVisitor {
+    fn compose_span(&self, pre: &Lifespan, value_snap: i64) -> Option<Lifespan> {
+        let point = Lifespan::span(value_snap, value_snap);
+        let result = pre.intersect(&point);
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn visit_child(
+        &self,
+        _parent: &TraceObject,
+        child_key: &str,
+        _child_path: &KeyPath,
+        _span: &Lifespan,
+    ) -> VisitResult {
+        if self.match_keys.is_empty() || self.match_keys.iter().any(|k| k == child_key) {
+            VisitResult::IncludeDescend
+        } else {
+            VisitResult::ExcludeDescend
+        }
+    }
+}
+
+/// Traverse ancestors upward until reaching a root or limit.
+///
+/// Ported from Java `AncestorsRootVisitor`. Walks from a value up to the
+/// root, including all ancestors along the way.
+pub struct AncestorsRootVisitor;
+
+impl TreeVisitor for AncestorsRootVisitor {
+    fn compose_span(&self, pre: &Lifespan, value_snap: i64) -> Option<Lifespan> {
+        let point = Lifespan::span(value_snap, value_snap);
+        let result = pre.intersect(&point);
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn visit_child(
+        &self,
+        _parent: &TraceObject,
+        _child_key: &str,
+        _child_path: &KeyPath,
+        _span: &Lifespan,
+    ) -> VisitResult {
+        VisitResult::IncludeDescend
+    }
+}
+
+/// Visit canonical successors of objects, descending through unique paths.
+///
+/// Ported from Java `CanonicalSuccessorsRelativeVisitor`. Follows the
+/// "canonical" path through the object tree — the first child or attribute
+/// at each level — filtering by a path pattern.
+pub struct CanonicalSuccessorsRelativeVisitor {
+    /// The set of canonical keys to follow.
+    pub canonical_keys: Vec<String>,
+}
+
+impl CanonicalSuccessorsRelativeVisitor {
+    /// Create a new canonical successors visitor.
+    pub fn new(canonical_keys: Vec<String>) -> Self {
+        Self { canonical_keys }
+    }
+}
+
+impl TreeVisitor for CanonicalSuccessorsRelativeVisitor {
+    fn compose_span(&self, pre: &Lifespan, value_snap: i64) -> Option<Lifespan> {
+        let point = Lifespan::span(value_snap, value_snap);
+        let result = pre.intersect(&point);
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn visit_child(
+        &self,
+        _parent: &TraceObject,
+        child_key: &str,
+        _child_path: &KeyPath,
+        _span: &Lifespan,
+    ) -> VisitResult {
+        if self.canonical_keys.is_empty() || self.canonical_keys.contains(&child_key.to_string())
+        {
+            VisitResult::IncludeDescend
+        } else {
+            VisitResult::ExcludePrune
+        }
+    }
+}
+
+/// Visit successors in a deterministic (sorted) order.
+///
+/// Ported from Java `OrderedSuccessorsVisitor`. Traverses children in
+/// sorted key order, including all of them.
+pub struct OrderedSuccessorsVisitor;
+
+impl TreeVisitor for OrderedSuccessorsVisitor {
+    fn compose_span(&self, pre: &Lifespan, value_snap: i64) -> Option<Lifespan> {
+        let point = Lifespan::span(value_snap, value_snap);
+        let result = pre.intersect(&point);
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn visit_child(
+        &self,
+        _parent: &TraceObject,
+        _child_key: &str,
+        _child_path: &KeyPath,
+        _span: &Lifespan,
+    ) -> VisitResult {
+        VisitResult::IncludeDescend
+    }
+}
+
+/// Visit successors relative to a path filter.
+///
+/// Ported from Java `SuccessorsRelativeVisitor`. Descends through children
+/// that match a given set of allowed entry keys.
+pub struct SuccessorsRelativeVisitor {
+    /// The set of allowed entry keys (empty = allow all).
+    pub allowed_keys: Vec<String>,
+}
+
+impl SuccessorsRelativeVisitor {
+    /// Create a new successor visitor.
+    pub fn new(allowed_keys: Vec<String>) -> Self {
+        Self { allowed_keys }
+    }
+
+    /// Create a visitor that allows all successors.
+    pub fn all() -> Self {
+        Self::new(Vec::new())
+    }
+}
+
+impl TreeVisitor for SuccessorsRelativeVisitor {
+    fn compose_span(&self, pre: &Lifespan, value_snap: i64) -> Option<Lifespan> {
+        let point = Lifespan::span(value_snap, value_snap);
+        let result = pre.intersect(&point);
+        if result.is_empty() {
+            None
+        } else {
+            Some(result)
+        }
+    }
+
+    fn visit_child(
+        &self,
+        _parent: &TraceObject,
+        child_key: &str,
+        _child_path: &KeyPath,
+        _span: &Lifespan,
+    ) -> VisitResult {
+        if self.allowed_keys.is_empty() || self.allowed_keys.contains(&child_key.to_string()) {
+            VisitResult::IncludeDescend
+        } else {
+            VisitResult::ExcludePrune
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

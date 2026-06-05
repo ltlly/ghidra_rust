@@ -67,6 +67,23 @@ pub mod context;
 /// Ported from `CompositeChangeListener` and `CompositeEditorLockListener`.
 pub mod listener;
 
+/// Composite editor panel models.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompEditorPanel`,
+/// `UnionEditorPanel`, and related panel classes.
+pub mod panels;
+
+/// Composite editor action implementations.
+///
+/// Ported from individual action classes in
+/// `ghidra.app.plugin.core.compositeeditor`.
+pub mod actions_impl;
+
+/// Bit-field editor dialog model.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.BitFieldEditorDialog`.
+pub mod bitfield_dialog;
+
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of components allowed in a composite type.

@@ -19,6 +19,16 @@ pub mod reference_utils;
 pub mod starting_location;
 pub mod table_model;
 
+/// Navigation history management.
+///
+/// Ported from `ghidra.app.plugin.core.navigation` provider classes.
+pub mod provider;
+
+/// Address table navigation types (jump tables, vtables).
+///
+/// Ported from `ghidra.app.plugin.core.navigation` table-related classes.
+pub mod address_table;
+
 use std::collections::HashMap;
 
 use ghidra_core::Address;

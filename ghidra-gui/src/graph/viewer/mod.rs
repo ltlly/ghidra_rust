@@ -7,6 +7,7 @@ pub mod animation;
 pub mod edge;
 pub mod event;
 pub mod graph_component;
+pub mod graph_perspective;
 
 // New modules ported from Ghidra's graph viewer package
 pub mod visual_graph_scaling_control;
@@ -21,6 +22,9 @@ pub mod shape;
 pub mod utils;
 pub mod vertex;
 pub mod visual_graph_layered_pane_button;
+pub mod path_highlight_mode;
+pub mod satellite_graph_viewer;
+pub mod visual_graph_view;
 
 use std::collections::HashMap;
 

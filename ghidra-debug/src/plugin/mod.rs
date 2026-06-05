@@ -77,6 +77,7 @@ pub mod gui_register;
 pub mod gui_stack_vars;
 pub mod gui_thread;
 pub mod gui_time;
+pub mod gui_timetype;
 pub mod gui_timeoverview;
 pub mod gui_trace;
 pub mod gui_tracecalltree;

@@ -32,16 +32,97 @@ impl std::fmt::Display for StepKind {
 }
 
 /// The result of comparing two schedules.
+///
+/// Ported from Java `CompareResult` with support for enriched related/unrelated
+/// comparison semantics. The `compareTo` field preserves sort order, and the
+/// `related` field indicates whether the items share a common ancestry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum CompareResult {
-    /// The two schedules are equivalent.
-    Equal,
-    /// The first schedule is before the second.
-    Before,
-    /// The first schedule is after the second.
-    After,
-    /// The relationship cannot be determined (e.g., different sources).
-    Unrelated,
+pub struct CompareResult {
+    /// Sort order: -1 (less), 0 (equal), 1 (greater).
+    pub compare_to: i32,
+    /// Whether the two schedules are related (share a common snap).
+    pub related: bool,
+}
+
+impl CompareResult {
+    /// Unrelated and less-than.
+    pub const UNREL_LT: Self = Self {
+        compare_to: -1,
+        related: false,
+    };
+    /// Related and less-than.
+    pub const REL_LT: Self = Self {
+        compare_to: -1,
+        related: true,
+    };
+    /// Equal and related.
+    pub const EQUALS: Self = Self {
+        compare_to: 0,
+        related: true,
+    };
+    /// Related and greater-than.
+    pub const REL_GT: Self = Self {
+        compare_to: 1,
+        related: true,
+    };
+    /// Unrelated and greater-than.
+    pub const UNREL_GT: Self = Self {
+        compare_to: 1,
+        related: false,
+    };
+
+    /// Enrich the result of `Ord::cmp`, given that the two are related.
+    pub fn related(compare_to: std::cmp::Ordering) -> Self {
+        match compare_to {
+            std::cmp::Ordering::Less => Self::REL_LT,
+            std::cmp::Ordering::Equal => Self::EQUALS,
+            std::cmp::Ordering::Greater => Self::REL_GT,
+        }
+    }
+
+    /// Enrich the result of `Ord::cmp`, given that the two are not related.
+    pub fn unrelated(compare_to: std::cmp::Ordering) -> Self {
+        match compare_to {
+            std::cmp::Ordering::Less => Self::UNREL_LT,
+            std::cmp::Ordering::Equal => Self::EQUALS,
+            std::cmp::Ordering::Greater => Self::UNREL_GT,
+        }
+    }
+
+    /// Convert from a std::cmp::Ordering for use in step_trait module.
+    pub fn from_ordering(o: std::cmp::Ordering) -> Self {
+        Self::related(o)
+    }
+
+    /// Legacy comparison enum variant (kept for backward compat).
+    pub fn equal() -> Self {
+        Self::EQUALS
+    }
+    /// Legacy comparison enum variant (kept for backward compat).
+    pub fn before() -> Self {
+        Self::REL_LT
+    }
+    /// Legacy comparison enum variant (kept for backward compat).
+    pub fn after() -> Self {
+        Self::REL_GT
+    }
+    /// Legacy comparison enum variant (kept for backward compat).
+    pub fn unrelated_result() -> Self {
+        Self::UNREL_LT
+    }
+}
+
+impl std::fmt::Display for CompareResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match (self.compare_to, self.related) {
+            (-1, false) => write!(f, "UNREL_LT"),
+            (-1, true) => write!(f, "REL_LT"),
+            (0, true) => write!(f, "EQUALS"),
+            (1, true) => write!(f, "REL_GT"),
+            (1, false) => write!(f, "UNREL_GT"),
+            _ => write!(f, "UNKNOWN({},{})", self.compare_to, self.related),
+        }
+    }
 }
 
 /// A single step in a schedule sequence.
@@ -268,15 +349,11 @@ impl Scheduler {
     /// Compare two schedules.
     pub fn compare(a: &ScheduleSequence, b: &ScheduleSequence) -> CompareResult {
         if a.initial_snap != b.initial_snap {
-            return CompareResult::Unrelated;
+            return CompareResult::unrelated(a.initial_snap.cmp(&b.initial_snap));
         }
         let total_a = a.total_steps();
         let total_b = b.total_steps();
-        match total_a.cmp(&total_b) {
-            std::cmp::Ordering::Equal => CompareResult::Equal,
-            std::cmp::Ordering::Less => CompareResult::Before,
-            std::cmp::Ordering::Greater => CompareResult::After,
-        }
+        CompareResult::related(total_a.cmp(&total_b))
     }
 }
 
@@ -403,22 +480,52 @@ mod tests {
     fn test_compare_equal() {
         let a = ScheduleSequence::parse("0:3i").unwrap();
         let b = ScheduleSequence::parse("0:3i").unwrap();
-        assert_eq!(Scheduler::compare(&a, &b), CompareResult::Equal);
+        let r = Scheduler::compare(&a, &b);
+        assert_eq!(r.compare_to, 0);
+        assert!(r.related);
     }
 
     #[test]
     fn test_compare_before_after() {
         let a = ScheduleSequence::parse("0:2i").unwrap();
         let b = ScheduleSequence::parse("0:3i").unwrap();
-        assert_eq!(Scheduler::compare(&a, &b), CompareResult::Before);
-        assert_eq!(Scheduler::compare(&b, &a), CompareResult::After);
+        let r = Scheduler::compare(&a, &b);
+        assert_eq!(r.compare_to, -1);
+        assert!(r.related);
+        let r2 = Scheduler::compare(&b, &a);
+        assert_eq!(r2.compare_to, 1);
+        assert!(r2.related);
     }
 
     #[test]
     fn test_compare_unrelated() {
         let a = ScheduleSequence::parse("0:3i").unwrap();
         let b = ScheduleSequence::parse("1:3i").unwrap();
-        assert_eq!(Scheduler::compare(&a, &b), CompareResult::Unrelated);
+        let r = Scheduler::compare(&a, &b);
+        assert!(!r.related);
+    }
+
+    #[test]
+    fn test_compare_result_display() {
+        assert_eq!(CompareResult::EQUALS.to_string(), "EQUALS");
+        assert_eq!(CompareResult::REL_LT.to_string(), "REL_LT");
+        assert_eq!(CompareResult::REL_GT.to_string(), "REL_GT");
+        assert_eq!(CompareResult::UNREL_LT.to_string(), "UNREL_LT");
+        assert_eq!(CompareResult::UNREL_GT.to_string(), "UNREL_GT");
+    }
+
+    #[test]
+    fn test_compare_result_related() {
+        let r = CompareResult::related(std::cmp::Ordering::Less);
+        assert_eq!(r, CompareResult::REL_LT);
+        assert!(r.related);
+    }
+
+    #[test]
+    fn test_compare_result_unrelated() {
+        let r = CompareResult::unrelated(std::cmp::Ordering::Greater);
+        assert_eq!(r, CompareResult::UNREL_GT);
+        assert!(!r.related);
     }
 
     #[test]

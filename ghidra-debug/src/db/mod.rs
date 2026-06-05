@@ -84,6 +84,7 @@ pub mod trace_db_map_impl;
 pub mod trace_db_memory_impl;
 pub mod trace_db_ref_impl;
 pub mod trace_db_symbol_impl;
+pub mod trace_db_value_spatial;
 pub mod trace_db_visitors;
 
 pub use trace_db::TraceDatabase;
@@ -125,6 +126,11 @@ pub use trace_db_value_storage::{
 pub use trace_db_event_scope::{DbEventScopeManager, DbObjectEventScope};
 pub use trace_db_method::{DbMethodManager, DbObjectMethod, MethodParameter};
 pub use trace_db_snapshot::{DbTraceSnapshot, DbTraceTimeManager};
+pub use trace_db_value_spatial::{
+    ImmutableValueShape as SpatialImmutableValueShape, RecAddress, ValueBox as SpatialValueBox,
+    ValueShape as SpatialValueShape, ValueSpace as SpatialValueSpace,
+    ValueTriple as SpatialValueTriple,
+};
 pub use trace_db_visitors::{
     AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,
     CanonicalSuccessorsRelativeVisitor, OrderedSuccessorsVisitor, SuccessorsRelativeVisitor,

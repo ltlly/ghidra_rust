@@ -27,4 +27,9 @@ pub use path_filter_expr::PathFilterExpr;
 pub use path_matcher::{NoneFilter, PathFilter, PathMatcher};
 pub use path_pattern::{Align, PathPattern};
 pub use trace_object::{ObjectEntry, ObjectValue, TraceObject, TraceObjectManager};
-pub use visitors::{VisitResult, TreeVisitor, all_descendants, all_paths_under, ancestor_paths};
+pub use visitors::{
+    AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,
+    CanonicalSuccessorsRelativeVisitor, OrderedSuccessorsVisitor,
+    SuccessorsRelativeVisitor, VisitResult, TreeVisitor,
+    all_descendants, all_paths_under, ancestor_paths,
+};

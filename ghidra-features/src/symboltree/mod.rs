@@ -33,6 +33,11 @@ pub mod actions;
 /// Ported from action classes in `ghidra.app.plugin.core.symboltree.actions`.
 pub mod operations;
 
+/// Symbol tree filtering and search.
+///
+/// Ported from Ghidra's symbol tree filter-related classes.
+pub mod filter;
+
 use std::collections::BTreeMap;
 
 /// Options category name.

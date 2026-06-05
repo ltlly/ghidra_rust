@@ -19,6 +19,12 @@ pub mod call_fixup_analyzer;
 pub mod entry_point_analyzer;
 pub mod processor_actions;
 
+/// Disassembly options and configuration.
+///
+/// Ported from disassembly configuration classes in
+/// `ghidra.app.plugin.core.disassembler`.
+pub mod disassembly_options;
+
 use ghidra_core::Address;
 use std::collections::{BTreeMap, HashSet};
 

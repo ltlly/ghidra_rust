@@ -48,6 +48,7 @@ pub mod file;
 pub mod function_database;
 pub mod gui;
 pub mod ingest;
+pub mod parallel_decompile;
 pub mod postgresql;
 pub mod protocol;
 pub mod query;
@@ -99,6 +100,12 @@ pub use client_factory::{
     DEFAULT_ELASTIC_PORT, DEFAULT_POSTGRES_PORT, H2_FILE_EXTENSION,
 };
 
+// Re-export parallel decompile types.
+pub use parallel_decompile::{
+    DecompileFunctionResult, ParallelDecompileConfig,
+    ParallelDecompileTaskRunner, RichDecompileFunctionTask,
+};
+
 // Re-export key facade types.
 pub use facade::{
     DatabaseInfo, DefaultSFQueryServiceFactory, FunctionSymbolIterator,
@@ -110,9 +117,9 @@ pub use facade::{
 // Re-export key query-level types.
 pub use query::{
     BSimDbConnectTaskManager, BSimInitializer, BSimServerInfo,
-    CollectingErrorLogger, DecompileFunctionTask, GenSignatures,
+    CollectingErrorLogger, GenSignatures,
     LshException, MinimalErrorLogger, NullErrorLogger,
-    ParallelDecompileTask, ServerConfig,
+    ServerConfig,
 };
 
 // Re-export search results types.

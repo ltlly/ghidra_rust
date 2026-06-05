@@ -50,6 +50,7 @@ pub mod target_object;
 pub mod target_schema;
 pub mod target_value;
 pub mod thread;
+pub mod step_trait;
 pub mod time;
 pub mod time_schedule;
 pub mod trace;
@@ -129,6 +130,7 @@ pub use target_schema::{AttributeSchema, SchemaBuilder, SchemaContext, SchemaNam
 pub use target_value::{PrimitiveValue, TraceObjectValPath, TraceObjectValue, TruncateResult};
 pub use thread::{TraceProcess, TraceThread};
 pub use time::{TraceSchedule, TraceSnapshot, TraceTimeManager};
+pub use step_trait::{PatchStep as StepPatchStep, SkipStep, StepKind as StepKindTrait, StepType, TickStep as StepTickStep};
 pub use time_schedule::{CompareResult, PatchStep, ScheduleSequence, ScheduleStep, Scheduler, StepKind, TickStep};
 pub use trace::{Trace, TraceOptionsManager, TraceTimeViewport, TraceUserData};
 pub use trace_data_ops::{
