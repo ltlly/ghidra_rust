@@ -26,6 +26,7 @@
 //! - `trace_db_time_viewport`: Time viewport for viewing.
 
 pub mod trace_db;
+pub mod trace_db_address;
 pub mod trace_db_bookmark;
 pub mod trace_db_breakpoint;
 pub mod trace_db_content;
@@ -47,6 +48,7 @@ pub mod trace_db_spatial;
 pub mod trace_db_stack;
 pub mod trace_db_symbol;
 pub mod trace_db_target;
+pub mod trace_db_target_iface;
 pub mod trace_db_thread;
 pub mod trace_db_time;
 pub mod trace_db_time_viewport;
@@ -54,6 +56,9 @@ pub mod trace_db_util;
 pub mod trace_db_visitor_ext;
 
 pub use trace_db::TraceDatabase;
+pub use trace_db_address::{
+    AddressSpaceManager, AddressSpaceType, OverlaySpaceInfo, TraceAddressSpace,
+};
 pub use trace_db_breakpoint::{
     DbTraceBreakpointLocation, DbTraceBreakpointManager, DbTraceBreakpointSpec,
 };
@@ -61,4 +66,8 @@ pub use trace_db_guest::{
     DbTraceGuestLanguage, DbTraceGuestPlatform, DbTraceHostPlatform, DbTracePlatformManager,
 };
 pub use trace_db_manager::{DbTraceManager, TraceDbError, TraceDbResult};
+pub use trace_db_target_iface::{
+    DbObjectActivatable, DbObjectAggregate, DbObjectEnvironment, DbObjectExecutionStateful,
+    DbObjectFocusScope, DbObjectTogglable, DbTargetInterfaceRegistry,
+};
 pub use trace_db_time_viewport::{SingleSnapViewport, TraceTimeViewport};

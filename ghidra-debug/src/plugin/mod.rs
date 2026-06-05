@@ -38,23 +38,32 @@ pub mod disassemble;
 pub mod event;
 pub mod export;
 pub mod gui;
+pub mod gui_breakpoint;
+pub mod gui_breakpoint_timeline;
 pub mod gui_colors;
+pub mod gui_console;
 pub mod gui_control;
 pub mod gui_copy;
 pub mod gui_diff;
+pub mod gui_internal;
 pub mod gui_listing;
 pub mod gui_memory;
 pub mod gui_memview;
 pub mod gui_modules;
 pub mod gui_pcode;
+pub mod gui_platform;
 pub mod gui_register;
+pub mod gui_stack_vars;
 pub mod gui_thread;
 pub mod gui_time;
 pub mod gui_timeoverview;
+pub mod gui_trace;
 pub mod gui_tracecalltree;
 pub mod gui_watch;
 pub mod location_tracking;
 pub mod mapping;
+pub mod platform_arm;
+pub mod platform_dbgeng;
 pub mod platform_frida;
 pub mod platform_gdb;
 pub mod platform_jdi;
@@ -70,11 +79,29 @@ pub use disassemble::*;
 pub use event::*;
 pub use export::*;
 pub use gui::*;
+pub use gui_breakpoint::{
+    BreakpointActionContext, BreakpointDisplayState, BreakpointKindSet,
+    BreakpointMarkerData, LogicalBreakpointActionContext,
+    MakeBreakpointsEffectiveContext, SleighBreakpointInput,
+};
+pub use gui_breakpoint_timeline::{
+    BreakpointHitEvent, BreakpointTimelineFilter, BreakpointTimelineModel, CachedTimelineIndex,
+    TimelineColors, TimelineViewport,
+};
 pub use gui_colors::{DebugColor, DebugColorScheme};
+pub use gui_console::{
+    ConsoleAction, ConsoleColumn, ConsoleModel, ConsoleSortState, LogLevel, LogRow, LogRowActionContext,
+    MonitorRow, MonitorRowActionContext, ProgressReceiver, SortDirection,
+};
 pub use gui_control::{ControlAction, ControlActionBuilder, ControlActionKind, ControlActionTarget, SnapshotNavigation};
 pub use gui_copy::{CopyDirection, CopyEndpoint, CopyEntry, CopyPlan};
+pub use gui_internal::{RStarTreeDiagnosticsModel, RStarTreeNode, RStarTreeStats};
 pub use gui_memview::{MemviewBoxType, MemviewMap, MemviewModel, MemoryBox};
 pub use gui_pcode::{PcodeRow, PcodeRowKind, PcodeStepperModel, PcodeVarnode};
+pub use gui_platform::{
+    DisassemblyResult, Endianness, PlatformChangedEvent, PlatformDisplayInfo, PlatformMapperData,
+    PlatformProviderModel, RegisterMappingEntry,
+};
 pub use gui_diff::{DiffKind, MemoryDiffEntry, RegisterDiffEntry, TraceDiffResult};
 pub use gui_listing::{BlendedListingColorModel, DebuggerListingLocation};
 pub use gui_memory::{CachedBytePage, MemoryRegionRow, MemoryRegionTableModel};
@@ -84,10 +111,16 @@ pub use gui_modules::{
 pub use gui_register::{
     AvailableRegisterRow, RegisterColumn, RegisterRow, RegisterTableModel,
 };
+pub use gui_stack_vars::{
+    VariableValueHoverConfig, VariableValueRow, VariableValueTableModel, VariableValueUtils,
+};
 pub use gui_thread::{ThreadColumn, ThreadRow, ThreadTableModel};
 pub use gui_time::{SnapshotRow, SnapshotTableModel};
 pub use gui_timeoverview::{
     BreakpointOverviewType, TimeOverviewColorEntry, TimeOverviewColorService, TimeType,
+};
+pub use gui_trace::{
+    TimeRadix, TraceTabActionContext, TraceTabEntry, TraceTabEvent, TraceTabPanelModel,
 };
 pub use gui_tracecalltree::{
     CallTreeNodeKind, TraceCallTreeLogContext, TraceCallTreeNode, TraceCallTreeModel,
@@ -95,6 +128,11 @@ pub use gui_tracecalltree::{
 pub use gui_watch::{DefaultWatchRow, SavedWatchSettings, WatchColumn, WatchFormat, WatchTableModel};
 pub use location_tracking::*;
 pub use mapping::*;
+pub use platform_arm::{ArmDisassemblyInject, ArmPlatformOpinion, ARM_LANG_IDS, THUMB_BIT};
+pub use platform_dbgeng::{
+    DbgengMode, DbgengPlatformOpinion, DbgengX64DisassemblyInject, PeMachineType, PeModuleInfo,
+    COMP_ID_WINDOWS, DBGENG_TOOL, LANG_ID_X86, LANG_ID_X86_64, LANG_ID_X86_64_32,
+};
 pub use platform_frida::*;
 pub use platform_gdb::*;
 pub use platform_jdi::*;

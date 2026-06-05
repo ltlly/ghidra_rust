@@ -12,7 +12,9 @@
 //!
 //! Swing UI code is omitted; only model and business logic are ported.
 
+pub mod function_utils;
 pub mod locationreferences;
+pub mod starting_location;
 
 use std::collections::HashMap;
 

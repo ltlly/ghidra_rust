@@ -5,6 +5,9 @@
 
 pub mod data;
 pub mod execution;
+pub mod integration;
+pub mod memory_state;
+pub mod sleigh_utils;
 
 pub use data::{
     PcodeTraceAccess, PcodeTraceDataAccess, PcodeTraceMemoryAccess,
@@ -14,3 +17,6 @@ pub use execution::{
     PcodeExecutorStatePiece, TraceEmulationCallbacks, TraceMemoryStateArithmetic,
     UnknownStateError,
 };
+pub use integration::{PieceDomain, PieceHandler, TraceWriter, WriteStrategy};
+pub use memory_state::{StateSpanMap, TraceMemoryStatePiece};
+pub use sleigh_utils::TraceSleighUtils;

@@ -6,6 +6,7 @@ pub mod actions;
 pub mod animation;
 pub mod edge;
 pub mod event;
+pub mod graph_component;
 pub mod grid;
 pub mod layout;
 pub mod options;

@@ -71,17 +71,34 @@ impl StateSpanMap {
         Self::default()
     }
 
-    /// Set the state for a given range.
+    /// Set the state for a given range. Splits existing entries that partially overlap.
     pub fn set(&mut self, offset: u64, size: u64, state: TraceMemoryState) {
-        // Remove overlapping entries
-        self.entries.retain(|(o, s, _)| {
+        let new_end = offset + size;
+        let mut new_entries: Vec<(u64, u64, TraceMemoryState)> = Vec::new();
+
+        for (o, s, ref existing_state) in self.entries.drain(..) {
             let end = o + s;
-            let new_end = offset + size;
-            // Keep if no overlap
-            *o >= new_end || end <= offset
-        });
-        self.entries.push((offset, size, state));
-        self.entries.sort_by_key(|(o, _, _)| *o);
+            if end <= offset || o >= new_end {
+                // No overlap, keep as-is
+                new_entries.push((o, s, existing_state.clone()));
+            } else {
+                // There is overlap: keep the non-overlapping parts
+                if o < offset {
+                    // Left portion before the new range
+                    new_entries.push((o, offset - o, existing_state.clone()));
+                }
+                if end > new_end {
+                    // Right portion after the new range
+                    new_entries.push((new_end, end - new_end, existing_state.clone()));
+                }
+                // The overlapping portion is replaced (not added here)
+            }
+        }
+
+        // Add the new entry
+        new_entries.push((offset, size, state));
+        new_entries.sort_by_key(|(o, _, _)| *o);
+        self.entries = new_entries;
     }
 
     /// Get the composite state for a given range.

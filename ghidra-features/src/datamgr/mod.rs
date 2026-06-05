@@ -36,6 +36,7 @@
 pub mod actions;
 pub mod archive;
 pub mod dialog;
+pub mod find_actions;
 pub mod sync;
 pub mod handler;
 pub mod plugin;

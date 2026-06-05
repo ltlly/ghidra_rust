@@ -21,6 +21,7 @@ pub mod variable;
 pub mod thunk;
 pub mod stack;
 pub mod editor;
+pub mod analyzers;
 
 pub use plugin::*;
 pub use actions::*;
@@ -29,3 +30,4 @@ pub use variable::*;
 pub use thunk::*;
 pub use stack::*;
 pub use editor::*;
+pub use analyzers::*;
