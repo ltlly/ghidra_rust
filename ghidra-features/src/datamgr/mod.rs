@@ -36,6 +36,9 @@
 pub mod actions;
 pub mod archive;
 pub mod dialog;
+pub mod dnd;
+pub mod enum_table;
+pub mod filter;
 pub mod find_actions;
 pub mod sync;
 pub mod handler;
@@ -43,8 +46,10 @@ pub mod plugin;
 pub mod property_manager;
 pub mod provider;
 pub mod editor;
+pub mod tasks;
 pub mod tree;
 pub mod util;
+pub mod utils;
 
 // Re-export the most-used public types at the datamgr level.
 pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArchive,

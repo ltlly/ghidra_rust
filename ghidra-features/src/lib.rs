@@ -170,6 +170,51 @@ pub use base::function;
 /// Ported from `ghidra.app.plugin.core.console`.
 pub use base::console;
 
+/// Plugin events for program lifecycle, location, selection, and highlighting.
+///
+/// Ported from `ghidra.app.events`.
+pub use base::events;
+
+/// Action context types for the docking action framework.
+///
+/// Ported from `ghidra.app.context`.
+pub use base::context;
+
+/// Command pattern implementations for undoable program modifications.
+///
+/// Ported from `ghidra.app.cmd`.
+pub use base::cmd;
+
+/// Service interfaces for the plugin framework.
+///
+/// Ported from `ghidra.app.services`.
+pub use base::services;
+
+/// Navigation types for program viewers and navigatables.
+///
+/// Ported from `ghidra.app.nav`.
+pub use base::nav;
+
+/// Table chooser dialog framework.
+///
+/// Ported from `ghidra.app.tablechooser`.
+pub use base::tablechooser;
+
+/// Binary format analyzers that run during import.
+///
+/// Ported from `ghidra.app.analyzers`.
+pub use base::analyzers;
+
+/// Application-level actions.
+///
+/// Ported from `ghidra.app.actions`.
+pub use base::actions;
+
+/// Plugin component factories.
+///
+/// Ported from `ghidra.app.factory`.
+pub use base::factory;
+
 // Selective re-exports from base::analyzer used by this crate's FeatureManager
 pub use base::analyzer::Analyzer;
 pub use base::analyzer::Program;

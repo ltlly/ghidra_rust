@@ -15,6 +15,7 @@
 
 pub mod info;
 pub mod key_path;
+pub mod path_filter_expr;
 pub mod path_matcher;
 pub mod path_pattern;
 pub mod schema_context;
@@ -22,6 +23,7 @@ pub mod trace_object;
 pub mod visitors;
 
 pub use key_path::KeyPath;
+pub use path_filter_expr::PathFilterExpr;
 pub use path_matcher::{NoneFilter, PathFilter, PathMatcher};
 pub use path_pattern::{Align, PathPattern};
 pub use trace_object::{ObjectEntry, ObjectValue, TraceObject, TraceObjectManager};

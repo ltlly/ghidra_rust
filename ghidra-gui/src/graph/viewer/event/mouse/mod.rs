@@ -10,6 +10,8 @@
 //! - Satellite navigation
 //! - Animated transitions
 
+pub mod plugins;
+
 /// Mouse event types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseEventType {

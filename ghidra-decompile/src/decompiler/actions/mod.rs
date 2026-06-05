@@ -6,6 +6,7 @@
 //! decompiler view. In the Rust port, we provide the action definitions and
 //! metadata only (no Swing/AWT integration).
 
+pub mod action_types;
 pub mod edit_actions;
 pub mod extra_actions;
 

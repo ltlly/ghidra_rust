@@ -18,6 +18,10 @@ pub enum TraceSymbolKind {
     Class,
     /// A function symbol.
     Function,
+    /// A reference symbol (xref between addresses).
+    Reference,
+    /// An equate symbol (named constant).
+    Equate,
 }
 
 /// A symbol in the trace.

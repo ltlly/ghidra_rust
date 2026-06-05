@@ -13,6 +13,9 @@
 //! - [`VisualGraphLayout`] -- the main visual graph layout interface
 //! - [`AbstractVisualGraphLayout`] -- base implementation
 
+pub mod grid_location_map;
+pub mod layout_provider;
+
 use std::collections::HashMap;
 
 use super::{Point2D, Rect2D};
@@ -372,6 +375,11 @@ impl LayoutLocationMap {
 
     fn invalidate_bounds(&mut self) {
         self.bounds = None;
+    }
+
+    /// Iterate over all (vertex_id, position) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Point2D)> {
+        self.positions.iter()
     }
 
     fn recompute_bounds(&mut self) {

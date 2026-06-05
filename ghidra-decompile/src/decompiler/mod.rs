@@ -66,6 +66,7 @@ pub mod analysis_cmd;
 pub mod analysis_plugin;
 pub mod clang_line;
 pub mod clang_node;
+pub mod clang_token_ext;
 pub mod clang_token_hierarchy;
 pub mod clang_token_types;
 pub mod comments;

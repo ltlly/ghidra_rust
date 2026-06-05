@@ -8,6 +8,7 @@ pub mod exe_table;
 pub mod idf_lookup_table;
 pub mod key_value_table;
 pub mod optional_table;
+pub mod sql_complex_table;
 pub mod sql_string_table;
 pub mod vector_store;
 pub mod weight_table;

@@ -18,6 +18,11 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.symboltree.nodes` package.
 pub mod nodes;
 
+/// Category nodes and tree root for the symbol tree.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.nodes` category and root classes.
+pub mod category_nodes;
+
 /// Symbol tree user actions (delete, rename, create, cut/paste, etc.).
 ///
 /// Ported from Ghidra's `ghidra.app.plugin.core.symboltree.actions` package.

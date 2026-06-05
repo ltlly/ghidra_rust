@@ -52,3 +52,41 @@ pub mod select;
 pub mod stack;
 pub mod subroutine;
 pub mod symbol;
+
+// -- New modules ported from Ghidra's Features/Base app packages --
+/// Plugin events for program lifecycle, location, selection, and highlighting.
+/// Ported from `ghidra.app.events`.
+pub mod events;
+
+/// Action context types for Ghidra's docking action framework.
+/// Ported from `ghidra.app.context`.
+pub mod context;
+
+/// Command pattern implementations for undoable program modifications.
+/// Ported from `ghidra.app.cmd` (sub-packages: analysis, comments, data,
+/// disassemble, equate, formats, function, label, memory, module, refs, register).
+pub mod cmd;
+
+/// Service interfaces for Ghidra's plugin framework.
+/// Ported from `ghidra.app.services`.
+pub mod services;
+
+/// Navigation types for program viewers and navigatables.
+/// Ported from `ghidra.app.nav`.
+pub mod nav;
+
+/// Table chooser dialog framework.
+/// Ported from `ghidra.app.tablechooser`.
+pub mod tablechooser;
+
+/// Binary format analyzers that run automatically during import.
+/// Ported from `ghidra.app.analyzers`.
+pub mod analyzers;
+
+/// Application-level actions.
+/// Ported from `ghidra.app.actions`.
+pub mod actions;
+
+/// Plugin component factories.
+/// Ported from `ghidra.app.factory`.
+pub mod factory;

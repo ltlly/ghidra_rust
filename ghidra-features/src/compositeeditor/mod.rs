@@ -20,6 +20,16 @@
 /// Ported from individual action classes in `ghidra.app.plugin.core.compositeeditor`.
 pub mod actions;
 
+/// Bit-field placement visualization component.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.BitFieldPlacementComponent`.
+pub mod bitfield_placement;
+
+/// Cell editor for inline editing of data type names and field names.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.ComponentCellEditor`.
+pub mod cell_editor;
+
 /// Bidirectional ID mapping between view and original data type managers.
 ///
 /// Ported from `ghidra.app.plugin.core.compositeeditor.IDMapDB`.
@@ -29,6 +39,23 @@ pub mod idmap;
 ///
 /// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeEditorModel`.
 pub mod model;
+
+/// Editor provider types (EditorProvider, StructureEditorProvider, UnionEditorProvider).
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.EditorProvider` and
+/// related provider classes.
+pub mod provider;
+
+/// Cell renderers for the composite editor table.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.DataTypeCellRenderer`
+/// and `DndTableCellRenderer`.
+pub mod renderer;
+
+/// Search control panel for type-ahead data type selection.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.SearchControlPanel`.
+pub mod search_control;
 
 /// Editor action contexts for composite editor operations.
 ///

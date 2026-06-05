@@ -4,6 +4,7 @@
 
 pub mod apply_tasks;
 pub mod filters;
+pub mod filter_type_ext;
 pub mod filter_types;
 pub mod overview;
 pub mod search_dialog;

@@ -3,6 +3,8 @@
 //! Port of `ghidra.features.bsim.query.protocol`:
 //! client-server protocol types for BSim queries.
 
+pub mod protocol_ext;
+
 use serde::{Deserialize, Serialize};
 
 use super::super::description::{

@@ -9,6 +9,7 @@ pub mod address_snap;
 pub mod bookmark;
 pub mod bookmark_ops;
 pub mod breakpoint;
+pub mod breakpoint_spec;
 pub mod changeset;
 pub mod code_ops;
 pub mod context;
@@ -20,6 +21,7 @@ pub mod execution_state;
 pub mod guest;
 pub mod lifespan;
 pub mod listing;
+pub mod listing_views;
 pub mod map;
 pub mod mem_buffer;
 pub mod memory;
@@ -39,6 +41,7 @@ pub mod stack;
 pub mod symbol;
 pub mod symbol_types;
 pub mod symbol_views;
+pub mod symbol_views_extra;
 pub mod target_iface;
 pub mod target_info;
 pub mod target_manager;
@@ -50,13 +53,18 @@ pub mod time;
 pub mod time_schedule;
 pub mod trace;
 pub mod trace_emulation;
+pub mod trace_event;
 pub mod trace_location;
 pub mod trace_method;
+pub mod trace_object_value;
 pub mod trace_span;
 
 pub use address_snap::{AddressSnap, TraceAddressSnapRange};
 pub use bookmark::{TraceBookmark, TraceBookmarkManager, TraceBookmarkType};
 pub use breakpoint::{BreakpointKindSet, TraceBreakpointKind};
+pub use breakpoint_spec::{
+    TraceBreakpointCommon, TraceBreakpointLocation, TraceBreakpointSpec,
+};
 pub use changeset::{ChangeType, TraceChangeRecord, TraceChangeSet};
 pub use context::{ContextAddressRange, ContextRegisterValue, LanguageId, RegisterId, TraceRegisterContextOperations};
 pub use data_type::{DataTypeConflictHandler, TraceBasedDataTypeManager, TraceDataType};
@@ -68,6 +76,10 @@ pub use execution_state::TraceExecutionState;
 pub use guest::{TraceGuestPlatformMappedRange, TracePlatform, TracePlatformManager};
 pub use lifespan::{is_scratch, Lifespan};
 pub use listing::{CodeUnitType, TraceCodeManager, TraceCodeUnit, TraceCodeIndex};
+pub use listing_views::{
+    TraceCodeUnitsView, TraceDataView, TraceDefinedDataView, TraceDefinedUnitsView,
+    TraceInstructionsView, TraceUndefinedDataView,
+};
 pub use map::TraceAddressSnapRangePropertyMap;
 pub use memory::{TraceMemoryRegion, TraceMemoryState};
 pub use memory_ext::{MemoryRegionBuilder, TraceMemorySpaceInputStream, TraceOverlappedRegionException};
@@ -87,6 +99,10 @@ pub use symbol::{
 pub use symbol_views::{
     TraceClassSymbolView, TraceEquateView, TraceLabelSymbolView, TraceNamespaceSymbolView,
     TraceReferenceView, TraceSymbolNoDuplicatesView, TraceSymbolView,
+};
+pub use symbol_views_extra::{
+    TraceSymbolWithAddressNoDuplicatesView, TraceSymbolWithAddressView,
+    TraceSymbolWithLocationView,
 };
 pub use target_iface::{
     ExecutionState, TraceActivatable, TraceAggregate, TraceEnvironment, TraceEventScope,
@@ -125,4 +141,10 @@ pub use register_context_ops::{
 };
 pub use symbol_types::{
     TraceClassSymbol, TraceLabelSymbol, TraceNamespaceSymbol, TraceSymbolWithLifespan,
+};
+pub use trace_event::{
+    LogLevel, TraceEvent, TraceEventManager, TraceEventType, TraceLogEntry, TraceLogManager,
+};
+pub use trace_object_value::{
+    ChangeCollector, TargetTreeSnapshot, TraceObjectChangeListener, ValueChangeEvent, ValueChangeKind,
 };

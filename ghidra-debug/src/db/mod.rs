@@ -45,8 +45,10 @@ pub mod trace_db_data_type_mgr;
 pub mod trace_db_direct_listener;
 pub mod trace_db_equate;
 pub mod trace_db_equate_space;
+pub mod trace_db_event_scope;
 pub mod trace_db_fragment;
 pub mod trace_db_guest;
+pub mod trace_db_method;
 pub mod trace_db_instruction;
 pub mod trace_db_label;
 pub mod trace_db_link_content;
@@ -113,6 +115,8 @@ pub use trace_db_program_view::{
 pub use trace_db_value_storage::{
     ImmutableValueBox, ImmutableValueShape, ValueBox, ValueShape, ValueSpace, ValueTriple,
 };
+pub use trace_db_event_scope::{DbEventScopeManager, DbObjectEventScope};
+pub use trace_db_method::{DbMethodManager, DbObjectMethod, MethodParameter};
 pub use trace_db_visitors::{
     AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,
     CanonicalSuccessorsRelativeVisitor, OrderedSuccessorsVisitor, SuccessorsRelativeVisitor,
