@@ -75,6 +75,12 @@ pub mod region_map_proposal_impl;
 pub mod section_map_proposal_impl;
 pub mod module_map_proposal_impl;
 
+// New service plugin implementations from Debugger module
+pub mod breakpoint_service_plugin;
+pub mod tracemgr_service_plugin;
+pub mod dynamic_static_sync;
+pub mod program_emulation_utils;
+
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
     DebuggerAutoMappingService as AutoMappingServiceExt,

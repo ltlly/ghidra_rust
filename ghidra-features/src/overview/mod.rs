@@ -406,6 +406,133 @@ pub struct OverviewSaveState {
     pub active_service_names: Vec<String>,
 }
 
+// ---------------------------------------------------------------------------
+// AbstractColorOverviewAction
+// ---------------------------------------------------------------------------
+
+/// Base type for popup overview bar actions.
+///
+/// Ported from `ghidra.app.plugin.core.overview.AbstractColorOverviewAction`.
+///
+/// In the original Java this extends `DockingAction` and checks that the
+/// action context's component matches the overview component.  Here we
+/// capture just the model data.
+#[derive(Debug, Clone)]
+pub struct AbstractColorOverviewAction {
+    /// Action name (shown in popup menu).
+    pub name: String,
+    /// Owner plugin name.
+    pub owner: String,
+    /// Help topic identifier.
+    pub help_topic: String,
+    /// Help location name.
+    pub help_name: String,
+}
+
+impl AbstractColorOverviewAction {
+    /// Create a new abstract overview color action.
+    pub fn new(
+        name: impl Into<String>,
+        owner: impl Into<String>,
+        help_topic: impl Into<String>,
+        help_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            owner: owner.into(),
+            help_topic: help_topic.into(),
+            help_name: help_name.into(),
+        }
+    }
+
+    /// Check if the action is valid for the given context component name.
+    ///
+    /// In the Java original, this checks `context.getContextObject() == component`.
+    /// Here we compare component identifiers.
+    pub fn is_valid_context(&self, component_id: &str, context_component_id: &str) -> bool {
+        component_id == context_component_id
+    }
+}
+
+// ---------------------------------------------------------------------------
+// OverviewColorLegendDialog
+// ---------------------------------------------------------------------------
+
+/// Dialog for showing a legend for an overview color component.
+///
+/// Ported from `ghidra.app.plugin.core.overview.OverviewColorLegendDialog`.
+///
+/// This is a simple dialog that displays a component (the legend) and
+/// provides a "Dismiss" button.  In the non-GUI Rust port we model just
+/// the data/state.
+#[derive(Debug, Clone)]
+pub struct OverviewColorLegendDialog {
+    /// Dialog title.
+    pub title: String,
+    /// Whether the dialog is currently visible.
+    pub visible: bool,
+    /// Help location.
+    pub help_topic: String,
+    pub help_name: String,
+    /// The legend entries to display.
+    pub legend_entries: Vec<LegendEntry>,
+}
+
+/// A single entry in the overview color legend.
+#[derive(Debug, Clone)]
+pub struct LegendEntry {
+    /// The color swatch for this entry.
+    pub color: RgbColor,
+    /// The label for this entry.
+    pub label: String,
+}
+
+impl OverviewColorLegendDialog {
+    /// Create a new legend dialog.
+    pub fn new(
+        title: impl Into<String>,
+        help_topic: impl Into<String>,
+        help_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            title: title.into(),
+            visible: false,
+            help_topic: help_topic.into(),
+            help_name: help_name.into(),
+            legend_entries: Vec::new(),
+        }
+    }
+
+    /// Add a legend entry.
+    pub fn add_entry(&mut self, color: RgbColor, label: impl Into<String>) {
+        self.legend_entries.push(LegendEntry {
+            color,
+            label: label.into(),
+        });
+    }
+
+    /// Show the dialog.
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+
+    /// Dismiss the dialog.
+    pub fn dismiss(&mut self) {
+        self.visible = false;
+    }
+
+    /// Whether the dialog is visible.
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Request a repaint of the dialog content.
+    pub fn refresh(&self) {
+        // In a real GUI framework, this would trigger a repaint.
+        // Here it's a no-op placeholder.
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -577,5 +704,60 @@ mod tests {
         let json = serde_json::to_string(&state).unwrap();
         let restored: OverviewSaveState = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.active_service_names, state.active_service_names);
+    }
+
+    // --- Tests for newly ported types ---
+
+    #[test]
+    fn test_abstract_color_overview_action() {
+        let action = AbstractColorOverviewAction::new(
+            "Toggle Entropy",
+            "OverviewColorPlugin",
+            "Overview",
+            "Entropy_Color",
+        );
+        assert_eq!(action.name, "Toggle Entropy");
+        assert_eq!(action.owner, "OverviewColorPlugin");
+        assert!(action.is_valid_context("comp1", "comp1"));
+        assert!(!action.is_valid_context("comp1", "comp2"));
+    }
+
+    #[test]
+    fn test_overview_color_legend_dialog() {
+        let mut dialog = OverviewColorLegendDialog::new(
+            "Color Legend",
+            "Overview",
+            "Color_Legend",
+        );
+        assert_eq!(dialog.title, "Color Legend");
+        assert!(!dialog.is_visible());
+
+        dialog.add_entry(RgbColor::new(255, 0, 0), "Code");
+        dialog.add_entry(RgbColor::new(0, 255, 0), "Data");
+        dialog.add_entry(RgbColor::new(0, 0, 255), "Function");
+        assert_eq!(dialog.legend_entries.len(), 3);
+
+        dialog.show();
+        assert!(dialog.is_visible());
+
+        dialog.dismiss();
+        assert!(!dialog.is_visible());
+    }
+
+    #[test]
+    fn test_legend_entry() {
+        let entry = LegendEntry {
+            color: RgbColor::new(128, 64, 32),
+            label: "Test".to_string(),
+        };
+        assert_eq!(entry.label, "Test");
+        assert_eq!(entry.color.r, 128);
+    }
+
+    #[test]
+    fn test_overview_color_legend_dialog_refresh() {
+        let dialog = OverviewColorLegendDialog::new("T", "H", "N");
+        // Should not panic
+        dialog.refresh();
     }
 }

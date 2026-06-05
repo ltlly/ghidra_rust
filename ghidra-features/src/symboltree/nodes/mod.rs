@@ -314,6 +314,149 @@ impl MoreNode {
     }
 }
 
+/// A special symbol node used as a key when searching for other symbol nodes.
+///
+/// Allows searching for another symbol node using whatever name is desired,
+/// overriding the symbol's actual name.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.nodes.SearchKeySymbolNode`.
+#[derive(Debug, Clone)]
+pub struct SearchKeySymbolNode {
+    /// The base symbol node data.
+    pub base: SymbolTreeNodeData,
+    /// The search name used for lookups instead of the symbol's real name.
+    pub search_name: String,
+}
+
+impl SearchKeySymbolNode {
+    /// Create a new search key node with a custom search name.
+    pub fn new(
+        name: impl Into<String>,
+        kind: SymbolNodeKind,
+        symbol_id: u64,
+        search_name: impl Into<String>,
+    ) -> Self {
+        let search = search_name.into();
+        assert!(!search.is_empty(), "search_name must not be null/empty");
+        let base = SymbolTreeNodeData {
+            name: search.clone(),
+            kind,
+            symbol_id,
+            address: 0,
+            namespace_path: String::new(),
+            loaded: false,
+            cut: false,
+            children: Vec::new(),
+        };
+        Self {
+            base,
+            search_name: search,
+        }
+    }
+
+    /// Get the effective name used for searching.
+    pub fn name(&self) -> &str {
+        &self.search_name
+    }
+
+    /// Get the symbol ID.
+    pub fn symbol_id(&self) -> u64 {
+        self.base.symbol_id
+    }
+
+    /// Get the kind.
+    pub fn kind(&self) -> SymbolNodeKind {
+        self.base.kind
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExportCategoryNode
+// ---------------------------------------------------------------------------
+
+/// A category node for the "Exports" section of the symbol tree.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.nodes.ExportsCategoryNode`.
+#[derive(Debug, Clone)]
+pub struct ExportsCategoryNode {
+    /// The display name.
+    pub name: String,
+    /// Child export symbol nodes.
+    pub children: Vec<SymbolTreeNodeData>,
+}
+
+impl ExportsCategoryNode {
+    /// Create a new exports category node.
+    pub fn new() -> Self {
+        Self {
+            name: "Exports".to_string(),
+            children: Vec::new(),
+        }
+    }
+
+    /// Add an export symbol.
+    pub fn add_export(&mut self, node: SymbolTreeNodeData) {
+        self.children.push(node);
+    }
+
+    /// Number of exports.
+    pub fn count(&self) -> usize {
+        self.children.len()
+    }
+}
+
+impl Default for ExportsCategoryNode {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ConfigurableSymbolTreeRootNode
+// ---------------------------------------------------------------------------
+
+/// A configurable root node for the symbol tree.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.nodes.ConfigurableSymbolTreeRootNode`.
+#[derive(Debug, Clone)]
+pub struct ConfigurableSymbolTreeRootNode {
+    /// The display name.
+    pub name: String,
+    /// Top-level category children.
+    pub categories: Vec<SymbolTreeNodeData>,
+    /// Whether the root is expanded.
+    pub expanded: bool,
+}
+
+impl ConfigurableSymbolTreeRootNode {
+    /// Create a new configurable root node.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            categories: Vec::new(),
+            expanded: true,
+        }
+    }
+
+    /// Add a category node.
+    pub fn add_category(&mut self, category: SymbolTreeNodeData) {
+        self.categories.push(category);
+    }
+
+    /// Total number of symbols across all categories.
+    pub fn total_symbols(&self) -> usize {
+        self.categories
+            .iter()
+            .map(|c| c.descendant_count() + 1)
+            .sum()
+    }
+
+    /// Find a category by name.
+    pub fn find_category(&self, name: &str) -> Option<&SymbolTreeNodeData> {
+        self.categories.iter().find(|c| c.name == name)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -443,5 +586,51 @@ mod tests {
         assert_eq!(SymbolTreeNodeData::code_label("l", 0, 0).icon_name(), "CodeIcon");
         assert_eq!(SymbolTreeNodeData::class("c", 0).icon_name(), "ClassIcon");
         assert_eq!(SymbolTreeNodeData::library("lib", 0).icon_name(), "LibraryIcon");
+    }
+
+    #[test]
+    fn test_search_key_symbol_node() {
+        let node = SearchKeySymbolNode::new("real_name", SymbolNodeKind::Function, 42, "lookup_key");
+        assert_eq!(node.name(), "lookup_key");
+        assert_eq!(node.symbol_id(), 42);
+        assert_eq!(node.kind(), SymbolNodeKind::Function);
+    }
+
+    #[test]
+    fn test_exports_category_node() {
+        let mut exports = ExportsCategoryNode::new();
+        assert_eq!(exports.count(), 0);
+        exports.add_export(SymbolTreeNodeData::code_label("printf", 0x1000, 1));
+        exports.add_export(SymbolTreeNodeData::function("main", 0x2000, 2));
+        assert_eq!(exports.count(), 2);
+    }
+
+    #[test]
+    fn test_configurable_root_node() {
+        let mut root = ConfigurableSymbolTreeRootNode::new("Program");
+        root.add_category(SymbolTreeNodeData::new("Functions", SymbolNodeKind::Namespace));
+        root.add_category(SymbolTreeNodeData::new("Labels", SymbolNodeKind::Namespace));
+        assert_eq!(root.categories.len(), 2);
+        assert!(root.find_category("Functions").is_some());
+        assert!(root.find_category("Missing").is_none());
+        assert!(root.expanded);
+    }
+
+    #[test]
+    fn test_configurable_root_total_symbols() {
+        let mut root = ConfigurableSymbolTreeRootNode::new("Program");
+        let mut funcs = SymbolTreeNodeData::new("Functions", SymbolNodeKind::Namespace);
+        funcs.add_child(SymbolTreeNodeData::function("a", 0x100, 1));
+        funcs.add_child(SymbolTreeNodeData::function("b", 0x200, 2));
+        root.add_category(funcs);
+        // Functions category + 2 children = 3
+        assert_eq!(root.total_symbols(), 3);
+    }
+
+    #[test]
+    fn test_more_node_display() {
+        let more = MoreNode::new(100, "A");
+        assert_eq!(more.display_text(), "(100 more...)");
+        assert_eq!(more.prefix, "A");
     }
 }

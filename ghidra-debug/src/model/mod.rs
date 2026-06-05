@@ -248,3 +248,4 @@ pub mod trace_property_map_ops;
 pub mod trace_program_view_ext;
 pub mod trace_memory_space_input_stream;
 pub mod trace_data_type_ops;
+pub mod memory_stream;

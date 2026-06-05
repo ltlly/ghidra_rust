@@ -15,6 +15,7 @@ pub mod method_protector;
 pub mod trace_register_utils;
 pub mod trace_space_mixin;
 pub mod trace_event_queue;
+pub mod wrapping_iterators;
 
 pub use byte_array_utils::{
     compute_diffs_address_set, hash_bytes, AddressSet, DiffRange,

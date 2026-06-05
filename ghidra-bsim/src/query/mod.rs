@@ -22,10 +22,17 @@ pub mod lsh;
 pub mod postgresql;
 pub mod protocol;
 pub mod additional_protocol;
+pub mod response_types;
 pub mod server_cache;
 pub mod server_config;
 pub mod sf_query_service;
 pub mod tables;
+pub mod child_match_record;
+pub mod lsh_exception;
+pub mod bsim_data_source;
+pub mod bsim_db_connect_task_manager;
+pub mod bsim_postgres_connection_manager;
+pub mod bsim_control_launchable;
 
 use std::fmt;
 

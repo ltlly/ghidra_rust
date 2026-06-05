@@ -12,3 +12,4 @@ pub mod event_queues;
 pub mod gspan_field;
 pub mod rstar_diagnostics;
 pub mod domain_object_adapter;
+pub mod change_tracker;

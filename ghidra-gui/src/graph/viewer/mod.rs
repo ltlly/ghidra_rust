@@ -28,6 +28,11 @@ pub mod path_highlight_mode;
 pub mod satellite_graph_viewer;
 pub mod visual_graph_view;
 
+// Additional graph viewer modules ported from Ghidra
+pub mod graph_viewer;
+pub mod view_updater;
+pub mod calculate_layout_task;
+
 use std::collections::HashMap;
 
 /// Point in 2D space.

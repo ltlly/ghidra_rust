@@ -504,6 +504,562 @@ impl Default for StringTablePlugin {
 // Tests
 // ===========================================================================
 
+// ---------------------------------------------------------------------------
+// StringsAnalyzer -- automatic string discovery analyzer
+// ---------------------------------------------------------------------------
+
+/// Alignment options for string start address.
+///
+/// Ported from `ghidra.app.plugin.core.string.StringsAnalyzer.Alignment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringAlignment {
+    /// No alignment requirement.
+    Align1 = 1,
+    /// Must start on even address.
+    Align2 = 2,
+    /// Must start on 4-byte boundary.
+    Align4 = 4,
+}
+
+impl StringAlignment {
+    /// Get the alignment value.
+    pub fn value(&self) -> usize {
+        *self as usize
+    }
+
+    /// All alignment choices.
+    pub fn all() -> &'static [StringAlignment] {
+        &[StringAlignment::Align1, StringAlignment::Align2, StringAlignment::Align4]
+    }
+}
+
+/// Minimum string length options.
+///
+/// Ported from `ghidra.app.plugin.core.string.StringsAnalyzer.MinStringLen`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MinStringLen {
+    /// 4 characters minimum.
+    Len4,
+    /// 5 characters minimum.
+    Len5,
+    /// 6 characters minimum.
+    Len6,
+    /// 8 characters minimum.
+    Len8,
+    /// 10 characters minimum.
+    Len10,
+    /// 16 characters minimum.
+    Len16,
+    /// 20 characters minimum.
+    Len20,
+    /// 25 characters minimum.
+    Len25,
+}
+
+impl MinStringLen {
+    /// Get the minimum length value.
+    pub fn value(&self) -> usize {
+        match self {
+            Self::Len4 => 4,
+            Self::Len5 => 5,
+            Self::Len6 => 6,
+            Self::Len8 => 8,
+            Self::Len10 => 10,
+            Self::Len16 => 16,
+            Self::Len20 => 20,
+            Self::Len25 => 25,
+        }
+    }
+}
+
+/// Configuration options for the StringsAnalyzer.
+///
+/// Ported from `ghidra.app.plugin.core.string.StringsAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct StringsAnalyzerOptions {
+    /// NGram model file name (e.g., "StringModel.sng").
+    pub model_name: String,
+    /// Force model reload on next run.
+    pub force_model_reload: bool,
+    /// Minimum string length.
+    pub min_string_length: usize,
+    /// Require null termination.
+    pub require_null_termination: bool,
+    /// String start alignment.
+    pub start_alignment: StringAlignment,
+    /// String end alignment.
+    pub end_alignment: usize,
+    /// Allow creating strings that contain (but don't start with) references.
+    pub allow_creation_with_middle_refs: bool,
+    /// Allow creating strings that overlap existing strings.
+    pub allow_creation_with_existing_substring: bool,
+    /// Only search in accessible (R/W/X) memory blocks.
+    pub search_only_accessible_blocks: bool,
+}
+
+impl Default for StringsAnalyzerOptions {
+    fn default() -> Self {
+        Self {
+            model_name: "StringModel.sng".to_string(),
+            force_model_reload: false,
+            min_string_length: 5,
+            require_null_termination: true,
+            start_alignment: StringAlignment::Align1,
+            end_alignment: 4,
+            allow_creation_with_middle_refs: true,
+            allow_creation_with_existing_substring: true,
+            search_only_accessible_blocks: true,
+        }
+    }
+}
+
+/// The ASCII Strings analyzer.
+///
+/// Searches for valid ASCII strings in memory and automatically creates
+/// them as defined data.  Uses n-gram models to score string candidates.
+///
+/// Ported from `ghidra.app.plugin.core.string.StringsAnalyzer`.
+#[derive(Debug)]
+pub struct StringsAnalyzer {
+    /// Analyzer name.
+    pub name: String,
+    /// Description.
+    pub description: String,
+    /// Whether the analyzer is enabled.
+    pub enabled: bool,
+    /// Configuration options.
+    pub options: StringsAnalyzerOptions,
+    /// Whether it supports one-time analysis.
+    pub supports_one_time: bool,
+}
+
+impl StringsAnalyzer {
+    /// Create a new StringsAnalyzer with default options.
+    pub fn new() -> Self {
+        Self {
+            name: "ASCII Strings".to_string(),
+            description: "This analyzer searches for valid ASCII strings and automatically creates them in the binary.".to_string(),
+            enabled: true,
+            options: StringsAnalyzerOptions::default(),
+            supports_one_time: true,
+        }
+    }
+
+    /// Check whether this analyzer can analyze the given program.
+    ///
+    /// Returns true if the program has a minimum address (i.e., memory is defined).
+    pub fn can_analyze(&self, has_memory: bool) -> bool {
+        has_memory
+    }
+
+    /// Set the model file name.
+    pub fn set_model_name(&mut self, name: impl Into<String>) {
+        let n = name.into();
+        self.options.model_name = if n.ends_with(".sng") {
+            n
+        } else {
+            format!("{}.sng", n)
+        };
+    }
+
+    /// Set minimum string length.
+    pub fn set_min_string_length(&mut self, length: usize) {
+        self.options.min_string_length = length.max(4);
+    }
+
+    /// Set null termination requirement.
+    pub fn set_require_null_termination(&mut self, require: bool) {
+        self.options.require_null_termination = require;
+    }
+
+    /// Set start alignment.
+    pub fn set_start_alignment(&mut self, alignment: StringAlignment) {
+        self.options.start_alignment = alignment;
+    }
+
+    /// Set end alignment.
+    pub fn set_end_alignment(&mut self, alignment: usize) {
+        self.options.end_alignment = if alignment <= 0 { 1 } else { alignment };
+    }
+
+    /// Set whether to force model reload.
+    pub fn set_force_model_reload(&mut self, force: bool) {
+        self.options.force_model_reload = force;
+    }
+
+    /// Set whether to allow string creation over references.
+    pub fn set_allow_creation_with_middle_refs(&mut self, allow: bool) {
+        self.options.allow_creation_with_middle_refs = allow;
+    }
+
+    /// Set whether to allow string creation over existing substrings.
+    pub fn set_allow_creation_with_existing_substring(&mut self, allow: bool) {
+        self.options.allow_creation_with_existing_substring = allow;
+    }
+
+    /// Set whether to search only accessible memory blocks.
+    pub fn set_search_only_accessible_blocks(&mut self, only_accessible: bool) {
+        self.options.search_only_accessible_blocks = only_accessible;
+    }
+
+    /// Analyze memory for strings.  Returns found strings that pass the
+    /// n-gram scoring model.
+    pub fn analyze(
+        &self,
+        memory: &[u8],
+        base_address: u64,
+    ) -> Vec<FoundString> {
+        let min_len = self.options.min_string_length;
+        let align = self.options.start_alignment.value();
+        let require_null = self.options.require_null_termination;
+
+        let mut results = Vec::new();
+        let mut i = 0;
+
+        while i < memory.len() {
+            // Check alignment
+            let addr = base_address + i as u64;
+            if (addr % align as u64) != 0 {
+                i += 1;
+                continue;
+            }
+
+            // Find a run of printable ASCII characters
+            let start = i;
+            while i < memory.len() && is_printable_ascii(memory[i]) {
+                i += 1;
+            }
+
+            let str_len = i - start;
+            if str_len >= min_len {
+                // Check null termination
+                let null_terminated = i < memory.len() && memory[i] == 0;
+
+                if !require_null || null_terminated {
+                    let value = String::from_utf8_lossy(&memory[start..start + str_len]).to_string();
+                    let byte_length = if null_terminated {
+                        str_len + 1
+                    } else {
+                        str_len
+                    };
+                    results.push(FoundString::new(
+                        base_address + start as u64,
+                        value,
+                        StringEncoding::Ascii,
+                        byte_length,
+                    ));
+                }
+            }
+
+            if i < memory.len() && !is_printable_ascii(memory[i]) {
+                i += 1;
+            }
+        }
+
+        results
+    }
+}
+
+impl Default for StringsAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Check if a byte is a printable ASCII character (0x20-0x7E).
+fn is_printable_ascii(b: u8) -> bool {
+    (0x20..=0x7E).contains(&b)
+}
+
+// ---------------------------------------------------------------------------
+// FoundDefinedStringIterator
+// ---------------------------------------------------------------------------
+
+/// Iterator over existing defined strings in a program.
+///
+/// Uses a defined data iterator to find all defined data and recursively
+/// searches arrays and structures for string data types.
+///
+/// Ported from `ghidra.app.plugin.core.string.FoundDefinedStringIterator`.
+#[derive(Debug)]
+pub struct FoundDefinedStringIterator {
+    /// The defined data items to iterate over.
+    items: Vec<FoundString>,
+    /// Current position in the items vector.
+    position: usize,
+}
+
+impl FoundDefinedStringIterator {
+    /// Create a new iterator over the given defined strings.
+    pub fn new(items: Vec<FoundString>) -> Self {
+        Self { items, position: 0 }
+    }
+
+    /// Get the next found string.
+    pub fn next(&mut self) -> Option<&FoundString> {
+        if self.position < self.items.len() {
+            let item = &self.items[self.position];
+            self.position += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    /// Check if there are more strings.
+    pub fn has_next(&self) -> bool {
+        self.position < self.items.len()
+    }
+
+    /// Total number of defined strings.
+    pub fn count(&self) -> usize {
+        self.items.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FoundStringWithWordStatus
+// ---------------------------------------------------------------------------
+
+/// A found string that also tracks whether it's a high-confidence word.
+///
+/// Ported from `ghidra.app.plugin.core.string.FoundStringWithWordStatus`.
+#[derive(Debug, Clone)]
+pub struct FoundStringWithWordStatus {
+    /// The base found string.
+    pub found_string: FoundString,
+    /// Whether this string is considered a high-confidence word
+    /// according to the n-gram model.
+    pub is_high_confidence_word: bool,
+}
+
+impl FoundStringWithWordStatus {
+    /// Create a new string with word status.
+    pub fn new(found_string: FoundString) -> Self {
+        Self {
+            found_string,
+            is_high_confidence_word: false,
+        }
+    }
+
+    /// Set the high-confidence word status.
+    pub fn set_is_high_confidence_word(&mut self, status: bool) {
+        self.is_high_confidence_word = status;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SearchStringDialog
+// ---------------------------------------------------------------------------
+
+/// Options for the string search dialog.
+///
+/// Ported from `ghidra.app.plugin.core.string.SearchStringDialog`.
+#[derive(Debug, Clone)]
+pub struct SearchStringDialogOptions {
+    /// Minimum string length.
+    pub min_length: usize,
+    /// Alignment.
+    pub alignment: usize,
+    /// Require null termination.
+    pub require_null_termination: bool,
+    /// Search for Pascal strings.
+    pub pascal_strings: bool,
+    /// Word model file path (empty if not used).
+    pub word_model_file: String,
+    /// Whether to search only loaded blocks.
+    pub loaded_blocks_only: bool,
+    /// Whether to search only the selection.
+    pub search_selection: bool,
+}
+
+impl Default for SearchStringDialogOptions {
+    fn default() -> Self {
+        Self {
+            min_length: 5,
+            alignment: 1,
+            require_null_termination: true,
+            pascal_strings: false,
+            word_model_file: "StringModel.sng".to_string(),
+            loaded_blocks_only: true,
+            search_selection: false,
+        }
+    }
+}
+
+/// Search string dialog model.
+///
+/// Ported from `ghidra.app.plugin.core.string.SearchStringDialog`.
+#[derive(Debug)]
+pub struct SearchStringDialog {
+    /// Current dialog options.
+    pub options: SearchStringDialogOptions,
+    /// Whether the dialog is visible.
+    pub visible: bool,
+    /// Current status text.
+    pub status_text: Option<String>,
+    /// Whether there is a selection in the listing.
+    pub has_selection: bool,
+}
+
+impl SearchStringDialog {
+    /// Create a new search string dialog.
+    pub fn new(has_selection: bool) -> Self {
+        Self {
+            options: SearchStringDialogOptions {
+                search_selection: has_selection,
+                ..Default::default()
+            },
+            visible: false,
+            status_text: None,
+            has_selection,
+        }
+    }
+
+    /// Show the dialog.
+    pub fn show(&mut self) {
+        self.visible = true;
+        self.status_text = None;
+    }
+
+    /// Dismiss the dialog.
+    pub fn dismiss(&mut self) {
+        self.visible = false;
+    }
+
+    /// Validate and accept the dialog, returning the options if valid.
+    pub fn accept(&mut self) -> Result<SearchStringDialogOptions, String> {
+        if self.options.min_length <= 1 {
+            self.status_text =
+                Some("Please enter a valid minimum search length. Must be > 1".to_string());
+            return Err(self.status_text.clone().unwrap());
+        }
+
+        self.visible = false;
+        Ok(self.options.clone())
+    }
+
+    /// Set the minimum string length.
+    pub fn set_min_length(&mut self, length: usize) {
+        self.options.min_length = length;
+    }
+
+    /// Set the alignment.
+    pub fn set_alignment(&mut self, alignment: usize) {
+        self.options.alignment = alignment.max(1);
+    }
+
+    /// Set null termination requirement.
+    pub fn set_require_null_termination(&mut self, require: bool) {
+        self.options.require_null_termination = require;
+    }
+
+    /// Set Pascal strings requirement.
+    pub fn set_pascal_strings(&mut self, pascal: bool) {
+        self.options.pascal_strings = pascal;
+    }
+
+    /// Set the word model file.
+    pub fn set_word_model_file(&mut self, file: impl Into<String>) {
+        self.options.word_model_file = file.into();
+    }
+
+    /// Set whether to use loaded blocks only.
+    pub fn set_loaded_blocks_only(&mut self, loaded_only: bool) {
+        self.options.loaded_blocks_only = loaded_only;
+    }
+
+    /// Set whether to search the selection.
+    pub fn set_search_selection(&mut self, selection: bool) {
+        if selection && !self.has_selection {
+            return; // Cannot search selection if there is none
+        }
+        self.options.search_selection = selection;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StringEventsTask
+// ---------------------------------------------------------------------------
+
+/// Task that processes string events (creation, modification, deletion).
+///
+/// Ported from `ghidra.app.plugin.core.string.StringEventsTask`.
+#[derive(Debug, Clone)]
+pub struct StringEventsTask {
+    /// Task name.
+    pub name: String,
+    /// Address of the string being modified.
+    pub address: u64,
+    /// The event type.
+    pub event: StringEvent,
+    /// Whether the task has completed.
+    pub completed: bool,
+}
+
+/// Types of string events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StringEvent {
+    /// A new string was created.
+    Created,
+    /// An existing string was modified.
+    Modified,
+    /// A string was deleted.
+    Deleted,
+}
+
+impl StringEventsTask {
+    /// Create a new string events task.
+    pub fn new(event: StringEvent, address: u64) -> Self {
+        Self {
+            name: format!("String Event: {:?}", event),
+            address,
+            event,
+            completed: false,
+        }
+    }
+
+    /// Mark the task as completed.
+    pub fn complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Table row mappers
+// ---------------------------------------------------------------------------
+
+/// Maps a `FoundString` to an address for display in a table.
+///
+/// Ported from `ghidra.app.plugin.core.string.FoundStringToAddressTableRowMapper`.
+#[derive(Debug, Clone)]
+pub struct FoundStringToAddressTableRowMapper;
+
+impl FoundStringToAddressTableRowMapper {
+    /// Get the address from a found string row.
+    pub fn get_address(row: &FoundString) -> u64 {
+        row.address
+    }
+}
+
+/// Maps a `FoundString` to a program location for navigation.
+///
+/// Ported from `ghidra.app.plugin.core.string.FoundStringToProgramLocationTableRowMapper`.
+#[derive(Debug, Clone)]
+pub struct FoundStringToProgramLocationTableRowMapper;
+
+impl FoundStringToProgramLocationTableRowMapper {
+    /// Get the program location (address) from a found string row.
+    pub fn get_location(row: &FoundString) -> u64 {
+        row.address
+    }
+
+    /// Get the row index for a given address in a list of found strings.
+    pub fn find_row_for_address(strings: &[FoundString], address: u64) -> Option<usize> {
+        strings.iter().position(|s| s.address == address)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -666,5 +1222,201 @@ mod tests {
         analysis.analyze(&[]);
         assert!(analysis.most_common(10).is_empty());
         assert_eq!(analysis.score("anything"), 0.0);
+    }
+
+    // --- Tests for newly ported types ---
+
+    #[test]
+    fn test_strings_analyzer_default() {
+        let analyzer = StringsAnalyzer::new();
+        assert_eq!(analyzer.name, "ASCII Strings");
+        assert!(analyzer.enabled);
+        assert!(analyzer.supports_one_time);
+        assert!(analyzer.options.require_null_termination);
+        assert_eq!(analyzer.options.min_string_length, 5);
+        assert_eq!(analyzer.options.end_alignment, 4);
+    }
+
+    #[test]
+    fn test_strings_analyzer_can_analyze() {
+        let analyzer = StringsAnalyzer::new();
+        assert!(analyzer.can_analyze(true));
+        assert!(!analyzer.can_analyze(false));
+    }
+
+    #[test]
+    fn test_strings_analyzer_set_model_name() {
+        let mut analyzer = StringsAnalyzer::new();
+        analyzer.set_model_name("TestModel");
+        assert_eq!(analyzer.options.model_name, "TestModel.sng");
+
+        analyzer.set_model_name("Other.sng");
+        assert_eq!(analyzer.options.model_name, "Other.sng");
+    }
+
+    #[test]
+    fn test_strings_analyzer_analyze() {
+        let analyzer = StringsAnalyzer::new();
+        // Memory with a printable ASCII string "Hello World" followed by null
+        let memory = b"\x00\x00Hello World\x00\x00\x00";
+        let results = analyzer.analyze(memory, 0x1000);
+        assert!(!results.is_empty());
+        assert!(results.iter().any(|s| s.value == "Hello World"));
+    }
+
+    #[test]
+    fn test_strings_analyzer_analyze_short_string() {
+        let mut analyzer = StringsAnalyzer::new();
+        analyzer.set_min_string_length(8);
+        let memory = b"Hi\x00"; // too short
+        let results = analyzer.analyze(memory, 0x1000);
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_strings_analyzer_analyze_no_null() {
+        let mut analyzer = StringsAnalyzer::new();
+        analyzer.set_require_null_termination(false);
+        let memory = b"Hello World more text here";
+        let results = analyzer.analyze(memory, 0x1000);
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_string_alignment() {
+        assert_eq!(StringAlignment::Align1.value(), 1);
+        assert_eq!(StringAlignment::Align2.value(), 2);
+        assert_eq!(StringAlignment::Align4.value(), 4);
+        assert_eq!(StringAlignment::all().len(), 3);
+    }
+
+    #[test]
+    fn test_min_string_len() {
+        assert_eq!(MinStringLen::Len4.value(), 4);
+        assert_eq!(MinStringLen::Len5.value(), 5);
+        assert_eq!(MinStringLen::Len25.value(), 25);
+    }
+
+    #[test]
+    fn test_found_defined_string_iterator() {
+        let strings = vec![
+            FoundString::new(0x100, "first", StringEncoding::Ascii, 6),
+            FoundString::new(0x200, "second", StringEncoding::Ascii, 7),
+            FoundString::new(0x300, "third", StringEncoding::Ascii, 6),
+        ];
+        let mut iter = FoundDefinedStringIterator::new(strings);
+        assert!(iter.has_next());
+        assert_eq!(iter.count(), 3);
+
+        let s1 = iter.next().unwrap();
+        assert_eq!(s1.value, "first");
+
+        let s2 = iter.next().unwrap();
+        assert_eq!(s2.value, "second");
+
+        let s3 = iter.next().unwrap();
+        assert_eq!(s3.value, "third");
+
+        assert!(!iter.has_next());
+        assert!(iter.next().is_none());
+    }
+
+    #[test]
+    fn test_found_string_with_word_status() {
+        let fs = FoundString::new(0x100, "error", StringEncoding::Ascii, 6);
+        let mut ws = FoundStringWithWordStatus::new(fs);
+        assert!(!ws.is_high_confidence_word);
+
+        ws.set_is_high_confidence_word(true);
+        assert!(ws.is_high_confidence_word);
+    }
+
+    #[test]
+    fn test_search_string_dialog() {
+        let mut dialog = SearchStringDialog::new(true);
+        assert!(dialog.has_selection);
+        assert!(!dialog.visible);
+
+        dialog.show();
+        assert!(dialog.visible);
+
+        dialog.set_min_length(3);
+        let result = dialog.accept();
+        assert!(result.is_ok());
+        let opts = result.unwrap();
+        assert_eq!(opts.min_length, 3);
+        assert!(!dialog.visible);
+    }
+
+    #[test]
+    fn test_search_string_dialog_invalid_min_length() {
+        let mut dialog = SearchStringDialog::new(false);
+        dialog.show();
+        dialog.set_min_length(1);
+        let result = dialog.accept();
+        assert!(result.is_err());
+        assert!(dialog.visible); // stays open on error
+    }
+
+    #[test]
+    fn test_search_string_dialog_no_selection() {
+        let mut dialog = SearchStringDialog::new(false);
+        assert!(!dialog.has_selection);
+        dialog.set_search_selection(true); // should be ignored
+        assert!(!dialog.options.search_selection);
+    }
+
+    #[test]
+    fn test_string_events_task() {
+        let mut task = StringEventsTask::new(StringEvent::Created, 0x1000);
+        assert!(!task.completed);
+        assert_eq!(task.address, 0x1000);
+        assert_eq!(task.event, StringEvent::Created);
+
+        task.complete();
+        assert!(task.completed);
+    }
+
+    #[test]
+    fn test_found_string_to_address_row_mapper() {
+        let fs = FoundString::new(0x4000, "test", StringEncoding::Ascii, 5);
+        assert_eq!(FoundStringToAddressTableRowMapper::get_address(&fs), 0x4000);
+    }
+
+    #[test]
+    fn test_found_string_to_location_row_mapper() {
+        let strings = vec![
+            FoundString::new(0x100, "a", StringEncoding::Ascii, 2),
+            FoundString::new(0x200, "b", StringEncoding::Ascii, 2),
+            FoundString::new(0x300, "c", StringEncoding::Ascii, 2),
+        ];
+        assert_eq!(
+            FoundStringToProgramLocationTableRowMapper::find_row_for_address(&strings, 0x200),
+            Some(1)
+        );
+        assert_eq!(
+            FoundStringToProgramLocationTableRowMapper::find_row_for_address(&strings, 0x999),
+            None
+        );
+    }
+
+    #[test]
+    fn test_is_printable_ascii() {
+        assert!(is_printable_ascii(b'A'));
+        assert!(is_printable_ascii(b'z'));
+        assert!(is_printable_ascii(b'0'));
+        assert!(is_printable_ascii(b' '));
+        assert!(!is_printable_ascii(0x00));
+        assert!(!is_printable_ascii(0x1F));
+        assert!(!is_printable_ascii(0x7F));
+    }
+
+    #[test]
+    fn test_strings_analyzer_options_default() {
+        let opts = StringsAnalyzerOptions::default();
+        assert!(opts.require_null_termination);
+        assert_eq!(opts.start_alignment, StringAlignment::Align1);
+        assert!(opts.allow_creation_with_middle_refs);
+        assert!(opts.search_only_accessible_blocks);
     }
 }

@@ -344,3 +344,9 @@ pub use gui_search_region::{
     DefaultEmulatorFactory, SearchRegion, SearchRegionFilter,
     ALL_SEARCH_REGION_FILTERS, create_search_regions,
 };
+
+// Remaining GUI data-model types from the final Debug port
+pub mod gui_remaining;
+
+// Debugger plugin event types from Framework-TraceModeling/Debugger
+pub mod debugger_events;

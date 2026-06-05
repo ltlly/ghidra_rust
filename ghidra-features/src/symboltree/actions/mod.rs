@@ -434,6 +434,373 @@ impl SetExternalProgramAction {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SymbolTreeContextAction -- abstract base for symbol-tree-specific actions
+// ---------------------------------------------------------------------------
+
+/// Menu group for middle-of-popup items.
+pub const MIDDLE_MENU_GROUP: &str = "0Middle";
+
+/// Abstract base for actions that operate within the symbol tree context.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.actions.SymbolTreeActionContext`.
+#[derive(Debug, Clone)]
+pub struct SymbolTreeContextAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin name.
+    pub owner: String,
+    /// Menu group for popup placement.
+    pub menu_group: String,
+    /// Key binding type.
+    pub key_binding_type: Option<String>,
+}
+
+impl SymbolTreeContextAction {
+    /// Create a new context action.
+    pub fn new(name: impl Into<String>, owner: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            owner: owner.into(),
+            menu_group: MIDDLE_MENU_GROUP.to_string(),
+            key_binding_type: None,
+        }
+    }
+
+    /// Check whether this action is enabled for the given context.
+    ///
+    /// By default, requires that the context is a `SymbolTreeActionContext`
+    /// and that there is at least one selected tree path.
+    pub fn is_enabled(&self, ctx: &SymbolTreeActionContext) -> bool {
+        ctx.valid && ctx.has_selection()
+    }
+
+    /// Whether this action should appear in the popup menu.
+    pub fn is_add_to_popup(&self, ctx: &SymbolTreeActionContext) -> bool {
+        self.is_enabled(ctx)
+    }
+
+    /// Whether the context is valid for this action.
+    pub fn is_valid_context(&self, ctx: &SymbolTreeActionContext) -> bool {
+        ctx.valid
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CloneSymbolTreeAction
+// ---------------------------------------------------------------------------
+
+/// Action to clone (snapshot) the symbol tree window.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.actions.CloneSymbolTreeAction`.
+#[derive(Debug, Clone)]
+pub struct CloneSymbolTreeAction {
+    /// Action name.
+    pub name: String,
+    /// Description.
+    pub description: String,
+}
+
+impl CloneSymbolTreeAction {
+    /// Create a new clone action.
+    pub fn new() -> Self {
+        Self {
+            name: "Symbol Tree Clone".to_string(),
+            description: "Create a snapshot (disconnected) copy of this Symbol Tree window"
+                .to_string(),
+        }
+    }
+
+    /// Whether the action is enabled (a program must be loaded).
+    pub fn is_enabled(&self, has_program: bool) -> bool {
+        has_program
+    }
+}
+
+impl Default for CloneSymbolTreeAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CreateSymbolTableAction
+// ---------------------------------------------------------------------------
+
+/// Action to create a transient symbol table from the current selection.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.actions.CreateSymbolTableAction`.
+#[derive(Debug, Clone)]
+pub struct CreateSymbolTableAction {
+    /// Action name.
+    pub name: String,
+    /// The table title.
+    pub title: String,
+}
+
+impl CreateSymbolTableAction {
+    /// Create a new create-table action.
+    pub fn new() -> Self {
+        Self {
+            name: "Create Table".to_string(),
+            title: "Symbols".to_string(),
+        }
+    }
+
+    /// Whether this action is enabled for the given symbol count.
+    pub fn is_enabled(&self, symbol_count: usize) -> bool {
+        symbol_count > 0
+    }
+
+    /// Build the set of symbol row objects for the transient table.
+    pub fn build_row_objects(&self, symbol_ids: &[u64]) -> Vec<u64> {
+        symbol_ids.to_vec()
+    }
+}
+
+impl Default for CreateSymbolTableAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EditExternalLocationAction
+// ---------------------------------------------------------------------------
+
+/// Action to edit an external location symbol.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.actions.EditExternalLocationAction`.
+#[derive(Debug, Clone)]
+pub struct EditExternalLocationAction {
+    /// Action name.
+    pub name: String,
+    /// Menu group.
+    pub menu_group: String,
+    /// The plugin owning this action.
+    pub owner: String,
+}
+
+impl EditExternalLocationAction {
+    /// Create a new edit-external-location action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Edit External Location".to_string(),
+            menu_group: "0External".to_string(),
+            owner: owner.into(),
+        }
+    }
+
+    /// Check whether this action is enabled for the context.
+    ///
+    /// Requires exactly one selected external symbol of type LABEL or FUNCTION.
+    pub fn is_enabled(&self, ctx: &SymbolTreeActionContext) -> bool {
+        ctx.has_single_selection()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NavigateOnIncomingAction
+// ---------------------------------------------------------------------------
+
+/// Toggle action to navigate to matching tree symbols on program location changes.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.actions.NavigateOnIncomingAction`.
+#[derive(Debug, Clone)]
+pub struct NavigateOnIncomingAction {
+    /// Action name.
+    pub name: String,
+    /// Whether the toggle is currently selected.
+    pub selected: bool,
+    /// Description.
+    pub description: String,
+}
+
+impl NavigateOnIncomingAction {
+    /// Create a new navigate-on-incoming action.
+    pub fn new() -> Self {
+        Self {
+            name: "Navigate on Incoming".to_string(),
+            selected: false,
+            description: "Toggle On means to select the matching tree symbol on program location changes".to_string(),
+        }
+    }
+
+    /// Toggle the selected state.
+    pub fn toggle(&mut self) {
+        self.selected = !self.selected;
+    }
+
+    /// Get whether the toggle is selected.
+    pub fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+impl Default for NavigateOnIncomingAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NavigateOnOutgoingAction
+// ---------------------------------------------------------------------------
+
+/// Toggle action to navigate the listing as the selected tree symbol changes.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.actions.NavigateOnOutgoingActon`.
+#[derive(Debug, Clone)]
+pub struct NavigateOnOutgoingAction {
+    /// Action name.
+    pub name: String,
+    /// Whether the toggle is currently selected.
+    pub selected: bool,
+    /// Description.
+    pub description: String,
+}
+
+impl NavigateOnOutgoingAction {
+    /// Create a new navigate-on-outgoing action.
+    pub fn new() -> Self {
+        Self {
+            name: "Navigate on Outgoing".to_string(),
+            selected: true,
+            description: "Toggle on means to navigate to the location in the program as the selected tree symbol changes".to_string(),
+        }
+    }
+
+    /// Toggle the selected state.
+    pub fn toggle(&mut self) {
+        self.selected = !self.selected;
+    }
+
+    /// Get whether the toggle is selected.
+    pub fn is_selected(&self) -> bool {
+        self.selected
+    }
+}
+
+impl Default for NavigateOnOutgoingAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EditExternalLocationPanel
+// ---------------------------------------------------------------------------
+
+/// State model for the edit external location panel.
+///
+/// Ported from `ghidra.app.plugin.core.symboltree.EditExternalLocationPanel`.
+#[derive(Debug, Clone)]
+pub struct EditExternalLocationPanel {
+    /// The library name.
+    pub library_name: String,
+    /// The library path (if linked).
+    pub library_path: Option<String>,
+    /// The label name for the external location.
+    pub label: String,
+    /// Whether this location is a function.
+    pub is_function: bool,
+    /// The external address (as a string, e.g. "0x400000").
+    pub address: Option<String>,
+    /// The original imported name.
+    pub original_imported_name: Option<String>,
+    /// Whether the panel state is valid.
+    pub is_valid: bool,
+    /// Validation error message, if any.
+    pub error_message: Option<String>,
+}
+
+impl EditExternalLocationPanel {
+    /// Create a panel for editing an existing external location.
+    pub fn edit(
+        library_name: impl Into<String>,
+        label: impl Into<String>,
+        is_function: bool,
+    ) -> Self {
+        Self {
+            library_name: library_name.into(),
+            library_path: None,
+            label: label.into(),
+            is_function,
+            address: None,
+            original_imported_name: None,
+            is_valid: true,
+            error_message: None,
+        }
+    }
+
+    /// Create a panel for adding a new external location.
+    pub fn create(library_name: impl Into<String>) -> Self {
+        Self {
+            library_name: library_name.into(),
+            library_path: None,
+            label: String::new(),
+            is_function: false,
+            address: None,
+            original_imported_name: None,
+            is_valid: true,
+            error_message: None,
+        }
+    }
+
+    /// Validate the panel state.
+    pub fn validate(&mut self) -> bool {
+        self.error_message = None;
+
+        if self.library_name.is_empty() {
+            self.error_message =
+                Some("An external library 'Name' must be specified.".to_string());
+            self.is_valid = false;
+            return false;
+        }
+
+        if self.label.is_empty() && self.address.is_none() {
+            self.error_message = Some(
+                "Either (or both) an external 'Label' and/or 'Address' must be specified."
+                    .to_string(),
+            );
+            self.is_valid = false;
+            return false;
+        }
+
+        if let Some(ref addr) = self.address {
+            if addr.is_empty() {
+                self.address = None;
+            } else if !addr.starts_with("0x") && !addr.chars().all(|c| c.is_ascii_digit()) {
+                self.error_message = Some("Invalid address specified.".to_string());
+                self.is_valid = false;
+                return false;
+            }
+        }
+
+        self.is_valid = true;
+        true
+    }
+
+    /// Restore the original imported name into the label field.
+    pub fn restore_original_name(&mut self) {
+        if let Some(ref orig) = self.original_imported_name {
+            if !orig.is_empty() {
+                self.label = orig.clone();
+            }
+        }
+    }
+
+    /// Set the library path.
+    pub fn set_library_path(&mut self, path: Option<String>) {
+        self.library_path = path;
+    }
+
+    /// Clear the library path link.
+    pub fn clear_library_path(&mut self) {
+        self.library_path = None;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,5 +965,145 @@ mod tests {
         ctx.add_selection(2, vec!["b".into()]);
         ctx.clear_selection();
         assert!(!ctx.has_selection());
+    }
+
+    // --- Tests for newly ported actions ---
+
+    #[test]
+    fn test_symbol_tree_context_action() {
+        let action = SymbolTreeContextAction::new("TestAction", "TestPlugin");
+        assert_eq!(action.name, "TestAction");
+        assert_eq!(action.owner, "TestPlugin");
+        assert_eq!(action.menu_group, MIDDLE_MENU_GROUP);
+
+        let mut ctx = SymbolTreeActionContext::new();
+        assert!(!action.is_enabled(&ctx)); // no selection
+
+        ctx.add_selection(1, vec!["main".into()]);
+        assert!(action.is_enabled(&ctx));
+
+        ctx.valid = false;
+        assert!(!action.is_enabled(&ctx));
+    }
+
+    #[test]
+    fn test_symbol_tree_context_action_popup() {
+        let action = SymbolTreeContextAction::new("Test", "Owner");
+        let mut ctx = SymbolTreeActionContext::new();
+        ctx.add_selection(1, vec!["x".into()]);
+        assert!(action.is_add_to_popup(&ctx));
+        assert!(action.is_valid_context(&ctx));
+
+        let empty_ctx = SymbolTreeActionContext::new();
+        assert!(!action.is_add_to_popup(&empty_ctx));
+    }
+
+    #[test]
+    fn test_clone_symbol_tree_action() {
+        let action = CloneSymbolTreeAction::new();
+        assert_eq!(action.name, "Symbol Tree Clone");
+        assert!(action.is_enabled(true));
+        assert!(!action.is_enabled(false));
+    }
+
+    #[test]
+    fn test_create_symbol_table_action() {
+        let action = CreateSymbolTableAction::new();
+        assert_eq!(action.name, "Create Table");
+        assert_eq!(action.title, "Symbols");
+        assert!(action.is_enabled(5));
+        assert!(!action.is_enabled(0));
+
+        let rows = action.build_row_objects(&[1, 2, 3]);
+        assert_eq!(rows, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_edit_external_location_action() {
+        let action = EditExternalLocationAction::new("SymbolTreePlugin");
+        assert_eq!(action.name, "Edit External Location");
+        assert_eq!(action.menu_group, "0External");
+
+        let mut ctx = SymbolTreeActionContext::new();
+        ctx.add_selection(1, vec!["ext".into()]);
+        assert!(action.is_enabled(&ctx));
+
+        let empty = SymbolTreeActionContext::new();
+        assert!(!action.is_enabled(&empty));
+    }
+
+    #[test]
+    fn test_navigate_on_incoming_action() {
+        let mut action = NavigateOnIncomingAction::new();
+        assert_eq!(action.name, "Navigate on Incoming");
+        assert!(!action.is_selected()); // default off
+
+        action.toggle();
+        assert!(action.is_selected());
+
+        action.toggle();
+        assert!(!action.is_selected());
+    }
+
+    #[test]
+    fn test_navigate_on_outgoing_action() {
+        let mut action = NavigateOnOutgoingAction::new();
+        assert_eq!(action.name, "Navigate on Outgoing");
+        assert!(action.is_selected()); // default on
+
+        action.toggle();
+        assert!(!action.is_selected());
+
+        action.toggle();
+        assert!(action.is_selected());
+    }
+
+    #[test]
+    fn test_edit_external_location_panel_create() {
+        let mut panel = EditExternalLocationPanel::create("libc.so");
+        assert_eq!(panel.library_name, "libc.so");
+        assert!(panel.label.is_empty());
+        assert!(!panel.is_function);
+
+        // Empty label and no address -> invalid
+        assert!(!panel.validate());
+        assert!(panel.error_message.is_some());
+
+        panel.label = "printf".to_string();
+        assert!(panel.validate());
+    }
+
+    #[test]
+    fn test_edit_external_location_panel_edit() {
+        let panel = EditExternalLocationPanel::edit("libc.so", "printf", true);
+        assert_eq!(panel.library_name, "libc.so");
+        assert_eq!(panel.label, "printf");
+        assert!(panel.is_function);
+        assert!(panel.is_valid);
+    }
+
+    #[test]
+    fn test_edit_external_location_panel_validate_no_lib_name() {
+        let mut panel = EditExternalLocationPanel::create("");
+        panel.label = "test".to_string();
+        assert!(!panel.validate());
+        assert!(panel.error_message.as_ref().unwrap().contains("Name"));
+    }
+
+    #[test]
+    fn test_edit_external_location_panel_restore_original() {
+        let mut panel = EditExternalLocationPanel::edit("libc.so", "renamed", false);
+        panel.original_imported_name = Some("original_name".to_string());
+        panel.restore_original_name();
+        assert_eq!(panel.label, "original_name");
+    }
+
+    #[test]
+    fn test_edit_external_location_panel_clear_path() {
+        let mut panel = EditExternalLocationPanel::create("libc.so");
+        panel.set_library_path(Some("/usr/lib/libc.so".to_string()));
+        assert!(panel.library_path.is_some());
+        panel.clear_library_path();
+        assert!(panel.library_path.is_none());
     }
 }

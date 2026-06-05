@@ -358,3 +358,12 @@ pub mod trace_db_program_func_manager;
 pub mod trace_db_program_ref_manager_view;
 pub mod trace_db_raw_data_adapter;
 pub mod trace_db_raw_code_unit_adapter;
+
+// Remaining Debug port: DBTraceStack implementation, program view equate, abstract view memory
+pub mod trace_db_stack_impl;
+pub mod trace_db_program_equate;
+pub mod trace_db_abstract_view_memory;
+
+// New modules from remaining Debug port (deep listing views and target iface)
+pub mod trace_db_listing_views;
+pub mod target_iface_impl;

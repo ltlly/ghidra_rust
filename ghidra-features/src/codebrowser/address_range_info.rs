@@ -102,6 +102,99 @@ impl fmt::Display for AddressRangeInfo {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AddressRangeBytesTableColumn
+// ---------------------------------------------------------------------------
+
+/// Table column that displays the byte values of an address range.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.AddressRangeBytesTableColumn`.
+#[derive(Debug, Clone)]
+pub struct AddressRangeBytesTableColumn {
+    /// Column name.
+    pub name: String,
+    /// Column description.
+    pub description: String,
+    /// Preferred width in pixels.
+    pub preferred_width: usize,
+}
+
+impl AddressRangeBytesTableColumn {
+    /// Create a new bytes table column.
+    pub fn new() -> Self {
+        Self {
+            name: "Bytes".to_string(),
+            description: "Displays the byte values of the address range".to_string(),
+            preferred_width: 200,
+        }
+    }
+
+    /// Get the display value for a row (the bytes as a hex string).
+    pub fn get_display_value(&self, info: &AddressRangeInfo, memory: &[u8]) -> String {
+        let start = (info.min as usize).min(memory.len());
+        let end = (info.max as usize + 1).min(memory.len());
+        if start >= end || start >= memory.len() {
+            return String::new();
+        }
+        memory[start..end]
+            .iter()
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+impl Default for AddressRangeBytesTableColumn {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AddressRangeCodeUnitTableColumn
+// ---------------------------------------------------------------------------
+
+/// Table column that displays code unit (instruction/data) mnemonics
+/// for an address range.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.AddressRangeCodeUnitTableColumn`.
+#[derive(Debug, Clone)]
+pub struct AddressRangeCodeUnitTableColumn {
+    /// Column name.
+    pub name: String,
+    /// Column description.
+    pub description: String,
+    /// Maximum characters to display.
+    pub max_display_chars: usize,
+}
+
+impl AddressRangeCodeUnitTableColumn {
+    /// Create a new code unit table column.
+    pub fn new() -> Self {
+        Self {
+            name: "Code Units".to_string(),
+            description: "Displays the code unit mnemonics for the address range".to_string(),
+            max_display_chars: 120,
+        }
+    }
+
+    /// Get the display value (placeholder -- real impl would consult the listing).
+    pub fn get_display_value(&self, info: &AddressRangeInfo) -> String {
+        format!(
+            "[0x{:X}..0x{:X}] ({} bytes)",
+            info.min,
+            info.max,
+            info.size
+        )
+    }
+}
+
+impl Default for AddressRangeCodeUnitTableColumn {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,5 +252,41 @@ mod tests {
         let c = AddressRangeInfo::new(0x1000, 0x10FF, 256, false, 10, 5);
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    // --- Tests for table column types ---
+
+    #[test]
+    fn test_address_range_bytes_table_column() {
+        let col = AddressRangeBytesTableColumn::new();
+        assert_eq!(col.name, "Bytes");
+        assert_eq!(col.preferred_width, 200);
+
+        let info = AddressRangeInfo::new(0, 3, 4, true, 0, 0);
+        let memory = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let display = col.get_display_value(&info, &memory);
+        assert_eq!(display, "DE AD BE EF");
+    }
+
+    #[test]
+    fn test_address_range_bytes_table_column_empty() {
+        let col = AddressRangeBytesTableColumn::new();
+        let info = AddressRangeInfo::new(0x1000, 0x1003, 4, true, 0, 0);
+        let memory: Vec<u8> = vec![];
+        let display = col.get_display_value(&info, &memory);
+        assert!(display.is_empty());
+    }
+
+    #[test]
+    fn test_address_range_code_unit_table_column() {
+        let col = AddressRangeCodeUnitTableColumn::new();
+        assert_eq!(col.name, "Code Units");
+        assert_eq!(col.max_display_chars, 120);
+
+        let info = AddressRangeInfo::new(0x400000, 0x4000FF, 256, true, 5, 3);
+        let display = col.get_display_value(&info);
+        assert!(display.contains("0x400000"));
+        assert!(display.contains("0x4000FF"));
+        assert!(display.contains("256 bytes"));
     }
 }

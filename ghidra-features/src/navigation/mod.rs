@@ -455,6 +455,392 @@ impl Default for NavigationHistoryPlugin {
     }
 }
 
+// ---------------------------------------------------------------------------
+// NextPrevHighlightRangePlugin
+// ---------------------------------------------------------------------------
+
+/// Plugin for navigating to the next/previous highlighted range.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.NextPrevHighlightRangePlugin`.
+#[derive(Debug)]
+pub struct NextPrevHighlightRangePlugin {
+    /// Plugin name.
+    pub name: String,
+    /// Whether the plugin has been disposed.
+    pub is_disposed: bool,
+    /// The next action.
+    pub next_action: NextHighlightedRangeAction,
+    /// The previous action.
+    pub previous_action: PreviousHighlightedRangeAction,
+}
+
+impl NextPrevHighlightRangePlugin {
+    /// Create a new plugin.
+    pub fn new() -> Self {
+        let name = "NextPrevHighlightRange".to_string();
+        Self {
+            next_action: NextHighlightedRangeAction::new(&name),
+            previous_action: PreviousHighlightedRangeAction::new(&name),
+            name,
+            is_disposed: false,
+        }
+    }
+
+    /// Dispose the plugin.
+    pub fn dispose(&mut self) {
+        self.is_disposed = true;
+    }
+}
+
+impl Default for NextPrevHighlightRangePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to go to the next highlighted range.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.NextHighlightedRangeAction`.
+#[derive(Debug, Clone)]
+pub struct NextHighlightedRangeAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin name.
+    pub owner: String,
+    /// Whether the action is enabled.
+    pub is_enabled: bool,
+}
+
+impl NextHighlightedRangeAction {
+    /// Create a new action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Next Highlighted Range".to_string(),
+            owner: owner.into(),
+            is_enabled: true,
+        }
+    }
+}
+
+/// Action to go to the previous highlighted range.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.PreviousHighlightedRangeAction`.
+#[derive(Debug, Clone)]
+pub struct PreviousHighlightedRangeAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin name.
+    pub owner: String,
+    /// Whether the action is enabled.
+    pub is_enabled: bool,
+}
+
+impl PreviousHighlightedRangeAction {
+    /// Create a new action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Previous Highlighted Range".to_string(),
+            owner: owner.into(),
+            is_enabled: true,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NextPrevSelectedRangePlugin
+// ---------------------------------------------------------------------------
+
+/// Plugin for navigating to the next/previous selected range.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.NextPrevSelectedRangePlugin`.
+#[derive(Debug)]
+pub struct NextPrevSelectedRangePlugin {
+    /// Plugin name.
+    pub name: String,
+    /// Whether the plugin has been disposed.
+    pub is_disposed: bool,
+    /// The next action.
+    pub next_action: NextSelectedRangeAction,
+    /// The previous action.
+    pub previous_action: PreviousSelectedRangeAction,
+}
+
+impl NextPrevSelectedRangePlugin {
+    /// Create a new plugin.
+    pub fn new() -> Self {
+        let name = "NextPrevSelectedRange".to_string();
+        Self {
+            next_action: NextSelectedRangeAction::new(&name),
+            previous_action: PreviousSelectedRangeAction::new(&name),
+            name,
+            is_disposed: false,
+        }
+    }
+
+    /// Dispose the plugin.
+    pub fn dispose(&mut self) {
+        self.is_disposed = true;
+    }
+}
+
+impl Default for NextPrevSelectedRangePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to go to the next selected range.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.NextSelectedRangeAction`.
+#[derive(Debug, Clone)]
+pub struct NextSelectedRangeAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin name.
+    pub owner: String,
+}
+
+impl NextSelectedRangeAction {
+    /// Create a new action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Next Selected Range".to_string(),
+            owner: owner.into(),
+        }
+    }
+}
+
+/// Action to go to the previous selected range.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.PreviousSelectedRangeAction`.
+#[derive(Debug, Clone)]
+pub struct PreviousSelectedRangeAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin name.
+    pub owner: String,
+}
+
+impl PreviousSelectedRangeAction {
+    /// Create a new action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Previous Selected Range".to_string(),
+            owner: owner.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProviderNavigationPlugin
+// ---------------------------------------------------------------------------
+
+/// Plugin providing navigation actions for provider windows.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.ProviderNavigationPlugin`.
+#[derive(Debug)]
+pub struct ProviderNavigationPlugin {
+    /// Plugin name.
+    pub name: String,
+    /// Whether the plugin has been disposed.
+    pub is_disposed: bool,
+}
+
+impl ProviderNavigationPlugin {
+    /// Create a new plugin.
+    pub fn new() -> Self {
+        Self {
+            name: "ProviderNavigation".to_string(),
+            is_disposed: false,
+        }
+    }
+
+    /// Dispose the plugin.
+    pub fn dispose(&mut self) {
+        self.is_disposed = true;
+    }
+}
+
+impl Default for ProviderNavigationPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FindReferencesTo actions
+// ---------------------------------------------------------------------------
+
+/// Action to find references to the current location.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.locationreferences.FindReferencesToAction`.
+#[derive(Debug, Clone)]
+pub struct FindReferencesToAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin.
+    pub owner: String,
+    /// Whether the action is enabled.
+    pub is_enabled: bool,
+}
+
+impl FindReferencesToAction {
+    /// Create a new action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Find References To".to_string(),
+            owner: owner.into(),
+            is_enabled: true,
+        }
+    }
+}
+
+/// Action to find references to a specific address.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.locationreferences.FindReferencesToAddressAction`.
+#[derive(Debug, Clone)]
+pub struct FindReferencesToAddressAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin.
+    pub owner: String,
+}
+
+impl FindReferencesToAddressAction {
+    /// Create a new action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Find References To Address".to_string(),
+            owner: owner.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NextPreviousDefinedDataAction
+// ---------------------------------------------------------------------------
+
+/// Action for navigating to the next or previous defined data item.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.NextPreviousDefinedDataAction`.
+#[derive(Debug, Clone)]
+pub struct NextPreviousDefinedDataAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin.
+    pub owner: String,
+    /// Whether this is a forward (next) or backward (previous) action.
+    pub is_forward: bool,
+}
+
+impl NextPreviousDefinedDataAction {
+    /// Create a "Next Defined Data" action.
+    pub fn new_forward(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Next Defined Data".to_string(),
+            owner: owner.into(),
+            is_forward: true,
+        }
+    }
+
+    /// Create a "Previous Defined Data" action.
+    pub fn new_backward(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Previous Defined Data".to_string(),
+            owner: owner.into(),
+            is_forward: false,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Location descriptor types
+// ---------------------------------------------------------------------------
+
+/// Location descriptor for function signature fields.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.locationreferences.FunctionSignatureFieldLocationDescriptor`.
+#[derive(Debug, Clone)]
+pub struct FunctionSignatureFieldLocationDescriptor {
+    /// Address of the function.
+    pub address: u64,
+    /// Name of the function.
+    pub function_name: String,
+}
+
+impl FunctionSignatureFieldLocationDescriptor {
+    /// Create a new descriptor.
+    pub fn new(address: u64, function_name: impl Into<String>) -> Self {
+        Self {
+            address,
+            function_name: function_name.into(),
+        }
+    }
+}
+
+/// Program location for a composite data type.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.locationreferences.GenericCompositeDataTypeProgramLocation`.
+#[derive(Debug, Clone)]
+pub struct GenericCompositeDataTypeProgramLocation {
+    /// Address where the composite type is used.
+    pub address: u64,
+    /// Name of the composite type.
+    pub type_name: String,
+}
+
+impl GenericCompositeDataTypeProgramLocation {
+    /// Create a new location.
+    pub fn new(address: u64, type_name: impl Into<String>) -> Self {
+        Self {
+            address,
+            type_name: type_name.into(),
+        }
+    }
+}
+
+/// Program location for a generic data type.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.locationreferences.GenericDataTypeProgramLocation`.
+#[derive(Debug, Clone)]
+pub struct GenericDataTypeProgramLocation {
+    /// Address where the data type is used.
+    pub address: u64,
+    /// Name of the data type.
+    pub type_name: String,
+}
+
+impl GenericDataTypeProgramLocation {
+    /// Create a new location.
+    pub fn new(address: u64, type_name: impl Into<String>) -> Self {
+        Self {
+            address,
+            type_name: type_name.into(),
+        }
+    }
+}
+
+/// Context for the location references provider.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.locationreferences.LocationReferencesProviderContext`.
+#[derive(Debug, Clone)]
+pub struct LocationReferencesProviderContext {
+    /// The address being referenced.
+    pub address: u64,
+    /// The provider name.
+    pub provider_name: String,
+}
+
+impl LocationReferencesProviderContext {
+    /// Create a new context.
+    pub fn new(address: u64, provider_name: impl Into<String>) -> Self {
+        Self {
+            address,
+            provider_name: provider_name.into(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -682,5 +1068,108 @@ mod tests {
         assert!(plugin.history(2).is_some());
         assert_eq!(plugin.history(1).unwrap().size(), 1);
         assert_eq!(plugin.history(2).unwrap().size(), 1);
+    }
+
+    // --- Tests for newly ported types ---
+
+    #[test]
+    fn test_next_prev_highlight_range_plugin() {
+        let mut plugin = NextPrevHighlightRangePlugin::new();
+        assert_eq!(plugin.name, "NextPrevHighlightRange");
+        assert!(!plugin.is_disposed);
+
+        plugin.dispose();
+        assert!(plugin.is_disposed);
+    }
+
+    #[test]
+    fn test_next_highlighted_range_action() {
+        let action = NextHighlightedRangeAction::new("Plugin");
+        assert_eq!(action.name, "Next Highlighted Range");
+        assert!(action.is_enabled);
+    }
+
+    #[test]
+    fn test_previous_highlighted_range_action() {
+        let action = PreviousHighlightedRangeAction::new("Plugin");
+        assert_eq!(action.name, "Previous Highlighted Range");
+        assert!(action.is_enabled);
+    }
+
+    #[test]
+    fn test_next_prev_selected_range_plugin() {
+        let mut plugin = NextPrevSelectedRangePlugin::new();
+        assert!(!plugin.is_disposed);
+        plugin.dispose();
+        assert!(plugin.is_disposed);
+    }
+
+    #[test]
+    fn test_next_selected_range_action() {
+        let action = NextSelectedRangeAction::new("Plugin");
+        assert_eq!(action.name, "Next Selected Range");
+    }
+
+    #[test]
+    fn test_previous_selected_range_action() {
+        let action = PreviousSelectedRangeAction::new("Plugin");
+        assert_eq!(action.name, "Previous Selected Range");
+    }
+
+    #[test]
+    fn test_provider_navigation_plugin() {
+        let mut plugin = ProviderNavigationPlugin::new();
+        assert!(!plugin.is_disposed);
+        plugin.dispose();
+        assert!(plugin.is_disposed);
+    }
+
+    #[test]
+    fn test_find_references_to_action() {
+        let action = FindReferencesToAction::new("Plugin");
+        assert_eq!(action.name, "Find References To");
+        assert!(action.is_enabled);
+    }
+
+    #[test]
+    fn test_find_references_to_address_action() {
+        let action = FindReferencesToAddressAction::new("Plugin");
+        assert_eq!(action.name, "Find References To Address");
+    }
+
+    #[test]
+    fn test_next_previous_defined_data_action() {
+        let action = NextPreviousDefinedDataAction::new_forward("Plugin");
+        assert_eq!(action.name, "Next Defined Data");
+        assert!(action.is_forward);
+
+        let back = NextPreviousDefinedDataAction::new_backward("Plugin");
+        assert_eq!(back.name, "Previous Defined Data");
+        assert!(!back.is_forward);
+    }
+
+    #[test]
+    fn test_function_signature_field_location_descriptor() {
+        let desc = FunctionSignatureFieldLocationDescriptor::new(0x1000, "myFunc");
+        assert_eq!(desc.address, 0x1000);
+        assert_eq!(desc.function_name, "myFunc");
+    }
+
+    #[test]
+    fn test_generic_data_type_location_descriptors() {
+        let composite = GenericCompositeDataTypeProgramLocation::new(0x2000, "MyStruct");
+        assert_eq!(composite.address, 0x2000);
+        assert_eq!(composite.type_name, "MyStruct");
+
+        let generic = GenericDataTypeProgramLocation::new(0x3000, "int");
+        assert_eq!(generic.address, 0x3000);
+        assert_eq!(generic.type_name, "int");
+    }
+
+    #[test]
+    fn test_location_references_provider_context() {
+        let ctx = LocationReferencesProviderContext::new(0x4000, "test_provider");
+        assert_eq!(ctx.address, 0x4000);
+        assert_eq!(ctx.provider_name, "test_provider");
     }
 }

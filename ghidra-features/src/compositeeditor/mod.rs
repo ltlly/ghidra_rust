@@ -1006,6 +1006,302 @@ impl DataTypeHelper {
 }
 
 // ===========================================================================
+// Component action contexts
+// ===========================================================================
+
+/// Action context for the composite editor panel.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.ComponentProgramActionContext`.
+#[derive(Debug, Clone)]
+pub struct ComponentProgramActionContext {
+    /// The composite data type being edited.
+    pub composite_name: String,
+    /// The selected component index (None if no selection).
+    pub selected_component: Option<usize>,
+    /// The selected component's field name.
+    pub selected_field_name: Option<String>,
+    /// The current program name.
+    pub program_name: Option<String>,
+}
+
+impl ComponentProgramActionContext {
+    /// Create a new context.
+    pub fn new() -> Self {
+        Self {
+            composite_name: String::new(),
+            selected_component: None,
+            selected_field_name: None,
+            program_name: None,
+        }
+    }
+
+    /// Whether there is a selection.
+    pub fn has_selection(&self) -> bool {
+        self.selected_component.is_some()
+    }
+}
+
+impl Default for ComponentProgramActionContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Stand-alone action context for the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.ComponentStandAloneActionContext`.
+#[derive(Debug, Clone)]
+pub struct ComponentStandAloneActionContext {
+    /// The composite data type being edited.
+    pub composite_name: String,
+    /// Selected component index.
+    pub selected_component: Option<usize>,
+    /// Whether this is a stand-alone context (no program).
+    pub stand_alone: bool,
+}
+
+impl ComponentStandAloneActionContext {
+    /// Create a new stand-alone context.
+    pub fn new(composite_name: impl Into<String>) -> Self {
+        Self {
+            composite_name: composite_name.into(),
+            selected_component: None,
+            stand_alone: true,
+        }
+    }
+}
+
+// ===========================================================================
+// Editor panel model
+// ===========================================================================
+
+/// State model for the composite editor panel.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeEditorPanel`.
+///
+/// This captures the non-GUI state: table row model, selection,
+/// field editor state, DnD state, etc.
+#[derive(Debug)]
+pub struct CompositeEditorPanelModel {
+    /// The composite data type being edited.
+    pub composite_name: String,
+    /// Row data: (field_name, type_name, size, comment).
+    pub rows: Vec<(String, String, usize, String)>,
+    /// Selected row index.
+    pub selected_row: Option<usize>,
+    /// Whether the editor is in edit mode.
+    pub editing: bool,
+    /// Current editor value.
+    pub editor_value: Option<String>,
+    /// The info panel text.
+    pub info_text: String,
+    /// Total size of the composite.
+    pub total_size: usize,
+}
+
+impl CompositeEditorPanelModel {
+    /// Create a new panel model.
+    pub fn new(composite_name: impl Into<String>) -> Self {
+        Self {
+            composite_name: composite_name.into(),
+            rows: Vec::new(),
+            selected_row: None,
+            editing: false,
+            editor_value: None,
+            info_text: String::new(),
+            total_size: 0,
+        }
+    }
+
+    /// Add a row.
+    pub fn add_row(
+        &mut self,
+        field_name: impl Into<String>,
+        type_name: impl Into<String>,
+        size: usize,
+        comment: impl Into<String>,
+    ) {
+        self.rows
+            .push((field_name.into(), type_name.into(), size, comment.into()));
+        self.total_size += size;
+    }
+
+    /// Select a row.
+    pub fn select_row(&mut self, index: Option<usize>) {
+        self.selected_row = index;
+    }
+
+    /// Start editing the selected row.
+    pub fn start_editing(&mut self) {
+        if self.selected_row.is_some() {
+            self.editing = true;
+        }
+    }
+
+    /// Cancel editing.
+    pub fn cancel_editing(&mut self) {
+        self.editing = false;
+        self.editor_value = None;
+    }
+
+    /// Commit the current editor value.
+    pub fn commit_editing(&mut self) {
+        if let (Some(row), Some(ref val)) = (self.selected_row, self.editor_value.take()) {
+            if row < self.rows.len() {
+                self.rows[row].0 = val.clone();
+            }
+        }
+        self.editing = false;
+    }
+
+    /// Number of rows.
+    pub fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+}
+
+// ===========================================================================
+// Model listeners
+// ===========================================================================
+
+/// Event types emitted by the composite editor model.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeViewerModelListener`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompositeModelEvent {
+    /// A row was added.
+    RowAdded(usize),
+    /// A row was deleted.
+    RowDeleted(usize),
+    /// A row was modified.
+    RowModified(usize),
+    /// Rows were reordered.
+    RowsReordered,
+    /// Selection changed.
+    SelectionChanged,
+    /// The composite was renamed.
+    Renamed,
+    /// All data was reloaded.
+    Reloaded,
+}
+
+/// Listener trait for composite editor model changes.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeModelDataListener`.
+pub trait CompositeModelDataListener: Send + Sync {
+    /// Called when the model data changes.
+    fn on_data_changed(&self, event: &CompositeModelEvent);
+}
+
+/// Listener for selection changes in the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeModelSelectionListener`.
+pub trait CompositeModelSelectionListener: Send + Sync {
+    /// Called when the selection changes.
+    fn on_selection_changed(&self, selected_row: Option<usize>);
+}
+
+/// Listener for status changes in the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeModelStatusListener`.
+pub trait CompositeModelStatusListener: Send + Sync {
+    /// Called when the status message changes.
+    fn on_status_changed(&self, status: &str);
+}
+
+/// Listener for the original composite data type.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.OriginalCompositeListener`.
+pub trait OriginalCompositeListener: Send + Sync {
+    /// Called when the original composite changes (e.g., external program update).
+    fn on_original_changed(&self, composite_name: &str);
+}
+
+/// Listener for editor action events.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.EditorActionListener`.
+pub trait EditorActionListener: Send + Sync {
+    /// Called when an editor action occurs.
+    fn on_action(&self, action: &EditorAction);
+}
+
+// ===========================================================================
+// Move up / Move down actions
+// ===========================================================================
+
+/// Action to move the selected component up in the composite.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.MoveUpAction`.
+#[derive(Debug, Clone)]
+pub struct MoveUpAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin.
+    pub owner: String,
+}
+
+impl MoveUpAction {
+    /// Create a new move-up action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Move Up".to_string(),
+            owner: owner.into(),
+        }
+    }
+
+    /// Whether this action is enabled for the given row index.
+    pub fn is_enabled(&self, selected_row: Option<usize>) -> bool {
+        matches!(selected_row, Some(i) if i > 0)
+    }
+
+    /// Execute the move, returning the new row index.
+    pub fn execute(&self, rows: &mut Vec<(String, String, usize, String)>, row: usize) -> usize {
+        if row > 0 && row < rows.len() {
+            rows.swap(row, row - 1);
+            row - 1
+        } else {
+            row
+        }
+    }
+}
+
+/// Action to move the selected component down in the composite.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.MoveDownAction`.
+#[derive(Debug, Clone)]
+pub struct MoveDownAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin.
+    pub owner: String,
+}
+
+impl MoveDownAction {
+    /// Create a new move-down action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Move Down".to_string(),
+            owner: owner.into(),
+        }
+    }
+
+    /// Whether this action is enabled for the given row index.
+    pub fn is_enabled(&self, selected_row: Option<usize>, row_count: usize) -> bool {
+        matches!(selected_row, Some(i) if i + 1 < row_count)
+    }
+
+    /// Execute the move, returning the new row index.
+    pub fn execute(&self, rows: &mut Vec<(String, String, usize, String)>, row: usize) -> usize {
+        if row + 1 < rows.len() {
+            rows.swap(row, row + 1);
+            row + 1
+        } else {
+            row
+        }
+    }
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -1306,5 +1602,94 @@ mod tests {
         for comp in model.base.components() {
             assert_eq!(comp.offset, 0);
         }
+    }
+
+    // --- Tests for newly ported types ---
+
+    #[test]
+    fn test_component_program_action_context() {
+        let mut ctx = ComponentProgramActionContext::new();
+        assert!(!ctx.has_selection());
+        ctx.selected_component = Some(2);
+        assert!(ctx.has_selection());
+    }
+
+    #[test]
+    fn test_component_stand_alone_action_context() {
+        let ctx = ComponentStandAloneActionContext::new("MyStruct");
+        assert_eq!(ctx.composite_name, "MyStruct");
+        assert!(ctx.stand_alone);
+    }
+
+    #[test]
+    fn test_composite_editor_panel_model() {
+        let mut model = CompositeEditorPanelModel::new("MyStruct");
+        model.add_row("field1", "int", 4, "first field");
+        model.add_row("field2", "char", 1, "second field");
+        assert_eq!(model.row_count(), 2);
+        assert_eq!(model.total_size, 5);
+
+        model.select_row(Some(0));
+        assert_eq!(model.selected_row, Some(0));
+
+        model.start_editing();
+        assert!(model.editing);
+
+        model.cancel_editing();
+        assert!(!model.editing);
+    }
+
+    #[test]
+    fn test_composite_editor_panel_model_commit() {
+        let mut model = CompositeEditorPanelModel::new("S");
+        model.add_row("old_name", "int", 4, "");
+        model.select_row(Some(0));
+        model.start_editing();
+        model.editor_value = Some("new_name".to_string());
+        model.commit_editing();
+        assert_eq!(model.rows[0].0, "new_name");
+        assert!(!model.editing);
+    }
+
+    #[test]
+    fn test_move_up_action() {
+        let action = MoveUpAction::new("Plugin");
+        assert_eq!(action.name, "Move Up");
+        assert!(!action.is_enabled(None));
+        assert!(!action.is_enabled(Some(0)));
+        assert!(action.is_enabled(Some(1)));
+
+        let mut rows = vec![
+            ("a".to_string(), "int".to_string(), 4, String::new()),
+            ("b".to_string(), "int".to_string(), 4, String::new()),
+            ("c".to_string(), "int".to_string(), 4, String::new()),
+        ];
+        let new_idx = action.execute(&mut rows, 2);
+        assert_eq!(new_idx, 1);
+        assert_eq!(rows[1].0, "c");
+        assert_eq!(rows[2].0, "b");
+    }
+
+    #[test]
+    fn test_move_down_action() {
+        let action = MoveDownAction::new("Plugin");
+        assert!(!action.is_enabled(None, 3));
+        assert!(action.is_enabled(Some(0), 3));
+        assert!(!action.is_enabled(Some(2), 3));
+
+        let mut rows = vec![
+            ("a".to_string(), "int".to_string(), 4, String::new()),
+            ("b".to_string(), "int".to_string(), 4, String::new()),
+        ];
+        let new_idx = action.execute(&mut rows, 0);
+        assert_eq!(new_idx, 1);
+        assert_eq!(rows[0].0, "b");
+        assert_eq!(rows[1].0, "a");
+    }
+
+    #[test]
+    fn test_composite_model_event_variants() {
+        assert_ne!(CompositeModelEvent::RowAdded(0), CompositeModelEvent::RowDeleted(0));
+        assert_eq!(CompositeModelEvent::SelectionChanged, CompositeModelEvent::SelectionChanged);
     }
 }

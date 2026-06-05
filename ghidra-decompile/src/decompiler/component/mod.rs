@@ -17,6 +17,12 @@ pub mod highlight_controller;
 pub mod program_listener;
 pub mod decompile_runnable;
 
+// Additional decompiler component modules
+pub mod clang_decompiler_highlighter;
+pub mod layout_pixel_index_map;
+pub mod decompiler_hover_service;
+pub mod decompiler_panel;
+
 use super::clang_node::{ClangNodeId, SyntaxType};
 use super::decompile_results::DecompileResults;
 

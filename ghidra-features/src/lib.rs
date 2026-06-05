@@ -129,6 +129,31 @@ pub mod vscode;
 pub mod functionwindow;
 pub mod processors;
 
+// -- New modules ported from Ghidra's Features/Base (app/plugin/* packages) --
+/// GCC exception handler analysis and DWARF frame parsing.
+/// Ported from `ghidra.app.plugin.exceptionhandlers`.
+pub mod exceptionhandlers;
+
+/// Function matching and hashing for version tracking.
+/// Ported from `ghidra.app.plugin.match`.
+pub mod r#match;
+
+/// Runtime information display (version, memory, processors).
+/// Ported from `ghidra.app.plugin.runtimeinfo`.
+pub mod runtimeinfo;
+
+/// Prototype/experimental analyzers (aggressive instruction finder).
+/// Ported from `ghidra.app.plugin.prototype`.
+pub mod prototype;
+
+/// Window location diagnostic plugin.
+/// Ported from `ghidra.app.plugin.gui`.
+pub mod gui;
+
+/// Exporter plugin dialog and actions.
+/// Ported from `ghidra.app.plugin.core.exporter`.
+pub mod exporter_plugin;
+
 // -- Entropy analysis plugin ported from EntropyCalculate.java --
 pub mod entropy;
 

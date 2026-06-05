@@ -723,6 +723,51 @@ impl Default for MultiTabPlugin {
 }
 
 // ===========================================================================
+// SaveProgramAction
+// ===========================================================================
+
+/// Action to save the current program.
+///
+/// Ported from `ghidra.app.plugin.core.progmgr.SaveProgramAction`.
+#[derive(Debug, Clone)]
+pub struct SaveProgramAction {
+    /// Action name.
+    pub name: String,
+    /// Owner plugin.
+    pub owner: String,
+    /// Whether the action is currently enabled.
+    pub enabled: bool,
+}
+
+impl SaveProgramAction {
+    /// Create a new save-program action.
+    pub fn new(owner: impl Into<String>) -> Self {
+        Self {
+            name: "Save".to_string(),
+            owner: owner.into(),
+            enabled: false,
+        }
+    }
+
+    /// Whether the action is enabled (requires a program with unsaved changes).
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Update enablement based on whether the program has unsaved changes.
+    pub fn update_enabled(&mut self, has_unsaved_changes: bool) {
+        self.enabled = has_unsaved_changes;
+    }
+
+    /// Execute the save action.  Returns true if the save was successful.
+    pub fn execute(&self, program_name: &str) -> bool {
+        // In the real implementation, this would call ProgramSaveManager.
+        // Here we just validate.
+        !program_name.is_empty()
+    }
+}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -902,5 +947,27 @@ mod tests {
         assert_eq!(action.name(), "TestAction");
         assert_eq!(action.owner(), "Owner");
         assert!(action.is_enabled());
+    }
+
+    // --- Tests for SaveProgramAction ---
+
+    #[test]
+    fn test_save_program_action() {
+        let mut action = SaveProgramAction::new("ProgramManagerPlugin");
+        assert_eq!(action.name, "Save");
+        assert!(!action.is_enabled()); // no unsaved changes initially
+
+        action.update_enabled(true);
+        assert!(action.is_enabled());
+
+        action.update_enabled(false);
+        assert!(!action.is_enabled());
+    }
+
+    #[test]
+    fn test_save_program_action_execute() {
+        let action = SaveProgramAction::new("Plugin");
+        assert!(action.execute("test.exe"));
+        assert!(!action.execute(""));
     }
 }

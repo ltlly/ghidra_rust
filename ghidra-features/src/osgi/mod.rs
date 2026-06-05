@@ -642,6 +642,126 @@ impl StartLevelManager {
 }
 
 // ===========================================================================
+// BundleHostListener
+// ===========================================================================
+
+/// Listener trait for bundle host events.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BundleHostListener`.
+pub trait BundleHostListener: Send + Sync {
+    /// Called when a bundle is installed.
+    fn on_bundle_installed(&self, bundle_name: &str);
+    /// Called when a bundle is uninstalled.
+    fn on_bundle_uninstalled(&self, bundle_name: &str);
+    /// Called when a bundle status changes.
+    fn on_status_changed(&self, bundle_name: &str, new_status: BundleStatus);
+}
+
+// ===========================================================================
+// BundleStatusChangeRequestListener
+// ===========================================================================
+
+/// Listener trait for bundle status change requests.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BundleStatusChangeRequestListener`.
+pub trait BundleStatusChangeRequestListener: Send + Sync {
+    /// Called when a status change is requested.  Returns true if the change
+    /// should proceed.
+    fn on_status_change_requested(
+        &self,
+        bundle_name: &str,
+        current_status: BundleStatus,
+        requested_status: BundleStatus,
+    ) -> bool;
+}
+
+// ===========================================================================
+// GhidraBundleActivator
+// ===========================================================================
+
+/// Activator for Ghidra OSGi bundles.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.GhidraBundleActivator`.
+///
+/// The activator is responsible for starting and stopping OSGi bundles
+/// within the Ghidra plugin framework.
+#[derive(Debug, Clone)]
+pub struct GhidraBundleActivator {
+    /// The bundle symbolic name.
+    pub bundle_name: String,
+    /// Whether the activator has been started.
+    pub started: bool,
+    /// The bundle context.
+    pub context: Option<String>,
+}
+
+impl GhidraBundleActivator {
+    /// Create a new activator.
+    pub fn new(bundle_name: impl Into<String>) -> Self {
+        Self {
+            bundle_name: bundle_name.into(),
+            started: false,
+            context: None,
+        }
+    }
+
+    /// Start the activator.
+    pub fn start(&mut self, context: impl Into<String>) -> Result<(), GhidraBundleException> {
+        if self.started {
+            return Err(GhidraBundleException::new("Bundle already started"));
+        }
+        self.context = Some(context.into());
+        self.started = true;
+        Ok(())
+    }
+
+    /// Stop the activator.
+    pub fn stop(&mut self) -> Result<(), GhidraBundleException> {
+        if !self.started {
+            return Err(GhidraBundleException::new("Bundle not started"));
+        }
+        self.context = None;
+        self.started = false;
+        Ok(())
+    }
+
+    /// Whether the activator is started.
+    pub fn is_started(&self) -> bool {
+        self.started
+    }
+}
+
+// ===========================================================================
+// GhidraBundleException
+// ===========================================================================
+
+/// Exception type for Ghidra bundle operations.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.GhidraBundleException`.
+#[derive(Debug, Clone)]
+pub struct GhidraBundleException {
+    /// Error message.
+    pub message: String,
+}
+
+impl GhidraBundleException {
+    /// Create a new exception.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for GhidraBundleException {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "GhidraBundleException: {}", self.message)
+    }
+}
+
+impl std::error::Error for GhidraBundleException {}
+
+// ===========================================================================
 // Tests
 // ===========================================================================
 
@@ -857,5 +977,41 @@ mod tests {
         assert_eq!(mgr.current_level(), 1);
         mgr.advance_level();
         assert_eq!(mgr.current_level(), 2);
+    }
+
+    // --- Tests for newly ported types ---
+
+    #[test]
+    fn test_ghidra_bundle_activator() {
+        let mut activator = GhidraBundleActivator::new("com.ghidra.test");
+        assert!(!activator.is_started());
+
+        activator.start("test_context").unwrap();
+        assert!(activator.is_started());
+
+        activator.stop().unwrap();
+        assert!(!activator.is_started());
+    }
+
+    #[test]
+    fn test_ghidra_bundle_activator_double_start() {
+        let mut activator = GhidraBundleActivator::new("com.ghidra.test");
+        activator.start("ctx").unwrap();
+        let result = activator.start("ctx2");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ghidra_bundle_activator_stop_not_started() {
+        let mut activator = GhidraBundleActivator::new("com.ghidra.test");
+        let result = activator.stop();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_ghidra_bundle_exception() {
+        let err = GhidraBundleException::new("test error");
+        assert_eq!(err.message, "test error");
+        assert!(format!("{}", err).contains("test error"));
     }
 }

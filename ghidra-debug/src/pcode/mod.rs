@@ -39,3 +39,8 @@ pub use trace_thread_access::{
 
 pub mod addresses_read_state;
 pub use addresses_read_state::AddressesReadStatePiece;
+
+pub mod trace_property_access;
+pub use trace_property_access::{
+    InternalPcodeTraceDataAccess, PropertyEntry, PropertyValue, TracePropertyAccess,
+};

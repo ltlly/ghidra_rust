@@ -75,6 +75,35 @@ impl BlendedListingColorModel {
     }
 }
 
+/// Debugger listing interface.
+///
+/// Ported from `ghidra.debug.api.listing.DebuggerListing`. Defines the contract
+/// for a debugger listing panel that can navigate to addresses, track locations,
+/// and follow the current thread.
+pub trait DebuggerListing {
+    /// Get the window title of this debugger listing.
+    fn get_title(&self) -> &str;
+
+    /// Returns whether this listing is the main debugger listing.
+    fn is_main_listing(&self) -> bool;
+
+    /// Set a custom title. Prevents future calls to the generic title setter
+    /// from having any effect, preserving the custom title.
+    fn set_custom_title(&mut self, title: &str);
+
+    /// Set if this listing should follow the current thread when displaying.
+    fn set_follows_current_thread(&mut self, follows: bool);
+
+    /// Get whether this listing follows the current thread.
+    fn follows_current_thread(&self) -> bool;
+
+    /// Navigate to an address in the listing.
+    fn go_to_address(&mut self, address: u64);
+
+    /// Get the current address, if any.
+    fn current_address(&self) -> Option<u64>;
+}
+
 /// Debugger-specific listing configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DebuggerListingConfig {
