@@ -10,8 +10,10 @@ pub mod overview;
 pub mod overview_row_object;
 pub mod search_dialog;
 pub mod search_dialog_ext;
+pub mod search_plugin;
 pub mod search_results;
 pub mod server_cache;
+pub mod server_dialog;
 pub mod value_editors;
 
 /// BSim search settings.

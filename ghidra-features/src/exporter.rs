@@ -1365,6 +1365,248 @@ impl fmt::Display for BookmarkType {
 }
 
 // ---------------------------------------------------------------------------
+// ExportFormat -- user-facing export format enumeration
+// ---------------------------------------------------------------------------
+
+/// Export format selection for the ExporterDialog.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterDialog`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExportFormat {
+    /// Raw binary bytes.
+    Binary,
+    /// Intel HEX format.
+    IntelHex,
+    /// Motorola S-Record format.
+    MotorolaHex,
+    /// Plain text listing.
+    AsciiText,
+    /// XML representation.
+    Xml,
+    /// HTML listing.
+    Html,
+}
+
+impl ExportFormat {
+    /// All available export formats.
+    pub fn all() -> &'static [ExportFormat] {
+        &[
+            ExportFormat::Binary,
+            ExportFormat::IntelHex,
+            ExportFormat::MotorolaHex,
+            ExportFormat::AsciiText,
+            ExportFormat::Xml,
+            ExportFormat::Html,
+        ]
+    }
+
+    /// Human-readable display name.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Binary => "Raw Binary (*.bin)",
+            Self::IntelHex => "Intel Hex (*.hex, *.ihex)",
+            Self::MotorolaHex => "Motorola S-Record (*.srec, *.s19)",
+            Self::AsciiText => "ASCII Text (*.txt)",
+            Self::Xml => "XML (*.xml)",
+            Self::Html => "HTML (*.html, *.htm)",
+        }
+    }
+
+    /// Default file extension for this format.
+    pub fn default_extension(&self) -> &'static str {
+        match self {
+            Self::Binary => "bin",
+            Self::IntelHex => "hex",
+            Self::MotorolaHex => "srec",
+            Self::AsciiText => "txt",
+            Self::Xml => "xml",
+            Self::Html => "html",
+        }
+    }
+
+    /// Map to the corresponding exporter name in the registry.
+    pub fn exporter_name(&self) -> &'static str {
+        match self {
+            Self::Binary => "Raw Bytes",
+            Self::IntelHex => "Intel Hex",
+            Self::MotorolaHex => "Motorola Hex",
+            Self::AsciiText => "Ascii Text",
+            Self::Xml => "XML",
+            Self::Html => "HTML",
+        }
+    }
+}
+
+impl fmt::Display for ExportFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExportConfig -- configuration for an export operation
+// ---------------------------------------------------------------------------
+
+/// Configuration for an export operation.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterDialog`.
+#[derive(Debug, Clone)]
+pub struct ExportConfig {
+    /// The selected export format.
+    pub format: ExportFormat,
+    /// The output file path.
+    pub output_path: String,
+    /// Whether to export only the selected address range.
+    pub export_selection_only: bool,
+    /// Custom options for the exporter.
+    pub options: Vec<ExportOption>,
+}
+
+impl ExportConfig {
+    /// Create a new export configuration.
+    pub fn new(format: ExportFormat, output_path: impl Into<String>) -> Self {
+        Self {
+            format,
+            output_path: output_path.into(),
+            export_selection_only: false,
+            options: Vec::new(),
+        }
+    }
+
+    /// Set whether to export only the selection.
+    pub fn with_selection_only(mut self, selection_only: bool) -> Self {
+        self.export_selection_only = selection_only;
+        self
+    }
+
+    /// Add a custom export option.
+    pub fn with_option(mut self, option: ExportOption) -> Self {
+        self.options.push(option);
+        self
+    }
+
+    /// Find an option by name.
+    pub fn get_option(&self, name: &str) -> Option<&ExportOption> {
+        self.options.iter().find(|o| o.name == name)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExporterPlugin -- the export plugin model
+// ---------------------------------------------------------------------------
+
+/// The export plugin model.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterPlugin`.
+///
+/// Provides methods for initiating export operations from either the
+/// front-end project view or from within a tool with an open program.
+pub struct ExporterPlugin {
+    /// The exporter registry.
+    registry: ExporterRegistry,
+    /// Event log (for testing).
+    events: Vec<String>,
+}
+
+impl fmt::Debug for ExporterPlugin {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ExporterPlugin")
+            .field("events", &self.events)
+            .finish()
+    }
+}
+
+impl ExporterPlugin {
+    /// Create a new exporter plugin.
+    pub fn new() -> Self {
+        Self {
+            registry: ExporterRegistry::with_defaults(),
+            events: Vec::new(),
+        }
+    }
+
+    /// Get available export formats.
+    pub fn available_formats(&self) -> &[ExportFormat] {
+        ExportFormat::all()
+    }
+
+    /// Get the exporter registry.
+    pub fn registry(&self) -> &ExporterRegistry {
+        &self.registry
+    }
+
+    /// Export a program using the given configuration.
+    ///
+    /// Returns the number of bytes written on success.
+    pub fn export(
+        &mut self,
+        program: &Program,
+        config: &ExportConfig,
+        memory: Option<&MemoryModel>,
+        writer: &mut dyn Write,
+        log: &mut LoaderMessageLog,
+    ) -> Result<u64, ExporterError> {
+        let exporter_name = config.format.exporter_name();
+        self.events
+            .push(format!("Export: {} -> {}", exporter_name, config.output_path));
+
+        let mut counting_writer = CountingWriter::new(writer);
+        self.registry.export(
+            exporter_name,
+            program,
+            None,
+            memory,
+            &mut counting_writer,
+            log,
+        )?;
+        Ok(counting_writer.bytes_written())
+    }
+
+    /// Get the event log.
+    pub fn events(&self) -> &[String] {
+        &self.events
+    }
+}
+
+impl Default for ExporterPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CountingWriter -- wrapper that counts bytes written
+// ---------------------------------------------------------------------------
+
+/// A writer wrapper that counts the total bytes written.
+struct CountingWriter<'a> {
+    inner: &'a mut dyn Write,
+    count: u64,
+}
+
+impl<'a> CountingWriter<'a> {
+    fn new(inner: &'a mut dyn Write) -> Self {
+        Self { inner, count: 0 }
+    }
+
+    fn bytes_written(&self) -> u64 {
+        self.count
+    }
+}
+
+impl<'a> Write for CountingWriter<'a> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        self.count += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1702,5 +1944,92 @@ mod tests {
         assert_eq!(BookmarkType::Warning.to_string(), "Warning");
         assert_eq!(BookmarkType::Error.to_string(), "Error");
         assert_eq!(BookmarkType::Info.to_string(), "Info");
+    }
+
+    #[test]
+    fn test_export_format_display_name() {
+        assert_eq!(ExportFormat::Binary.display_name(), "Raw Binary (*.bin)");
+        assert_eq!(
+            ExportFormat::IntelHex.display_name(),
+            "Intel Hex (*.hex, *.ihex)"
+        );
+        assert_eq!(
+            ExportFormat::Html.display_name(),
+            "HTML (*.html, *.htm)"
+        );
+    }
+
+    #[test]
+    fn test_export_format_extension() {
+        assert_eq!(ExportFormat::Binary.default_extension(), "bin");
+        assert_eq!(ExportFormat::Xml.default_extension(), "xml");
+        assert_eq!(ExportFormat::Html.default_extension(), "html");
+    }
+
+    #[test]
+    fn test_export_format_exporter_name() {
+        assert_eq!(ExportFormat::Binary.exporter_name(), "Raw Bytes");
+        assert_eq!(ExportFormat::IntelHex.exporter_name(), "Intel Hex");
+        assert_eq!(ExportFormat::MotorolaHex.exporter_name(), "Motorola Hex");
+    }
+
+    #[test]
+    fn test_export_format_all() {
+        let all = ExportFormat::all();
+        assert_eq!(all.len(), 6);
+    }
+
+    #[test]
+    fn test_export_format_display() {
+        assert_eq!(
+            format!("{}", ExportFormat::Binary),
+            "Raw Binary (*.bin)"
+        );
+    }
+
+    #[test]
+    fn test_export_config() {
+        let config = ExportConfig::new(ExportFormat::Binary, "/tmp/output.bin")
+            .with_selection_only(true);
+        assert_eq!(config.format, ExportFormat::Binary);
+        assert_eq!(config.output_path, "/tmp/output.bin");
+        assert!(config.export_selection_only);
+    }
+
+    #[test]
+    fn test_export_config_option() {
+        let config = ExportConfig::new(ExportFormat::IntelHex, "/tmp/out.hex")
+            .with_option(ExportOption {
+                name: "Record Size".into(),
+                option_type: ExportOptionType::Integer,
+                default_value: ExportOptionValue::Integer(32),
+                description: Some("Size of each record".into()),
+            });
+        let opt = config.get_option("Record Size").unwrap();
+        assert_eq!(opt.default_value.as_i64(), Some(32));
+    }
+
+    #[test]
+    fn test_exporter_plugin() {
+        let plugin = ExporterPlugin::new();
+        assert_eq!(plugin.available_formats().len(), 6);
+        assert!(plugin.events().is_empty());
+    }
+
+    #[test]
+    fn test_exporter_plugin_export() {
+        let mut plugin = ExporterPlugin::new();
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let config = ExportConfig::new(ExportFormat::Binary, "/tmp/out.bin");
+
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+        let bytes = plugin
+            .export(&prog, &config, Some(&mem), &mut output, &mut log)
+            .unwrap();
+        assert_eq!(bytes, 32);
+        assert_eq!(output.len(), 32);
+        assert_eq!(plugin.events().len(), 1);
     }
 }

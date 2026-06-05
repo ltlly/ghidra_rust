@@ -122,6 +122,12 @@ pub use search_results::{
     BSimSearchResultsFilter, BSimSearchSettings, ExecutableResult,
 };
 
+// Re-export GUI plugin and dialog types.
+pub use gui::search_plugin::{
+    BSimDatabaseInfo, BSimSearchPlugin, BSimServerEntry, BSimServerManager, BSimTaskState,
+};
+pub use gui::server_dialog::{BSimServerDialog, ServerDialogOperation};
+
 // Re-export configuration types.
 pub use configuration::{
     BSimServerConfig, BSimConfiguration, BSimDatabaseType,

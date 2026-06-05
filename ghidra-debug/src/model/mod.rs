@@ -60,7 +60,15 @@ pub mod trace_method;
 pub mod trace_object_value;
 pub mod trace_span;
 
+pub mod address_translator;
+pub mod experiment;
+pub mod location_tracking;
+pub mod map_proposal;
+
 pub use address_snap::{AddressSnap, TraceAddressSnapRange};
+pub use address_translator::{
+    AddressTranslator, MappingChangeEvent, MappingChangeKind, TranslatedAddress, TranslationEntry,
+};
 pub use bookmark::{TraceBookmark, TraceBookmarkManager, TraceBookmarkType};
 pub use breakpoint::{BreakpointKindSet, TraceBreakpointKind};
 pub use breakpoint_spec::{
@@ -156,4 +164,15 @@ pub use trace_event::{
 };
 pub use trace_object_value::{
     ChangeCollector, TargetTreeSnapshot, TraceObjectChangeListener, ValueChangeEvent, ValueChangeKind,
+};
+pub use location_tracking::{
+    AutoMapMatchStrategy, AutoMapSpec, AutoReadMemorySpec, GoToInput, LocationTrackingSpec,
+    TrackingEvent,
+};
+pub use map_proposal::{
+    MapProposal, MapProposalSet, MapProposalSource, ModuleMapProposal, ProposedMapping,
+    RegionMapProposal, RegionPermissions, SectionMapProposal, SectionMapping,
+};
+pub use experiment::{
+    DebugExperiment, DiagnosticBoundingBox, RStarTreeDiagnostics, TracePerformanceMetrics,
 };

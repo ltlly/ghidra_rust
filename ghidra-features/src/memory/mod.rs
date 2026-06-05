@@ -17,6 +17,17 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.memory` Java package.
 pub mod manager;
 
+/// Expand block model -- expand a block upward or downward.
+///
+/// Ported from `ghidra.app.plugin.core.memory.ExpandBlockModel`,
+/// `ExpandBlockUpModel`, and `ExpandBlockDownModel`.
+pub mod expand_block;
+
+/// Move block model -- relocate a block to a new address.
+///
+/// Ported from `ghidra.app.plugin.core.memory.MoveBlockModel`.
+pub mod move_block;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 
@@ -367,11 +378,154 @@ impl MemoryMapModel {
     fn ranges_overlap(s1: u64, e1: u64, s2: u64, e2: u64) -> bool {
         s1 <= e2 && s2 <= e1
     }
+
+    /// Move all blocks by a delta offset (used for rebasing).
+    ///
+    /// Shifts every block's start and end address by `delta` bytes.
+    /// Positive delta moves blocks to higher addresses; negative to lower.
+    pub fn rebase_all(&mut self, delta: i64) {
+        let old_blocks: Vec<(u64, MemoryBlockInfo)> = self
+            .blocks
+            .iter()
+            .map(|(&k, v)| (k, v.clone()))
+            .collect();
+
+        self.blocks.clear();
+
+        for (_, mut block) in old_blocks {
+            let new_start = if delta >= 0 {
+                block.start.offset.wrapping_add(delta as u64)
+            } else {
+                block.start.offset.wrapping_sub((-delta) as u64)
+            };
+            let new_end = if delta >= 0 {
+                block.end.offset.wrapping_add(delta as u64)
+            } else {
+                block.end.offset.wrapping_sub((-delta) as u64)
+            };
+            block.start = Address::new(new_start);
+            block.end = Address::new(new_end);
+            self.blocks.insert(block.start.offset, block);
+        }
+    }
+
+    /// Get the total size of all blocks in bytes.
+    pub fn total_size(&self) -> u64 {
+        self.blocks.values().map(|b| b.size()).sum()
+    }
+
+    /// Get the lowest address across all blocks.
+    pub fn min_address(&self) -> Option<Address> {
+        self.blocks.values().map(|b| b.start).min_by_key(|a| a.offset)
+    }
+
+    /// Get the highest address across all blocks.
+    pub fn max_address(&self) -> Option<Address> {
+        self.blocks.values().map(|b| b.end).max_by_key(|a| a.offset)
+    }
+
+    /// Get all blocks that are executable.
+    pub fn executable_blocks(&self) -> Vec<&MemoryBlockInfo> {
+        self.blocks
+            .values()
+            .filter(|b| b.permissions.execute)
+            .collect()
+    }
+
+    /// Get all blocks that are writable.
+    pub fn writable_blocks(&self) -> Vec<&MemoryBlockInfo> {
+        self.blocks
+            .values()
+            .filter(|b| b.permissions.write)
+            .collect()
+    }
+
+    /// Set the volatile flag on a block.
+    pub fn set_volatile(&mut self, name: &str, volatile: bool) -> Result<(), String> {
+        self.blocks
+            .values_mut()
+            .find(|b| b.name == name)
+            .map(|b| {
+                b.volatile = volatile;
+            })
+            .ok_or_else(|| format!("Block '{}' not found", name))
+    }
+
+    /// Convert a block to an overlay block.
+    pub fn set_overlay(&mut self, name: &str, overlay: bool) -> Result<(), String> {
+        self.blocks
+            .values_mut()
+            .find(|b| b.name == name)
+            .map(|b| {
+                b.overlay = overlay;
+            })
+            .ok_or_else(|| format!("Block '{}' not found", name))
+    }
 }
 
 impl Default for MemoryMapModel {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ============================================================================
+// ImageBaseAction -- change the image base address
+// ============================================================================
+
+/// Action for changing the image base address of a program.
+///
+/// Ported from `ghidra.app.plugin.core.memory.ImageBaseDialog`.
+///
+/// When the image base is changed, all blocks are shifted by the delta
+/// between the old and new base addresses.
+#[derive(Debug)]
+pub struct ImageBaseAction {
+    /// The current base address.
+    pub current_base: Address,
+    /// The desired new base address.
+    pub new_base: Address,
+    /// Validation message (if invalid).
+    message: Option<String>,
+}
+
+impl ImageBaseAction {
+    /// Create a new image base action.
+    pub fn new(current_base: Address, new_base: Address) -> Self {
+        let message = if current_base == new_base {
+            Some("New base is the same as the current base".into())
+        } else {
+            None
+        };
+        Self {
+            current_base,
+            new_base,
+            message,
+        }
+    }
+
+    /// The delta between old and new base.
+    pub fn delta(&self) -> i64 {
+        self.new_base.offset as i64 - self.current_base.offset as i64
+    }
+
+    /// Whether the action is valid.
+    pub fn is_valid(&self) -> bool {
+        self.message.is_none()
+    }
+
+    /// Get the validation error message, if any.
+    pub fn message(&self) -> Option<&str> {
+        self.message.as_deref()
+    }
+
+    /// Execute the rebase on the given memory map model.
+    pub fn execute(&self, model: &mut MemoryMapModel) -> Result<(), String> {
+        if let Some(msg) = &self.message {
+            return Err(msg.clone());
+        }
+        model.rebase_all(self.delta());
+        Ok(())
     }
 }
 
@@ -545,5 +699,187 @@ mod tests {
             ))
             .unwrap();
         assert!(model.merge_blocks("a", "b").is_err());
+    }
+
+    #[test]
+    fn test_rebase_all() {
+        let mut model = MemoryMapModel::new();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".text",
+                Address::new(0x1000),
+                Address::new(0x1FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".data",
+                Address::new(0x2000),
+                Address::new(0x2FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+
+        model.rebase_all(0x10000);
+
+        let text = model.get_block(".text").unwrap();
+        assert_eq!(text.start.offset, 0x11000);
+        assert_eq!(text.end.offset, 0x11FFF);
+
+        let data = model.get_block(".data").unwrap();
+        assert_eq!(data.start.offset, 0x12000);
+        assert_eq!(data.end.offset, 0x12FFF);
+    }
+
+    #[test]
+    fn test_total_size() {
+        let mut model = MemoryMapModel::new();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".text",
+                Address::new(0x1000),
+                Address::new(0x1FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".data",
+                Address::new(0x2000),
+                Address::new(0x27FF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        assert_eq!(model.total_size(), 0x1000 + 0x800);
+    }
+
+    #[test]
+    fn test_min_max_address() {
+        let mut model = MemoryMapModel::new();
+        assert!(model.min_address().is_none());
+        assert!(model.max_address().is_none());
+
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".text",
+                Address::new(0x1000),
+                Address::new(0x1FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".data",
+                Address::new(0x5000),
+                Address::new(0x5FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+
+        assert_eq!(model.min_address().unwrap().offset, 0x1000);
+        assert_eq!(model.max_address().unwrap().offset, 0x5FFF);
+    }
+
+    #[test]
+    fn test_executable_blocks() {
+        let mut model = MemoryMapModel::new();
+        let mut text = MemoryBlockInfo::new(
+            ".text",
+            Address::new(0x1000),
+            Address::new(0x1FFF),
+            MemoryBlockType::Initialized,
+        );
+        text.permissions = MemoryBlockPermission::read_execute();
+        model.add_block(text).unwrap();
+
+        let mut data = MemoryBlockInfo::new(
+            ".data",
+            Address::new(0x2000),
+            Address::new(0x2FFF),
+            MemoryBlockType::Initialized,
+        );
+        data.permissions = MemoryBlockPermission::read_write();
+        model.add_block(data).unwrap();
+
+        assert_eq!(model.executable_blocks().len(), 1);
+        assert_eq!(model.writable_blocks().len(), 1);
+    }
+
+    #[test]
+    fn test_set_volatile() {
+        let mut model = MemoryMapModel::new();
+        model
+            .add_block(MemoryBlockInfo::new(
+                "IO",
+                Address::new(0xF000),
+                Address::new(0xF0FF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        model.set_volatile("IO", true).unwrap();
+        let b = model.get_block("IO").unwrap();
+        assert!(b.volatile);
+    }
+
+    #[test]
+    fn test_set_overlay() {
+        let mut model = MemoryMapModel::new();
+        model
+            .add_block(MemoryBlockInfo::new(
+                "overlay",
+                Address::new(0x1000),
+                Address::new(0x1FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        model.set_overlay("overlay", true).unwrap();
+        let b = model.get_block("overlay").unwrap();
+        assert!(b.overlay);
+    }
+
+    #[test]
+    fn test_image_base_action() {
+        let action = ImageBaseAction::new(Address::new(0x400000), Address::new(0x1000000));
+        assert!(action.is_valid());
+        assert_eq!(action.delta(), 0xC00000);
+
+        let mut model = MemoryMapModel::new();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".text",
+                Address::new(0x401000),
+                Address::new(0x401FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        action.execute(&mut model).unwrap();
+        let b = model.get_block(".text").unwrap();
+        assert_eq!(b.start.offset, 0x1001000);
+    }
+
+    #[test]
+    fn test_image_base_action_same_address() {
+        let action = ImageBaseAction::new(Address::new(0x400000), Address::new(0x400000));
+        assert!(!action.is_valid());
+    }
+
+    #[test]
+    fn test_image_base_action_negative_delta() {
+        let action = ImageBaseAction::new(Address::new(0x1000000), Address::new(0x400000));
+        assert_eq!(action.delta(), -0xC00000);
+
+        let mut model = MemoryMapModel::new();
+        model
+            .add_block(MemoryBlockInfo::new(
+                ".text",
+                Address::new(0x1001000),
+                Address::new(0x1001FFF),
+                MemoryBlockType::Initialized,
+            ))
+            .unwrap();
+        action.execute(&mut model).unwrap();
+        let b = model.get_block(".text").unwrap();
+        assert_eq!(b.start.offset, 0x401000);
     }
 }

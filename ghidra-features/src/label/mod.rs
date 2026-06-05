@@ -18,6 +18,11 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.label` Java package.
 pub mod history;
 
+/// Symbol chooser -- search and select symbols from the program's symbol table.
+///
+/// Ported from `ghidra.app.plugin.core.label.SymbolChooserDialog`.
+pub mod symbol_chooser;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

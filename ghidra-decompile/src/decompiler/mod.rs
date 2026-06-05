@@ -188,6 +188,12 @@ pub use actions::{
     PCodeDfgDisplayOptions, PCodeDfgGraphType, SliceHighlightColorProvider,
 };
 
+// Convert action types (explicit per-format action structs)
+pub use actions::convert_actions::{
+    ConstantFormat as ConvertConstantFormat,
+    ConvertConstantAction as ConvertConstantActionData,
+};
+
 // Utility types
 pub use util::{
     DataTypeDependencyOrderer, FillOutStructureHelper as UtilFillOutStructureHelper, StructFieldEntry as UtilStructFieldEntry,

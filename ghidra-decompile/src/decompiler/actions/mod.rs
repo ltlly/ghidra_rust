@@ -7,6 +7,7 @@
 //! metadata only (no Swing/AWT integration).
 
 pub mod action_types;
+pub mod convert_actions;
 pub mod edit_actions;
 pub mod extra_actions;
 

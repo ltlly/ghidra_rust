@@ -14,6 +14,7 @@
 
 pub mod actions;
 pub mod address_table_analyzer;
+pub mod auto_table_disassembler;
 pub mod call_fixup_analyzer;
 pub mod entry_point_analyzer;
 pub mod processor_actions;
