@@ -37,8 +37,16 @@
 //! ```
 
 pub mod algo;
+pub mod edge_weight_metric;
+pub mod featurette;
+pub mod graph_algorithms;
+pub mod graph_event;
+pub mod graph_factory;
+pub mod graph_path_set;
+pub mod implicit_graph;
 pub mod job;
 pub mod jung;
+pub mod mutable_wrapper;
 pub mod service;
 pub mod viewer;
 

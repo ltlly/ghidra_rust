@@ -2,10 +2,21 @@
 //!
 //! Ports `ghidra.features.bsim.query.client.tables` package.
 
-pub mod vector_store;
-pub mod weight_table;
 pub mod callgraph_table;
 pub mod description_table;
+pub mod exe_table;
+pub mod idf_lookup_table;
+pub mod key_value_table;
+pub mod optional_table;
+pub mod sql_string_table;
+pub mod vector_store;
+pub mod weight_table;
+
+pub use exe_table::{ExeTable, ExeTableOrderColumn, ExecutableRow};
+pub use idf_lookup_table::{IdfLookupRow, IdfLookupTable};
+pub use key_value_table::KeyValueTable;
+pub use optional_table::{OptionalRow, OptionalTable};
+pub use sql_string_table::SqlStringTable;
 
 /// SQL table name constants.
 pub mod table_names {

@@ -78,6 +78,8 @@ pub mod decompile_process;
 pub mod decompile_results;
 pub mod decompiled_function;
 pub mod decomp_interface;
+pub mod decompiler_clipboard_provider;
+pub mod decompiler_location_memento;
 pub mod disposer;
 pub mod fill_out_structure;
 pub mod flatapi;
@@ -211,6 +213,12 @@ pub use highlight_types::PanelToken as HtPanelToken;
 
 // Concurrent queue types (from ghidra.app.util.DecompilerConcurrentQ)
 pub use concurrent_q::{DecompilerConcurrentQ, QCallback, QResult};
+
+// Clipboard provider
+pub use decompiler_clipboard_provider::DecompilerClipboardProvider;
+
+// Location memento
+pub use decompiler_location_memento::DecompilerLocationMemento;
 
 // ============================================================================
 // Tests

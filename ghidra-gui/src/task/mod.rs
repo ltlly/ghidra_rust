@@ -8,11 +8,13 @@
 //! - [`TrackedTaskListener`] -- listener for tracked task lifecycle events
 //! - [`SwingExceptionHandler`] -- global exception handler (Ghidra.SwingExceptionHandler)
 
+pub mod script_task_listener;
 pub mod task_dialog;
 pub mod task_types;
 pub mod task_utilities;
 pub mod tracked_task;
 
+pub use script_task_listener::ScriptTaskListener;
 pub use task_dialog::TaskDialog;
 pub use task_types::{
     BufferedSwingRunner, CompoundTask, DummyCancellableTaskMonitor, SwingRunnable,

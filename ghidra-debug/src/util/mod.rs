@@ -6,6 +6,7 @@
 
 pub mod coordinates;
 pub mod data_adapter;
+pub mod event_queue;
 pub mod events;
 pub mod iterator_adapters;
 

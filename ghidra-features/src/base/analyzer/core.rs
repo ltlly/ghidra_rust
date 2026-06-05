@@ -299,6 +299,7 @@ impl<'a> Iterator for FunctionIterator<'a> {
 
 #[derive(Debug, Clone)]
 pub struct Program { pub name: String, pub language: Language, pub memory_blocks: Vec<MemoryBlock>, pub listing: Listing, pub function_manager: FunctionManager, pub image_base: u64, pub memory: AddressSet, pub is_temporary: bool, pub is_changed: bool, pub executable_format: Option<String>, pub external_references: HashMap<Address, String>, pub symbols: HashMap<Address, String>, pub bookmarks: Vec<(Address, BookmarkType, String, String)> }
+impl Default for Program { fn default() -> Self { Program::new("", Language { processor: String::new(), variant: String::new(), size: 0 }) } }
 impl Program {
     pub fn new(name: &str, language: Language) -> Self { Self { name: name.to_string(), language, memory_blocks: Vec::new(), listing: Listing::default(), function_manager: FunctionManager::default(), image_base: 0, memory: AddressSet::new(), is_temporary: true, is_changed: false, executable_format: None, external_references: HashMap::new(), symbols: HashMap::new(), bookmarks: Vec::new() } }
     pub fn get_listing(&self) -> &Listing { &self.listing }

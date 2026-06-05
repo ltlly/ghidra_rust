@@ -21,7 +21,10 @@ pub mod tracemgr;
 pub mod tracermi;
 pub mod watch;
 
-pub use action::{ActionSource, AutoMapSpec, AutoMapSpecRegistry, GoToInput, LocationTrackingSpec, TrackingEvent};
+pub use action::{
+    ActionSource, AutoMapSpec, AutoMapSpecRegistry, AutoReadMemorySpec, AutoReadMemorySpecRegistry,
+    GoToInput, InstanceUtils, LocationTracker, LocationTrackingSpec, TrackingEvent,
+};
 pub use action_name::ActionName;
 pub use address_translator::{AddressTranslator, StaticMappingEntry, TranslatedAddress};
 pub use breakpoint::{

@@ -33,6 +33,7 @@
 pub mod actions;
 pub mod app;
 pub mod bean;
+pub mod swing_exception_handler;
 pub mod bytes_view;
 pub mod chooser;
 pub mod decompiler_view;

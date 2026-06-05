@@ -208,6 +208,163 @@ impl AutoMapSpecRegistry {
     }
 }
 
+/// A location tracker that computes the current trace address for navigation.
+///
+/// Ported from Ghidra's `LocationTracker` interface. Implementations
+/// compute addresses for "Go To" actions and determine whether changes
+/// should trigger re-navigation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocationTracker {
+    /// The name of the tracking specification.
+    pub spec_name: String,
+    /// The default Sleigh expression for "Go To".
+    pub goto_expression: String,
+    /// Whether this tracker is currently active.
+    pub active: bool,
+    /// Last computed address (offset), if any.
+    pub last_computed_offset: Option<u64>,
+    /// Last computed address space, if any.
+    pub last_computed_space: Option<String>,
+}
+
+impl LocationTracker {
+    /// Create a new location tracker.
+    pub fn new(spec_name: impl Into<String>) -> Self {
+        Self {
+            spec_name: spec_name.into(),
+            goto_expression: String::new(),
+            active: true,
+            last_computed_offset: None,
+            last_computed_space: None,
+        }
+    }
+
+    /// Set the Go To expression.
+    pub fn with_goto_expression(mut self, expr: impl Into<String>) -> Self {
+        self.goto_expression = expr.into();
+        self
+    }
+
+    /// Check if the tracker is affected by a bytes change.
+    pub fn affected_by_bytes_change(&self, _space: &str, _snap: i64) -> bool {
+        self.active
+    }
+
+    /// Check if the tracker is affected by a register change.
+    pub fn affected_by_register_change(&self, _register_name: &str, _snap: i64) -> bool {
+        self.active
+    }
+
+    /// Check if the tracker is affected by a stack change.
+    pub fn affected_by_stack_change(&self, _snap: i64) -> bool {
+        self.active
+    }
+
+    /// Update the last computed address.
+    pub fn set_computed_address(&mut self, space: impl Into<String>, offset: u64) {
+        self.last_computed_space = Some(space.into());
+        self.last_computed_offset = Some(offset);
+    }
+
+    /// Clear the last computed address.
+    pub fn clear_computed_address(&mut self) {
+        self.last_computed_space = None;
+        self.last_computed_offset = None;
+    }
+}
+
+/// An auto-read memory specification.
+///
+/// Ported from Ghidra's `AutoReadMemorySpec`. Specifies how to
+/// automatically read target memory into the trace when the target
+/// state changes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoReadMemorySpec {
+    /// Configuration name for serialization.
+    pub config_name: String,
+    /// Menu display name.
+    pub menu_name: String,
+    /// Description of this specification.
+    pub description: String,
+    /// Whether this spec is enabled.
+    pub enabled: bool,
+}
+
+impl AutoReadMemorySpec {
+    /// Create a new auto-read memory spec.
+    pub fn new(
+        config_name: impl Into<String>,
+        menu_name: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            config_name: config_name.into(),
+            menu_name: menu_name.into(),
+            description: description.into(),
+            enabled: true,
+        }
+    }
+}
+
+/// Registry of auto-read memory specifications.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AutoReadMemorySpecRegistry {
+    specs: std::collections::BTreeMap<String, AutoReadMemorySpec>,
+}
+
+impl AutoReadMemorySpecRegistry {
+    /// Create a new registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register an auto-read memory spec.
+    pub fn register(&mut self, spec: AutoReadMemorySpec) {
+        self.specs.insert(spec.config_name.clone(), spec);
+    }
+
+    /// Get a spec by config name.
+    pub fn get(&self, name: &str) -> Option<&AutoReadMemorySpec> {
+        self.specs.get(name)
+    }
+
+    /// Get all registered specs.
+    pub fn all_specs(&self) -> &std::collections::BTreeMap<String, AutoReadMemorySpec> {
+        &self.specs
+    }
+
+    /// Number of registered specs.
+    pub fn len(&self) -> usize {
+        self.specs.len()
+    }
+
+    /// Whether the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.specs.is_empty()
+    }
+}
+
+/// Utility for collecting unique instances by name.
+///
+/// Ported from Ghidra's `InstanceUtils`.
+pub struct InstanceUtils;
+
+impl InstanceUtils {
+    /// Collect unique instances by their name into a map.
+    pub fn collect_by_name<T, F>(items: impl IntoIterator<Item = T>, name_fn: F) -> std::collections::BTreeMap<String, T>
+    where
+        F: Fn(&T) -> String,
+    {
+        items
+            .into_iter()
+            .map(|item| {
+                let name = name_fn(&item);
+                (name, item)
+            })
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +441,81 @@ mod tests {
         let json = serde_json::to_string(&input).unwrap();
         let back: GoToInput = serde_json::from_str(&json).unwrap();
         assert_eq!(back, input);
+    }
+
+    #[test]
+    fn test_location_tracker() {
+        let mut tracker = LocationTracker::new("PC")
+            .with_goto_expression("RIP");
+        assert_eq!(tracker.spec_name, "PC");
+        assert_eq!(tracker.goto_expression, "RIP");
+        assert!(tracker.active);
+        assert!(tracker.last_computed_offset.is_none());
+
+        tracker.set_computed_address("register", 0x400000);
+        assert_eq!(tracker.last_computed_offset, Some(0x400000));
+        assert_eq!(tracker.last_computed_space.as_deref(), Some("register"));
+
+        tracker.clear_computed_address();
+        assert!(tracker.last_computed_offset.is_none());
+    }
+
+    #[test]
+    fn test_location_tracker_affected() {
+        let tracker = LocationTracker::new("PC");
+        assert!(tracker.affected_by_bytes_change("ram", 0));
+        assert!(tracker.affected_by_register_change("RIP", 0));
+        assert!(tracker.affected_by_stack_change(0));
+    }
+
+    #[test]
+    fn test_auto_read_memory_spec() {
+        let spec = AutoReadMemorySpec::new(
+            "regions",
+            "Read Regions",
+            "Read memory regions automatically",
+        );
+        assert_eq!(spec.config_name, "regions");
+        assert!(spec.enabled);
+    }
+
+    #[test]
+    fn test_auto_read_memory_spec_registry() {
+        let mut reg = AutoReadMemorySpecRegistry::new();
+        assert!(reg.is_empty());
+
+        reg.register(AutoReadMemorySpec::new("r1", "Read 1", "First"));
+        reg.register(AutoReadMemorySpec::new("r2", "Read 2", "Second"));
+
+        assert_eq!(reg.len(), 2);
+        assert!(reg.get("r1").is_some());
+        assert!(reg.get("missing").is_none());
+    }
+
+    #[test]
+    fn test_instance_utils() {
+        let items = vec![
+            AutoMapSpec::new("a", "A", "first"),
+            AutoMapSpec::new("b", "B", "second"),
+        ];
+        let map = InstanceUtils::collect_by_name(items, |s| s.config_name.clone());
+        assert_eq!(map.len(), 2);
+        assert!(map.contains_key("a"));
+    }
+
+    #[test]
+    fn test_location_tracker_serde() {
+        let tracker = LocationTracker::new("PC");
+        let json = serde_json::to_string(&tracker).unwrap();
+        let back: LocationTracker = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.spec_name, "PC");
+    }
+
+    #[test]
+    fn test_auto_read_memory_spec_serde() {
+        let spec = AutoReadMemorySpec::new("test", "Test", "Desc");
+        let json = serde_json::to_string(&spec).unwrap();
+        let back: AutoReadMemorySpec = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.config_name, "test");
     }
 }

@@ -129,6 +129,9 @@ pub mod vscode;
 pub mod functionwindow;
 pub mod processors;
 
+// -- Analysis plugin layer ported from Ghidra's analysis package --
+pub mod analysis;
+
 // -- Top-level re-exports of base plugin modules --
 // These modules live under `base::` (ported from `ghidra.app.plugin.core.*`)
 // but are re-exported here for direct access via `ghidra_features::<module>`.
@@ -164,7 +167,11 @@ pub use base::function;
 /// Ported from `ghidra.app.plugin.core.console`.
 pub use base::console;
 
-pub use base::analyzer::*;
+// Selective re-exports from base::analyzer used by this crate's FeatureManager
+pub use base::analyzer::Analyzer;
+pub use base::analyzer::Program;
+pub use base::analyzer::Address;
+pub use base::analyzer::AddressSet;
 pub use dwarf::*;
 pub use fileformats::*;
 pub use pdb::*;
