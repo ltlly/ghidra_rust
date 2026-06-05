@@ -293,6 +293,240 @@ impl VariableValueUtils {
     }
 }
 
+// ---------------------------------------------------------------------------
+// VariableValueRowKind: rich row type matching Ghidra's VariableValueRow variants
+// ---------------------------------------------------------------------------
+
+/// The key for a variable value row, determining display order.
+///
+/// Ported from Ghidra's `VariableValueRow.RowKey`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum VariableRowKey {
+    /// The variable name.
+    Name,
+    /// The unwound frame.
+    Frame,
+    /// The variable's storage (register or stack location).
+    Storage,
+    /// The data type.
+    Type,
+    /// The instruction at the variable's address.
+    Instruction,
+    /// The dynamic location.
+    Location,
+    /// Raw bytes.
+    Bytes,
+    /// Integer representation.
+    Integer,
+    /// The value in its type's default format.
+    Value,
+    /// Computation status.
+    Status,
+    /// Unwind warnings.
+    Warnings,
+    /// Evaluation error.
+    Error,
+}
+
+impl VariableRowKey {
+    /// Get the display label for this key.
+    pub fn display_label(&self) -> &'static str {
+        match self {
+            Self::Name => "Name",
+            Self::Frame => "Frame",
+            Self::Storage => "Storage",
+            Self::Type => "Type",
+            Self::Instruction => "Instruction",
+            Self::Location => "Location",
+            Self::Bytes => "Bytes",
+            Self::Integer => "Integer",
+            Self::Value => "Value",
+            Self::Status => "Status",
+            Self::Warnings => "Warnings",
+            Self::Error => "Error",
+        }
+    }
+}
+
+/// The rich kind of a variable value row, matching Ghidra's Java variant classes.
+///
+/// Each variant carries the data specific to that row type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VariableValueRowKind {
+    /// Variable name row.
+    Name {
+        /// The variable name.
+        name: String,
+    },
+    /// Frame info row (which unwound frame this evaluation used).
+    Frame {
+        /// Frame description string.
+        description: String,
+        /// Frame level.
+        level: u32,
+    },
+    /// Storage location row (register or stack address).
+    Storage {
+        /// Storage description (e.g., "RAX" or "Stack[-0x8]:8").
+        storage: String,
+    },
+    /// Data type row.
+    Type {
+        /// Type display name.
+        type_name: String,
+    },
+    /// Instruction row (if the operand refers to code).
+    Instruction {
+        /// The instruction mnemonic and operands.
+        mnemonic: String,
+        /// Instruction address.
+        address: u64,
+    },
+    /// Location row (dynamic location string).
+    Location {
+        /// Location string (e.g., "0x400000:8").
+        location: Option<String>,
+    },
+    /// Bytes row (raw bytes).
+    Bytes {
+        /// The bytes.
+        bytes: Vec<u8>,
+        /// The memory state of these bytes.
+        state: TraceMemoryState,
+        /// Whether big-endian.
+        big_endian: bool,
+    },
+    /// Integer representation row.
+    Integer {
+        /// The bytes for integer conversion.
+        bytes: Vec<u8>,
+        /// The memory state.
+        state: TraceMemoryState,
+        /// Whether big-endian.
+        big_endian: bool,
+    },
+    /// Value in type's default representation.
+    Value {
+        /// The formatted value string.
+        value: String,
+        /// The memory state.
+        state: TraceMemoryState,
+    },
+    /// Computation status row.
+    Status {
+        /// Status message.
+        status: String,
+    },
+    /// Warnings row (unwind warnings).
+    Warnings {
+        /// Warning messages.
+        warnings: Vec<String>,
+    },
+    /// Error row.
+    Error {
+        /// Error message.
+        error: String,
+    },
+}
+
+impl VariableValueRowKind {
+    /// Get the row key for ordering.
+    pub fn key(&self) -> VariableRowKey {
+        match self {
+            Self::Name { .. } => VariableRowKey::Name,
+            Self::Frame { .. } => VariableRowKey::Frame,
+            Self::Storage { .. } => VariableRowKey::Storage,
+            Self::Type { .. } => VariableRowKey::Type,
+            Self::Instruction { .. } => VariableRowKey::Instruction,
+            Self::Location { .. } => VariableRowKey::Location,
+            Self::Bytes { .. } => VariableRowKey::Bytes,
+            Self::Integer { .. } => VariableRowKey::Integer,
+            Self::Value { .. } => VariableRowKey::Value,
+            Self::Status { .. } => VariableRowKey::Status,
+            Self::Warnings { .. } => VariableRowKey::Warnings,
+            Self::Error { .. } => VariableRowKey::Error,
+        }
+    }
+
+    /// Get a simple string representation of the value.
+    pub fn value_to_string(&self) -> String {
+        match self {
+            Self::Name { name } => name.clone(),
+            Self::Frame { description, .. } => description.clone(),
+            Self::Storage { storage } => storage.clone(),
+            Self::Type { type_name } => type_name.clone(),
+            Self::Instruction { mnemonic, .. } => mnemonic.clone(),
+            Self::Location { location } => location.as_deref().unwrap_or("None").to_string(),
+            Self::Bytes { bytes, state, .. } => {
+                let hex = bytes.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ");
+                format!("({:?}) {}", state, hex)
+            }
+            Self::Integer { bytes, state, .. } => {
+                let hex = bytes.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>().join(" ");
+                format!("({:?}) {}", state, hex)
+            }
+            Self::Value { value, state } => format!("({:?}) {}", state, value),
+            Self::Status { status } => status.clone(),
+            Self::Warnings { warnings } => warnings.join("\n"),
+            Self::Error { error } => error.clone(),
+        }
+    }
+
+    /// Get a simple string for the key.
+    pub fn key_to_string(&self) -> String {
+        self.key().display_label().to_string()
+    }
+
+    /// Render this row as a simple "Key: Value" string.
+    pub fn to_simple_string(&self) -> String {
+        format!("{}: {}", self.key_to_string(), self.value_to_string())
+    }
+}
+
+/// A collection of variable value rows for display.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VariableValueRowSet {
+    /// The rows in display order.
+    pub rows: Vec<VariableValueRowKind>,
+}
+
+impl VariableValueRowSet {
+    /// Create an empty row set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a row.
+    pub fn push(&mut self, row: VariableValueRowKind) {
+        self.rows.push(row);
+    }
+
+    /// Sort rows by key order.
+    pub fn sort_by_key(&mut self) {
+        self.rows.sort_by_key(|r| r.key());
+    }
+
+    /// Get the number of rows.
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Whether the row set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Whether this row set contains any errors.
+    pub fn has_error(&self) -> bool {
+        self.rows.iter().any(|r| matches!(r, VariableValueRowKind::Error { .. }))
+    }
+
+    /// Whether this row set contains any warnings.
+    pub fn has_warnings(&self) -> bool {
+        self.rows.iter().any(|r| matches!(r, VariableValueRowKind::Warnings { .. }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -405,5 +639,185 @@ mod tests {
         assert_eq!(config.max_rows, 50);
         assert!(config.show_registers);
         assert!(config.show_stack);
+    }
+
+    #[test]
+    fn test_variable_row_key_ordering() {
+        assert!(VariableRowKey::Name < VariableRowKey::Frame);
+        assert!(VariableRowKey::Frame < VariableRowKey::Storage);
+        assert!(VariableRowKey::Storage < VariableRowKey::Type);
+        assert!(VariableRowKey::Bytes < VariableRowKey::Integer);
+        assert!(VariableRowKey::Value < VariableRowKey::Status);
+        assert!(VariableRowKey::Warnings < VariableRowKey::Error);
+    }
+
+    #[test]
+    fn test_variable_row_key_display() {
+        assert_eq!(VariableRowKey::Name.display_label(), "Name");
+        assert_eq!(VariableRowKey::Error.display_label(), "Error");
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_name() {
+        let kind = VariableValueRowKind::Name { name: "rax".into() };
+        assert_eq!(kind.key(), VariableRowKey::Name);
+        assert_eq!(kind.value_to_string(), "rax");
+        assert_eq!(kind.to_simple_string(), "Name: rax");
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_frame() {
+        let kind = VariableValueRowKind::Frame {
+            description: "Frame 0 @ 0x400000".into(),
+            level: 0,
+        };
+        assert_eq!(kind.key(), VariableRowKey::Frame);
+        assert!(kind.value_to_string().contains("0x400000"));
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_storage() {
+        let kind = VariableValueRowKind::Storage { storage: "RAX".into() };
+        assert_eq!(kind.key(), VariableRowKey::Storage);
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_bytes() {
+        let kind = VariableValueRowKind::Bytes {
+            bytes: vec![0xde, 0xad, 0xbe, 0xef],
+            state: TraceMemoryState::Known,
+            big_endian: false,
+        };
+        assert_eq!(kind.key(), VariableRowKey::Bytes);
+        // Bytes are space-separated hex
+        let val = kind.value_to_string();
+        assert!(val.contains("de"));
+        assert!(val.contains("ad"));
+        assert!(val.contains("be"));
+        assert!(val.contains("ef"));
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_bytes_stale() {
+        let kind = VariableValueRowKind::Bytes {
+            bytes: vec![0x42],
+            state: TraceMemoryState::Unknown,
+            big_endian: false,
+        };
+        assert!(kind.value_to_string().contains("Unknown"));
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_integer() {
+        let kind = VariableValueRowKind::Integer {
+            bytes: vec![0x42, 0x00, 0x00, 0x00],
+            state: TraceMemoryState::Known,
+            big_endian: false,
+        };
+        assert_eq!(kind.key(), VariableRowKey::Integer);
+        assert!(kind.value_to_string().contains("42"));
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_value() {
+        let kind = VariableValueRowKind::Value {
+            value: "42".into(),
+            state: TraceMemoryState::Known,
+        };
+        assert_eq!(kind.key(), VariableRowKey::Value);
+        assert_eq!(kind.value_to_string(), "(Known) 42");
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_status() {
+        let kind = VariableValueRowKind::Status { status: "Evaluating...".into() };
+        assert_eq!(kind.key(), VariableRowKey::Status);
+        assert_eq!(kind.value_to_string(), "Evaluating...");
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_warnings() {
+        let kind = VariableValueRowKind::Warnings {
+            warnings: vec!["No return path".into(), "Opaque return".into()],
+        };
+        assert_eq!(kind.key(), VariableRowKey::Warnings);
+        assert!(kind.value_to_string().contains("No return path"));
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_error() {
+        let kind = VariableValueRowKind::Error { error: "Cannot evaluate".into() };
+        assert_eq!(kind.key(), VariableRowKey::Error);
+        assert!(kind.to_simple_string().contains("Cannot evaluate"));
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_location() {
+        let kind = VariableValueRowKind::Location {
+            location: Some("0x400000:8".into()),
+        };
+        assert_eq!(kind.key(), VariableRowKey::Location);
+        assert_eq!(kind.value_to_string(), "0x400000:8");
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_location_none() {
+        let kind = VariableValueRowKind::Location { location: None };
+        assert_eq!(kind.value_to_string(), "None");
+    }
+
+    #[test]
+    fn test_variable_value_row_kind_instruction() {
+        let kind = VariableValueRowKind::Instruction {
+            mnemonic: "mov rax, rbx".into(),
+            address: 0x400000,
+        };
+        assert_eq!(kind.key(), VariableRowKey::Instruction);
+        assert_eq!(kind.value_to_string(), "mov rax, rbx");
+    }
+
+    #[test]
+    fn test_variable_value_row_set_sort() {
+        let mut set = VariableValueRowSet::new();
+        set.push(VariableValueRowKind::Error { error: "err".into() });
+        set.push(VariableValueRowKind::Name { name: "rax".into() });
+        set.push(VariableValueRowKind::Bytes {
+            bytes: vec![0x42],
+            state: TraceMemoryState::Known,
+            big_endian: false,
+        });
+        set.sort_by_key();
+        assert_eq!(set.rows[0].key(), VariableRowKey::Name);
+        assert_eq!(set.rows[1].key(), VariableRowKey::Bytes);
+        assert_eq!(set.rows[2].key(), VariableRowKey::Error);
+    }
+
+    #[test]
+    fn test_variable_value_row_set_has_error() {
+        let mut set = VariableValueRowSet::new();
+        assert!(!set.has_error());
+        set.push(VariableValueRowKind::Error { error: "fail".into() });
+        assert!(set.has_error());
+    }
+
+    #[test]
+    fn test_variable_value_row_set_has_warnings() {
+        let mut set = VariableValueRowSet::new();
+        assert!(!set.has_warnings());
+        set.push(VariableValueRowKind::Warnings { warnings: vec!["warn".into()] });
+        assert!(set.has_warnings());
+    }
+
+    #[test]
+    fn test_variable_value_row_set_serde() {
+        let mut set = VariableValueRowSet::new();
+        set.push(VariableValueRowKind::Name { name: "rax".into() });
+        set.push(VariableValueRowKind::Value {
+            value: "42".into(),
+            state: TraceMemoryState::Known,
+        });
+        let json = serde_json::to_string(&set).unwrap();
+        let back: VariableValueRowSet = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.len(), 2);
     }
 }

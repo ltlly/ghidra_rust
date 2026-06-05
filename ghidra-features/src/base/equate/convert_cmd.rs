@@ -255,6 +255,16 @@ pub fn all_convert_actions() -> Vec<FormatConvertAction> {
     ScalarFormat::ALL.iter().map(|f| FormatConvertAction::new(*f)).collect()
 }
 
+/// Format a scalar value for display in a given format.
+///
+/// This is a convenience wrapper around [`convert_scalar`] that returns
+/// only the formatted string, suitable for menu labels and tooltips.
+pub fn format_scalar_value(scalar: &super::Scalar, format: ScalarFormat) -> String {
+    let byte_width = ((scalar.bit_length() + 7) / 8) as u8;
+    let value = scalar.unsigned_value();
+    convert_scalar(value, byte_width, format).formatted
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

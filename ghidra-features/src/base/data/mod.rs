@@ -5,19 +5,22 @@
 //!
 //! # Modules
 //!
-//! | Rust module   | Java class(es)                                   |
-//! |---------------|--------------------------------------------------|
-//! | `plugin`      | `DataPlugin`                                     |
-//! | `actions`     | `DataAction`, `ChooseDataTypeAction`, etc.       |
-//! | `settings`    | `DataSettingsDialog`, `DataTypeSettingsDialog`   |
-//! | `dialogs`     | `CreateStructureDialog`, `EditDataFieldDialog`   |
+//! | Rust module     | Java class(es)                                   |
+//! |-----------------|--------------------------------------------------|
+//! | `plugin`        | `DataPlugin`                                     |
+//! | `actions`       | `DataAction`, `ChooseDataTypeAction`, etc.       |
+//! | `actions_ext`   | `PointerDataAction`, `VoidDataAction`, etc.      |
+//! | `settings`      | `DataSettingsDialog`, `DataTypeSettingsDialog`   |
+//! | `dialogs`       | `CreateStructureDialog`, `EditDataFieldDialog`   |
 
 pub mod plugin;
 pub mod actions;
+pub mod actions_ext;
 pub mod settings;
 pub mod dialogs;
 
 pub use plugin::*;
 pub use actions::*;
+pub use actions_ext::*;
 pub use settings::*;
 pub use dialogs::*;

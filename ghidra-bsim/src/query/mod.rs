@@ -2,6 +2,9 @@
 //!
 //! Ports `ghidra.features.bsim.query` from Ghidra's Java source.
 
+pub mod bsim_initializer;
+pub mod bsim_plugin_package;
+pub mod bsim_search_service;
 pub mod bsim_server_info;
 pub mod client;
 pub mod client_sql;

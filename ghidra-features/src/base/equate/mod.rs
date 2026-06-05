@@ -16,10 +16,12 @@
 pub mod actions;
 pub mod commands;
 pub mod convert_cmd;
+pub mod convert_actions;
 pub mod format;
 pub mod manager;
 pub mod plugin;
 pub mod table;
+pub mod table_provider;
 
 // Re-export key types at module level for convenience.
 pub use actions::{
@@ -31,16 +33,25 @@ pub use commands::{
     RenameEquatesCmd,
 };
 pub use convert_cmd::{
-    all_convert_actions, convert_scalar, ConvertedValue, FormatConvertAction, ScalarFormat,
+    all_convert_actions, convert_scalar, format_scalar_value, ConvertedValue,
+    FormatConvertAction, ScalarFormat,
+};
+pub use convert_actions::{
+    AbstractConvertActionModel, ConvertToBinaryAction, ConvertToCharAction,
+    ConvertToDoubleAction, ConvertToFloatAction, ConvertToOctalAction,
+    ConvertToSignedDecimalAction, ConvertToSignedHexAction,
+    ConvertToUnsignedDecimalAction, ConvertToUnsignedHexAction,
+    all_convert_action_models,
 };
 pub use format::{format_scalar, FormatChoice};
 pub use manager::{EquateManager, EquateTable};
-pub use plugin::{EquateInfo, EquatePlugin, EquateTablePluginState, SelectionType};
+pub use plugin::{EquateInfo, EquatePlugin, SelectionType};
 pub use table::{
     EquateColumnDef, EquateNameColumn, EquateRefCountColumn, EquateTableModel, EquateValueColumn,
     IsEnumBasedColumn, ReferenceAddressColumn, ReferenceColumnDef, ReferenceOpIndexColumn,
     EquateReferenceTableModel, SortOrder,
 };
+pub use table_provider::{EquateTableProviderModel, EquateTableWindowPluginState};
 
 use ghidra_core::Address;
 use serde::{Deserialize, Serialize};

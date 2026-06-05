@@ -381,6 +381,23 @@ impl EquateTableModel {
     pub fn name(&self) -> &str {
         "Equates"
     }
+
+    /// Deletes equates by name from both the model and the underlying table.
+    ///
+    /// Returns the names of the equates that were actually removed.
+    pub fn delete_equates(&mut self, names: &[&str], table: &mut EquateTable) -> Vec<String> {
+        let mut removed = Vec::new();
+        for &name in names {
+            if table.remove_equate(name) {
+                removed.push(name.to_string());
+            }
+        }
+        // Refresh model from the updated table.
+        if !removed.is_empty() {
+            self.update(table);
+        }
+        removed
+    }
 }
 
 impl Default for EquateTableModel {

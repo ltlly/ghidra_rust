@@ -176,7 +176,10 @@ pub use gui_model::{
 pub use gui_model_columns::{
     ColumnDescriptor, ColumnKind, ColumnRenderConfig, EditableColumn, ModelColumn,
 };
-pub use gui_pcode::{PcodeRow, PcodeRowKind, PcodeStepperModel, PcodeVarnode};
+pub use gui_pcode::{
+    PcodeRow, PcodeRowKind, PcodeStepperModel, PcodeVarnode, UniqueRefType, UniqueRow,
+    UniqueTableModel,
+};
 pub use gui_program_location::{
     AutoReadMemorySpec, GoToAction, GoToContext, LocationTracker, ProgramLocationContext,
 };
@@ -194,7 +197,8 @@ pub use gui_register::{
     AvailableRegisterRow, RegisterColumn, RegisterRow, RegisterTableModel,
 };
 pub use gui_stack_vars::{
-    VariableValueHoverConfig, VariableValueRow, VariableValueTableModel, VariableValueUtils,
+    VariableRowKey, VariableValueHoverConfig, VariableValueRow, VariableValueRowKind,
+    VariableValueRowSet, VariableValueTableModel, VariableValueUtils,
 };
 pub use gui_thread::{ThreadColumn, ThreadRow, ThreadTableModel};
 pub use gui_time::{SnapshotRow, SnapshotTableModel};

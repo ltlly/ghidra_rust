@@ -39,6 +39,12 @@ pub struct SymArithmetic {
     pub big_endian: bool,
 }
 
+impl Default for SymArithmetic {
+    fn default() -> Self {
+        Self::new("SP", false)
+    }
+}
+
 impl SymArithmetic {
     /// Create a new symbolic arithmetic engine.
     pub fn new(sp_name: impl Into<String>, big_endian: bool) -> Self {

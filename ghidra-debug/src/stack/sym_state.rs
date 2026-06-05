@@ -4,7 +4,7 @@
 //! in stack, register, and unique address spaces. When a read encounters an
 //! unknown location, a fresh symbolic value is generated.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use super::sym::Sym;
@@ -287,6 +287,52 @@ impl SymState {
             }
         }
         None
+    }
+
+    /// Compute a map of registers saved to the stack.
+    ///
+    /// Returns a map of `(register_name -> stack_address)` for registers
+    /// that were found saved on the stack during entry-to-PC analysis.
+    pub fn compute_map_using_stack(&self) -> HashMap<String, i64> {
+        let mut map = HashMap::new();
+        for (addr, name) in self.compute_saved_registers_from_stack() {
+            map.insert(name, addr);
+        }
+        map
+    }
+
+    /// Compute a map of registers that were restored from stack dereferences.
+    ///
+    /// Returns a map of `(register_name -> stack_offset)` for registers
+    /// whose values are stack dereferences (indicating they were restored).
+    pub fn compute_map_using_registers(&self) -> HashMap<String, i64> {
+        let mut map = HashMap::new();
+        for (_addr, sym) in self.registers.entries() {
+            if let Sym::StackDeref(deref) = sym {
+                // Use a synthetic name based on the register offset
+                map.insert(format!("REG_0x{:x}", _addr), deref.offset);
+            }
+        }
+        map
+    }
+
+    /// Compute the address of the return pointer.
+    ///
+    /// After executing from PC to return, examines where the return address
+    /// ended up. Returns the stack address of the return pointer, or None.
+    pub fn compute_address_of_return(&self) -> Option<i64> {
+        match self.compute_return_address_location()? {
+            ReturnAddressLocation::Stack { offset, .. } => Some(offset),
+            ReturnAddressLocation::Register { .. } => None,
+        }
+    }
+
+    /// Compute a bit mask for the return address.
+    pub fn compute_mask_of_return(&self) -> u64 {
+        match self.compute_return_address_location() {
+            Some(ReturnAddressLocation::Register { mask, .. }) => mask,
+            _ => u64::MAX,
+        }
     }
 
     /// Add a warning.

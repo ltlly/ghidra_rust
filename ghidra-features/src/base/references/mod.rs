@@ -25,6 +25,7 @@
 //!   by the UI panels
 //! - Exception types: [`ParameterConflictException`], [`ReservedNameException`]
 
+pub mod action_ext;
 pub mod commands;
 pub mod default_ref_action;
 pub mod dialog;
@@ -55,6 +56,10 @@ pub use instruction_info::InstructionOperandInfo;
 pub use offset_table::OffsetTablePlugin;
 pub use plugin::{ReferencesPlugin, ReferencesPluginState};
 pub use ref_type_factory::RefTypeFactory;
+pub use action_ext::{
+    AddReferenceAction, DeleteAllReferencesAction, OffsetTableAction, ReferenceDirection,
+    ShowReferencesAction,
+};
 
 use serde::{Deserialize, Serialize};
 
