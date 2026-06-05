@@ -41,6 +41,13 @@ pub mod key_bindings;
 /// Ported from `ghidra.app.plugin.core.script.RunScriptTask`.
 pub mod run_task;
 
+/// GhidraScript core: the scripting API, state management, provider system,
+/// script properties, and console output.
+///
+/// Ported from `ghidra.app.script.GhidraScript`, `GhidraState`,
+/// `GhidraScriptProvider`, `GhidraScriptProperties`, and related types.
+pub mod ghidra_script;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

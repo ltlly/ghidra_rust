@@ -132,6 +132,14 @@ pub mod processors;
 // -- Entropy analysis plugin ported from EntropyCalculate.java --
 pub mod entropy;
 
+// -- FileSystemBrowser plugin and batch import framework --
+// Ported from `ghidra.plugins.fsbrowser` and `ghidra.plugins.importer.batch`.
+pub mod fsbrowser;
+
+// -- GhidraProject batch-mode project management --
+// Ported from `ghidra.base.project.GhidraProject` and related utilities.
+pub mod base_project;
+
 // -- Analysis plugin layer ported from Ghidra's analysis package --
 pub mod analysis;
 

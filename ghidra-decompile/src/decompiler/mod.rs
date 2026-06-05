@@ -103,6 +103,7 @@ pub mod signature;
 pub mod token_iterator;
 pub mod util;
 pub mod validator;
+pub mod decompiler_initializer;
 
 // ============================================================================
 // Re-exports for convenience
@@ -247,6 +248,9 @@ pub use decompiler_clipboard_provider::DecompilerClipboardProvider;
 
 // Location memento
 pub use decompiler_location_memento::DecompilerLocationMemento;
+
+// Module initializer
+pub use decompiler_initializer::{DecompilerInitializer, DecompilerCommentsActionFactory};
 
 // ============================================================================
 // Tests

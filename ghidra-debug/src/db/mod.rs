@@ -106,6 +106,16 @@ pub mod trace_db_program_view_impl;
 pub mod trace_db_program_view_listing;
 pub mod trace_db_program_view_memory;
 
+// New modules from Debugger / Framework-TraceModeling port
+pub mod trace_db_bookmark_type;
+pub mod trace_db_guest_ext;
+pub mod trace_db_listing_views_ext;
+pub mod trace_db_map_occlusion;
+pub mod trace_db_program_view_ext;
+pub mod trace_db_symbol_views_ext;
+pub mod trace_db_target_iface_ext;
+pub mod trace_db_target_storage_ext;
+
 pub use trace_db::TraceDatabase;
 pub use trace_db_database::{
     DBTrace, DBTraceChangeSet as TraceDatabaseChangeSet, TraceDatabaseConfig,
@@ -209,4 +219,36 @@ pub use trace_db_program_view_memory::{
     ProgramViewMemoryBlock, ProgramViewProgramContext, ProgramViewPropertyMap,
     ProgramViewPropertyMapManager, ProgramViewReference, ProgramViewReferenceManager,
     ProgramViewRegisterValue, ProgramViewSymbol, ProgramViewSymbolTable,
+};
+
+// Re-exports from new modules
+pub use trace_db_bookmark_type::DbTraceBookmarkType;
+pub use trace_db_guest_ext::{
+    GuestPlatformMappedMemory, InternalTracePlatform, ObjectRegisterSupport,
+};
+pub use trace_db_listing_views_ext::{
+    CodeUnitViewEntry, CodeUnitsMemoryView, ComposedCodeUnitsView,
+};
+pub use trace_db_map_occlusion::{
+    OcclusionDirection, OcclusionEntry, OcclusionIntoFutureIterator, OcclusionIntoPastIterator,
+};
+pub use trace_db_program_view_ext::{
+    ProgramRegisterValue, ProgramViewProgramContext as ProgramViewProgramContextExt,
+    ProgramViewReference as ProgramViewReferenceEntry,
+    ProgramViewReferenceManager as ProgramViewReferenceManagerExt,
+    ProgramViewReferenceType,
+};
+pub use trace_db_symbol_views_ext::{
+    SnapSelectedReferenceSpace, SymbolMultipleTypesNoDuplicatesView,
+    SymbolMultipleTypesView, SymbolMultipleTypesWithAddressNoDuplicatesView,
+    SymbolMultipleTypesWithLocationView,
+};
+pub use trace_db_target_iface_ext::{
+    DbObjectExecutionStateful as ExtendedExecutionStateful,
+    DbObjectFocusScope as ExtendedFocusScope,
+    DbObjectTogglable as ExtendedTogglable,
+};
+pub use trace_db_target_storage_ext::{
+    AddressRange, CachedValueEntry, ObjectValueMapAddressSetView,
+    ObjectValueWriteBehindCache, TraceObjectValueStorage,
 };

@@ -101,6 +101,16 @@ pub mod trace_exporters;
 pub mod trace_plugin_events;
 pub mod utils;
 
+// New modules from Debugger service/plugin port
+pub mod service_breakpoint_impl;
+pub mod service_control_ext;
+pub mod service_modules_ext;
+pub mod service_platform_ext;
+pub mod service_tracemgr_ext;
+pub mod gui_calltree_ext;
+pub mod gui_memview_ext;
+pub mod gui_pcode_ext;
+
 pub use abstract_plugin::{
     DebuggerPluginPackage, ExtensionPointId, PluginLifecycleEvent, PluginPhase,
 };
@@ -202,3 +212,26 @@ pub use platform_override::*;
 pub use stack::*;
 pub use taint::*;
 pub use utils::*;
+
+// Re-exports from new service/plugin modules
+pub use service_breakpoint_impl::{
+    BreakpointActionItem, BreakpointActionKind, BreakpointActionSet,
+    LogicalBreakpointInternal, LoneLogicalBreakpoint, ProgramBreakpoint,
+    TraceBreakpointEntry, TraceBreakpointSet, TrackedTooSoonException,
+};
+pub use service_control_ext::{
+    ControlConnectionState, ControlMode, ControlServiceData, ControlTarget,
+};
+pub use service_modules_ext::{
+    MapProposalEntry, MappingChangeKind, MappingEntry,
+    InfoPerProgram, InfoPerTrace, StaticMappingContext, StaticMappingProposals,
+};
+pub use service_platform_ext::{
+    PlatformOffer, PlatformOpinion, PlatformServiceData,
+};
+pub use service_tracemgr_ext::{
+    SaveKind, SaveTaskManager, SaveTraceTask,
+};
+pub use gui_calltree_ext::*;
+pub use gui_memview_ext::*;
+pub use gui_pcode_ext::*;
