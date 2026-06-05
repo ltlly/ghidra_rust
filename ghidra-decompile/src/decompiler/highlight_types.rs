@@ -536,6 +536,7 @@ impl ColorProvider for DefaultColorProvider {
             SyntaxType::Default => "#000000".into(),
             SyntaxType::Error => "#FF0000".into(),
             SyntaxType::Special => "#FF8000".into(),
+            SyntaxType::Field => "#008080".into(),
         }
     }
 

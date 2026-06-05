@@ -255,6 +255,7 @@ impl ColorProvider for DefaultColorProvider {
             SyntaxType::Default => "#000000",
             SyntaxType::Error => "#ff0000",
             SyntaxType::Special => "#8000ff",
+            SyntaxType::Field => "#008080",
         }
     }
 }

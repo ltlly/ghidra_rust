@@ -374,7 +374,7 @@ impl WordAnalysis {
             .iter()
             .map(|(k, &v)| (k.as_str(), v))
             .collect();
-        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(b.0)));
         entries.truncate(limit);
         entries
     }

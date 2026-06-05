@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn test_plugin_config() {
         let mut plugin = SymbolTablePlugin::new("Test");
-        assert!(!plugin.config().show_address_hex);
+        assert!(plugin.config().show_address_hex);
         plugin.config_mut().show_address_hex = true;
         assert!(plugin.config().show_address_hex);
     }

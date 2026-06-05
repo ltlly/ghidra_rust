@@ -129,6 +129,9 @@ pub mod vscode;
 pub mod functionwindow;
 pub mod processors;
 
+// -- Entropy analysis plugin ported from EntropyCalculate.java --
+pub mod entropy;
+
 // -- Analysis plugin layer ported from Ghidra's analysis package --
 pub mod analysis;
 

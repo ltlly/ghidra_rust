@@ -34,8 +34,10 @@ pub const DEFAULT_COLOR: i32 = 8;
 pub const ERROR_COLOR: i32 = 9;
 /// Special color identifier.
 pub const SPECIAL_COLOR: i32 = 10;
+/// Color for field names in structs/classes.
+pub const FIELD_COLOR: i32 = 11;
 /// Maximum color identifier (sentinel).
-pub const MAX_COLOR: i32 = 11;
+pub const MAX_COLOR: i32 = 12;
 
 // ============================================================================
 // SyntaxType
@@ -56,6 +58,7 @@ pub enum SyntaxType {
     Default = DEFAULT_COLOR,
     Error = ERROR_COLOR,
     Special = SPECIAL_COLOR,
+    Field = FIELD_COLOR,
 }
 
 impl SyntaxType {
@@ -72,6 +75,7 @@ impl SyntaxType {
             7 => Self::Global,
             9 => Self::Error,
             10 => Self::Special,
+            11 => Self::Field,
             _ => Self::Default,
         }
     }

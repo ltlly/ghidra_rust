@@ -34,10 +34,15 @@
 
 pub mod api;
 pub mod db;
+pub mod isf;
+pub mod jdi;
 pub mod model;
 pub mod pcode;
 pub mod plugin;
+pub mod proposed_utils;
+pub mod rmi;
 pub mod services;
 pub mod stack;
 pub mod target;
+pub mod taint_analysis;
 pub mod util;

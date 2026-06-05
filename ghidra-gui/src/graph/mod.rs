@@ -45,6 +45,8 @@ pub mod graph_factory;
 pub mod graph_path_set;
 pub mod implicit_graph;
 pub mod job;
+pub mod graph_to_tree;
+pub mod g_vertex;
 pub mod jung;
 pub mod mutable_wrapper;
 pub mod service;

@@ -1685,7 +1685,7 @@ mod tests {
     fn test_intel_hex_checksum() {
         let data = [0x03, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00];
         let cs = checksum_u8(&data);
-        assert_eq!(cs, 0xFC);
+        assert_eq!(cs, 0xFB);
     }
 
     #[test]

@@ -163,6 +163,49 @@ impl GThemeValueMap {
         self.color_map.is_empty() && self.font_map.is_empty() && self.icon_map.is_empty()
     }
 
+    /// Merge all values from another map into this one (overwrites existing).
+    /// Alias for [`load`](Self::load).
+    pub fn merge_from(&mut self, other: &GThemeValueMap) {
+        self.load(other);
+    }
+
+    /// Whether the map contains a color with the given id.
+    pub fn contains_color(&self, id: &str) -> bool {
+        self.color_map.contains_key(id)
+    }
+
+    /// Whether the map contains a font with the given id.
+    pub fn contains_font(&self, id: &str) -> bool {
+        self.font_map.contains_key(id)
+    }
+
+    /// Whether the map contains an icon with the given id.
+    pub fn contains_icon(&self, id: &str) -> bool {
+        self.icon_map.contains_key(id)
+    }
+
+    /// Get a property value by id (used by JavaPropertyValue).
+    pub fn get_property(&self, id: &str) -> Option<&ColorValue> {
+        // Properties are stored as colors for now.
+        self.color_map.get(id)
+    }
+
+    /// Build a simple id -> RgbaColor table for the GColor refresh mechanism.
+    pub fn color_table(&self) -> std::collections::HashMap<String, crate::gui_util::web_colors::RgbaColor> {
+        self.color_map
+            .iter()
+            .filter_map(|(id, cv)| cv.raw_value().map(|c| (id.clone(), c)))
+            .collect()
+    }
+
+    /// Build a simple id -> icon-path table for the GIcon refresh mechanism.
+    pub fn icon_path_table(&self) -> std::collections::HashMap<String, String> {
+        self.icon_map
+            .iter()
+            .filter_map(|(id, iv)| iv.raw_value().map(|p| (id.clone(), p.0.clone())))
+            .collect()
+    }
+
     /// Check for unresolved references and log warnings.
     pub fn check_for_unresolved_references(&self) {
         for cv in self.color_map.values() {

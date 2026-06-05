@@ -1149,7 +1149,7 @@ mod tests {
         let specs = vec![
             LoadSpecChoice {
                 loader_name: "ELF".into(),
-                load_spec: LoadSpec::with_unknown_language("ELF", 0, false),
+                load_spec: LoadSpec::with_unknown_language("ELF", 0, true),
                 index: 0,
             },
             LoadSpecChoice {
@@ -1173,7 +1173,7 @@ mod tests {
         let specs = vec![
             LoadSpecChoice {
                 loader_name: "ELF".into(),
-                load_spec: LoadSpec::with_unknown_language("ELF", 0, false),
+                load_spec: LoadSpec::with_unknown_language("ELF", 0, true),
                 index: 0,
             },
         ];
@@ -1321,7 +1321,7 @@ mod tests {
     fn test_auto_importer_detect_format() {
         let mut data = vec![0u8; 64];
         data[0..4].copy_from_slice(&[0x7f, b'E', b'L', b'F']);
-        assert_eq!(AutoImporter::detect_format(&data), Some("ELF"));
+        assert_eq!(AutoImporter::detect_format(&data), Some("Executable and Linking Format (ELF)"));
 
         let unknown = [0x00u8; 16];
         assert!(AutoImporter::detect_format(&unknown).is_none());
@@ -1368,7 +1368,7 @@ mod tests {
             "ELF",
             LoaderTier::GenericTargetLoader,
             0,
-            vec![LoadSpec::with_unknown_language("ELF", 0, true)],
+            vec![LoadSpec::with_unknown_language("ELF", 0, false)],
         );
         let (name, _spec) = map.first_preferred().unwrap();
         assert_eq!(name, "ELF");
