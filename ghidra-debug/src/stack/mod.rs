@@ -16,6 +16,7 @@
 //!   register redirection.
 //! - `UnwindWarning`: Warnings generated during analysis.
 
+pub mod frame_structure_builder;
 pub mod saved_register_map;
 pub mod stack_unwinder;
 pub mod sym;
@@ -23,6 +24,7 @@ pub mod sym_arithmetic;
 pub mod sym_state;
 pub mod unwind_info;
 pub mod unwind_warning;
+pub mod unwound_frame;
 
 pub use saved_register_map::SavedRegisterMap;
 pub use stack_unwinder::StackUnwinder;

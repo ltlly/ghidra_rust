@@ -4,5 +4,6 @@
 //! - `event_queues`: DomainObjectEventQueues for managing trace change event dispatch.
 //! - `gspan_field`: GSpanField widget model for span display in docking components.
 
+pub mod byte_cache;
 pub mod event_queues;
 pub mod gspan_field;

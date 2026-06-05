@@ -5,10 +5,12 @@
 //! Framework-TraceModeling.
 
 pub mod coordinates;
+pub mod copy_on_write;
 pub mod data_adapter;
 pub mod event_queue;
 pub mod events;
 pub mod iterator_adapters;
+pub mod method_protector;
 
 pub use coordinates::DebuggerCoordinates as DebugCoordinates;
 pub use coordinates::LifespanEnumerator;

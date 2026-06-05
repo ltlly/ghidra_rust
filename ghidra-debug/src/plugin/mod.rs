@@ -33,8 +33,10 @@
 //! - `auto_map`: Auto-mapping specifications for dynamic-to-static mapping.
 
 pub mod auto_map;
+pub mod background_utils;
 pub mod breakpoint_actions;
 pub mod disassemble;
+pub mod disassembly_inject;
 pub mod event;
 pub mod experiments;
 pub mod export;
@@ -65,8 +67,10 @@ pub mod gui_trace;
 pub mod gui_tracecalltree;
 pub mod gui_watch;
 pub mod location_tracking;
+pub mod managed_domain_object;
 pub mod mapping;
 pub mod platform_arm;
+pub mod transaction_coalescer;
 pub mod platform_dbgeng;
 pub mod platform_frida;
 pub mod platform_gdb;

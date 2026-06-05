@@ -107,7 +107,7 @@ mod tests {
 
     #[test]
     fn test_no_pending() {
-        let c = TransactionCoalescer::default_delay();
+        let mut c = TransactionCoalescer::default_delay();
         assert!(!c.has_pending());
         assert!(c.commit().is_none());
     }

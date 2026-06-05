@@ -9,6 +9,8 @@
 //!   including state pieces and address-space taint storage.
 //! - **`gui`**: GUI column and field types for taint-aware register display.
 
+pub mod ext_key_value;
 pub mod gui;
 pub mod model;
 pub mod pcode_emu;
+pub mod sarif_writer;
