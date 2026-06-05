@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 
 use super::super::description::{ExecutableRecord, FunctionDescription};
 
+// New modules ported from Ghidra's BSim elastic package
+pub mod base64_lite;
+pub mod elastic_utilities;
+
 /// Elasticsearch-backed BSim function database.
 #[derive(Debug, Clone)]
 pub struct ElasticDatabase {

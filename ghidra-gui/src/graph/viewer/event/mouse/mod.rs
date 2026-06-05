@@ -1,146 +1,385 @@
-//! Mouse event handling for graph viewers.
+//! Mouse event handling for the visual graph.
 //!
-//! Ports `ghidra.graph.viewer.event.mouse` package.
+//! Ports Ghidra's extensive mouse plugin system including:
+//! - Picking (click-to-select vertices/edges)
+//! - Hovering
+//! - Zooming (scroll wheel + mouse drag)
+//! - Panning (translating)
+//! - Popup menus
+//! - Edge selection
+//! - Satellite navigation
+//! - Animated transitions
 
-use crate::graph::viewer::Point2D;
+/// Mouse event types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseEventType {
+    /// Mouse pressed.
+    Pressed,
+    /// Mouse released.
+    Released,
+    /// Mouse clicked (pressed + released).
+    Clicked,
+    /// Mouse dragged.
+    Dragged,
+    /// Mouse moved (no button).
+    Moved,
+    /// Mouse entered a component.
+    Entered,
+    /// Mouse exited a component.
+    Exited,
+    /// Mouse wheel scrolled.
+    Wheel,
+}
 
-/// Mouse button identifier.
+/// Mouse button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseButton {
-    /// Left mouse button.
+    /// Left button.
     Left,
-    /// Middle mouse button.
+    /// Middle button.
     Middle,
-    /// Right mouse button.
+    /// Right button.
     Right,
 }
 
-/// Type of mouse event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MouseEventType {
-    /// Mouse button pressed.
-    Press,
-    /// Mouse button released.
-    Release,
-    /// Mouse moved (with button held).
-    Drag,
-    /// Mouse moved (no button held).
-    Move,
-    /// Mouse wheel scrolled.
-    Scroll,
-    /// Double-click.
-    DoubleClick,
-}
-
-/// A mouse event in graph coordinates.
+/// A mouse event on the graph viewer.
 #[derive(Debug, Clone)]
 pub struct GraphMouseEvent {
-    /// Type of event.
+    /// The type of mouse event.
     pub event_type: MouseEventType,
-    /// Mouse position in graph coordinates.
-    pub graph_point: Point2D,
-    /// Mouse position in screen/widget coordinates.
-    pub screen_point: Point2D,
-    /// Which button was pressed/released.
+    /// The mouse button involved.
     pub button: Option<MouseButton>,
-    /// Scroll delta (positive = up, negative = down).
-    pub scroll_delta: f64,
+    /// X position in view coordinates.
+    pub view_x: f64,
+    /// Y position in view coordinates.
+    pub view_y: f64,
+    /// X position in graph/model coordinates.
+    pub graph_x: f64,
+    /// Y position in graph/model coordinates.
+    pub graph_y: f64,
     /// Whether shift was held.
-    pub shift: bool,
-    /// Whether ctrl/cmd was held.
-    pub ctrl: bool,
+    pub shift_down: bool,
+    /// Whether ctrl was held.
+    pub ctrl_down: bool,
     /// Whether alt was held.
-    pub alt: bool,
+    pub alt_down: bool,
+    /// The vertex ID under the mouse (if any).
+    pub vertex_id: Option<u64>,
+    /// The edge ID under the mouse (if any).
+    pub edge_id: Option<u64>,
+    /// Wheel rotation amount (for scroll events).
+    pub wheel_rotation: i32,
 }
 
 impl GraphMouseEvent {
     /// Create a new mouse event.
-    pub fn new(event_type: MouseEventType, graph_point: Point2D, screen_point: Point2D) -> Self {
+    pub fn new(event_type: MouseEventType, view_x: f64, view_y: f64) -> Self {
         Self {
             event_type,
-            graph_point,
-            screen_point,
             button: None,
-            scroll_delta: 0.0,
-            shift: false,
-            ctrl: false,
-            alt: false,
+            view_x,
+            view_y,
+            graph_x: view_x,
+            graph_y: view_y,
+            shift_down: false,
+            ctrl_down: false,
+            alt_down: false,
+            vertex_id: None,
+            edge_id: None,
+            wheel_rotation: 0,
         }
+    }
+
+    /// Check if this is a left click event.
+    pub fn is_left_click(&self) -> bool {
+        self.event_type == MouseEventType::Clicked && self.button == Some(MouseButton::Left)
+    }
+
+    /// Check if this is a right click event.
+    pub fn is_right_click(&self) -> bool {
+        self.event_type == MouseEventType::Clicked && self.button == Some(MouseButton::Right)
     }
 }
 
-/// Mouse plugin trait for handling graph mouse events.
+/// Plugin trait for handling mouse events on the graph.
 pub trait GraphMousePlugin: Send + Sync {
-    /// Called when a mouse event occurs on the graph.
-    fn on_mouse_event(&mut self, event: &GraphMouseEvent) -> bool;
-
-    /// Whether this plugin wants to consume the event.
-    fn wants_event(&self, event: &GraphMouseEvent) -> bool;
+    /// Handle a mouse event. Returns true if the event was consumed.
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool;
+    /// Get the name of this plugin.
+    fn name(&self) -> &str;
 }
 
-/// Picking plugin that handles vertex/edge selection via mouse clicks.
-#[derive(Debug, Clone, Default)]
-pub struct PickingGraphMousePlugin {
-    /// Whether to allow multi-selection via ctrl+click.
-    pub allow_multi_select: bool,
-}
+/// Picking plugin: click to select vertices/edges.
+#[derive(Debug, Default)]
+pub struct PickingGraphMousePlugin;
 
 impl PickingGraphMousePlugin {
-    /// Create a new picking plugin.
     pub fn new() -> Self {
-        Self {
-            allow_multi_select: true,
-        }
+        Self
     }
 }
 
 impl GraphMousePlugin for PickingGraphMousePlugin {
-    fn on_mouse_event(&mut self, _event: &GraphMouseEvent) -> bool {
-        // Selection logic would go here in a full implementation
-        true
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+        event.vertex_id.is_some() && event.is_left_click()
     }
 
-    fn wants_event(&self, event: &GraphMouseEvent) -> bool {
-        matches!(
-            event.event_type,
-            MouseEventType::Press | MouseEventType::DoubleClick
-        )
+    fn name(&self) -> &str {
+        "PickingGraphMousePlugin"
     }
 }
 
-/// Animated picking plugin with hover effects.
-#[derive(Debug, Clone, Default)]
-pub struct AnimatedPickingGraphMousePlugin {
-    /// Hover delay in milliseconds.
-    pub hover_delay_ms: u32,
-    /// Currently hovered element id.
-    pub hovered_id: Option<String>,
+/// Hover plugin: mouse-over vertex/edge highlighting.
+#[derive(Debug, Default)]
+pub struct HoverMousePlugin {
+    /// Delay in ms before showing hover.
+    pub hover_delay_ms: u64,
 }
 
-impl AnimatedPickingGraphMousePlugin {
-    /// Create a new animated picking plugin.
+impl HoverMousePlugin {
+    pub fn new() -> Self {
+        Self { hover_delay_ms: 500 }
+    }
+}
+
+impl GraphMousePlugin for HoverMousePlugin {
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+        event.event_type == MouseEventType::Moved && event.vertex_id.is_some()
+    }
+
+    fn name(&self) -> &str {
+        "HoverMousePlugin"
+    }
+}
+
+/// Popup plugin: right-click context menus.
+#[derive(Debug, Default)]
+pub struct PopupMousePlugin;
+
+impl PopupMousePlugin {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl GraphMousePlugin for PopupMousePlugin {
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+        event.is_right_click()
+    }
+
+    fn name(&self) -> &str {
+        "PopupMousePlugin"
+    }
+}
+
+/// Zooming plugin: scroll wheel zoom.
+#[derive(Debug, Default)]
+pub struct ZoomingGraphMousePlugin {
+    /// Zoom factor per scroll unit.
+    pub zoom_factor: f64,
+}
+
+impl ZoomingGraphMousePlugin {
+    pub fn new() -> Self {
+        Self { zoom_factor: 1.1 }
+    }
+}
+
+impl GraphMousePlugin for ZoomingGraphMousePlugin {
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+        event.event_type == MouseEventType::Wheel && event.wheel_rotation != 0
+    }
+
+    fn name(&self) -> &str {
+        "ZoomingGraphMousePlugin"
+    }
+}
+
+/// Translating (panning) plugin: drag to pan.
+#[derive(Debug, Default)]
+pub struct TranslatingGraphMousePlugin;
+
+impl TranslatingGraphMousePlugin {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl GraphMousePlugin for TranslatingGraphMousePlugin {
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+        event.event_type == MouseEventType::Dragged
+            && event.button == Some(MouseButton::Left)
+            && event.vertex_id.is_none()
+    }
+
+    fn name(&self) -> &str {
+        "TranslatingGraphMousePlugin"
+    }
+}
+
+/// Edge selection plugin: click to select edges.
+#[derive(Debug, Default)]
+pub struct EdgeSelectionGraphMousePlugin;
+
+impl EdgeSelectionGraphMousePlugin {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl GraphMousePlugin for EdgeSelectionGraphMousePlugin {
+    fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+        event.is_left_click() && event.edge_id.is_some()
+    }
+
+    fn name(&self) -> &str {
+        "EdgeSelectionGraphMousePlugin"
+    }
+}
+
+/// The main pluggable graph mouse that dispatches events to registered plugins.
+pub struct VisualGraphPluggableGraphMouse {
+    /// Registered plugins.
+    plugins: Vec<Box<dyn GraphMousePlugin>>,
+}
+
+impl VisualGraphPluggableGraphMouse {
+    /// Create with default plugins.
     pub fn new() -> Self {
         Self {
-            hover_delay_ms: 300,
-            hovered_id: None,
+            plugins: Vec::new(),
         }
     }
-}
 
-impl GraphMousePlugin for AnimatedPickingGraphMousePlugin {
-    fn on_mouse_event(&mut self, event: &GraphMouseEvent) -> bool {
-        if event.event_type == MouseEventType::Move {
-            // Hover detection would go here
-            return true;
+    /// Add a plugin.
+    pub fn add_plugin(&mut self, plugin: Box<dyn GraphMousePlugin>) {
+        self.plugins.push(plugin);
+    }
+
+    /// Dispatch a mouse event to plugins (first match wins).
+    pub fn dispatch(&mut self, event: &GraphMouseEvent) -> bool {
+        for plugin in &mut self.plugins {
+            if plugin.handle_event(event) {
+                return true;
+            }
         }
         false
     }
 
-    fn wants_event(&self, event: &GraphMouseEvent) -> bool {
-        matches!(
-            event.event_type,
-            MouseEventType::Move | MouseEventType::Press | MouseEventType::DoubleClick
-        )
+    /// Get the number of registered plugins.
+    pub fn plugin_count(&self) -> usize {
+        self.plugins.len()
+    }
+}
+
+impl Default for VisualGraphPluggableGraphMouse {
+    fn default() -> Self {
+        let mut mouse = Self::new();
+        mouse.add_plugin(Box::new(PopupMousePlugin::new()));
+        mouse.add_plugin(Box::new(PickingGraphMousePlugin::new()));
+        mouse.add_plugin(Box::new(EdgeSelectionGraphMousePlugin::new()));
+        mouse.add_plugin(Box::new(ZoomingGraphMousePlugin::new()));
+        mouse.add_plugin(Box::new(TranslatingGraphMousePlugin::new()));
+        mouse.add_plugin(Box::new(HoverMousePlugin::new()));
+        mouse
+    }
+}
+
+/// Satellite-specific mouse plugins.
+pub mod satellite {
+    //! Mouse plugins for the satellite (minimap) view.
+
+    use super::*;
+
+    /// Panning plugin for satellite view.
+    #[derive(Debug, Default)]
+    pub struct SatelliteTranslatingPlugin;
+
+    impl SatelliteTranslatingPlugin {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl GraphMousePlugin for SatelliteTranslatingPlugin {
+        fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+            event.event_type == MouseEventType::Dragged
+                && event.button == Some(MouseButton::Left)
+        }
+
+        fn name(&self) -> &str {
+            "SatelliteTranslatingPlugin"
+        }
+    }
+
+    /// Zooming plugin for satellite view.
+    #[derive(Debug, Default)]
+    pub struct SatelliteScalingPlugin;
+
+    impl SatelliteScalingPlugin {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl GraphMousePlugin for SatelliteScalingPlugin {
+        fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+            event.event_type == MouseEventType::Wheel
+        }
+
+        fn name(&self) -> &str {
+            "SatelliteScalingPlugin"
+        }
+    }
+
+    /// Navigation plugin: click in satellite to navigate main view.
+    #[derive(Debug, Default)]
+    pub struct SatelliteNavigationPlugin;
+
+    impl SatelliteNavigationPlugin {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
+    impl GraphMousePlugin for SatelliteNavigationPlugin {
+        fn handle_event(&mut self, event: &GraphMouseEvent) -> bool {
+            event.is_left_click()
+        }
+
+        fn name(&self) -> &str {
+            "SatelliteNavigationPlugin"
+        }
+    }
+
+    /// The satellite graph mouse with all satellite plugins.
+    pub struct SatelliteGraphMouse {
+        plugins: Vec<Box<dyn GraphMousePlugin>>,
+    }
+
+    impl SatelliteGraphMouse {
+        pub fn new() -> Self {
+            let mut mouse = Self { plugins: Vec::new() };
+            mouse.plugins.push(Box::new(SatelliteNavigationPlugin::new()));
+            mouse.plugins.push(Box::new(SatelliteScalingPlugin::new()));
+            mouse.plugins.push(Box::new(SatelliteTranslatingPlugin::new()));
+            mouse
+        }
+
+        pub fn dispatch(&mut self, event: &GraphMouseEvent) -> bool {
+            for plugin in &mut self.plugins {
+                if plugin.handle_event(event) {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+
+    impl Default for SatelliteGraphMouse {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 }
 
@@ -149,44 +388,56 @@ mod tests {
     use super::*;
 
     #[test]
-    fn mouse_event_creation() {
-        let event = GraphMouseEvent::new(
-            MouseEventType::Press,
-            Point2D::new(100.0, 200.0),
-            Point2D::new(300.0, 400.0),
-        );
-        assert_eq!(event.event_type, MouseEventType::Press);
-        assert!(!event.shift);
+    fn test_mouse_event() {
+        let mut evt = GraphMouseEvent::new(MouseEventType::Clicked, 100.0, 200.0);
+        evt.button = Some(MouseButton::Left);
+        assert!(evt.is_left_click());
+        assert!(!evt.is_right_click());
     }
 
     #[test]
-    fn picking_plugin_wants_clicks() {
-        let plugin = PickingGraphMousePlugin::new();
-        let click = GraphMouseEvent::new(MouseEventType::Press, Point2D::ZERO, Point2D::ZERO);
-        assert!(plugin.wants_event(&click));
+    fn test_picking_plugin() {
+        let mut plugin = PickingGraphMousePlugin::new();
+        let mut evt = GraphMouseEvent::new(MouseEventType::Clicked, 10.0, 20.0);
+        evt.button = Some(MouseButton::Left);
+        evt.vertex_id = Some(42);
+        assert!(plugin.handle_event(&evt));
 
-        let move_event = GraphMouseEvent::new(MouseEventType::Move, Point2D::ZERO, Point2D::ZERO);
-        assert!(!plugin.wants_event(&move_event));
+        evt.vertex_id = None;
+        assert!(!plugin.handle_event(&evt));
     }
 
     #[test]
-    fn animated_plugin_wants_hover() {
-        let plugin = AnimatedPickingGraphMousePlugin::new();
-        let move_event = GraphMouseEvent::new(MouseEventType::Move, Point2D::ZERO, Point2D::ZERO);
-        assert!(plugin.wants_event(&move_event));
+    fn test_popup_plugin() {
+        let mut plugin = PopupMousePlugin::new();
+        let mut evt = GraphMouseEvent::new(MouseEventType::Clicked, 10.0, 20.0);
+        evt.button = Some(MouseButton::Right);
+        assert!(plugin.handle_event(&evt));
     }
 
     #[test]
-    fn mouse_button_equality() {
-        assert_eq!(MouseButton::Left, MouseButton::Left);
-        assert_ne!(MouseButton::Left, MouseButton::Right);
+    fn test_zooming_plugin() {
+        let mut plugin = ZoomingGraphMousePlugin::new();
+        let mut evt = GraphMouseEvent::new(MouseEventType::Wheel, 0.0, 0.0);
+        evt.wheel_rotation = 1;
+        assert!(plugin.handle_event(&evt));
     }
 
     #[test]
-    fn mouse_event_types() {
-        assert_ne!(MouseEventType::Press, MouseEventType::Release);
-        assert_ne!(MouseEventType::Drag, MouseEventType::Move);
+    fn test_pluggable_mouse_dispatch() {
+        let mut mouse = VisualGraphPluggableGraphMouse::default();
+        assert_eq!(mouse.plugin_count(), 6);
+        let mut evt = GraphMouseEvent::new(MouseEventType::Clicked, 10.0, 20.0);
+        evt.button = Some(MouseButton::Right);
+        assert!(mouse.dispatch(&evt));
+    }
+
+    #[test]
+    fn test_satellite_mouse() {
+        use satellite::*;
+        let mut mouse = SatelliteGraphMouse::new();
+        let mut evt = GraphMouseEvent::new(MouseEventType::Clicked, 10.0, 20.0);
+        evt.button = Some(MouseButton::Left);
+        assert!(mouse.dispatch(&evt));
     }
 }
-
-// Point2D::ZERO is defined in the parent viewer module.

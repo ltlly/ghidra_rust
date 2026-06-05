@@ -43,7 +43,12 @@ pub use breakpoint::{
 };
 pub use control_mode::ControlMode;
 pub use flat_api::{CommonBreakpointSet, FlatApiError, FlatApiResult, FlatDebuggerApi, ProgramLocation};
-pub use modules::{MapEntry, MappedAddressRange, MapProposal, MappingChangeKind, MappingChangeEvent, ModuleMapProposal, SectionMapProposal};
+pub use modules::{
+    DebuggerAddressTranslator, DebuggerMissingModuleActionContext,
+    DebuggerMissingProgramActionContext, DebuggerOpenProgramActionContext,
+    MapEntry, MappedAddressRange, MapProposal, MappingChangeKind, MappingChangeEvent,
+    ModuleMapProposal, RegionMapProposal, SectionMapProposal,
+};
 pub use platform::{DebuggerConnection, PlatformDescription, ProcessDescriptor};
 pub use target::{ActionEntry, ActionResult, ObjectArgumentPolicy, Target};
 pub use tracemgr::DebuggerCoordinates;

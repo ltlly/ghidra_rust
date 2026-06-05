@@ -83,7 +83,9 @@ pub use symbol_views::{
 };
 pub use target_iface::{
     ExecutionState, TraceActivatable, TraceAggregate, TraceEnvironment, TraceEventScope,
-    TraceExecutionStateful, TraceFocusScope, TraceMethod, TraceObjectInterface, TraceTogglable,
+    TraceExecutionStateful, TraceFocusScope, TraceMethod, TraceObjectInterface, TraceRegion,
+    TraceTargetEvent, TraceTargetProcess, TraceTargetRegisterContainer, TraceTargetRegisterValue,
+    TraceTargetSection, TraceTargetStack, TraceTargetStackFrame, TraceTogglable,
 };
 pub use target_info::{builtin as target_builtin, TraceObjectInfo, TraceObjectInterfaceFactory, TraceObjectInterfaceRegistry};
 pub use target_manager::{TargetObjectError, TraceObjectManager};

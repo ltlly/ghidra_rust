@@ -7,6 +7,9 @@ pub mod animation;
 pub mod edge;
 pub mod event;
 pub mod graph_component;
+
+// New modules ported from Ghidra's graph viewer package
+pub mod visual_graph_scaling_control;
 pub mod grid;
 pub mod layout;
 pub mod options;

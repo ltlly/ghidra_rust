@@ -2,6 +2,10 @@
 //!
 //! Ports Ghidra's `ghidra.graph.job` package.
 
+// New modules ported from Ghidra's graph job package
+pub mod graph_job_listener;
+pub mod abstract_graph_transition_job;
+
 use std::collections::VecDeque;
 
 use super::viewer::{Point2D, VisualGraph};

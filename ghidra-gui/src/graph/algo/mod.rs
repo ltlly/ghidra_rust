@@ -18,6 +18,11 @@ pub mod tarjan;
 pub mod dfs_sorter;
 pub mod graph_to_tree;
 
+// New modules ported from Ghidra's graph algo package
+pub mod recursive_find_paths;
+pub mod sorter_exception;
+pub mod status_listener;
+
 pub use dominance::{DominanceAlgorithm, DominatorResult};
 pub use dijkstra::Dijkstra;
 pub use find_paths::FindPaths;

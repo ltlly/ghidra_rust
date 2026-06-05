@@ -11,6 +11,11 @@
 //! - [`ScalarTableModel`] -- the data model for the scalar table.
 //! - [`ScalarCategory`] -- categorization of scalar values.
 
+/// Scalar value search model, row objects, and plugin.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.scalartable` Java package.
+pub mod model;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

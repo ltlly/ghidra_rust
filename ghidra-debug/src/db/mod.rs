@@ -34,12 +34,14 @@ pub mod trace_db_breakpoint;
 pub mod trace_db_cache_containing;
 pub mod trace_db_class_symbol;
 pub mod trace_db_cache_sequence;
+pub mod trace_db_changeset;
 pub mod trace_db_content;
 pub mod trace_db_content_handler;
 pub mod trace_db_context;
 pub mod trace_db_data;
 pub mod trace_db_data_settings;
 pub mod trace_db_data_type_mgr;
+pub mod trace_db_direct_listener;
 pub mod trace_db_equate;
 pub mod trace_db_fragment;
 pub mod trace_db_guest;
@@ -65,7 +67,9 @@ pub mod trace_db_target_iface;
 pub mod trace_db_thread;
 pub mod trace_db_time;
 pub mod trace_db_time_viewport;
+pub mod trace_db_user_data;
 pub mod trace_db_util;
+pub mod trace_db_utils;
 pub mod trace_db_visitor_ext;
 
 pub use trace_db::TraceDatabase;
@@ -85,4 +89,10 @@ pub use trace_db_target_iface::{
     DbObjectActivatable, DbObjectAggregate, DbObjectEnvironment, DbObjectExecutionStateful,
     DbObjectFocusScope, DbObjectTogglable, DbTargetInterfaceRegistry,
 };
+pub use trace_db_changeset::{ChangeOperation, ChangeRecord, DbTraceChangeSet};
+pub use trace_db_direct_listener::{
+    DirectChangeKind, DirectChangeEvent, DirectChangeListener, DirectChangeListenerSet,
+};
 pub use trace_db_time_viewport::{SingleSnapViewport, TraceTimeViewport};
+pub use trace_db_user_data::{DbTraceUserData, UserDataEntry};
+pub use trace_db_utils::{TraceDatabaseInfo, TraceDbUtils};

@@ -9,6 +9,14 @@
 pub mod hover;
 pub mod margin;
 
+// New modules ported from Ghidra's decompiler component package
+pub mod decompiler_manager;
+pub mod decompiler_utils;
+pub mod callback_handler;
+pub mod highlight_controller;
+pub mod program_listener;
+pub mod decompile_runnable;
+
 use super::clang_node::{ClangNodeId, SyntaxType};
 use super::decompile_results::DecompileResults;
 

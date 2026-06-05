@@ -2,6 +2,10 @@
 //!
 //! Ports `ghidra.graph.viewer.vertex` package.
 
+// New modules ported from Ghidra's graph viewer vertex package
+pub mod abstract_visual_vertex;
+pub mod vertex_renderer;
+
 use crate::graph::viewer::{Point2D, Rect2D, VisualVertex};
 use crate::graph::service::VertexShape;
 

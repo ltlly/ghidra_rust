@@ -13,6 +13,11 @@
 //! - [`RelocationTable`] -- manages all relocations in a program.
 //! - [`RelocationFixupModel`] -- the business logic for relocation operations.
 
+/// Relocation table plugin, fixup handler, and table model.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.reloc` Java package.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

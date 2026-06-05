@@ -12,6 +12,11 @@
 //! - [`MemoryBlockPermission`] -- permission flags for memory blocks.
 //! - [`ImageBaseAction`] -- actions for changing the image base address.
 
+/// Memory map manager, block models, and plugin logic.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.memory` Java package.
+pub mod manager;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

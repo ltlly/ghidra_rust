@@ -14,6 +14,11 @@
 //! - [`MarkerManager`] -- manages all marker sets for a program.
 //! - [`MarkerPanel`] -- model for rendering markers in the UI.
 
+/// Marker plugin, overview provider, margin provider, and navigation.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.marker` Java package.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 

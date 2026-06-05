@@ -14,6 +14,11 @@
 //! - [`CallTreeBuilder`] -- builds call trees from function metadata.
 //! - [`CallTreeDirection`] -- incoming (callers) or outgoing (callees).
 
+/// Call tree options and configuration.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreeOptions`.
+pub mod options;
+
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 

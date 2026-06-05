@@ -2,6 +2,11 @@
 //!
 //! Ports `ghidra.graph.viewer.shape` package.
 
+// New modules ported from Ghidra's graph viewer shape package
+pub mod articulated_edge_transformer;
+pub mod graph_loop_shape;
+pub mod vertex_shape_pick_support;
+
 use crate::graph::viewer::Point2D;
 
 /// A 2D shape path for rendering complex vertex shapes.

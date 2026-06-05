@@ -13,6 +13,11 @@
 //! - [`LabelValidator`] -- validates label names against naming rules.
 //! - [`LabelScope`] -- the visibility scope of a label.
 
+/// Label history tracking, label manager plugin, and edit label actions.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.label` Java package.
+pub mod history;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

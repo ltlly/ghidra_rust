@@ -9,6 +9,9 @@
 pub mod edit_actions;
 pub mod extra_actions;
 
+// New modules ported from Ghidra's decompiler actions package
+pub mod decompiler_actions;
+
 use ghidra_core::addr::Address;
 
 use super::clang_node::{ClangNodeId, SyntaxType};

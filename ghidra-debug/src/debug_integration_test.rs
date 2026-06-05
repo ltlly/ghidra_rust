@@ -625,4 +625,242 @@ mod tests {
         // Root path
         assert_eq!(KeyPath::ROOT.size(), 0);
     }
+
+    // ===== New modules: db::trace_db_changeset =====
+
+    #[test]
+    fn test_changeset_undo_redo_integration() {
+        let mut cs = crate::db::trace_db_changeset::DbTraceChangeSet::new();
+
+        // Transaction 1: insert thread
+        cs.start_transaction();
+        cs.record(crate::db::trace_db_changeset::ChangeRecord::new(
+            crate::db::trace_db_changeset::ChangeOperation::Insert,
+            "threads", 1, "new thread",
+        ));
+        cs.end_transaction(true);
+
+        // Transaction 2: write memory
+        cs.start_transaction();
+        cs.record(crate::db::trace_db_changeset::ChangeRecord::new(
+            crate::db::trace_db_changeset::ChangeOperation::Update,
+            "memory", 0x400000, "write bytes",
+        ));
+        cs.end_transaction(true);
+
+        assert_eq!(cs.undo_depth(), 2);
+        assert!(cs.can_undo());
+        assert!(!cs.can_redo());
+
+        // Undo transaction 2
+        let undone = cs.undo().unwrap();
+        assert_eq!(undone.len(), 1);
+        assert_eq!(undone[0].table, "memory");
+
+        // Redo
+        let redone = cs.redo().unwrap();
+        assert_eq!(redone[0].table, "memory");
+    }
+
+    // ===== New modules: db::trace_db_direct_listener =====
+
+    #[test]
+    fn test_direct_listener_integration() {
+        use crate::db::trace_db_direct_listener::*;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        struct CountingListener {
+            count: AtomicU32,
+        }
+        impl DirectChangeListener for CountingListener {
+            fn on_change(&self, _event: &DirectChangeEvent) {
+                self.count.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let mut set = DirectChangeListenerSet::new();
+        set.add(Box::new(CountingListener { count: AtomicU32::new(0) }));
+        set.add(Box::new(CountingListener { count: AtomicU32::new(0) }));
+
+        // Notify
+        let event = DirectChangeEvent::new(DirectChangeKind::MemoryBytesChanged, 5)
+            .with_space("ram")
+            .with_range(0x1000, 0x1fff);
+        set.notify(&event);
+        assert_eq!(set.len(), 2);
+
+        // Various event kinds
+        let snap_event = DirectChangeEvent::new(DirectChangeKind::SnapAdded, 10);
+        set.notify(&snap_event);
+    }
+
+    // ===== New modules: db::trace_db_user_data =====
+
+    #[test]
+    fn test_user_data_integration() {
+        use crate::db::trace_db_user_data::*;
+
+        let mut data = DbTraceUserData::new();
+
+        // Store some preferences
+        data.put(UserDataEntry::new("theme", "dark"));
+        data.put(UserDataEntry::new("font_size", "14").with_namespace("editor"));
+        data.put(UserDataEntry::new("tab_width", "4").with_namespace("editor"));
+        data.put(UserDataEntry::new("recent_files", "/tmp/test.c"));
+
+        assert_eq!(data.len(), 4);
+        assert_eq!(data.get_string("theme", None), Some("dark"));
+        assert_eq!(data.get_string("font_size", Some("editor")), Some("14"));
+
+        // Namespace isolation
+        let editor_entries = data.entries_in_namespace("editor");
+        assert_eq!(editor_entries.len(), 2);
+
+        // Remove
+        data.remove("recent_files", None);
+        assert_eq!(data.len(), 3);
+
+        // Persistence filter
+        data.put(UserDataEntry::new("temp", "val").with_persistent(false));
+        assert_eq!(data.persistent_entries().len(), 3); // temp is not persistent
+    }
+
+    // ===== New modules: db::trace_db_utils =====
+
+    #[test]
+    fn test_trace_db_utils_integration() {
+        use crate::db::trace_db_utils::*;
+
+        // Address space helpers
+        assert!(TraceDbUtils::is_register_space("register"));
+        assert!(TraceDbUtils::is_memory_space("ram"));
+        assert!(TraceDbUtils::is_stack_space("stack"));
+
+        // Snap formatting
+        assert_eq!(TraceDbUtils::format_snap(5), "snap:5");
+        assert_eq!(TraceDbUtils::parse_snap("snap:5"), Some(5));
+        assert_eq!(TraceDbUtils::parse_snap("scratch"), Some(-1));
+
+        // Range overlap
+        assert_eq!(TraceDbUtils::range_overlap(0, 100, 50, 150), Some((50, 100)));
+        assert_eq!(TraceDbUtils::range_overlap(0, 100, 200, 300), None);
+
+        // Alignment
+        assert_eq!(TraceDbUtils::align_down(0x1234, 0x1000), 0x1000);
+        assert_eq!(TraceDbUtils::align_up(0x1234, 0x1000), 0x2000);
+
+        // Database info
+        let info = TraceDatabaseInfo::new(
+            "my_trace", "x86:LE:64:default", "default",
+        )
+        .with_platform("linux")
+        .with_executable_path("/bin/test");
+        assert_eq!(info.platform, Some("linux".into()));
+    }
+
+    // ===== New target interface types =====
+
+    #[test]
+    fn test_target_interfaces_integration() {
+        use crate::model::target_iface::*;
+
+        // Process
+        let mut proc = TraceTargetProcess::new(
+            KeyPath::parse("Processes[0]"), 1234, "test",
+        );
+        assert!(proc.is_alive());
+        proc.state = ExecutionState::Stopped;
+        assert!(proc.is_alive());
+        proc.state = ExecutionState::Terminated;
+        assert!(!proc.is_alive());
+
+        // Stack
+        let mut stack = TraceTargetStack::new(KeyPath::parse("Stack"), 1);
+        stack.push_frame(TraceTargetStackFrame::new(
+            KeyPath::parse("F[0]"), 0, 0x401000, 0x7fff0000,
+        ));
+        assert_eq!(stack.depth(), 1);
+
+        // Region
+        let region = TraceRegion::new(
+            KeyPath::parse("R[0]"), "stack", 0x7fff0000, 0x7fffffff,
+            true, true, false,
+        );
+        assert!(region.contains(0x7fff5000));
+        assert_eq!(region.length(), 0x10000);
+
+        // Register value
+        let rv = TraceTargetRegisterValue::new(
+            "RAX", vec![0x42, 0, 0, 0, 0, 0, 0, 0], 64,
+        );
+        assert_eq!(rv.as_u64_le(), Some(0x42));
+
+        // Target event
+        let event = TraceTargetEvent::new(
+            KeyPath::parse("Events[0]"), "breakpoint-hit",
+        )
+        .with_thread_id(1)
+        .with_detail("type", "hardware");
+        assert_eq!(event.details.get("type").unwrap(), "hardware");
+    }
+
+    // ===== New event types =====
+
+    #[test]
+    fn test_new_event_types() {
+        use crate::plugin::event::*;
+
+        // TraceOpenedEvent
+        let opened = TraceOpenedEvent::new("trace1");
+        assert_eq!(opened.trace_id, "trace1");
+
+        // TraceLocationEvent
+        let location = TraceLocationEvent::new("trace1", 0x400000).with_space("ram");
+        assert_eq!(location.offset, 0x400000);
+
+        // TraceSelectionEvent
+        let selection = TraceSelectionEvent::new("trace1", vec![(0x1000, 0x1fff)]);
+        assert_eq!(selection.selected_size(), 0x1000);
+        assert!(!selection.is_empty());
+
+        // ActivationCause
+        assert_ne!(ActivationCause::Navigate, ActivationCause::Opened);
+
+        // DebuggerPluginEvent variants
+        let events = vec![
+            DebuggerPluginEvent::TraceOpened(TraceOpenedEvent::new("t1")),
+            DebuggerPluginEvent::TraceLocation(TraceLocationEvent::new("t1", 0)),
+            DebuggerPluginEvent::TraceSelection(TraceSelectionEvent::new("t1", vec![])),
+        ];
+        assert_eq!(events.len(), 3);
+    }
+
+    // ===== New API modules types =====
+
+    #[test]
+    fn test_new_api_modules_types() {
+        use crate::api::modules::*;
+
+        // RegionMapProposal
+        let region = RegionMapProposal::new(".text", 0x1000, 0x2000, 0x400000, 0x401000, Lifespan::now_on(0));
+        let entry = region.to_map_entry("trace1");
+        assert_eq!(entry.from_min, 0x1000);
+        assert_eq!(entry.to_min, 0x400000);
+
+        // DebuggerMissingModuleActionContext
+        let missing = DebuggerMissingModuleActionContext::new("trace1", "libc.so.6")
+            .with_load_address(0x7f0000);
+        assert_eq!(missing.module_name, "libc.so.6");
+        assert_eq!(missing.load_address, Some(0x7f0000));
+
+        // DebuggerOpenProgramActionContext
+        let open = DebuggerOpenProgramActionContext::new("trace1", "/usr/lib/libc.so", 5);
+        assert_eq!(open.snap, 5);
+
+        // DebuggerMissingProgramActionContext
+        let missing_prog = DebuggerMissingProgramActionContext::new(
+            "trace1", "/usr/lib/libc.so", 0x7f000000, 0x7f001000,
+        );
+        assert_eq!(missing_prog.trace_min, 0x7f000000);
+    }
 }

@@ -9,6 +9,12 @@
 
 pub mod routing;
 
+// New modules ported from Ghidra's graph viewer edge package
+pub mod visual_edge_renderer;
+pub mod abstract_visual_edge;
+pub mod edge_stroke_transformer;
+pub mod path_highlighter;
+
 use crate::graph::viewer::{Point2D, VisualEdge, VisualVertex};
 
 /// Calculates arrow positions for directed edges.

@@ -258,6 +258,162 @@ impl ModuleMapProposal {
     }
 }
 
+/// A region map proposal: maps an entire region from a trace to a program.
+///
+/// Ported from Ghidra's `RegionMapProposal`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegionMapProposal {
+    /// The region name (e.g., ".text", ".data").
+    pub region_name: String,
+    /// The trace start address.
+    pub trace_start: u64,
+    /// The trace end address (inclusive).
+    pub trace_end: u64,
+    /// The program start address.
+    pub program_start: u64,
+    /// The program end address (inclusive).
+    pub program_end: u64,
+    /// The lifespan for this region.
+    pub lifespan: Lifespan,
+}
+
+impl RegionMapProposal {
+    /// Create a new region map proposal.
+    pub fn new(
+        region_name: impl Into<String>,
+        trace_start: u64,
+        trace_end: u64,
+        program_start: u64,
+        program_end: u64,
+        lifespan: Lifespan,
+    ) -> Self {
+        Self {
+            region_name: region_name.into(),
+            trace_start,
+            trace_end,
+            program_start,
+            program_end,
+            lifespan,
+        }
+    }
+
+    /// Convert to a `MapEntry`.
+    pub fn to_map_entry(&self, trace_id: &str) -> MapEntry {
+        MapEntry::new(
+            trace_id,
+            self.trace_start,
+            self.trace_end,
+            self.program_start,
+            self.program_end,
+            self.lifespan.clone(),
+        )
+    }
+}
+
+/// Action context for when a module is missing from the trace.
+///
+/// Ported from Ghidra's `DebuggerMissingModuleActionContext`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebuggerMissingModuleActionContext {
+    /// The trace ID.
+    pub trace_id: String,
+    /// The module name that is missing.
+    pub module_name: String,
+    /// The module load address, if known.
+    pub load_address: Option<u64>,
+}
+
+impl DebuggerMissingModuleActionContext {
+    /// Create a new missing module context.
+    pub fn new(trace_id: impl Into<String>, module_name: impl Into<String>) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            module_name: module_name.into(),
+            load_address: None,
+        }
+    }
+
+    /// Set the load address.
+    pub fn with_load_address(mut self, addr: u64) -> Self {
+        self.load_address = Some(addr);
+        self
+    }
+}
+
+/// Action context for opening a program from the trace module.
+///
+/// Ported from Ghidra's `DebuggerOpenProgramActionContext`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebuggerOpenProgramActionContext {
+    /// The trace ID.
+    pub trace_id: String,
+    /// The program URL.
+    pub program_url: String,
+    /// The snap (snapshot time) to view.
+    pub snap: i64,
+}
+
+impl DebuggerOpenProgramActionContext {
+    /// Create a new open program context.
+    pub fn new(
+        trace_id: impl Into<String>,
+        program_url: impl Into<String>,
+        snap: i64,
+    ) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            program_url: program_url.into(),
+            snap,
+        }
+    }
+}
+
+/// Action context for when a program mapping is missing.
+///
+/// Ported from Ghidra's `DebuggerMissingProgramActionContext`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebuggerMissingProgramActionContext {
+    /// The trace ID.
+    pub trace_id: String,
+    /// The expected program URL.
+    pub program_url: String,
+    /// The trace address range start.
+    pub trace_min: u64,
+    /// The trace address range end (inclusive).
+    pub trace_max: u64,
+}
+
+impl DebuggerMissingProgramActionContext {
+    /// Create a new missing program context.
+    pub fn new(
+        trace_id: impl Into<String>,
+        program_url: impl Into<String>,
+        trace_min: u64,
+        trace_max: u64,
+    ) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            program_url: program_url.into(),
+            trace_min,
+            trace_max,
+        }
+    }
+}
+
+/// Trait for an address translator that maps between trace and program addresses.
+///
+/// Ported from Ghidra's `DebuggerAddressTranslator` interface.
+pub trait DebuggerAddressTranslator {
+    /// Translate a trace address to a program address.
+    fn trace_to_program(&self, trace_addr: u64, snap: i64) -> Option<(String, u64)>;
+
+    /// Translate a program address back to a trace address.
+    fn program_to_trace(&self, program_url: &str, program_addr: u64, snap: i64) -> Option<u64>;
+
+    /// Get all open mapped locations for a given program location.
+    fn get_open_mapped_locations(&self, program_url: &str, program_addr: u64) -> Vec<(String, u64, i64)>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -368,5 +524,80 @@ mod tests {
         let back: MapEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(back.from_min, 0x1000);
         assert_eq!(back.to_min, 0x400000);
+    }
+
+    #[test]
+    fn test_region_map_proposal() {
+        let region = RegionMapProposal::new(
+            ".text",
+            0x7fff0000,
+            0x7fff0fff,
+            0x400000,
+            0x400fff,
+            Lifespan::now_on(0),
+        );
+        assert_eq!(region.region_name, ".text");
+
+        let entry = region.to_map_entry("trace1");
+        assert_eq!(entry.from_min, 0x7fff0000);
+        assert_eq!(entry.to_min, 0x400000);
+    }
+
+    #[test]
+    fn test_missing_module_context() {
+        let ctx = DebuggerMissingModuleActionContext::new("trace1", "libc.so.6")
+            .with_load_address(0x7f0000);
+        assert_eq!(ctx.module_name, "libc.so.6");
+        assert_eq!(ctx.load_address, Some(0x7f0000));
+    }
+
+    #[test]
+    fn test_open_program_context() {
+        let ctx = DebuggerOpenProgramActionContext::new("trace1", "/usr/lib/libc.so", 5);
+        assert_eq!(ctx.program_url, "/usr/lib/libc.so");
+        assert_eq!(ctx.snap, 5);
+    }
+
+    #[test]
+    fn test_missing_program_context() {
+        let ctx = DebuggerMissingProgramActionContext::new(
+            "trace1",
+            "/usr/lib/libc.so",
+            0x7f000000,
+            0x7f001000,
+        );
+        assert_eq!(ctx.trace_min, 0x7f000000);
+        assert_eq!(ctx.trace_max, 0x7f001000);
+    }
+
+    struct MockTranslator;
+    impl DebuggerAddressTranslator for MockTranslator {
+        fn trace_to_program(&self, _trace_addr: u64, _snap: i64) -> Option<(String, u64)> {
+            Some(("prog.bin".into(), 0x400000))
+        }
+        fn program_to_trace(&self, _url: &str, _addr: u64, _snap: i64) -> Option<u64> {
+            Some(0x7fff0000)
+        }
+        fn get_open_mapped_locations(&self, _url: &str, _addr: u64) -> Vec<(String, u64, i64)> {
+            vec![("trace1".into(), 0x7fff0000, 0)]
+        }
+    }
+
+    #[test]
+    fn test_address_translator_trait() {
+        let translator = MockTranslator;
+        let result = translator.trace_to_program(0x7fff0000, 0);
+        assert_eq!(result, Some(("prog.bin".into(), 0x400000)));
+
+        let result = translator.program_to_trace("prog.bin", 0x400000, 0);
+        assert_eq!(result, Some(0x7fff0000));
+    }
+
+    #[test]
+    fn test_region_map_proposal_serde() {
+        let region = RegionMapProposal::new(".text", 0x1000, 0x2000, 0x400000, 0x401000, Lifespan::now_on(0));
+        let json = serde_json::to_string(&region).unwrap();
+        let back: RegionMapProposal = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.region_name, ".text");
     }
 }

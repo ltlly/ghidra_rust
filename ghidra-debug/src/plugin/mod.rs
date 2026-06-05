@@ -85,7 +85,12 @@ pub mod utils;
 pub use auto_map::*;
 pub use breakpoint_actions::*;
 pub use disassemble::*;
-pub use event::*;
+pub use event::{
+    ActivationCause, DebuggerPlatformEvent, DebuggerPluginEvent,
+    TraceActivatedEvent, TraceClosedEvent, TraceHighlightEvent,
+    TraceInactiveCoordinatesEvent, TraceLocationEvent, TraceOpenedEvent,
+    TraceSelectionEvent, TransactionCoalescer,
+};
 pub use export::*;
 pub use experiments::*;
 pub use gui::*;

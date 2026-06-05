@@ -6,6 +6,10 @@
 //! - [`PopupMenu`] / [`PopupMenuBuilder`]: context menu construction.
 //! - [`PopupRegulator`]: manages popup show/hide delays and target tracking.
 
+// New modules ported from Ghidra's graph viewer popup package
+pub mod popup_source;
+pub mod tooltip_info;
+
 /// A popup menu item.
 #[derive(Debug, Clone)]
 pub struct PopupMenuItem {

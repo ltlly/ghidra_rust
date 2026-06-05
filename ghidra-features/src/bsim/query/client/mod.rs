@@ -11,6 +11,13 @@ use serde::{Deserialize, Serialize};
 
 use super::super::description::{ExecutableRecord, FunctionDescription};
 
+// New modules ported from Ghidra's BSim client package
+pub mod row_key_sql;
+pub mod sql_effects;
+pub mod id_sql_resolution;
+pub mod exceptions;
+pub mod tables;
+
 // Re-export core client types from the parent bsim module.
 pub use super::super::client::{BSimError, BSimResult, ConnectionType, FunctionDatabase};
 

@@ -14,6 +14,11 @@
 //! - [`AddressSet`] -- an ordered set of addresses representing a selection
 //! - [`SelectionModel`] -- model managing the current program selection
 
+/// Byte selection and selection restoration plugins.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.select` Java package.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::BTreeSet;
 

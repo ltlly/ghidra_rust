@@ -30,6 +30,12 @@ pub mod tool_options;
 pub mod wrapped_option;
 pub mod wrapped_options;
 
+// New modules ported from Ghidra's options framework
+pub mod options_editor;
+pub mod editor_state_factory;
+pub mod enum_editor;
+pub mod theme_options;
+
 pub use action_trigger::ActionTrigger;
 pub use editor_state::EditorState;
 pub use file_options::FileOptions;

@@ -2,6 +2,10 @@
 //!
 //! Ports `ghidra.graph.viewer.actions` and related packages.
 
+// New modules ported from Ghidra's graph viewer actions package
+pub mod action_context;
+pub mod context_marker;
+
 use crate::graph::viewer::{Point2D, Rect2D, VisualGraph};
 
 /// Actions that can be performed on a graph viewer.

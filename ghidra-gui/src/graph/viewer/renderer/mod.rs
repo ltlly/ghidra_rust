@@ -2,6 +2,13 @@
 //!
 //! Ports `ghidra.graph.viewer.renderer` package.
 
+// New modules ported from Ghidra's graph viewer renderer package
+pub mod paintable_shape;
+pub mod debug_shape;
+pub mod articulated_edge_renderer;
+pub mod vertex_satellite_renderer;
+pub mod edge_label_renderer;
+
 use crate::graph::viewer::edge::EdgeRenderConfig;
 use crate::graph::service::VertexShape;
 use crate::graph::viewer::{Rect2D, VisualEdge, VisualGraph, VisualVertex};

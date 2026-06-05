@@ -5,6 +5,11 @@
 //! Provides model-level logic for displaying and querying source file
 //! information associated with a program's debug info.
 
+/// Source files table model, row objects, and plugin.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.sourcefilestable` Java package.
+pub mod model;
+
 use std::collections::HashMap;
 
 /// A source file entry from debug information.

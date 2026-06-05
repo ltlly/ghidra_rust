@@ -40,6 +40,15 @@ pub mod theme_value;
 pub mod theme_value_utils;
 pub mod theme_writer;
 
+// New modules ported from Ghidra's GUI framework
+pub mod theme_events;
+pub mod system_theme_ids;
+pub mod close_icon;
+pub mod g_icon_ui_resource;
+pub mod g_color_ui_resource;
+pub mod property_file_theme_defaults;
+pub mod g_attributes;
+
 pub use application_theme_manager::{ApplicationThemeManager, ThemePreferences};
 pub use color_value::ColorValue;
 pub use discoverable_theme::DiscoverableGTheme;

@@ -14,6 +14,11 @@
 //! - [`BookmarkNavigator`] -- navigates between bookmarks of a given type.
 //! - [`BookmarkPlugin`] -- orchestrates bookmark creation/removal actions.
 
+/// Bookmark plugin, provider, table model, and filtering logic.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.bookmark` Java package.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -212,6 +217,11 @@ impl BookmarkManager {
     /// Get a bookmark by ID.
     pub fn get_bookmark(&self, id: u64) -> Option<&BookmarkData> {
         self.bookmarks.get(&id)
+    }
+
+    /// Get a mutable bookmark by ID.
+    pub fn get_bookmark_mut(&mut self, id: u64) -> Option<&mut BookmarkData> {
+        self.bookmarks.get_mut(&id)
     }
 
     /// Get all bookmarks at the given address.

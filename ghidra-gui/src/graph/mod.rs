@@ -52,6 +52,9 @@ pub mod mutable_wrapper;
 pub mod service;
 pub mod viewer;
 
+// New modules ported from Ghidra's graph framework
+pub mod visual_graph_component_provider;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::hash::Hash;
