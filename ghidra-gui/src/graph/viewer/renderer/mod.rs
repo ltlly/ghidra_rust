@@ -8,6 +8,8 @@ pub mod debug_shape;
 pub mod articulated_edge_renderer;
 pub mod vertex_satellite_renderer;
 pub mod edge_label_renderer;
+pub mod visual_graph_renderer;
+pub mod paintable_shapes_ext;
 
 use crate::graph::viewer::edge::EdgeRenderConfig;
 use crate::graph::service::VertexShape;

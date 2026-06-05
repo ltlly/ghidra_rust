@@ -6,6 +6,7 @@
 //! flat (scripting) API, and platform descriptions.
 
 pub mod action;
+pub mod action_ext;
 pub mod action_name;
 pub mod address_translator;
 pub mod breakpoint;

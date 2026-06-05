@@ -11,6 +11,7 @@
 //! - Animated transitions
 
 pub mod plugins;
+pub mod plugins_ext;
 
 /// Mouse event types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

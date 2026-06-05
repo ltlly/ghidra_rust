@@ -132,9 +132,17 @@ impl ValStrDecoder for DecimalDecoder {
 }
 
 /// A collection of ValStr entries for displaying multiple values.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValStrTable<T> {
     entries: Vec<ValStrEntry<T>>,
+}
+
+impl<T> Default for ValStrTable<T> {
+    fn default() -> Self {
+        Self {
+            entries: Vec::new(),
+        }
+    }
 }
 
 impl<T> ValStrTable<T> {

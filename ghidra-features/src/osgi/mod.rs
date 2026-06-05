@@ -19,6 +19,36 @@
 /// Ported from `ghidra.app.plugin.core.osgi` bundle manager classes.
 pub mod bundle_manager;
 
+/// Thread-safe bundle container with dual-indexed lookups.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BundleMap`.
+pub mod bundle_map;
+
+/// OSGi utility functions for bundle management.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.OSGiUtils`.
+pub mod utils;
+
+/// Build error types for bundle operations.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BuildError`.
+pub mod build_error;
+
+/// Parallel lock utility for concurrent bundle operations.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.OSGiParallelLock`.
+pub mod parallel_lock;
+
+/// Bundle status table model for displaying bundle information.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BundleStatusTableModel`.
+pub mod status_table;
+
+/// Bundle status component provider.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BundleStatusComponentProvider`.
+pub mod status_provider;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

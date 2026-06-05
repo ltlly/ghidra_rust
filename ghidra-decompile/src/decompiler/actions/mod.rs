@@ -12,6 +12,7 @@ pub mod extra_actions;
 
 // New modules ported from Ghidra's decompiler actions package
 pub mod decompiler_actions;
+pub mod decompiler_actions_ext;
 
 use ghidra_core::addr::Address;
 

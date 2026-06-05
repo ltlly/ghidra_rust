@@ -133,6 +133,9 @@ pub use trace_location::{TraceClosedException, TraceLocation, TraceUniqueObject,
 pub use trace_method::{
     ArgValue, MethodArguments, MethodParameter, MethodResult, MethodValue, TraceMethodDescriptor,
 };
+pub mod defaults;
+pub mod operations_ext;
+
 pub use trace_span::TraceSpan;
 
 pub use bookmark_ops::{TraceBookmarkOperations, TraceBookmarkSpace, TraceBookmarkSpaceManager};

@@ -2,6 +2,8 @@
 //!
 //! Ports `ghidra.app.decompiler.component.hover` package.
 
+pub mod providers_ext;
+
 use ghidra_core::addr::Address;
 
 /// A hover result displayed when the user hovers over a token.

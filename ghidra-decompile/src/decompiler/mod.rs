@@ -86,6 +86,7 @@ pub mod decompiled_function;
 pub mod decomp_interface;
 pub mod decompiler_clipboard_provider;
 pub mod decompiler_location_memento;
+pub mod decompiler_plugin;
 pub mod disposer;
 pub mod fill_out_structure;
 pub mod find_dialog;

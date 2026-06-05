@@ -5,6 +5,7 @@
 // New modules ported from Ghidra's graph viewer actions package
 pub mod action_context;
 pub mod context_marker;
+pub mod action_contexts_ext;
 
 use crate::graph::viewer::{Point2D, Rect2D, VisualGraph};
 

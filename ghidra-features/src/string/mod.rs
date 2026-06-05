@@ -36,6 +36,16 @@ pub mod word_analyzer;
 /// Ported from `ghidra.app.plugin.core.string` viewer-related classes.
 pub mod viewer;
 
+/// String model with trigram frequency analysis for scoring.
+///
+/// Ported from `ghidra.app.plugin.core.string.StringModel`.
+pub mod model;
+
+/// Combined string searcher merging multiple search strategies.
+///
+/// Ported from `ghidra.app.plugin.core.string.CombinedStringSearcher`.
+pub mod combined_searcher;
+
 /// Minimum default string length to find.
 pub const DEFAULT_MIN_LENGTH: usize = 5;
 
@@ -50,7 +60,7 @@ pub const MAKE_STRINGS_ACTION: &str = "Make Strings";
 // ---------------------------------------------------------------------------
 
 /// Supported string encodings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum StringEncoding {
     /// ASCII / UTF-8.
     Ascii,

@@ -14,6 +14,7 @@ pub mod visual_edge_renderer;
 pub mod abstract_visual_edge;
 pub mod edge_stroke_transformer;
 pub mod path_highlighter;
+pub mod basic_edge_label_renderer;
 
 use crate::graph::viewer::{Point2D, VisualEdge, VisualVertex};
 

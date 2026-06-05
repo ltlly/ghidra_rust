@@ -33,6 +33,11 @@
 //! - `auto_map`: Auto-mapping specifications for dynamic-to-static mapping.
 
 pub mod auto_map;
+pub mod control_actions;
+pub mod disassembly_actions_ext;
+pub mod gui_model_columns_ext;
+pub mod service_plugins;
+pub mod stack_unwind;
 pub mod background_utils;
 pub mod breakpoint_actions;
 pub mod disassemble;

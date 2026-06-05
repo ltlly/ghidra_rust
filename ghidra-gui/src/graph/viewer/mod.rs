@@ -20,6 +20,7 @@ pub mod satellite;
 pub mod shape;
 pub mod utils;
 pub mod vertex;
+pub mod visual_graph_layered_pane_button;
 
 use std::collections::HashMap;
 
@@ -36,6 +37,16 @@ impl Point2D {
 
     pub fn new(x: f64, y: f64) -> Self {
         Self { x, y }
+    }
+
+    /// Linear interpolation between two points.
+    ///
+    /// `t = 0.0` returns `self`, `t = 1.0` returns `other`.
+    pub fn lerp(&self, other: &Point2D, t: f64) -> Point2D {
+        Point2D::new(
+            self.x + (other.x - self.x) * t,
+            self.y + (other.y - self.y) * t,
+        )
     }
 }
 
@@ -124,6 +135,8 @@ pub struct VisualEdge {
     pub highlighted: bool,
     /// Whether this edge is hovered.
     pub hovered: bool,
+    /// Edge label text (if any).
+    pub label: Option<String>,
 }
 
 impl VisualEdge {
@@ -139,6 +152,25 @@ impl VisualEdge {
             articulations: Vec::new(),
             highlighted: false,
             hovered: false,
+            label: None,
+        }
+    }
+
+    /// Create an edge with a label.
+    pub fn with_label(
+        id: impl Into<String>,
+        from_id: impl Into<String>,
+        to_id: impl Into<String>,
+        label: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            from_id: from_id.into(),
+            to_id: to_id.into(),
+            articulations: Vec::new(),
+            highlighted: false,
+            hovered: false,
+            label: Some(label.into()),
         }
     }
 }
@@ -276,6 +308,11 @@ impl VisualGraph {
             max_y = max_y.max(r.y + r.height);
         }
         Some(Rect2D::new(min_x, min_y, max_x - min_x, max_y - min_y))
+    }
+
+    /// Get the bounding rectangle of the entire graph (default if empty).
+    pub fn bounding_rect(&self) -> Rect2D {
+        self.bounds().unwrap_or(Rect2D::new(0.0, 0.0, 0.0, 0.0))
     }
 }
 

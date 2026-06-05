@@ -35,6 +35,7 @@ pub mod options_editor;
 pub mod editor_state_factory;
 pub mod enum_editor;
 pub mod theme_options;
+pub mod property_editors;
 
 pub use action_trigger::ActionTrigger;
 pub use editor_state::EditorState;
