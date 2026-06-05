@@ -11,6 +11,10 @@
 //! - [`AssemblyError`] -- an error during assembly.
 //! - [`AssemblerResult`] -- the result of an assembly operation.
 //! - [`AssemblerModel`] -- the business logic for assembly operations.
+//! - [`patch_actions`] -- patch instruction and data actions, assembly ratings,
+//!   and the assembler plugin model.
+
+pub mod patch_actions;
 
 use ghidra_core::Address;
 

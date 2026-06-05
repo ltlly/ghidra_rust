@@ -77,6 +77,7 @@ pub mod platform_gdb;
 pub mod platform_jdi;
 pub mod platform_lldb;
 pub mod platform_opinion;
+pub mod program_emulation;
 pub mod stack;
 pub mod taint;
 pub mod utils;

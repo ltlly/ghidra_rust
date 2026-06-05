@@ -57,9 +57,9 @@ pub mod staging;
 pub mod tables;
 
 pub use description::{
-    CategoryRecord, CallgraphEntry, CompareSignatures, ComparisonResult,
+    BSimClientConfig, CategoryRecord, CallgraphEntry, CompareSignatures, ComparisonResult,
     DatabaseInformation, DescriptionManager, ExecutableRecord, FunctionDescription,
-    RowKey, SignatureRecord, VectorResult,
+    FunctionDescriptionMapper, RowKey, SignatureRecord, VectorResult,
 };
 
 // Re-export key protocol types.

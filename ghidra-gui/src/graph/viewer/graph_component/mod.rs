@@ -510,18 +510,160 @@ impl CachingSatelliteGraphViewer {
 }
 
 // ============================================================================
+// GraphPerspectiveInfo
+// ============================================================================
+
+/// Stores and restores graph perspective data: zoom level, layout offset, and
+/// view offset.  Used for persisting the user's current view state across
+/// sessions or when switching tabs.
+///
+/// Ports `ghidra.graph.viewer.GraphPerspectiveInfo`.
+#[derive(Debug, Clone)]
+pub struct GraphPerspectiveInfo {
+    /// Layout-space translation offset (the layout transformer's origin).
+    pub layout_translate: Point2D,
+    /// View-space translation offset (the view transformer's origin).
+    pub view_translate: Point2D,
+    /// Current zoom level (1.0 = 100%).
+    pub zoom: f64,
+    /// Whether to restore zoom when applying this perspective.
+    pub restore_zoom: bool,
+}
+
+/// Sentinel value for an invalid coordinate.
+const INVALID_COORD: f64 = f64::MAX;
+/// Sentinel value for an invalid zoom level.
+const INVALID_ZOOM: f64 = -1.0;
+
+impl GraphPerspectiveInfo {
+    /// Create an invalid (empty) perspective.  Applying this perspective
+    /// is a no-op.
+    pub fn invalid() -> Self {
+        Self {
+            layout_translate: Point2D::new(INVALID_COORD, INVALID_COORD),
+            view_translate: Point2D::new(INVALID_COORD, INVALID_COORD),
+            zoom: INVALID_ZOOM,
+            restore_zoom: false,
+        }
+    }
+
+    /// Create a perspective from a `GraphViewer`'s current state.
+    pub fn from_viewer(viewer: &GraphViewer) -> Self {
+        Self {
+            layout_translate: viewer.viewport_origin,
+            view_translate: Point2D::ZERO,
+            zoom: viewer.scale,
+            restore_zoom: true,
+        }
+    }
+
+    /// Create a perspective from raw values.
+    pub fn new(layout_translate: Point2D, view_translate: Point2D, zoom: f64) -> Self {
+        Self {
+            layout_translate,
+            view_translate,
+            zoom,
+            restore_zoom: true,
+        }
+    }
+
+    /// Whether this perspective is invalid and should not be applied.
+    pub fn is_invalid(&self) -> bool {
+        self.zoom == INVALID_ZOOM
+            || self.layout_translate.x == INVALID_COORD
+            || self.layout_translate.y == INVALID_COORD
+    }
+
+    /// Apply this perspective to a `GraphViewer`, restoring zoom and position.
+    pub fn apply_to(&self, viewer: &mut GraphViewer) {
+        if self.is_invalid() {
+            return;
+        }
+        viewer.viewport_origin = self.layout_translate;
+        if self.restore_zoom {
+            viewer.scale = self.zoom.clamp(0.1, 5.0);
+        }
+    }
+
+    /// Serialize the perspective to a JSON string for persistence.
+    pub fn to_json(&self) -> String {
+        format!(
+            r#"{{"layout_x":{},"layout_y":{},"view_x":{},"view_y":{},"zoom":{}}}"#,
+            self.layout_translate.x,
+            self.layout_translate.y,
+            self.view_translate.x,
+            self.view_translate.y,
+            self.zoom,
+        )
+    }
+
+    /// Restore a perspective from a JSON-like map of key-value pairs.
+    /// This mirrors Ghidra's `SaveState` approach where fields are stored
+    /// by name and restored individually.
+    pub fn from_save_state(
+        layout_x: Option<f64>,
+        layout_y: Option<f64>,
+        view_x: Option<f64>,
+        view_y: Option<f64>,
+        zoom: Option<f64>,
+    ) -> Self {
+        let lx = layout_x.unwrap_or(INVALID_COORD);
+        let ly = layout_y.unwrap_or(INVALID_COORD);
+        let vx = view_x.unwrap_or(INVALID_COORD);
+        let vy = view_y.unwrap_or(INVALID_COORD);
+        let z = zoom.unwrap_or(INVALID_ZOOM);
+
+        if lx == INVALID_COORD || ly == INVALID_COORD || z == INVALID_ZOOM {
+            return Self::invalid();
+        }
+
+        Self {
+            layout_translate: Point2D::new(lx, ly),
+            view_translate: Point2D::new(vx, vy),
+            zoom: z,
+            restore_zoom: true,
+        }
+    }
+}
+
+// ============================================================================
 // VisualGraphViewUpdater
 // ============================================================================
 
-/// Manages updates to the visual graph view.
+/// Coordinates graph view mutations and animation jobs.
+///
+/// All view-changing operations (vertex relocation, relayout, zoom-to-fit,
+/// path highlight transitions) flow through this class so that they can be
+/// optionally animated and synchronised with the satellite viewer.
 ///
 /// Ports `ghidra.graph.viewer.VisualGraphViewUpdater`.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct VisualGraphViewUpdater {
     /// Pending vertex relocations.
     pending_relocations: HashMap<String, Point2D>,
     /// Whether a full relayout is requested.
     relayout_requested: bool,
+    /// Whether a zoom-to-fit is pending.
+    zoom_to_fit_requested: bool,
+    /// Current animation progress (0.0 .. 1.0).  None means no animation.
+    animation_progress: Option<f64>,
+    /// Animation step size per tick.
+    animation_step: f64,
+    /// Completed animation callbacks.
+    on_complete: Vec<String>,
+}
+
+impl Default for VisualGraphViewUpdater {
+    fn default() -> Self {
+        Self {
+            pending_relocations: HashMap::new(),
+            relayout_requested: false,
+            zoom_to_fit_requested: false,
+            animation_progress: None,
+            animation_step: 0.05,
+            on_complete: Vec::new(),
+        }
+    }
 }
 
 impl VisualGraphViewUpdater {
@@ -540,19 +682,184 @@ impl VisualGraphViewUpdater {
         self.relayout_requested = true;
     }
 
-    /// Apply pending updates to the graph.
-    pub fn apply_updates(&mut self, graph: &mut VisualGraph) {
+    /// Request that the viewer zooms to fit the entire graph.
+    pub fn request_zoom_to_fit(&mut self) {
+        self.zoom_to_fit_requested = true;
+    }
+
+    /// Start an animation for the given duration.
+    pub fn start_animation(&mut self, step: f64) {
+        self.animation_progress = Some(0.0);
+        self.animation_step = step.max(0.01);
+    }
+
+    /// Advance the animation by one tick.  Returns `true` if the animation
+    /// completed this tick.
+    pub fn tick_animation(&mut self) -> bool {
+        if let Some(ref mut progress) = self.animation_progress {
+            *progress += self.animation_step;
+            if *progress >= 1.0 {
+                self.animation_progress = None;
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Whether an animation is currently running.
+    pub fn is_animating(&self) -> bool {
+        self.animation_progress.is_some()
+    }
+
+    /// The current animation progress (0.0 .. 1.0), or None if not animating.
+    pub fn animation_progress(&self) -> Option<f64> {
+        self.animation_progress
+    }
+
+    /// Register a callback name to fire when the current animation completes.
+    pub fn on_animation_complete(&mut self, name: impl Into<String>) {
+        self.on_complete.push(name.into());
+    }
+
+    /// Drain and return the completed-animation callback names.
+    pub fn drain_completion_callbacks(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.on_complete)
+    }
+
+    /// Apply pending updates to the graph and viewer.
+    pub fn apply_updates(&mut self, graph: &mut VisualGraph, viewer: &mut GraphViewer) {
+        // Apply vertex relocations.
         for (id, pos) in self.pending_relocations.drain() {
             if let Some(v) = graph.vertex_mut(&id) {
                 v.position = pos;
             }
         }
-        self.relayout_requested = false;
+
+        // Apply relayout.
+        if self.relayout_requested {
+            self.relayout_requested = false;
+            // Relayout is delegated to the layout provider; just clear the flag here.
+        }
+
+        // Apply zoom-to-fit.
+        if self.zoom_to_fit_requested {
+            self.zoom_to_fit_requested = false;
+            viewer.fit_graph_to_view();
+        }
+    }
+
+    /// Apply a weighted blend between the current viewer state and a target
+    /// perspective (used during animated transitions).
+    pub fn interpolate_perspective(
+        &self,
+        current: &GraphPerspectiveInfo,
+        target: &GraphPerspectiveInfo,
+        t: f64,
+    ) -> GraphPerspectiveInfo {
+        let t = t.clamp(0.0, 1.0);
+        let one_minus_t = 1.0 - t;
+        GraphPerspectiveInfo {
+            layout_translate: Point2D::new(
+                current.layout_translate.x * one_minus_t + target.layout_translate.x * t,
+                current.layout_translate.y * one_minus_t + target.layout_translate.y * t,
+            ),
+            view_translate: Point2D::new(
+                current.view_translate.x * one_minus_t + target.view_translate.x * t,
+                current.view_translate.y * one_minus_t + target.view_translate.y * t,
+            ),
+            zoom: current.zoom * one_minus_t + target.zoom * t,
+            restore_zoom: true,
+        }
     }
 
     /// Whether any updates are pending.
     pub fn has_pending_updates(&self) -> bool {
-        !self.pending_relocations.is_empty() || self.relayout_requested
+        !self.pending_relocations.is_empty()
+            || self.relayout_requested
+            || self.zoom_to_fit_requested
+    }
+}
+
+// ============================================================================
+// GraphSatelliteListener
+// ============================================================================
+
+/// Trait for receiving notifications about satellite view changes.
+///
+/// Ports `ghidra.graph.viewer.GraphSatelliteListener`.
+pub trait GraphSatelliteListener: Send + Sync + std::fmt::Debug {
+    /// Called when the satellite view's viewport rectangle changes.
+    fn on_viewport_changed(&self, _new_viewport: Rect2D) {}
+
+    /// Called when the satellite view is shown.
+    fn on_satellite_shown(&self) {}
+
+    /// Called when the satellite view is hidden.
+    fn on_satellite_hidden(&self) {}
+
+    /// Called when the satellite view scale changes.
+    fn on_scale_changed(&self, _new_scale: f64) {}
+}
+
+/// A no-op implementation of `GraphSatelliteListener`.
+#[derive(Debug, Clone, Copy)]
+pub struct NullGraphSatelliteListener;
+
+impl GraphSatelliteListener for NullGraphSatelliteListener {}
+
+/// Container for managing satellite view listeners.
+#[derive(Debug, Default)]
+pub struct SatelliteListenerRegistry {
+    listeners: Vec<Box<dyn GraphSatelliteListener>>,
+}
+
+impl SatelliteListenerRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        Self { listeners: Vec::new() }
+    }
+
+    /// Add a listener.
+    pub fn add_listener(&mut self, listener: Box<dyn GraphSatelliteListener>) {
+        self.listeners.push(listener);
+    }
+
+    /// Notify all listeners that the viewport changed.
+    pub fn notify_viewport_changed(&self, viewport: Rect2D) {
+        for l in &self.listeners {
+            l.on_viewport_changed(viewport);
+        }
+    }
+
+    /// Notify all listeners that the satellite was shown.
+    pub fn notify_shown(&self) {
+        for l in &self.listeners {
+            l.on_satellite_shown();
+        }
+    }
+
+    /// Notify all listeners that the satellite was hidden.
+    pub fn notify_hidden(&self) {
+        for l in &self.listeners {
+            l.on_satellite_hidden();
+        }
+    }
+
+    /// Notify all listeners that the scale changed.
+    pub fn notify_scale_changed(&self, scale: f64) {
+        for l in &self.listeners {
+            l.on_scale_changed(scale);
+        }
+    }
+
+    /// Number of registered listeners.
+    pub fn len(&self) -> usize {
+        self.listeners.len()
+    }
+
+    /// Whether the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.listeners.is_empty()
     }
 }
 
@@ -674,7 +981,8 @@ mod tests {
         assert!(updater.has_pending_updates());
         let mut graph = VisualGraph::new();
         graph.add_vertex(VisualVertex::new("v1", "V1"));
-        updater.apply_updates(&mut graph);
+        let mut viewer = GraphViewer::new();
+        updater.apply_updates(&mut graph, &mut viewer);
         let v = graph.vertex("v1").unwrap();
         assert!((v.position.x - 10.0).abs() < 1e-6);
         assert!(!updater.has_pending_updates());
@@ -686,5 +994,116 @@ mod tests {
         gv.set_articulations("e1", vec![Point2D::new(10.0, 20.0), Point2D::new(30.0, 40.0)]);
         assert_eq!(gv.get_articulations("e1").len(), 2);
         assert_eq!(gv.get_articulations("unknown").len(), 0);
+    }
+
+    #[test]
+    fn graph_perspective_info_invalid() {
+        let info = GraphPerspectiveInfo::invalid();
+        assert!(info.is_invalid());
+    }
+
+    #[test]
+    fn graph_perspective_info_from_viewer() {
+        let mut gv = GraphViewer::new();
+        gv.scale = 1.5;
+        gv.viewport_origin = Point2D::new(100.0, 200.0);
+        let info = GraphPerspectiveInfo::from_viewer(&gv);
+        assert!(!info.is_invalid());
+        assert!((info.zoom - 1.5).abs() < 1e-6);
+        assert!((info.layout_translate.x - 100.0).abs() < 1e-6);
+        assert!((info.layout_translate.y - 200.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn graph_perspective_info_round_trip() {
+        let info = GraphPerspectiveInfo::new(
+            Point2D::new(50.0, 60.0),
+            Point2D::new(10.0, 20.0),
+            2.0,
+        );
+        let json = info.to_json();
+        assert!(json.contains("50"));
+        assert!(json.contains("60"));
+        assert!(json.contains("2"));
+    }
+
+    #[test]
+    fn graph_perspective_info_apply_to_viewer() {
+        let info = GraphPerspectiveInfo::new(
+            Point2D::new(150.0, 250.0),
+            Point2D::new(0.0, 0.0),
+            3.0,
+        );
+        let mut gv = GraphViewer::new();
+        info.apply_to(&mut gv);
+        assert!((gv.viewport_origin.x - 150.0).abs() < 1e-6);
+        assert!((gv.viewport_origin.y - 250.0).abs() < 1e-6);
+        assert!((gv.scale - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn graph_perspective_info_from_save_state() {
+        let info = GraphPerspectiveInfo::from_save_state(
+            Some(10.0),
+            Some(20.0),
+            Some(0.0),
+            Some(0.0),
+            Some(1.5),
+        );
+        assert!(!info.is_invalid());
+        assert!((info.zoom - 1.5).abs() < 1e-6);
+
+        let invalid = GraphPerspectiveInfo::from_save_state(None, None, None, None, None);
+        assert!(invalid.is_invalid());
+    }
+
+    #[test]
+    fn visual_graph_view_updater_zoom_to_fit() {
+        let mut updater = VisualGraphViewUpdater::new();
+        updater.request_zoom_to_fit();
+        assert!(updater.has_pending_updates());
+        let mut gv = GraphViewer::new();
+        let mut graph = VisualGraph::new();
+        graph.add_vertex(VisualVertex::new("v1", "V1"));
+        updater.apply_updates(&mut graph, &mut gv);
+        assert!(!updater.has_pending_updates());
+    }
+
+    #[test]
+    fn visual_graph_view_updater_animation() {
+        let mut updater = VisualGraphViewUpdater::new();
+        assert!(!updater.is_animating());
+        updater.start_animation(0.5);
+        assert!(updater.is_animating());
+        assert!(updater.animation_progress().unwrap() < 0.1);
+        // Tick until done
+        while updater.is_animating() {
+            updater.tick_animation();
+        }
+        let callbacks = updater.drain_completion_callbacks();
+        assert!(callbacks.is_empty());
+    }
+
+    #[test]
+    fn visual_graph_view_updater_interpolate() {
+        let updater = VisualGraphViewUpdater::new();
+        let a = GraphPerspectiveInfo::new(Point2D::new(0.0, 0.0), Point2D::ZERO, 1.0);
+        let b = GraphPerspectiveInfo::new(Point2D::new(100.0, 100.0), Point2D::ZERO, 2.0);
+        let mid = updater.interpolate_perspective(&a, &b, 0.5);
+        assert!((mid.layout_translate.x - 50.0).abs() < 1e-6);
+        assert!((mid.layout_translate.y - 50.0).abs() < 1e-6);
+        assert!((mid.zoom - 1.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn satellite_listener_registry() {
+        let mut reg = SatelliteListenerRegistry::new();
+        assert!(reg.is_empty());
+        reg.add_listener(Box::new(NullGraphSatelliteListener));
+        assert_eq!(reg.len(), 1);
+        reg.notify_viewport_changed(Rect2D::new(0.0, 0.0, 100.0, 100.0));
+        reg.notify_shown();
+        reg.notify_hidden();
+        reg.notify_scale_changed(2.0);
     }
 }

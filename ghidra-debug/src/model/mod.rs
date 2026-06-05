@@ -11,12 +11,14 @@ pub mod breakpoint;
 pub mod changeset;
 pub mod context;
 pub mod data_type;
+pub mod domain_object_listener;
 pub mod duplicate_key;
 pub mod execution_state;
 pub mod guest;
 pub mod lifespan;
 pub mod listing;
 pub mod map;
+pub mod mem_buffer;
 pub mod memory;
 pub mod memory_ext;
 pub mod memory_flag;
@@ -40,6 +42,7 @@ pub mod thread;
 pub mod time;
 pub mod time_schedule;
 pub mod trace;
+pub mod trace_emulation;
 pub mod trace_location;
 pub mod trace_method;
 pub mod trace_span;
@@ -50,6 +53,9 @@ pub use breakpoint::{BreakpointKindSet, TraceBreakpointKind};
 pub use changeset::{ChangeType, TraceChangeRecord, TraceChangeSet};
 pub use context::{ContextAddressRange, ContextRegisterValue, LanguageId, RegisterId, TraceRegisterContextOperations};
 pub use data_type::{DataTypeConflictHandler, TraceBasedDataTypeManager, TraceDataType};
+pub use domain_object_listener::{
+    DomainObjectChangeRecord, DomainObjectChangedEvent, DomainObjectEvent, TraceDomainObjectListener,
+};
 pub use duplicate_key::DuplicateKeyException;
 pub use execution_state::TraceExecutionState;
 pub use guest::{TraceGuestPlatformMappedRange, TracePlatform, TracePlatformManager};
@@ -88,6 +94,10 @@ pub use thread::{TraceProcess, TraceThread};
 pub use time::{TraceSchedule, TraceSnapshot, TraceTimeManager};
 pub use time_schedule::{CompareResult, PatchStep, ScheduleSequence, ScheduleStep, Scheduler, StepKind, TickStep};
 pub use trace::{Trace, TraceOptionsManager, TraceTimeViewport, TraceUserData};
+pub use trace_emulation::{
+    EmulationMode, EmulationStateSnapshot, EmulationStatus, TraceEmulationIntegration,
+    UnknownStatePcodeExecutionException,
+};
 pub use trace_location::{TraceClosedException, TraceLocation, TraceUniqueObject, UniqueObjectBase};
 pub use trace_method::{
     ArgValue, MethodArguments, MethodParameter, MethodResult, MethodValue, TraceMethodDescriptor,

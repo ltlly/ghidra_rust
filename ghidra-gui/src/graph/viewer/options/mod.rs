@@ -169,6 +169,108 @@ impl Default for VisualGraphOptionsBuilder {
     }
 }
 
+// ============================================================================
+// RelayoutOption
+// ============================================================================
+
+/// Controls when the graph layout should be recalculated.
+///
+/// Ports `ghidra.graph.viewer.options.RelayoutOption`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelayoutOption {
+    /// Always relayout when the graph changes.
+    Always,
+    /// Only relayout when the block model changes.
+    BlockModelChanges,
+    /// Only relayout when vertex grouping changes.
+    VertexGroupingChanges,
+    /// Never automatically relayout.
+    Never,
+}
+
+impl RelayoutOption {
+    /// Human-readable display name.
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Always => "Always",
+            Self::BlockModelChanges => "Block Model Changes Only",
+            Self::VertexGroupingChanges => "Vertex Grouping Changes Only",
+            Self::Never => "Never",
+        }
+    }
+}
+
+impl Default for RelayoutOption {
+    fn default() -> Self {
+        Self::Always
+    }
+}
+
+impl std::fmt::Display for RelayoutOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// ============================================================================
+// ViewRestoreOption
+// ============================================================================
+
+/// Controls how the graph view is restored when switching between graphs.
+///
+/// Ports `ghidra.graph.viewer.options.ViewRestoreOption`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewRestoreOption {
+    /// Start fully zoomed out to show the entire graph.
+    StartFullyZoomedOut,
+    /// Start fully zoomed in on the selected vertex.
+    StartFullyZoomedIn,
+    /// Remember and restore the user's previous zoom/pan settings.
+    RememberSettings,
+}
+
+impl ViewRestoreOption {
+    /// Human-readable display name.
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::StartFullyZoomedOut => "Start Fully Zoomed Out",
+            Self::StartFullyZoomedIn => "Start Fully Zoomed In",
+            Self::RememberSettings => "Remember User Settings",
+        }
+    }
+}
+
+impl Default for ViewRestoreOption {
+    fn default() -> Self {
+        Self::StartFullyZoomedOut
+    }
+}
+
+impl std::fmt::Display for ViewRestoreOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+// ============================================================================
+// ScrollWheelMode
+// ============================================================================
+
+/// Controls what the scroll wheel does in the graph view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollWheelMode {
+    /// Scroll wheel zooms (default).
+    Zoom,
+    /// Scroll wheel pans vertically.
+    Pan,
+}
+
+impl Default for ScrollWheelMode {
+    fn default() -> Self {
+        Self::Zoom
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +312,33 @@ mod tests {
         assert_eq!(opts.background_color, "#000000");
         assert!(opts.show_grid);
         assert_eq!(opts.animation_duration_ms, 500);
+    }
+
+    #[test]
+    fn relayout_option_display() {
+        assert_eq!(RelayoutOption::Always.display_name(), "Always");
+        assert_eq!(RelayoutOption::Never.display_name(), "Never");
+        assert_eq!(RelayoutOption::default(), RelayoutOption::Always);
+    }
+
+    #[test]
+    fn view_restore_option_display() {
+        assert_eq!(
+            ViewRestoreOption::StartFullyZoomedOut.display_name(),
+            "Start Fully Zoomed Out"
+        );
+        assert_eq!(
+            ViewRestoreOption::RememberSettings.display_name(),
+            "Remember User Settings"
+        );
+        assert_eq!(
+            ViewRestoreOption::default(),
+            ViewRestoreOption::StartFullyZoomedOut
+        );
+    }
+
+    #[test]
+    fn scroll_wheel_mode_default() {
+        assert_eq!(ScrollWheelMode::default(), ScrollWheelMode::Zoom);
     }
 }

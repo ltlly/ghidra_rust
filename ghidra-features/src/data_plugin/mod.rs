@@ -5,6 +5,17 @@
 //! Provides model-level logic for creating and managing data items
 //! (typed data) in a program's listing, including primitive types,
 //! arrays, structures, and strings.
+//!
+//! # Submodules
+//!
+//! - [`actions`] -- action definitions for data creation (DataActionDef,
+//!   CreateArrayActionDef, CreateStructureActionDef, CycleGroupActionDef, etc.)
+//! - [`settings`] -- data type settings management and favorites tracking
+//! - [`conflict`] -- conflict resolution when creating data over existing items
+
+pub mod actions;
+pub mod conflict;
+pub mod settings;
 
 use ghidra_core::Address;
 use std::collections::BTreeMap;

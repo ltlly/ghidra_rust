@@ -20,6 +20,12 @@
 /// related classes.
 pub mod view;
 
+/// String scanner for finding strings in raw memory.
+///
+/// Ported from `ghidra.app.plugin.core.strings.FoundStringIterator`
+/// and the string scanning logic in Ghidra's string viewing plugin.
+pub mod scanner;
+
 use std::collections::HashMap;
 
 /// Column header for string value.

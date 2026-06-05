@@ -10,6 +10,12 @@
 //! - [`StackEditorModel`] -- the model for editing a function's stack frame.
 //! - [`StackVariableEntry`] -- a single variable in the stack frame.
 //! - [`StackEditorAction`] -- types of edit operations on stack frames.
+//! - [`frame_datatype`] -- stack frame data type with component management
+//!   and offset translation.
+//! - [`manager`] -- stack editor manager for session lifecycle management.
+
+pub mod frame_datatype;
+pub mod manager;
 
 use ghidra_core::Address;
 use std::collections::BTreeMap;

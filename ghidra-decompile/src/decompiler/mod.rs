@@ -162,7 +162,12 @@ pub use component::{
 };
 
 // Highlighter types
-pub use highlighter::{CTokenHighlightMatcher, DecompilerHighlighter, TokenHighlightColors};
+pub use highlighter::{
+    CTokenHighlightMatcher, CTokenHighlightMatcherTrait, DecompilerHighlightService,
+    DecompilerHighlighter, DecompilerMarginProvider, DecompilerMarginService,
+    DecompileProcessHandle, HighlighterId, MarginProviderId, NameBasedHighlightMatcher,
+    SyntaxTypeHighlightMatcher, TokenHighlightColors,
+};
 
 // Analysis commands
 pub use analysis_cmd::{

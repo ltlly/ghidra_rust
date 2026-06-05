@@ -784,6 +784,205 @@ impl CompareSignatures {
 }
 
 // ---------------------------------------------------------------------------
+// FunctionDescriptionMapper
+// ---------------------------------------------------------------------------
+
+/// Abstract mapper for processing function descriptions from a BSim
+/// description stream.
+///
+/// Ports Ghidra's `ghidra.features.bsim.query.description.FunctionDescriptionMapper`.
+///
+/// This type scans a BSim description (e.g. from an XML export) and,
+/// for each `<exe>` and `<fdesc>` element, invokes callbacks to allow
+/// the caller to process the records one at a time without accumulating
+/// the entire description in memory.
+#[derive(Debug, Clone, Default)]
+pub struct FunctionDescriptionMapper {
+    /// Index of the current FunctionDescription being processed.
+    recnum: usize,
+    /// Collected executables.
+    executables: Vec<ExecutableRecord>,
+    /// Collected function descriptions.
+    functions: Vec<FunctionDescription>,
+}
+
+impl FunctionDescriptionMapper {
+    /// Create a new mapper.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Called for each executable record encountered in the stream.
+    ///
+    /// The default implementation stores the record for later retrieval.
+    pub fn handle_executable(&mut self, exe: &ExecutableRecord) {
+        self.executables.push(exe.clone());
+    }
+
+    /// Called for each function description encountered in the stream.
+    ///
+    /// The `record_number` is the 0-based index of this function within the
+    /// current executable.
+    ///
+    /// The default implementation stores the record for later retrieval.
+    pub fn handle_function(&mut self, func: &FunctionDescription, record_number: usize) {
+        self.recnum = record_number + 1;
+        self.functions.push(func.clone());
+    }
+
+    /// Process a list of executables and their functions from a
+    /// [`DescriptionManager`].
+    ///
+    /// This is the Rust equivalent of the Java `processFile` method that
+    /// reads from XML.  Here we operate on an already-populated
+    /// `DescriptionManager` instead.
+    pub fn process_manager(&mut self, manager: &DescriptionManager) {
+        for (i, exe) in manager.executables().iter().enumerate() {
+            self.handle_executable(exe);
+            for (j, func) in manager.list_all_functions().enumerate() {
+                if func.exe_index == i {
+                    self.handle_function(func, j);
+                }
+            }
+        }
+    }
+
+    /// The current record number (number of functions processed so far).
+    pub fn current_record_number(&self) -> usize {
+        self.recnum
+    }
+
+    /// Get the collected executables.
+    pub fn executables(&self) -> &[ExecutableRecord] {
+        &self.executables
+    }
+
+    /// Get the collected functions.
+    pub fn functions(&self) -> &[FunctionDescription] {
+        &self.functions
+    }
+
+    /// Clear the collected functions (keep executables).
+    pub fn clear_functions(&mut self) {
+        self.functions.clear();
+    }
+
+    /// Clear all collected data.
+    pub fn clear(&mut self) {
+        self.executables.clear();
+        self.functions.clear();
+        self.recnum = 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BSimClientConfig
+// ---------------------------------------------------------------------------
+
+/// Configuration for a BSim database client connection.
+///
+/// Encapsulates connection parameters for different backend types
+/// (file-based, PostgreSQL, Elasticsearch).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BSimClientConfig {
+    /// The connection URL (file path, JDBC URL, or HTTP endpoint).
+    pub url: String,
+    /// The database name.
+    pub database_name: String,
+    /// Connection timeout in seconds.
+    pub timeout_secs: u32,
+    /// Whether to use SSL/TLS.
+    pub use_tls: bool,
+    /// Username for authenticated connections.
+    pub username: Option<String>,
+    /// Whether to create the database if it does not exist.
+    pub create_if_missing: bool,
+    /// Maximum number of connections in the pool.
+    pub max_connections: u32,
+}
+
+impl Default for BSimClientConfig {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            database_name: String::new(),
+            timeout_secs: 30,
+            use_tls: false,
+            username: None,
+            create_if_missing: false,
+            max_connections: 4,
+        }
+    }
+}
+
+impl BSimClientConfig {
+    /// Create a configuration for a file-based (SQLite/H2) database.
+    pub fn file(path: impl Into<String>) -> Self {
+        Self {
+            url: path.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Create a configuration for a PostgreSQL database.
+    pub fn postgres(host: impl Into<String>, port: u16, database: impl Into<String>) -> Self {
+        Self {
+            url: format!("jdbc:postgresql://{}:{}/{}", host.into(), port, database.into()),
+            database_name: String::new(),
+            timeout_secs: 30,
+            use_tls: false,
+            username: None,
+            create_if_missing: false,
+            max_connections: 4,
+        }
+    }
+
+    /// Create a configuration for an Elasticsearch database.
+    pub fn elastic(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            url: format!("http://{}:{}", host.into(), port),
+            database_name: String::new(),
+            timeout_secs: 60,
+            use_tls: false,
+            username: None,
+            create_if_missing: false,
+            max_connections: 8,
+        }
+    }
+
+    /// Validate the configuration.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.url.is_empty() {
+            return Err("URL is required".into());
+        }
+        if self.timeout_secs == 0 {
+            return Err("Timeout must be greater than 0".into());
+        }
+        if self.max_connections == 0 {
+            return Err("Max connections must be greater than 0".into());
+        }
+        Ok(())
+    }
+
+    /// Whether this configuration points to a file-based database.
+    pub fn is_file_based(&self) -> bool {
+        !self.url.starts_with("http")
+            && !self.url.starts_with("jdbc:")
+            && !self.url.contains("://")
+    }
+
+    /// Whether this configuration points to a PostgreSQL database.
+    pub fn is_postgres(&self) -> bool {
+        self.url.contains("postgresql") || self.url.starts_with("jdbc:postgresql")
+    }
+
+    /// Whether this configuration points to an Elasticsearch database.
+    pub fn is_elastic(&self) -> bool {
+        self.url.starts_with("http") && !self.url.contains("jdbc:")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1088,5 +1287,89 @@ mod tests {
         let comp = CompareSignatures::new(dm);
         let results = comp.compare_all();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn function_description_mapper_basic() {
+        let mut mapper = FunctionDescriptionMapper::new();
+        let exe = ExecutableRecord::new("aaa", "prog", "x86", "gcc");
+        let mut func = FunctionDescription::new(0, "main", Some(0x1000));
+        func.set_signature(SignatureRecord::new(FeatureVector::from_pairs(
+            vec![1, 2, 3],
+            vec![1.0, 1.0, 1.0],
+        )));
+        let func2 = FunctionDescription::new(0, "helper", Some(0x2000));
+
+        mapper.handle_executable(&exe);
+        mapper.handle_function(&func, 0);
+        mapper.handle_function(&func2, 1);
+
+        assert_eq!(mapper.executables().len(), 1);
+        assert_eq!(mapper.functions().len(), 2);
+        assert_eq!(mapper.current_record_number(), 2);
+    }
+
+    #[test]
+    fn function_description_mapper_clear_and_reuse() {
+        let mut mapper = FunctionDescriptionMapper::new();
+        let exe = ExecutableRecord::new("aaa", "prog", "x86", "gcc");
+        mapper.handle_executable(&exe);
+        mapper.handle_function(&FunctionDescription::new(0, "f1", Some(0x100)), 0);
+        assert_eq!(mapper.functions().len(), 1);
+
+        mapper.clear_functions();
+        assert_eq!(mapper.functions().len(), 0);
+        assert_eq!(mapper.executables().len(), 1, "executables should be preserved");
+    }
+
+    #[test]
+    fn bsim_client_config_file() {
+        let cfg = BSimClientConfig::file("/tmp/test.db");
+        assert!(cfg.is_file_based());
+        assert!(!cfg.is_postgres());
+        assert!(!cfg.is_elastic());
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn bsim_client_config_postgres() {
+        let cfg = BSimClientConfig::postgres("localhost", 5432, "bsim");
+        assert!(!cfg.is_file_based());
+        assert!(cfg.is_postgres());
+        assert!(!cfg.is_elastic());
+    }
+
+    #[test]
+    fn bsim_client_config_elastic() {
+        let cfg = BSimClientConfig::elastic("localhost", 9200);
+        assert!(!cfg.is_file_based());
+        assert!(!cfg.is_postgres());
+        assert!(cfg.is_elastic());
+    }
+
+    #[test]
+    fn bsim_client_config_validate_empty_url() {
+        let cfg = BSimClientConfig::default();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn bsim_client_config_validate_zero_timeout() {
+        let mut cfg = BSimClientConfig::file("/tmp/test.db");
+        cfg.timeout_secs = 0;
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn function_description_mapper_process_manager() {
+        let mut dm = DescriptionManager::new();
+        dm.new_executable_record("aaa", "prog", "gcc", "x86");
+        dm.new_function_description("main", Some(0x1000), 0);
+        dm.new_function_description("helper", Some(0x2000), 0);
+
+        let mut mapper = FunctionDescriptionMapper::new();
+        mapper.process_manager(&dm);
+        assert_eq!(mapper.executables().len(), 1);
+        assert!(!mapper.functions().is_empty());
     }
 }
