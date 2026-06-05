@@ -341,6 +341,86 @@ impl TraceViewBinaryExporter {
     }
 }
 
+/// A trait for trace view exporters that can handle domain objects.
+///
+/// Ported from Ghidra's exporter pattern where each exporter overrides
+/// `canExportDomainObject` to indicate compatibility.
+pub trait TraceViewExporter: std::fmt::Debug {
+    /// Whether this exporter can export the given domain object type.
+    fn can_export_domain_object(&self, domain_type: &str) -> bool;
+
+    /// Get the supported export format.
+    fn format(&self) -> TraceExportFormat;
+
+    /// Get configurable options for this exporter.
+    fn options(&self) -> Vec<ExportOption> {
+        Vec::new()
+    }
+}
+
+/// A configurable export option.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportOption {
+    /// Option name.
+    pub name: String,
+    /// Option description.
+    pub description: String,
+    /// Default value.
+    pub default_value: ExportOptionValue,
+    /// Current value.
+    pub value: ExportOptionValue,
+}
+
+/// The value type for an export option.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ExportOptionValue {
+    /// Boolean option.
+    Bool(bool),
+    /// Integer option.
+    Int(i64),
+    /// String option.
+    String(String),
+}
+
+/// A registry of trace view exporters.
+#[derive(Debug, Default)]
+pub struct TraceExporterRegistry {
+    exporters: Vec<Box<dyn TraceViewExporter>>,
+}
+
+impl TraceExporterRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        Self {
+            exporters: Vec::new(),
+        }
+    }
+
+    /// Register an exporter.
+    pub fn register(&mut self, exporter: Box<dyn TraceViewExporter>) {
+        self.exporters.push(exporter);
+    }
+
+    /// Find all exporters that can handle the given domain type.
+    pub fn find_exporters(&self, domain_type: &str) -> Vec<TraceExportFormat> {
+        self.exporters
+            .iter()
+            .filter(|e| e.can_export_domain_object(domain_type))
+            .map(|e| e.format())
+            .collect()
+    }
+
+    /// Get the number of registered exporters.
+    pub fn len(&self) -> usize {
+        self.exporters.len()
+    }
+
+    /// Whether the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.exporters.is_empty()
+    }
+}
+
 /// Escape HTML special characters.
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")

@@ -2,6 +2,7 @@
 //!
 //! Ports `ghidra.features.bsim.gui.search` from Ghidra's Java source.
 
+pub mod apply;
 pub mod dialog;
 pub mod results;
 

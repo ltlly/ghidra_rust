@@ -154,6 +154,8 @@ pub mod register_value_convert;
 pub mod trace_address_snap_range;
 pub mod trace_conflicted_mapping;
 pub mod trace_data_type;
+pub mod trace_data_type_manager;
+pub mod trace_event_listener;
 pub mod trace_memory_manager;
 pub mod trace_module_manager;
 pub mod trace_overlay;
@@ -210,6 +212,10 @@ pub use experiment::{
 
 pub use trace_data_type::{DataTypeKind, TraceDataType as TraceDataTypeExt};
 pub use trace_data_type::TraceDataTypeManager as TraceDataTypeMgrExt;
+pub use trace_data_type_manager::TraceDataTypeManager as TraceDataTypeRegistry;
+pub use trace_event_listener::{
+    CompositeTraceListener, TraceDomainChangeRecord, TraceDomainObjectEventListener, TraceEventKind,
+};
 pub use trace_memory_manager::TraceMemoryRegionFull;
 pub use trace_memory_manager::TraceMemoryManager as TraceMemoryManagerExt;
 pub use trace_memory_manager::TraceMemorySpace as TraceMemorySpaceExt;

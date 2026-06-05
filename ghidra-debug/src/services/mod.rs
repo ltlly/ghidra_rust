@@ -17,6 +17,7 @@
 
 pub mod auto_map_impl;
 pub mod breakpoint_impl;
+pub mod console_extras;
 pub mod console_impl;
 pub mod control_impl;
 pub mod debugger_service_impls;
@@ -35,6 +36,7 @@ pub mod service_interfaces;
 pub mod target_impl;
 pub mod tracemgr_impl;
 pub mod url_impl;
+pub mod watches_impl;
 pub mod program_indexer;
 pub mod breakpoint_extras;
 pub mod trace_data_viewport_impl;

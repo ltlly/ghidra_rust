@@ -50,7 +50,7 @@ impl Default for VisualGraphOptions {
             edge_highlight_color: "#FF0000".to_string(),
             show_vertex_labels: true,
             show_edge_labels: false,
-            vertex_label_position: GraphLabelPosition::Center,
+            vertex_label_position: GraphLabelPosition::Center, // centered on vertex shape
             anti_alias: true,
             background_color: "#FAFAFA".to_string(),
             show_grid: false,

@@ -113,6 +113,10 @@ pub mod gui_calltree_ext;
 pub mod gui_memview_ext;
 pub mod gui_pcode_ext;
 
+// Listener data models ported from Debugger
+pub mod gui_memview_listener;
+pub mod gui_timeoverview_listener;
+
 pub use abstract_plugin::{
     DebuggerPluginPackage, ExtensionPointId, PluginLifecycleEvent, PluginPhase,
 };
@@ -158,7 +162,7 @@ pub use gui_console::{
 pub use gui_control::{ControlAction, ControlActionBuilder, ControlActionKind, ControlActionTarget, SnapshotNavigation};
 pub use gui_copy::{CopyDirection, CopyEndpoint, CopyEntry, CopyPlan};
 pub use gui_internal::{RStarTreeDiagnosticsModel, RStarTreeNode, RStarTreeStats};
-pub use gui_memview::{MemviewBoxType, MemviewMap, MemviewModel, MemoryBox};
+pub use gui_memview::{MemviewBoxType, MemviewMap, MemviewModel, MemoryBox, MemviewZoomAction, MemviewServiceImpl};
 pub use gui_model::{
     AttributeValue, DisplaysModified, ModelQuery, ModelValue, ModelValueEntry,
     ObjectModelRow, PathModelRow, TreeState, ValueDisplay,
@@ -189,7 +193,8 @@ pub use gui_stack_vars::{
 pub use gui_thread::{ThreadColumn, ThreadRow, ThreadTableModel};
 pub use gui_time::{SnapshotRow, SnapshotTableModel};
 pub use gui_timeoverview::{
-    BreakpointOverviewType, TimeOverviewColorEntry, TimeOverviewColorService, TimeType,
+    BreakpointOverviewType, BreakTypeLegendEntry, CellType, TimeOverviewColorEntry,
+    TimeOverviewColorService, TimeSelectionRange, TimeType, TimeTypeLegendEntry,
 };
 pub use gui_trace::{
     TimeRadix, TraceTabActionContext, TraceTabEntry, TraceTabEvent, TraceTabPanelModel,
@@ -246,6 +251,10 @@ pub use service_plugin_impls::{
 pub use gui_calltree_ext::*;
 pub use gui_memview_ext::*;
 pub use gui_pcode_ext::*;
+
+// Re-exports from listener modules
+pub use gui_memview_listener::{MemviewTraceEvent, MemviewTraceListener};
+pub use gui_timeoverview_listener::{TimeOverviewEntry, TimeOverviewListener};
 
 // Re-exports from action_specs module
 pub use action_specs::{

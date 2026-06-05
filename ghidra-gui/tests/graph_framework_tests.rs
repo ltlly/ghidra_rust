@@ -319,7 +319,7 @@ fn test_graph_display_options_builder() {
     use service::{GraphDisplayOptionsBuilder, GraphLabelPosition};
     let opts = GraphDisplayOptionsBuilder::new("cfg")
         .default_vertex_color("#FFE0E0")
-        .label_position(GraphLabelPosition::Top)
+        .label_position(GraphLabelPosition::North)
         .show_edge_labels(true)
         .build();
     assert_eq!(opts.default_vertex_color, "#FFE0E0");

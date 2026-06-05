@@ -203,20 +203,29 @@ impl AttributedGraph {
     }
 }
 
-/// Label position on graph vertices.
+/// Label position on graph vertices relative to the vertex shape.
+///
+/// Ports Ghidra's `ghidra.service.graph.GraphLabelPosition` enum.
+/// Positions use compass directions (North = top, South = bottom, etc.).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GraphLabelPosition {
-    /// No label.
-    None,
-    /// Label above vertex.
-    Top,
-    /// Label below vertex.
-    Bottom,
-    /// Label to the left.
-    Left,
+    /// Label above the vertex (top center).
+    North,
+    /// Label above-right.
+    NorthEast,
     /// Label to the right.
-    Right,
-    /// Label centered on vertex.
+    East,
+    /// Label below-right.
+    SouthEast,
+    /// Label below the vertex (bottom center).
+    South,
+    /// Label below-left.
+    SouthWest,
+    /// Label to the left.
+    West,
+    /// Label above-left.
+    NorthWest,
+    /// Label centered on the vertex.
     Center,
 }
 
@@ -238,7 +247,7 @@ impl Default for GraphDisplayOptions {
         Self {
             default_vertex_color: "#FFFFFF".to_string(),
             default_edge_color: "#000000".to_string(),
-            label_position: GraphLabelPosition::Center,
+            label_position: GraphLabelPosition::South,
             show_edge_labels: false,
         }
     }
@@ -438,15 +447,22 @@ fn equilateral_polygon(num_sides: usize, start_angle: f64) -> Vec<(f64, f64)> {
         .collect()
 }
 
-/// A named graph type with a set of vertex types.
+/// A named graph type defining the set of valid vertex and edge types.
+///
+/// Ports `ghidra.service.graph.GraphType`. A `GraphType` declares what kinds of
+/// vertices and edges are meaningful for a particular graph usage (e.g., a
+/// control-flow graph has "basic_block", "entry", "exit" vertex types and
+/// "fall-through", "branch" edge types).
 #[derive(Debug, Clone)]
 pub struct GraphType {
     /// Unique type name.
     pub name: String,
-    /// Display name.
+    /// Human-readable description of this graph type.
     pub display_name: String,
-    /// Vertex type names in this graph type.
+    /// Valid vertex type names for graphs of this type.
     pub vertex_types: Vec<String>,
+    /// Valid edge type names for graphs of this type.
+    pub edge_types: Vec<String>,
 }
 
 impl GraphType {
@@ -456,12 +472,50 @@ impl GraphType {
             name: name.into(),
             display_name: display_name.into(),
             vertex_types: Vec::new(),
+            edge_types: Vec::new(),
+        }
+    }
+
+    /// Create a new graph type with vertex and edge types.
+    pub fn with_types(
+        name: impl Into<String>,
+        display_name: impl Into<String>,
+        vertex_types: Vec<String>,
+        edge_types: Vec<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            display_name: display_name.into(),
+            vertex_types,
+            edge_types,
         }
     }
 
     /// Add a vertex type.
     pub fn add_vertex_type(&mut self, vertex_type: impl Into<String>) {
         self.vertex_types.push(vertex_type.into());
+    }
+
+    /// Add an edge type.
+    pub fn add_edge_type(&mut self, edge_type: impl Into<String>) {
+        self.edge_types.push(edge_type.into());
+    }
+
+    /// Check if the given vertex type is valid for this graph type.
+    pub fn contains_vertex_type(&self, vertex_type: &str) -> bool {
+        self.vertex_types.iter().any(|t| t == vertex_type)
+    }
+
+    /// Check if the given edge type is valid for this graph type.
+    pub fn contains_edge_type(&self, edge_type: &str) -> bool {
+        self.edge_types.iter().any(|t| t == edge_type)
+    }
+
+    /// Get the options name for this graph type (used in tool options).
+    ///
+    /// Returns `"{name} Graph Type"` matching Ghidra's convention.
+    pub fn options_name(&self) -> String {
+        format!("{} Graph Type", self.name)
     }
 }
 
@@ -500,7 +554,7 @@ pub mod layout_names {
 /// let opts = GraphDisplayOptionsBuilder::new("cfg")
 ///     .default_vertex_color("#FFE0E0")
 ///     .default_edge_color("#333333")
-///     .label_position(GraphLabelPosition::Top)
+///     .label_position(GraphLabelPosition::North)
 ///     .show_edge_labels(true)
 ///     .build();
 /// assert_eq!(opts.default_vertex_color, "#FFE0E0");
@@ -563,7 +617,7 @@ impl DefaultGraphDisplayOptions {
         GraphDisplayOptionsBuilder::new("cfg")
             .default_vertex_color("#FFFFFF")
             .default_edge_color("#000000")
-            .label_position(GraphLabelPosition::Center)
+            .label_position(GraphLabelPosition::South)
             .show_edge_labels(false)
             .build()
     }
@@ -583,7 +637,7 @@ impl DefaultGraphDisplayOptions {
         GraphDisplayOptionsBuilder::new("callgraph")
             .default_vertex_color("#E0FFE0")
             .default_edge_color("#336633")
-            .label_position(GraphLabelPosition::Bottom)
+            .label_position(GraphLabelPosition::South)
             .show_edge_labels(false)
             .build()
     }
@@ -592,10 +646,24 @@ impl DefaultGraphDisplayOptions {
 /// Builder for constructing [`GraphType`] with a fluent API.
 ///
 /// Ports `ghidra.service.graph.GraphTypeBuilder`.
+///
+/// # Example
+///
+/// ```
+/// use ghidra_gui::graph::service::GraphTypeBuilder;
+///
+/// let gt = GraphTypeBuilder::new("cfg", "Control Flow Graph")
+///     .vertex_type("basic_block")
+///     .edge_type("fall_through")
+///     .edge_type("branch")
+///     .build();
+/// assert_eq!(gt.edge_types.len(), 2);
+/// ```
 pub struct GraphTypeBuilder {
     name: String,
     display_name: String,
     vertex_types: Vec<String>,
+    edge_types: Vec<String>,
 }
 
 impl GraphTypeBuilder {
@@ -605,6 +673,7 @@ impl GraphTypeBuilder {
             name: name.into(),
             display_name: display_name.into(),
             vertex_types: Vec::new(),
+            edge_types: Vec::new(),
         }
     }
 
@@ -614,12 +683,19 @@ impl GraphTypeBuilder {
         self
     }
 
+    /// Add an edge type.
+    pub fn edge_type(mut self, etype: impl Into<String>) -> Self {
+        self.edge_types.push(etype.into());
+        self
+    }
+
     /// Build the [`GraphType`].
     pub fn build(self) -> GraphType {
         GraphType {
             name: self.name,
             display_name: self.display_name,
             vertex_types: self.vertex_types,
+            edge_types: self.edge_types,
         }
     }
 }
@@ -698,7 +774,9 @@ mod tests {
 
     #[test]
     fn label_position_variants() {
-        assert_ne!(GraphLabelPosition::Top, GraphLabelPosition::Bottom);
+        assert_ne!(GraphLabelPosition::North, GraphLabelPosition::South);
+        assert_ne!(GraphLabelPosition::East, GraphLabelPosition::West);
+        assert_ne!(GraphLabelPosition::NorthEast, GraphLabelPosition::SouthWest);
     }
 
     // --- GraphDisplayOptions tests ---
@@ -707,7 +785,7 @@ mod tests {
     fn display_options_default() {
         let opts = GraphDisplayOptions::default();
         assert_eq!(opts.default_vertex_color, "#FFFFFF");
-        assert_eq!(opts.label_position, GraphLabelPosition::Center);
+        assert_eq!(opts.label_position, GraphLabelPosition::South);
     }
 
     // --- VertexShape tests ---
@@ -788,8 +866,42 @@ mod tests {
     fn graph_type_new() {
         let mut gt = GraphType::new("cfg", "Control Flow Graph");
         gt.add_vertex_type("basic_block");
+        gt.add_edge_type("fall_through");
         assert_eq!(gt.name, "cfg");
         assert_eq!(gt.vertex_types.len(), 1);
+        assert_eq!(gt.edge_types.len(), 1);
+    }
+
+    #[test]
+    fn graph_type_with_types() {
+        let gt = GraphType::with_types(
+            "cfg",
+            "CFG",
+            vec!["entry".into(), "exit".into()],
+            vec!["fall_through".into(), "branch".into()],
+        );
+        assert_eq!(gt.vertex_types.len(), 2);
+        assert_eq!(gt.edge_types.len(), 2);
+    }
+
+    #[test]
+    fn graph_type_contains() {
+        let gt = GraphType::with_types(
+            "cfg",
+            "CFG",
+            vec!["basic_block".into()],
+            vec!["fall_through".into()],
+        );
+        assert!(gt.contains_vertex_type("basic_block"));
+        assert!(!gt.contains_vertex_type("nonexistent"));
+        assert!(gt.contains_edge_type("fall_through"));
+        assert!(!gt.contains_edge_type("nonexistent"));
+    }
+
+    #[test]
+    fn graph_type_options_name() {
+        let gt = GraphType::new("cfg", "Control Flow Graph");
+        assert_eq!(gt.options_name(), "cfg Graph Type");
     }
 
     // --- GraphDisplayOptionsBuilder tests ---
@@ -799,12 +911,12 @@ mod tests {
         let opts = GraphDisplayOptionsBuilder::new("dfg")
             .default_vertex_color("#E0F0FF")
             .default_edge_color("#0066CC")
-            .label_position(GraphLabelPosition::Top)
+            .label_position(GraphLabelPosition::North)
             .show_edge_labels(true)
             .build();
         assert_eq!(opts.default_vertex_color, "#E0F0FF");
         assert_eq!(opts.default_edge_color, "#0066CC");
-        assert_eq!(opts.label_position, GraphLabelPosition::Top);
+        assert_eq!(opts.label_position, GraphLabelPosition::North);
         assert!(opts.show_edge_labels);
     }
 
@@ -812,7 +924,7 @@ mod tests {
     fn builder_defaults_preserved() {
         let opts = GraphDisplayOptionsBuilder::new("test").build();
         assert_eq!(opts.default_vertex_color, "#FFFFFF");
-        assert_eq!(opts.label_position, GraphLabelPosition::Center);
+        assert_eq!(opts.label_position, GraphLabelPosition::South);
         assert!(!opts.show_edge_labels);
     }
 
@@ -840,7 +952,7 @@ mod tests {
     #[test]
     fn default_call_graph_options() {
         let opts = DefaultGraphDisplayOptions::call_graph_options();
-        assert_eq!(opts.label_position, GraphLabelPosition::Bottom);
+        assert_eq!(opts.label_position, GraphLabelPosition::South);
     }
 
     // --- GraphTypeBuilder tests ---
@@ -851,11 +963,15 @@ mod tests {
             .vertex_type("basic_block")
             .vertex_type("entry")
             .vertex_type("exit")
+            .edge_type("fall_through")
+            .edge_type("branch")
             .build();
         assert_eq!(gt.name, "cfg");
         assert_eq!(gt.display_name, "Control Flow Graph");
         assert_eq!(gt.vertex_types.len(), 3);
         assert_eq!(gt.vertex_types[0], "basic_block");
+        assert_eq!(gt.edge_types.len(), 2);
+        assert_eq!(gt.edge_types[0], "fall_through");
     }
 
     // --- empty_graph_type ---

@@ -107,12 +107,91 @@ pub fn create_signatures_table_sql() -> String {
     )".to_string()
 }
 
+/// Generate the CREATE TABLE SQL for the callgraph table.
+pub fn create_callgraph_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS callgraphtable (
+        src BIGINT NOT NULL,
+        dest BIGINT NOT NULL,
+        PRIMARY KEY (src, dest)
+    )".to_string()
+}
+
+/// Row in the callgraph table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallgraphRow {
+    /// Source function id.
+    pub src: i64,
+    /// Destination function id.
+    pub dest: i64,
+}
+
+/// Generate the CREATE TABLE SQL for the weight table.
+pub fn create_weight_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS weighttable (
+        funcid BIGINT NOT NULL,
+        score_function VARCHAR(64),
+        weight DOUBLE PRECISION DEFAULT 1.0,
+        PRIMARY KEY (funcid, score_function)
+    )".to_string()
+}
+
+/// Generate the CREATE TABLE SQL for the key-value table.
+pub fn create_key_value_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS keyvaluetable (
+        key VARCHAR(255) PRIMARY KEY,
+        value TEXT NOT NULL
+    )".to_string()
+}
+
+/// Generate the CREATE TABLE SQL for the category table.
+pub fn create_category_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS categorytable (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE,
+        description TEXT
+    )".to_string()
+}
+
+/// Generate the CREATE TABLE SQL for the exe-to-category mapping table.
+pub fn create_exe_to_category_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS exetocategory (
+        exeid INTEGER NOT NULL,
+        categoryid INTEGER NOT NULL,
+        PRIMARY KEY (exeid, categoryid)
+    )".to_string()
+}
+
+/// Generate the CREATE TABLE SQL for the optional (extra) fields table.
+pub fn create_optional_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS optionaltable (
+        funcid BIGINT NOT NULL,
+        fieldname VARCHAR(255) NOT NULL,
+        fieldvalue TEXT,
+        PRIMARY KEY (funcid, fieldname)
+    )".to_string()
+}
+
+/// Generate the CREATE TABLE SQL for the IDF lookup table.
+pub fn create_idf_lookup_table_sql() -> String {
+    "CREATE TABLE IF NOT EXISTS idflookuptable (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL UNIQUE
+    )".to_string()
+}
+
 /// Get all table creation SQL statements.
 pub fn all_create_table_sql() -> Vec<String> {
     vec![
         create_executables_table_sql(),
         create_functions_table_sql(),
         create_signatures_table_sql(),
+        create_callgraph_table_sql(),
+        create_weight_table_sql(),
+        create_key_value_table_sql(),
+        create_category_table_sql(),
+        create_exe_to_category_table_sql(),
+        create_optional_table_sql(),
+        create_idf_lookup_table_sql(),
     ]
 }
 
@@ -158,6 +237,67 @@ mod tests {
     #[test]
     fn test_all_create_table_sql() {
         let stmts = all_create_table_sql();
-        assert_eq!(stmts.len(), 3);
+        assert_eq!(stmts.len(), 10);
+    }
+
+    #[test]
+    fn test_callgraph_table_sql() {
+        let sql = create_callgraph_table_sql();
+        assert!(sql.contains("callgraphtable"));
+        assert!(sql.contains("src BIGINT"));
+        assert!(sql.contains("dest BIGINT"));
+        assert!(sql.contains("PRIMARY KEY (src, dest)"));
+    }
+
+    #[test]
+    fn test_callgraph_row() {
+        let row = CallgraphRow { src: 1, dest: 2 };
+        assert_eq!(row.src, 1);
+        assert_eq!(row.dest, 2);
+    }
+
+    #[test]
+    fn test_weight_table_sql() {
+        let sql = create_weight_table_sql();
+        assert!(sql.contains("weighttable"));
+        assert!(sql.contains("weight DOUBLE PRECISION"));
+    }
+
+    #[test]
+    fn test_key_value_table_sql() {
+        let sql = create_key_value_table_sql();
+        assert!(sql.contains("keyvaluetable"));
+        assert!(sql.contains("key VARCHAR"));
+        assert!(sql.contains("value TEXT"));
+    }
+
+    #[test]
+    fn test_category_table_sql() {
+        let sql = create_category_table_sql();
+        assert!(sql.contains("categorytable"));
+        assert!(sql.contains("name VARCHAR"));
+    }
+
+    #[test]
+    fn test_exe_to_category_table_sql() {
+        let sql = create_exe_to_category_table_sql();
+        assert!(sql.contains("exetocategory"));
+        assert!(sql.contains("exeid INTEGER"));
+        assert!(sql.contains("categoryid INTEGER"));
+    }
+
+    #[test]
+    fn test_optional_table_sql() {
+        let sql = create_optional_table_sql();
+        assert!(sql.contains("optionaltable"));
+        assert!(sql.contains("fieldname VARCHAR"));
+        assert!(sql.contains("fieldvalue TEXT"));
+    }
+
+    #[test]
+    fn test_idf_lookup_table_sql() {
+        let sql = create_idf_lookup_table_sql();
+        assert!(sql.contains("idflookuptable"));
+        assert!(sql.contains("name VARCHAR"));
     }
 }
