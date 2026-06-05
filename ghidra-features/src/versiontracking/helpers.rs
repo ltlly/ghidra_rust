@@ -100,3 +100,67 @@ pub fn lcs_length(a: &[String], b: &[String]) -> usize {
     }}
     dp[n][m]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jaccard_mnemonic_similarity_identical() {
+        let a = vec!["mov".into(), "add".into(), "ret".into()];
+        let b = vec!["mov".into(), "add".into(), "ret".into()];
+        assert!((jaccard_mnemonic_similarity(&a, &b) - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_jaccard_mnemonic_similarity_disjoint() {
+        let a = vec!["mov".into(), "add".into()];
+        let b = vec!["jmp".into(), "ret".into()];
+        assert!((jaccard_mnemonic_similarity(&a, &b) - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_jaccard_mnemonic_similarity_partial() {
+        let a = vec!["mov".into(), "add".into(), "ret".into()];
+        let b = vec!["mov".into(), "jmp".into(), "ret".into()];
+        // intersection = {mov, ret} = 2, union = {mov, add, ret, jmp} = 4
+        assert!((jaccard_mnemonic_similarity(&a, &b) - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_jaccard_mnemonic_similarity_empty() {
+        let a: Vec<String> = vec![];
+        let b = vec!["mov".into()];
+        assert_eq!(jaccard_mnemonic_similarity(&a, &b), 0.0);
+        assert_eq!(jaccard_mnemonic_similarity(&b, &a), 0.0);
+    }
+
+    #[test]
+    fn test_lcs_length_identical() {
+        let a = vec!["a".into(), "b".into(), "c".into()];
+        let b = vec!["a".into(), "b".into(), "c".into()];
+        assert_eq!(lcs_length(&a, &b), 3);
+    }
+
+    #[test]
+    fn test_lcs_length_disjoint() {
+        let a = vec!["a".into(), "b".into()];
+        let b = vec!["c".into(), "d".into()];
+        assert_eq!(lcs_length(&a, &b), 0);
+    }
+
+    #[test]
+    fn test_lcs_length_partial() {
+        let a = vec!["a".into(), "b".into(), "c".into()];
+        let b = vec!["a".into(), "c".into()];
+        assert_eq!(lcs_length(&a, &b), 2);
+    }
+
+    #[test]
+    fn test_lcs_length_empty() {
+        let a: Vec<String> = vec![];
+        let b = vec!["a".into()];
+        assert_eq!(lcs_length(&a, &b), 0);
+        assert_eq!(lcs_length(&b, &a), 0);
+    }
+}

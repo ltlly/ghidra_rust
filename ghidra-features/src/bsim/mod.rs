@@ -38,6 +38,8 @@
 pub mod bulk_signatures;
 pub mod client;
 pub mod client_factory;
+pub mod filter_types;
+pub mod value_editors;
 pub mod compare_signatures;
 pub mod configuration;
 pub mod description;
@@ -154,6 +156,20 @@ pub use bulk_signatures::{BulkIngestStats, BulkSignatureGenerator};
 // re-exported from description above; only import unique items here).
 pub use compare_signatures::{
     ComparisonSummary, cosine_similarity, jaccard_index, weighted_overlap,
+};
+
+// Re-export filter types.
+pub use filter_types::{
+    ArchitectureFilter, BlankFilter, BSimFilterType, CompilerFilter, DateEarlierFilter,
+    DateLaterFilter, ExecutableCategoryFilter, ExecutableNameFilter, FilterContext, FilterSet,
+    FunctionTagFilter, HasNamedChildFilter, Md5Filter, NegatedFilter, PathStartsFilter,
+    not_architecture, not_compiler, not_executable_category, not_executable_name, not_md5,
+};
+
+// Re-export value editors.
+pub use value_editors::{
+    BSimValueEditor, BooleanEditor, DateEditor, EditorError, EditorValue, MultiChoiceEditor,
+    StringEditor,
 };
 
 // Re-export scoring types (unique names to avoid conflicts with client re-exports).

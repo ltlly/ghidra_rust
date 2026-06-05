@@ -112,3 +112,38 @@ impl ColumnDisplay<String> for StringColumnDisplay {
         va.cmp(&vb)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ghidra_core::addr::Address;
+
+    #[derive(Debug, Clone)]
+    struct TestRow { addr: u64 }
+    impl AddressableRowObject for TestRow {
+        fn address(&self) -> Address { Address::new(self.addr) }
+    }
+
+    #[test]
+    fn test_string_column_display_name() {
+        let col = StringColumnDisplay::new("Address");
+        assert_eq!(col.column_name(), "Address");
+    }
+
+    #[test]
+    fn test_string_column_display_value() {
+        let col = StringColumnDisplay::new("Addr");
+        let row = TestRow { addr: 0x1234 };
+        assert_eq!(col.column_value(&row), "0x1234");
+    }
+
+    #[test]
+    fn test_string_column_display_compare() {
+        let col = StringColumnDisplay::new("Addr");
+        let a = TestRow { addr: 0x1000 };
+        let b = TestRow { addr: 0x2000 };
+        assert_eq!(col.compare(&a, &b), Ordering::Less);
+        assert_eq!(col.compare(&b, &a), Ordering::Greater);
+        assert_eq!(col.compare(&a, &a), Ordering::Equal);
+    }
+}

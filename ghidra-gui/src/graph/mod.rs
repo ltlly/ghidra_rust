@@ -54,6 +54,8 @@ pub mod viewer;
 
 // New modules ported from Ghidra's graph framework
 pub mod visual_graph_component_provider;
+pub mod filtering_visual_graph;
+pub mod grouping_visual_graph;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;

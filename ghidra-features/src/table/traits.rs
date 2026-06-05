@@ -156,3 +156,77 @@ pub trait TableService: Send + Sync {
         is_modal: bool,
     ) -> String;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cmp::Ordering;
+
+    #[derive(Debug, Clone)]
+    struct TestRow {
+        addr: u64,
+        name: String,
+    }
+
+    impl AddressableRowObject for TestRow {
+        fn address(&self) -> Address {
+            Address::new(self.addr)
+        }
+    }
+
+    struct NameColumn;
+    impl ColumnDisplay<String> for NameColumn {
+        fn column_name(&self) -> &str { "Name" }
+        fn column_value(&self, row: &dyn AddressableRowObject) -> String {
+            // We can't downcast easily in this context, so return a placeholder
+            format!("addr={:x}", row.address().offset)
+        }
+    }
+
+    #[test]
+    fn test_addressable_row_object() {
+        let row = TestRow { addr: 0x1000, name: "test".into() };
+        assert_eq!(row.address().offset, 0x1000);
+    }
+
+    #[test]
+    fn test_column_display_name() {
+        let col = NameColumn;
+        assert_eq!(col.column_name(), "Name");
+    }
+
+    #[test]
+    fn test_column_display_compare() {
+        let col = NameColumn;
+        let a = TestRow { addr: 0x1000, name: "a".into() };
+        let b = TestRow { addr: 0x2000, name: "b".into() };
+        // Both produce same column value pattern, so compare by address
+        let result = col.compare(&a, &b);
+        assert_eq!(result, Ordering::Less);
+    }
+
+    struct CountExecutor;
+    impl TableChooserExecutor for CountExecutor {
+        fn button_name(&self) -> &str { "Count" }
+        fn execute(&self, _row: &dyn AddressableRowObject) -> bool { false }
+    }
+
+    #[test]
+    fn test_executor_button_name() {
+        let ex = CountExecutor;
+        assert_eq!(ex.button_name(), "Count");
+    }
+
+    #[test]
+    fn test_executor_execute_in_bulk() {
+        let ex = CountExecutor;
+        let a = TestRow { addr: 0x1000, name: "a".into() };
+        let b = TestRow { addr: 0x2000, name: "b".into() };
+        let rows: Vec<&dyn AddressableRowObject> = vec![&a, &b];
+        let mut deleted = Vec::new();
+        let cancelled = || false;
+        let result = ex.execute_in_bulk(&rows, &mut deleted, &cancelled);
+        assert!(!result);
+        assert!(deleted.is_empty());
+    }
+}

@@ -321,3 +321,379 @@ impl MessageLog {
     pub fn len(&self) -> usize { self.messages.len() }
     pub fn is_empty(&self) -> bool { self.messages.is_empty() }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Address tests
+    #[test]
+    fn test_address_new() {
+        let a = Address::new(0x1000);
+        assert_eq!(a.offset, 0x1000);
+        assert_eq!(a.space_id, 0);
+    }
+
+    #[test]
+    fn test_address_in_space() {
+        let a = Address::in_space(1, 0x2000);
+        assert_eq!(a.space_id, 1);
+        assert_eq!(a.offset, 0x2000);
+    }
+
+    #[test]
+    fn test_address_add_sub() {
+        let a = Address::new(0x1000);
+        assert_eq!(a.add(0x10).offset, 0x1010);
+        assert_eq!(a.sub(0x10).offset, 0x0FF0);
+    }
+
+    #[test]
+    fn test_address_display() {
+        assert_eq!(format!("{}", Address::new(0x1000)), "0x00001000");
+        assert_eq!(format!("{}", Address::in_space(1, 0x2000)), "1:0x00002000");
+    }
+
+    #[test]
+    fn test_address_ordering() {
+        let a = Address::new(0x1000);
+        let b = Address::new(0x2000);
+        assert!(a < b);
+    }
+
+    // AddressRange tests
+    #[test]
+    fn test_address_range_new() {
+        let r = AddressRange::new(Address::new(0x1000), Address::new(0x1FFF));
+        assert_eq!(r.len(), 0x1000);
+        assert!(!r.is_empty());
+    }
+
+    #[test]
+    fn test_address_range_single() {
+        let r = AddressRange::single(Address::new(0x1000));
+        assert_eq!(r.len(), 1);
+        assert!(r.contains(&Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_address_range_contains() {
+        let r = AddressRange::new(Address::new(0x1000), Address::new(0x2000));
+        assert!(r.contains(&Address::new(0x1500)));
+        assert!(!r.contains(&Address::new(0x3000)));
+    }
+
+    #[test]
+    fn test_address_range_is_empty() {
+        // A properly constructed range is never empty since start <= end is enforced
+        let r = AddressRange::new(Address::new(0x1000), Address::new(0x1000));
+        assert!(!r.is_empty());
+        assert_eq!(r.len(), 1);
+    }
+
+    // AddressSet tests
+    #[test]
+    fn test_address_set_add_and_contains() {
+        let mut s = AddressSet::new();
+        s.add(Address::new(0x1000));
+        assert!(s.contains(&Address::new(0x1000)));
+        assert!(!s.contains(&Address::new(0x1001)));
+    }
+
+    #[test]
+    fn test_address_set_add_range() {
+        let mut s = AddressSet::new();
+        s.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x10FF)));
+        assert!(s.contains(&Address::new(0x1000)));
+        assert!(s.contains(&Address::new(0x1080)));
+        assert!(s.contains(&Address::new(0x10FF)));
+        assert!(!s.contains(&Address::new(0x1100)));
+        assert_eq!(s.num_addresses(), 0x100);
+    }
+
+    #[test]
+    fn test_address_set_merge_adjacent() {
+        let mut s = AddressSet::new();
+        s.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x100F)));
+        s.add_range(AddressRange::new(Address::new(0x1010), Address::new(0x101F)));
+        // Adjacent ranges should be merged
+        let ranges: Vec<_> = s.iter().collect();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(s.num_addresses(), 0x20);
+    }
+
+    #[test]
+    fn test_address_set_intersect() {
+        let mut s1 = AddressSet::new();
+        s1.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x2000)));
+        let mut s2 = AddressSet::new();
+        s2.add_range(AddressRange::new(Address::new(0x1800), Address::new(0x2800)));
+        let inter = s1.intersect(&s2);
+        assert!(inter.contains(&Address::new(0x1800)));
+        assert!(inter.contains(&Address::new(0x2000)));
+        assert!(!inter.contains(&Address::new(0x1000)));
+        assert!(!inter.contains(&Address::new(0x2800)));
+    }
+
+    #[test]
+    fn test_address_set_delete() {
+        let mut s = AddressSet::new();
+        s.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x2000)));
+        let mut del = AddressSet::new();
+        del.add_range(AddressRange::new(Address::new(0x1500), Address::new(0x1800)));
+        s.delete(&del);
+        assert!(s.contains(&Address::new(0x1000)));
+        assert!(!s.contains(&Address::new(0x1500)));
+        assert!(!s.contains(&Address::new(0x1800)));
+        assert!(s.contains(&Address::new(0x1900)));
+    }
+
+    #[test]
+    fn test_address_set_union() {
+        let mut s1 = AddressSet::new();
+        s1.add(Address::new(0x1000));
+        let mut s2 = AddressSet::new();
+        s2.add(Address::new(0x2000));
+        let u = s1.union(&s2);
+        assert!(u.contains(&Address::new(0x1000)));
+        assert!(u.contains(&Address::new(0x2000)));
+        assert_eq!(u.num_addresses(), 2);
+    }
+
+    #[test]
+    fn test_address_set_min_max() {
+        let mut s = AddressSet::new();
+        s.add(Address::new(0x3000));
+        s.add(Address::new(0x1000));
+        s.add(Address::new(0x2000));
+        assert_eq!(s.min_address(), Address::new(0x1000));
+        assert_eq!(s.max_address(), Address::new(0x3000));
+    }
+
+    #[test]
+    fn test_address_set_iterator() {
+        let mut s = AddressSet::new();
+        s.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1002)));
+        let addrs: Vec<Address> = s.get_addresses(true).collect();
+        assert_eq!(addrs.len(), 3);
+        assert_eq!(addrs[0], Address::new(0x1000));
+        assert_eq!(addrs[1], Address::new(0x1001));
+        assert_eq!(addrs[2], Address::new(0x1002));
+    }
+
+    #[test]
+    fn test_address_set_clear() {
+        let mut s = AddressSet::from_address(Address::new(0x1000));
+        assert!(!s.is_empty());
+        s.clear();
+        assert!(s.is_empty());
+    }
+
+    #[test]
+    fn test_address_set_from_conversions() {
+        let s = AddressSet::from_address(Address::new(0x1000));
+        assert_eq!(s.num_addresses(), 1);
+
+        let s = AddressSet::from_range(AddressRange::new(Address::new(0x1000), Address::new(0x100F)));
+        assert_eq!(s.num_addresses(), 16);
+    }
+
+    // BasicTaskMonitor tests
+    #[test]
+    fn test_task_monitor_basic() {
+        let m = BasicTaskMonitor::new();
+        assert!(!m.is_cancelled());
+        m.set_message("test");
+        assert_eq!(m.get_message(), "test");
+    }
+
+    #[test]
+    fn test_task_monitor_progress() {
+        let m = BasicTaskMonitor::new();
+        m.initialize(100);
+        assert_eq!(m.get_maximum(), 100);
+        assert_eq!(m.get_progress(), 0);
+        m.set_progress(50);
+        assert_eq!(m.get_progress(), 50);
+        m.increment_progress(25);
+        assert_eq!(m.get_progress(), 75);
+    }
+
+    #[test]
+    fn test_task_monitor_cancel() {
+        let m = BasicTaskMonitor::new();
+        m.cancel();
+        assert!(m.is_cancelled());
+        assert!(m.check_cancelled().is_err());
+        m.clear_cancelled();
+        assert!(!m.is_cancelled());
+        assert!(m.check_cancelled().is_ok());
+    }
+
+    #[test]
+    fn test_task_monitor_indeterminate() {
+        let m = BasicTaskMonitor::new();
+        assert!(!m.is_indeterminate());
+        m.set_indeterminate(true);
+        assert!(m.is_indeterminate());
+    }
+
+    // FlowType tests
+    #[test]
+    fn test_flow_type_properties() {
+        assert!(FlowType::Call.is_call());
+        assert!(FlowType::ConditionalCall.is_call());
+        assert!(!FlowType::Jump.is_call());
+
+        assert!(FlowType::Jump.is_jump());
+        assert!(FlowType::ConditionalJump.is_jump());
+        assert!(!FlowType::Call.is_jump());
+
+        assert!(FlowType::Return.is_terminal());
+        assert!(FlowType::Terminator.is_terminal());
+        assert!(!FlowType::Fallthrough.is_terminal());
+
+        assert!(FlowType::Call.has_fallthrough());
+        assert!(FlowType::ConditionalJump.has_fallthrough());
+        assert!(!FlowType::Return.has_fallthrough());
+    }
+
+    // Language tests
+    #[test]
+    fn test_language_properties() {
+        let lang = Language { processor: "x86".into(), variant: "seg".into(), size: 16 };
+        assert!(lang.is_segmented());
+        assert_eq!(lang.default_pointer_size(), 2);
+        assert_eq!(lang.instruction_alignment(), 1);
+
+        let lang2 = Language { processor: "ARM".into(), variant: "LE".into(), size: 32 };
+        assert!(!lang2.is_segmented());
+        assert_eq!(lang2.default_pointer_size(), 4);
+    }
+
+    // Program tests
+    #[test]
+    fn test_program_new() {
+        let lang = Language { processor: "x86".into(), variant: "LE".into(), size: 64 };
+        let p = Program::new("test", lang);
+        assert_eq!(p.name, "test");
+        assert!(p.is_temporary);
+        assert!(!p.is_changed);
+        assert!(p.executable_format.is_none());
+    }
+
+    #[test]
+    fn test_program_bookmarks() {
+        let lang = Language { processor: "x86".into(), variant: "LE".into(), size: 64 };
+        let mut p = Program::new("test", lang);
+        p.set_bookmark(Address::new(0x1000), BookmarkType::Analysis, "cat", "msg");
+        assert_eq!(p.bookmarks.len(), 1);
+        assert_eq!(p.bookmarks[0].2, "cat");
+    }
+
+    #[test]
+    fn test_program_get_min_address() {
+        let lang = Language { processor: "x86".into(), variant: "LE".into(), size: 64 };
+        let mut p = Program::new("test", lang);
+        assert!(p.get_min_address().is_none());
+        p.memory.add(Address::new(0x1000));
+        assert_eq!(p.get_min_address(), Some(Address::new(0x1000)));
+    }
+
+    // MessageLog tests
+    #[test]
+    fn test_message_log() {
+        let mut log = MessageLog::new();
+        assert!(log.is_empty());
+        log.append_msg("test message");
+        assert_eq!(log.len(), 1);
+        assert!(!log.is_empty());
+        let msgs: Vec<&str> = log.iter().collect();
+        assert_eq!(msgs, vec!["test message"]);
+        log.clear();
+        assert!(log.is_empty());
+    }
+
+    // Data tests
+    #[test]
+    fn test_data_is_pointer() {
+        let d = Data { address: Address::new(0x1000), length: 4, data_type_name: "pointer".into() };
+        assert!(d.is_pointer());
+        let d2 = Data { address: Address::new(0x1000), length: 4, data_type_name: "int".into() };
+        assert!(!d2.is_pointer());
+    }
+
+    // RefType tests
+    #[test]
+    fn test_ref_type_properties() {
+        assert!(RefType::Call.is_call());
+        assert!(!RefType::Read.is_call());
+        assert!(RefType::Flow.is_flow());
+        assert!(RefType::Read.is_read());
+        assert!(RefType::Write.is_write());
+    }
+
+    // CancelledError tests
+    #[test]
+    fn test_cancelled_error_display() {
+        let e = CancelledError;
+        assert!(e.to_string().contains("cancelled"));
+    }
+
+    // Listing tests
+    #[test]
+    fn test_listing_get_instruction() {
+        let mut listing = Listing::default();
+        let instr = Instruction {
+            address: Address::new(0x1000),
+            length: 4,
+            mnemonic: "mov".into(),
+            flow_type: FlowType::Fallthrough,
+            fall_through: Some(Address::new(0x1004)),
+            flows: vec![],
+            num_operands: 2,
+        };
+        listing.instructions.insert(Address::new(0x1000), instr);
+        assert!(listing.get_instruction_at(&Address::new(0x1000)).is_some());
+        assert!(listing.get_instruction_at(&Address::new(0x1004)).is_none());
+        assert_eq!(listing.num_instructions(), 1);
+    }
+
+    #[test]
+    fn test_listing_instruction_containing() {
+        let mut listing = Listing::default();
+        let instr = Instruction {
+            address: Address::new(0x1000),
+            length: 4,
+            mnemonic: "mov".into(),
+            flow_type: FlowType::Fallthrough,
+            fall_through: Some(Address::new(0x1004)),
+            flows: vec![],
+            num_operands: 2,
+        };
+        listing.instructions.insert(Address::new(0x1000), instr);
+        assert!(listing.get_instruction_containing(&Address::new(0x1002)).is_some());
+        assert!(listing.get_instruction_containing(&Address::new(0x1004)).is_none());
+    }
+
+    // FunctionManager tests
+    #[test]
+    fn test_function_manager() {
+        let mut fm = FunctionManager::default();
+        let func = Function {
+            entry_point: Address::new(0x1000),
+            body: AddressSet::from_range(AddressRange::new(Address::new(0x1000), Address::new(0x10FF))),
+            name: Some("main".into()),
+            is_external: false,
+            is_thunk: false,
+            is_inline: false,
+            has_noreturn: false,
+            call_fixup: None,
+        };
+        fm.functions.insert(Address::new(0x1000), func);
+        assert!(fm.get_function_at(&Address::new(0x1000)).is_some());
+        assert!(fm.get_function_containing(&Address::new(0x1050)).is_some());
+        assert!(fm.get_function_containing(&Address::new(0x2000)).is_none());
+        assert_eq!(fm.get_functions(true).count(), 1);
+    }
+}

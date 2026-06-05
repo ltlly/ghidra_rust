@@ -300,3 +300,141 @@ impl TableSortState {
         self.columns.first().map(|c| c.descending).unwrap_or(false)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_row(addr: u64, label: &str) -> SimpleRowObject {
+        SimpleRowObject::with_label(Address::new(addr), label)
+    }
+
+    #[test]
+    fn test_simple_row_object_new() {
+        let row = SimpleRowObject::new(Address::new(0x1000));
+        assert_eq!(row.address().offset, 0x1000);
+        assert!(row.label.is_empty());
+    }
+
+    #[test]
+    fn test_simple_row_object_with_label() {
+        let row = make_row(0x2000, "test");
+        assert_eq!(row.address().offset, 0x2000);
+        assert_eq!(row.label, "test");
+    }
+
+    #[test]
+    fn test_table_model_new() {
+        let model = TableChooserTableModel::<SimpleRowObject>::new("Test Table");
+        assert_eq!(model.title(), "Test Table");
+        assert_eq!(model.row_count(), 0);
+    }
+
+    #[test]
+    fn test_table_model_add_object() {
+        let mut model = TableChooserTableModel::new("Test");
+        let key = model.add_object(make_row(0x1000, "a"));
+        assert_eq!(key, 1);
+        assert_eq!(model.row_count(), 1);
+        let key2 = model.add_object(make_row(0x2000, "b"));
+        assert_eq!(key2, 2);
+        assert_eq!(model.row_count(), 2);
+    }
+
+    #[test]
+    fn test_table_model_remove_object() {
+        let mut model = TableChooserTableModel::new("Test");
+        model.add_object(make_row(0x1000, "a"));
+        model.add_object(make_row(0x2000, "b"));
+        assert!(model.remove_object(&Address::new(0x1000)));
+        assert_eq!(model.row_count(), 1);
+        assert!(!model.remove_object(&Address::new(0x9999)));
+    }
+
+    #[test]
+    fn test_table_model_contains_address() {
+        let mut model = TableChooserTableModel::new("Test");
+        model.add_object(make_row(0x1000, "a"));
+        assert!(model.contains_address(&Address::new(0x1000)));
+        assert!(!model.contains_address(&Address::new(0x2000)));
+    }
+
+    #[test]
+    fn test_table_model_get_row_object() {
+        let mut model = TableChooserTableModel::new("Test");
+        model.add_object(make_row(0x1000, "a"));
+        let row = model.get_row_object(0).unwrap();
+        assert_eq!(row.address().offset, 0x1000);
+        assert!(model.get_row_object(5).is_none());
+    }
+
+    #[test]
+    fn test_table_model_get_row_objects() {
+        let mut model = TableChooserTableModel::new("Test");
+        model.add_object(make_row(0x1000, "a"));
+        model.add_object(make_row(0x2000, "b"));
+        let rows = model.get_row_objects();
+        assert_eq!(rows.len(), 2);
+    }
+
+    #[test]
+    fn test_table_model_get_row_objects_at() {
+        let mut model = TableChooserTableModel::new("Test");
+        model.add_object(make_row(0x1000, "a"));
+        model.add_object(make_row(0x2000, "b"));
+        model.add_object(make_row(0x3000, "c"));
+        let rows = model.get_row_objects_at(&[0, 2]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].address().offset, 0x1000);
+        assert_eq!(rows[1].address().offset, 0x3000);
+    }
+
+    #[test]
+    fn test_table_model_set_sort_column() {
+        let mut model = TableChooserTableModel::<SimpleRowObject>::new("Test");
+        model.set_sort_column(1);
+        model.set_sort_descending(true);
+        // Verify through behavior: sort state is internal
+        // Just verify no panic
+    }
+
+    #[test]
+    fn test_table_model_clear() {
+        let mut model = TableChooserTableModel::new("Test");
+        model.add_object(make_row(0x1000, "a"));
+        model.add_object(make_row(0x2000, "b"));
+        model.clear();
+        assert_eq!(model.row_count(), 0);
+    }
+
+    #[test]
+    fn test_sort_state_create_default() {
+        let state = TableSortState::create_default(2);
+        assert_eq!(state.primary_column(), 2);
+        assert!(!state.is_primary_descending());
+        assert_eq!(state.columns().len(), 1);
+    }
+
+    #[test]
+    fn test_sort_state_new_descending() {
+        let state = TableSortState::new(1, true);
+        assert_eq!(state.primary_column(), 1);
+        assert!(state.is_primary_descending());
+    }
+
+    #[test]
+    fn test_sort_state_then() {
+        let state = TableSortState::new(0, false).then(2, true);
+        assert_eq!(state.columns().len(), 2);
+        assert_eq!(state.columns()[0].column, 0);
+        assert_eq!(state.columns()[1].column, 2);
+        assert!(state.columns()[1].descending);
+    }
+
+    #[test]
+    fn test_sort_state_empty() {
+        let state = TableSortState { columns: vec![] };
+        assert_eq!(state.primary_column(), 0);
+        assert!(!state.is_primary_descending());
+    }
+}

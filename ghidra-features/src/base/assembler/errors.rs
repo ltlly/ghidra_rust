@@ -208,3 +208,86 @@ impl From<AssemblySemanticException> for AssemblerError {
         Self::Semantic(e)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_assembly_error_display() {
+        let e = AssemblyError("bad context mask".into());
+        assert!(e.to_string().contains("bad context mask"));
+        assert!(e.to_string().contains("Assembly error"));
+    }
+
+    #[test]
+    fn test_assembly_error_is_std_error() {
+        let e = AssemblyError("test".into());
+        let _: &dyn std::error::Error = &e;
+    }
+
+    #[test]
+    fn test_assembly_selection_error_display() {
+        let e = AssemblySelectionError("invalid selection".into());
+        assert!(e.to_string().contains("selection error"));
+    }
+
+    #[test]
+    fn test_assembly_syntax_exception_new() {
+        let e = AssemblySyntaxException::new("unexpected token");
+        assert!(e.to_string().contains("unexpected token"));
+        assert!(e.errors().is_empty());
+    }
+
+    #[test]
+    fn test_assembly_syntax_exception_from_errors() {
+        let errors = vec!["err1".into(), "err2".into()];
+        let e = AssemblySyntaxException::from_errors(errors);
+        assert_eq!(e.errors().len(), 2);
+        assert!(e.to_string().contains("2 parse error(s)"));
+    }
+
+    #[test]
+    fn test_assembly_syntax_exception_empty_errors() {
+        let e = AssemblySyntaxException::from_errors(vec![]);
+        assert!(e.to_string().contains("Unknown"));
+    }
+
+    #[test]
+    fn test_assembly_semantic_exception_new() {
+        let e = AssemblySemanticException::new("out of range");
+        assert!(e.to_string().contains("out of range"));
+        assert!(e.errors().is_empty());
+    }
+
+    #[test]
+    fn test_assembly_semantic_exception_from_errors() {
+        let errors = vec!["imm too large".into()];
+        let e = AssemblySemanticException::from_errors(errors);
+        assert_eq!(e.errors().len(), 1);
+        assert!(e.to_string().contains("1 semantic error(s)"));
+    }
+
+    #[test]
+    fn test_assembler_error_display_variants() {
+        let e = AssemblerError::AddressOverflow("0x1000".into());
+        assert!(e.to_string().contains("Address overflow"));
+        let e = AssemblerError::MemoryAccess("write failed".into());
+        assert!(e.to_string().contains("Memory access"));
+    }
+
+    #[test]
+    fn test_assembler_error_from_conversions() {
+        let e: AssemblerError = AssemblyError("test".into()).into();
+        assert!(matches!(e, AssemblerError::Error(_)));
+
+        let e: AssemblerError = AssemblySelectionError("test".into()).into();
+        assert!(matches!(e, AssemblerError::Selection(_)));
+
+        let e: AssemblerError = AssemblySyntaxException::new("test").into();
+        assert!(matches!(e, AssemblerError::Syntax(_)));
+
+        let e: AssemblerError = AssemblySemanticException::new("test").into();
+        assert!(matches!(e, AssemblerError::Semantic(_)));
+    }
+}

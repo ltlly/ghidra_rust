@@ -65,7 +65,9 @@ pub mod actions;
 pub mod analysis_cmd;
 pub mod analysis_plugin;
 pub mod callback_handler;
+pub mod clang_break;
 pub mod clang_line;
+pub mod clang_markup;
 pub mod clang_node;
 pub mod clang_token_ext;
 pub mod clang_token_hierarchy;
@@ -210,6 +212,9 @@ pub use fill_out_structure::{
 pub use cpp_exporter::{
     CppExportOptions, CppExporter, DecompiledFunctionExport,
 };
+
+// Markup parser
+pub use clang_markup::{MarkupError, MarkupParser};
 
 // Highlight types (panel, controller, color provider) -- from highlight_types module
 pub use highlight_types::HighlightToken as HtHighlightToken;

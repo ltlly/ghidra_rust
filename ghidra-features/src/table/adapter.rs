@@ -68,3 +68,53 @@ impl<T: Clone + PartialOrd + Send + Sync + 'static> DynamicTableColumn<T>
         self.display.compare(a, b)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ghidra_core::addr::Address;
+
+    #[derive(Debug, Clone)]
+    struct TestRow { addr: u64, val: u64 }
+
+    impl AddressableRowObject for TestRow {
+        fn address(&self) -> Address { Address::new(self.addr) }
+    }
+
+    struct ValColumn;
+    impl ColumnDisplay<u64> for ValColumn {
+        fn column_name(&self) -> &str { "Value" }
+        fn column_value(&self, row: &dyn AddressableRowObject) -> u64 {
+            row.address().offset
+        }
+    }
+
+    #[test]
+    fn test_adapter_column_name() {
+        let adapter = ColumnDisplayDynamicTableColumnAdapter::new(Box::new(ValColumn));
+        assert_eq!(adapter.column_name(), "Value");
+    }
+
+    #[test]
+    fn test_adapter_get_value() {
+        let adapter = ColumnDisplayDynamicTableColumnAdapter::new(Box::new(ValColumn));
+        let row = TestRow { addr: 0x1000, val: 42 };
+        assert_eq!(adapter.get_value(&row), 0x1000);
+    }
+
+    #[test]
+    fn test_adapter_compare() {
+        let adapter = ColumnDisplayDynamicTableColumnAdapter::new(Box::new(ValColumn));
+        let a = TestRow { addr: 0x1000, val: 1 };
+        let b = TestRow { addr: 0x2000, val: 2 };
+        assert_eq!(adapter.compare(&a, &b), Ordering::Less);
+        assert_eq!(adapter.compare(&b, &a), Ordering::Greater);
+        assert_eq!(adapter.compare(&a, &a), Ordering::Equal);
+    }
+
+    #[test]
+    fn test_adapter_inner() {
+        let adapter = ColumnDisplayDynamicTableColumnAdapter::new(Box::new(ValColumn));
+        assert_eq!(adapter.inner().column_name(), "Value");
+    }
+}

@@ -159,3 +159,50 @@ pub fn pdb_symbol_hash(name: &str) -> u32 {
     }
     h
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pdb_symbol_hash_empty() {
+        assert_eq!(pdb_symbol_hash(""), 0);
+    }
+
+    #[test]
+    fn test_pdb_symbol_hash_deterministic() {
+        let h1 = pdb_symbol_hash("main");
+        let h2 = pdb_symbol_hash("main");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn test_pdb_symbol_hash_different_names() {
+        let h1 = pdb_symbol_hash("main");
+        let h2 = pdb_symbol_hash("printf");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn test_pdb_symbol_hash_known_value() {
+        // Verify the hash function produces consistent results
+        let h = pdb_symbol_hash("a");
+        // 'a' = 97, h = 0 * 31 + 97 = 97
+        assert_eq!(h, 97);
+    }
+
+    #[test]
+    fn test_pdb_symbol_hash_two_chars() {
+        // "ab" = 'a'=97, 'b'=98
+        // h = (0*31 + 97)*31 + 98 = 97*31 + 98 = 3007 + 98 = 3105
+        let h = pdb_symbol_hash("ab");
+        assert_eq!(h, 3105);
+    }
+
+    #[test]
+    fn test_pdb_symbol_hash_wraps() {
+        // Verify no panic on long names (wrapping arithmetic)
+        let long_name = "a".repeat(1000);
+        let _ = pdb_symbol_hash(&long_name);
+    }
+}

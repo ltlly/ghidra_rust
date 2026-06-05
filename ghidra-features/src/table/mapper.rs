@@ -138,3 +138,52 @@ impl RowMapper<Option<FunctionRef>> for FunctionTableRowMapper {
         (self.lookup)(row.address())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ghidra_core::addr::Address;
+
+    #[derive(Debug, Clone)]
+    struct TestRow { addr: u64 }
+    impl AddressableRowObject for TestRow {
+        fn address(&self) -> Address { Address::new(self.addr) }
+    }
+
+    struct NameMapper;
+    impl RowMapper<String> for NameMapper {
+        fn map(&self, row: &dyn AddressableRowObject) -> String {
+            format!("row_{:x}", row.address().offset)
+        }
+    }
+
+    #[test]
+    fn test_row_mapper_string() {
+        let mapper = NameMapper;
+        let row = TestRow { addr: 0x1000 };
+        assert_eq!(mapper.map(&row), "row_1000");
+    }
+
+    #[test]
+    fn test_function_table_row_mapper_null() {
+        let mapper = FunctionTableRowMapper::null();
+        let row = TestRow { addr: 0x1000 };
+        assert!(mapper.map(&row).is_none());
+    }
+
+    #[test]
+    fn test_function_table_row_mapper_with_lookup() {
+        let mapper = FunctionTableRowMapper::new(|addr| {
+            if addr.offset == 0x1000 {
+                Some(FunctionRef { name: "main".into(), entry: addr })
+            } else {
+                None
+            }
+        });
+        let row1 = TestRow { addr: 0x1000 };
+        let row2 = TestRow { addr: 0x2000 };
+        assert!(mapper.map(&row1).is_some());
+        assert_eq!(mapper.map(&row1).unwrap().name, "main");
+        assert!(mapper.map(&row2).is_none());
+    }
+}

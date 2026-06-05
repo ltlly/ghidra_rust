@@ -90,3 +90,29 @@ pub fn bottom_str() -> String {
 pub fn top_str() -> String {
     "\u{22a4}".to_string() // top symbol
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_bottom_str() {
+        let s = bottom_str();
+        assert!(!s.is_empty());
+        // Bottom symbol (perpendicular)
+        assert_eq!(s, "\u{22a5}");
+    }
+
+    #[test]
+    fn test_top_str() {
+        let s = top_str();
+        assert!(!s.is_empty());
+        // Top symbol (tack)
+        assert_eq!(s, "\u{22a4}");
+    }
+
+    #[test]
+    fn test_bottom_and_top_different() {
+        assert_ne!(bottom_str(), top_str());
+    }
+}

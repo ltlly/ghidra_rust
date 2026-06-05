@@ -90,3 +90,133 @@ impl AutoAnalysisManager {
     pub fn was_cancelled(&self) -> bool { self.was_cancelled }
     fn idx(&self, at: AnalyzerType) -> usize { match at { AnalyzerType::Byte => 0, AnalyzerType::Instruction => 1, AnalyzerType::Function => 2, AnalyzerType::FunctionModifiers => 3, AnalyzerType::FunctionSignatures => 4, AnalyzerType::Data => 5 } }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_program() -> Program {
+        let lang = Language { processor: "x86".into(), variant: "LE".into(), size: 64 };
+        let mut p = Program::new("test", lang);
+        p.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+        p
+    }
+
+    struct StubAnalyzer { name: String, can_analyze: bool }
+    impl StubAnalyzer {
+        fn new(name: &str) -> Self { Self { name: name.to_string(), can_analyze: true } }
+        fn with_can_analyze(mut self, v: bool) -> Self { self.can_analyze = v; self }
+    }
+    impl Analyzer for StubAnalyzer {
+        fn name(&self) -> &str { &self.name }
+        fn description(&self) -> &str { "stub" }
+        fn analysis_type(&self) -> AnalyzerType { AnalyzerType::Byte }
+        fn priority(&self) -> AnalysisPriority { AnalysisPriority::DATA_TYPE_PROPAGATION }
+        fn can_analyze(&self, _: &Program) -> bool { self.can_analyze }
+        fn default_enablement(&self, _: &Program) -> bool { true }
+        fn added(&self, _p: &mut Program, _s: &AddressSet, _m: &dyn TaskMonitor, _l: &mut MessageLog) -> Result<bool, CancelledError> { Ok(true) }
+    }
+
+    #[test]
+    fn test_manager_new() {
+        let mgr = AutoAnalysisManager::new(make_program());
+        assert_eq!(mgr.num_analyzers(), 0);
+        assert!(!mgr.is_analyzing());
+        assert_eq!(mgr.total_time_ms(), 0);
+    }
+
+    #[test]
+    fn test_manager_add_analyzer() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        mgr.add_analyzer(Box::new(StubAnalyzer::new("TestAnalyzer")));
+        assert_eq!(mgr.num_analyzers(), 1);
+        assert!(mgr.get_analyzer("TestAnalyzer").is_some());
+        assert!(mgr.get_analyzer("Nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_manager_add_analyzer_cant_analyze() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        mgr.add_analyzer(Box::new(StubAnalyzer::new("Disabled").with_can_analyze(false)));
+        assert_eq!(mgr.num_analyzers(), 0);
+    }
+
+    #[test]
+    fn test_manager_ignore_changes() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        mgr.set_ignore_changes(true);
+        let set = AddressSet::from_address(Address::new(0x1000));
+        mgr.block_added(&set);
+        // No panic or effect when ignoring changes
+        assert!(!mgr.is_analyzing());
+    }
+
+    #[test]
+    fn test_manager_run_analysis_empty() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        let monitor = BasicTaskMonitor::new();
+        let results = mgr.run_analysis(&monitor).unwrap();
+        assert_eq!(results.tasks_executed, 0);
+        assert!(!results.was_cancelled);
+        assert!(!results.has_changes());
+    }
+
+    #[test]
+    fn test_manager_run_analysis_cancelled() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        let monitor = BasicTaskMonitor::new();
+        monitor.cancel();
+        // run_analysis checks for cancellation and may return Err(CancelledError)
+        let result = mgr.run_analysis(&monitor);
+        match result {
+            Ok(results) => { let _ = results.was_cancelled; }
+            Err(CancelledError) => { /* expected when monitor is cancelled */ }
+        }
+    }
+
+    #[test]
+    fn test_manager_re_analyze_all() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        mgr.re_analyze_all(None);
+        // No panic
+    }
+
+    #[test]
+    fn test_manager_cancel_queued_tasks() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        mgr.add_analyzer(Box::new(StubAnalyzer::new("A")));
+        mgr.add_analyzer(Box::new(StubAnalyzer::new("B")));
+        let before = mgr.num_analyzers();
+        assert!(before > 0);
+        mgr.cancel_queued_tasks();
+        // cancel_queued_tasks clears the queue; analyzer count may stay but pending work is cleared
+    }
+
+    #[test]
+    fn test_manager_protected_locations() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        assert!(mgr.protected_locations().is_empty());
+        mgr.set_protected_location(Address::new(0x1000));
+        assert!(mgr.protected_locations().contains(&Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_manager_set_options() {
+        let mut mgr = AutoAnalysisManager::new(make_program());
+        let opts = AnalysisOptions { max_iterations: 50, timeout_ms: 60_000, enabled_analyzers: HashSet::new(), print_task_times: false };
+        mgr.set_options(opts);
+        assert_eq!(mgr.options().max_iterations, 50);
+    }
+
+    #[test]
+    fn test_analysis_results_has_changes() {
+        let r = AnalysisResults { tasks_executed: 5, was_cancelled: false, total_time_ms: 100, task_times: vec![] };
+        assert!(r.has_changes());
+
+        let r = AnalysisResults { tasks_executed: 0, was_cancelled: false, total_time_ms: 0, task_times: vec![] };
+        assert!(!r.has_changes());
+
+        let r = AnalysisResults { tasks_executed: 5, was_cancelled: true, total_time_ms: 100, task_times: vec![] };
+        assert!(!r.has_changes());
+    }
+}

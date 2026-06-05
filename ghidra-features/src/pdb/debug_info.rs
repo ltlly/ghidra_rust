@@ -523,3 +523,59 @@ impl OmapEntry {
         entries
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_c13_checksum_type_from_u8() {
+        assert_eq!(C13ChecksumType::from_u8(0x00), C13ChecksumType::None);
+        assert_eq!(C13ChecksumType::from_u8(0x01), C13ChecksumType::Md5);
+        assert_eq!(C13ChecksumType::from_u8(0x02), C13ChecksumType::Sha1);
+        assert_eq!(C13ChecksumType::from_u8(0x03), C13ChecksumType::Sha256);
+        assert!(matches!(C13ChecksumType::from_u8(0xFF), C13ChecksumType::Unknown(0xFF)));
+    }
+
+    #[test]
+    fn test_omap_entry_parse() {
+        let mut data = vec![0u8; 8];
+        data[0..4].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[4..8].copy_from_slice(&0x2000u32.to_le_bytes());
+        let entry = OmapEntry::parse(&data).unwrap();
+        assert_eq!(entry.source_rva, 0x1000);
+        assert_eq!(entry.target_rva, 0x2000);
+    }
+
+    #[test]
+    fn test_omap_entry_parse_short() {
+        let data = vec![0u8; 4];
+        assert!(OmapEntry::parse(&data).is_none());
+    }
+
+    #[test]
+    fn test_omap_entry_parse_all() {
+        let mut data = vec![0u8; 16];
+        data[0..4].copy_from_slice(&0x1000u32.to_le_bytes());
+        data[4..8].copy_from_slice(&0x2000u32.to_le_bytes());
+        data[8..12].copy_from_slice(&0x3000u32.to_le_bytes());
+        data[12..16].copy_from_slice(&0x4000u32.to_le_bytes());
+        let entries = OmapEntry::parse_all(&data);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].source_rva, 0x1000);
+        assert_eq!(entries[1].source_rva, 0x3000);
+    }
+
+    #[test]
+    fn test_omap_entry_parse_all_empty() {
+        let entries = OmapEntry::parse_all(&[]);
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn test_omap_entry_parse_all_partial() {
+        let data = vec![0u8; 12];
+        let entries = OmapEntry::parse_all(&data);
+        assert_eq!(entries.len(), 1);
+    }
+}

@@ -87,6 +87,24 @@ pub mod trace_db_symbol_impl;
 pub mod trace_db_value_spatial;
 pub mod trace_db_visitors;
 pub mod trace_db_database;
+pub mod trace_db_object_cache;
+pub mod trace_db_object_value_data;
+pub mod trace_db_object_value_behind;
+pub mod trace_db_object_value_query;
+pub mod trace_db_symbol_manager;
+pub mod trace_db_label_symbol;
+pub mod trace_db_namespace_symbol;
+pub mod trace_db_reference_manager;
+pub mod trace_db_reference_space;
+pub mod trace_db_memory_space_impl;
+pub mod trace_db_memory_buffer;
+pub mod trace_db_memory_block;
+pub mod trace_db_object_process;
+pub mod trace_db_object_register;
+pub mod trace_db_object_memory;
+pub mod trace_db_program_view_impl;
+pub mod trace_db_program_view_listing;
+pub mod trace_db_program_view_memory;
 
 pub use trace_db::TraceDatabase;
 pub use trace_db_database::{
@@ -140,4 +158,55 @@ pub use trace_db_visitors::{
     AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,
     CanonicalSuccessorsRelativeVisitor, OrderedSuccessorsVisitor, SuccessorsRelativeVisitor,
     TraceObjectVisitor, TraversalDirection, TreeTraversal, VisitorAction,
+};
+
+// New modules from Framework-TraceModeling port
+pub use trace_db_object_cache::{CachePerDbTraceObject, Cached, CachedLifespanValues, SnapKey};
+pub use trace_db_object_value_data::{
+    DbTraceObjectValueData, PrimitiveValue, ValueKind,
+};
+pub use trace_db_object_value_behind::{BehindValue, DbTraceObjectValueBehind};
+pub use trace_db_object_value_query::{
+    HyperDirection, QueryBound, TraceObjectValueQuery,
+};
+pub use trace_db_symbol_manager::{
+    SourceType, SymbolId, SymbolType, TraceDbSymbolManager, TraceSymbolEntry,
+};
+pub use trace_db_label_symbol::DbTraceLabelSymbol;
+pub use trace_db_namespace_symbol::{DbTraceNamespaceSymbol, DbTraceNamespaceSymbolView};
+pub use trace_db_reference_manager::{
+    DBTraceOffsetReference, DBTraceShiftedReference, DBTraceStackReference,
+    TraceDbReferenceManager, TraceReferenceEntry, TraceReferenceKind,
+};
+pub use trace_db_reference_space::{
+    DbTraceReferenceSpace, DbTraceSnapSelectedReferenceSpace, SpaceReference,
+};
+pub use trace_db_memory_space_impl::{
+    DbTraceMemoryBlockEntry, DbTraceMemoryBufferEntry, DbTraceMemoryRegion,
+    DbTraceMemorySpaceImpl, DbTraceMemoryStateEntry, BLOCK_SHIFT, BLOCK_MASK, BLOCK_SIZE,
+};
+pub use trace_db_memory_buffer::{DbTraceEmptyMemBuffer, DbTraceMemBuffer, MemoryStateQueryResult};
+pub use trace_db_memory_block::CompressedMemoryBlock;
+pub use trace_db_object_process::DbTraceObjectProcess;
+pub use trace_db_object_register::{DbTraceObjectRegister, DbTraceObjectRegisterContainer};
+pub use trace_db_object_memory::DbTraceObjectMemory;
+pub use trace_db_program_view_impl::{
+    DbTraceProgramViewImpl, DbTraceVariableSnapProgramView,
+    ProgramViewBookmark as ImplProgramViewBookmark,
+    ProgramViewChangeSet as ImplProgramViewChangeSet,
+    ProgramViewSnapshot as ImplProgramViewSnapshot,
+};
+pub use trace_db_program_view_listing::{
+    DbTraceProgramViewListing, ProgramViewCodeUnitType,
+    ProgramViewEquate as ListingProgramViewEquate,
+    ProgramViewEquateTable as ListingProgramViewEquateTable,
+    ProgramViewFragment as ListingProgramViewFragment,
+    ProgramViewListingEntry,
+};
+pub use trace_db_program_view_memory::{
+    DbTraceProgramViewMemory, ProgramViewBookmarkEntry,
+    ProgramViewBookmarkManager as MemProgramViewBookmarkManager,
+    ProgramViewMemoryBlock, ProgramViewProgramContext, ProgramViewPropertyMap,
+    ProgramViewPropertyMapManager, ProgramViewReference, ProgramViewReferenceManager,
+    ProgramViewRegisterValue, ProgramViewSymbol, ProgramViewSymbolTable,
 };

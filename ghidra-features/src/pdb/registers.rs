@@ -138,3 +138,65 @@ pub fn register_name(id: u32) -> &'static str {
 pub fn register_name_for_id(id: u16) -> &'static str {
     register_name(id as u32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_register_name_x86_eax() {
+        // EAX = 0x0011 = 17
+        assert_eq!(register_name(0x0011), "EAX");
+    }
+
+    #[test]
+    fn test_register_name_x86_ebx() {
+        // EBX = 0x0014 = 20
+        assert_eq!(register_name(0x0014), "EBX");
+    }
+
+    #[test]
+    fn test_register_name_x86_esp() {
+        // ESP = 0x0015 = 21
+        assert_eq!(register_name(0x0015), "ESP");
+    }
+
+    #[test]
+    fn test_register_name_x86_ebp() {
+        // EBP = 0x0016 = 22
+        assert_eq!(register_name(0x0016), "EBP");
+    }
+
+    #[test]
+    fn test_register_name_x86_eip() {
+        // EIP = 0x001F = 31
+        assert_eq!(register_name(0x001F), "EIP");
+    }
+
+    #[test]
+    fn test_register_name_x86_rax() {
+        // RAX = 0x008F in x64 range
+        assert_eq!(register_name(0x008F), "RAX");
+    }
+
+    #[test]
+    fn test_register_name_unknown() {
+        assert_eq!(register_name(0xFFFF), "Unknown");
+    }
+
+    #[test]
+    fn test_register_name_arm_r0() {
+        assert_eq!(register_name(0x0300), "R0");
+    }
+
+    #[test]
+    fn test_register_name_for_id_u16() {
+        assert_eq!(register_name_for_id(0x0011), "EAX");
+        assert_eq!(register_name_for_id(0xFFFF), "Unknown");
+    }
+
+    #[test]
+    fn test_register_name_none() {
+        assert_eq!(register_name(0x0000), "None");
+    }
+}

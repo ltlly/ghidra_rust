@@ -61,3 +61,103 @@ impl fmt::Display for StreamError {
 }
 
 impl std::error::Error for StreamError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_msf_error_truncated_input() {
+        let e = MsfError::TruncatedInput { expected: 100, actual: 50 };
+        assert!(e.to_string().contains("expected 100"));
+        assert!(e.to_string().contains("got 50"));
+    }
+
+    #[test]
+    fn test_msf_error_unknown_format() {
+        let e = MsfError::UnknownFormat;
+        assert!(e.to_string().contains("unknown magic"));
+    }
+
+    #[test]
+    fn test_msf_error_invalid_page_size() {
+        let e = MsfError::InvalidPageSize(0x2000);
+        assert!(e.to_string().contains("0x00002000"));
+    }
+
+    #[test]
+    fn test_msf_error_invalid_stream() {
+        let e = MsfError::InvalidStreamNumber(42);
+        assert!(e.to_string().contains("42"));
+    }
+
+    #[test]
+    fn test_msf_error_out_of_range_page() {
+        let e = MsfError::OutOfRangePageNumber(999);
+        assert!(e.to_string().contains("999"));
+    }
+
+    #[test]
+    fn test_msf_error_nom() {
+        let e = MsfError::NomError("bad input".into());
+        assert!(e.to_string().contains("bad input"));
+    }
+
+    #[test]
+    fn test_msf_error_is_std_error() {
+        let e = MsfError::UnknownFormat;
+        let _: &dyn std::error::Error = &e;
+    }
+
+    #[test]
+    fn test_msf_error_parse_error_trait() {
+        let e = MsfError::from_error_kind("input", ErrorKind::Tag);
+        assert!(matches!(e, MsfError::NomError(_)));
+    }
+
+    #[test]
+    fn test_msf_error_append() {
+        let e = MsfError::InvalidPageSize(1);
+        let result = MsfError::append("input", ErrorKind::Tag, e.clone());
+        assert_eq!(result, e);
+    }
+
+    #[test]
+    fn test_stream_error_truncated() {
+        let e = StreamError::Truncated { stream: "TPI", expected: 256, actual: 128 };
+        assert!(e.to_string().contains("TPI"));
+        assert!(e.to_string().contains("256"));
+    }
+
+    #[test]
+    fn test_stream_error_bad_magic() {
+        let e = StreamError::BadMagic { stream: "DBI", expected: 0xFFFFFFFF, actual: 0x12345678 };
+        assert!(e.to_string().contains("DBI"));
+        assert!(e.to_string().contains("0xFFFFFFFF"));
+    }
+
+    #[test]
+    fn test_stream_error_unsupported_version() {
+        let e = StreamError::UnsupportedVersion { stream: "OMAP", version: 20200402 };
+        assert!(e.to_string().contains("20200402"));
+    }
+
+    #[test]
+    fn test_stream_error_parse_error() {
+        let e = StreamError::ParseError("unexpected byte".into());
+        assert!(e.to_string().contains("unexpected byte"));
+    }
+
+    #[test]
+    fn test_stream_error_is_std_error() {
+        let e = StreamError::ParseError("test".into());
+        let _: &dyn std::error::Error = &e;
+    }
+
+    #[test]
+    fn test_stream_error_clone_eq() {
+        let e = StreamError::ParseError("test".into());
+        let e2 = e.clone();
+        assert_eq!(e, e2);
+    }
+}

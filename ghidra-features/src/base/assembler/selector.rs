@@ -142,3 +142,40 @@ impl AssemblySelector {
         &self.semantic_errors
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_assembly_selector_new() {
+        let sel = AssemblySelector::new();
+        assert!(sel.syntax_errors().is_empty());
+        assert!(sel.semantic_errors().is_empty());
+    }
+
+    #[test]
+    fn test_assembly_selector_default() {
+        let sel = AssemblySelector::default();
+        assert!(sel.syntax_errors().is_empty());
+        assert!(sel.semantic_errors().is_empty());
+    }
+
+    #[test]
+    fn test_assembly_selector_filter_parse_empty() {
+        let sel = AssemblySelector::new();
+        let result = sel.filter_parse(vec![]);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_selection_struct() {
+        // Just verify Selection can be constructed (it's a simple data carrier)
+        let sel = Selection {
+            ins: AssemblyPatternBlock::new_empty(4),
+            ctx: AssemblyPatternBlock::new_empty(4),
+        };
+        // Debug formatting works
+        let _ = format!("{:?}", sel);
+    }
+}
