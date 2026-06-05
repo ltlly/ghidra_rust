@@ -15,6 +15,7 @@
 
 pub mod addresstype;
 pub mod entropy;
+pub mod navigation;
 
 use std::collections::HashMap;
 

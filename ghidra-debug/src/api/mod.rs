@@ -21,6 +21,7 @@ pub mod location_tracker;
 pub mod model_context;
 pub mod modules;
 pub mod monitor_receiver;
+pub mod pcode_debugger_access;
 pub mod platform;
 pub mod platform_mapper;
 pub mod progress;
@@ -51,6 +52,10 @@ pub use modules::{
     DebuggerMissingProgramActionContext, DebuggerOpenProgramActionContext,
     MapEntry, MappedAddressRange, MapProposal, MappingChangeKind, MappingChangeEvent,
     ModuleMapProposal, RegionMapProposal, SectionMapProposal,
+};
+pub use pcode_debugger_access::{
+    AccessScope, PcodeDebuggerAccess, PcodeMemoryAccess, PcodeRegistersAccess,
+    PcodeTraceCoordinates,
 };
 pub use platform::{DebuggerConnection, PlatformDescription, ProcessDescriptor};
 pub use target::{ActionEntry, ActionResult, ObjectArgumentPolicy, Target};

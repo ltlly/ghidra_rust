@@ -31,6 +31,13 @@ pub mod scanner;
 /// Ported from `ghidra.app.plugin.core.strings.DefinedStringsTableModel`.
 pub mod table_model;
 
+/// Encoded strings plugin with trigram-based validation.
+///
+/// Ported from `ghidra.app.plugin.core.strings.EncodedStringsPlugin`,
+/// `EncodedStringsRow`, `EncodedStringsOptions`, `StringInfo`,
+/// `TrigramStringValidator`, and related classes.
+pub mod encoded;
+
 use std::collections::HashMap;
 
 /// Column header for string value.

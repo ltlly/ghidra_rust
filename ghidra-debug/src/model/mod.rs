@@ -37,6 +37,7 @@ pub mod reference_ops;
 pub mod register;
 pub mod register_context;
 pub mod register_context_ops;
+pub mod register_value;
 pub mod stack;
 pub mod symbol;
 pub mod symbol_types;
@@ -53,6 +54,7 @@ pub mod time;
 pub mod time_schedule;
 pub mod trace;
 pub mod trace_data_ops;
+pub mod trace_data_viewport;
 pub mod trace_emulation;
 pub mod trace_event;
 pub mod trace_location;
@@ -99,6 +101,7 @@ pub use program::{TickSpecificTraceView, TraceProgramView, TraceProgramViewMemor
 pub use property::{TracePropertyMap, TraceBoolPropertyMap, TraceIntPropertyMap, TraceStringPropertyMap};
 pub use register::{TraceRegister, TraceRegisterContainer, TraceRegisterGroup};
 pub use register_context::{RegisterDefinedState, TraceRegisterContextManager, TraceRegisterValue};
+pub use register_value::{RegisterSizeConverter, RegisterValueException};
 pub use reference_ext::{TraceOffsetReference, TraceReferenceVariant, TraceShiftedReference, TraceStackReference};
 pub use stack::{TraceStack, TraceStackFrame, TraceStackManager};
 pub use symbol::{
@@ -144,6 +147,7 @@ pub use trace_method::{
 pub mod defaults;
 pub mod operations_ext;
 
+pub use trace_data_viewport::TraceDataViewport;
 pub use trace_span::TraceSpan;
 
 pub use bookmark_ops::{TraceBookmarkOperations, TraceBookmarkSpace, TraceBookmarkSpaceManager};

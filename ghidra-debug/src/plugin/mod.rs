@@ -32,12 +32,20 @@
 //! - `location_tracking`: Location tracking specifications (PC, SP, etc.).
 //! - `auto_map`: Auto-mapping specifications for dynamic-to-static mapping.
 
+pub mod abstract_plugin;
 pub mod auto_map;
 pub mod control_actions;
+pub mod debugger_go_to;
+pub mod debugger_resources;
+pub mod debugger_regions;
+pub mod disconnect_task;
 pub mod disassembly_actions_ext;
 pub mod gui_model_columns_ext;
+pub mod pcode_stepper;
+pub mod save_settings;
 pub mod service_plugins;
 pub mod stack_unwind;
+pub mod variable_value_hover;
 pub mod background_utils;
 pub mod breakpoint_actions;
 pub mod disassemble;
@@ -91,8 +99,24 @@ pub mod taint;
 pub mod trace_exporters;
 pub mod utils;
 
+pub use abstract_plugin::{
+    DebuggerPluginPackage, ExtensionPointId, PluginLifecycleEvent, PluginPhase,
+};
 pub use auto_map::*;
 pub use breakpoint_actions::*;
+pub use debugger_go_to::{AddressKind, GoToResult, GoToTarget, SelectionRange};
+pub use debugger_regions::{
+    DebuggerRegion, DebuggerRegionsModel, RegionPermissions, SearchRegionQuery, SearchRegionScope,
+};
+pub use debugger_resources::{ActionGroup, DebuggerIcon, ToolActionCategory};
+pub use disconnect_task::{DisconnectMode, DisconnectResult, DisconnectTask, DisconnectTaskConfig};
+pub use pcode_stepper::{
+    PcodeStepperEntry, PcodeStepperExecutionModel, PcodeStepperOpType, StepperState,
+};
+pub use save_settings::{SavedSettings, SettingValue};
+pub use variable_value_hover::{
+    HoverConfig, ValueFormat, VariableValueEntry, VariableValueHoverModel,
+};
 pub use disassemble::*;
 pub use event::{
     ActivationCause, DebuggerPlatformEvent, DebuggerPluginEvent,
