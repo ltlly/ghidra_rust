@@ -198,6 +198,12 @@ pub use trace_address_snap_space::{
     AddressSnapRange, TraceAddressSnapSpace, for_address_space,
 };
 
+pub mod trace_memory_ops;
+pub use trace_memory_ops::{
+    InMemoryTraceMemory, MemoryRegionInfo, TraceMemoryOperations,
+    find_first_non_matching, is_state_entirely as memory_is_state_entirely,
+};
+
 pub use experiment::{
     DebugExperiment, DiagnosticBoundingBox, RStarTreeDiagnostics, TracePerformanceMetrics,
 };

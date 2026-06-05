@@ -143,6 +143,24 @@ pub mod base_project;
 // -- Analysis plugin layer ported from Ghidra's analysis package --
 pub mod analysis;
 
+// -- Additional modules ported from Ghidra's Features/Base (app/util and util packages) --
+// Ported from `ghidra.app.util.opinion` -- loader service, loader map, additional loaders,
+// LoadException, AddressSetPartitioner, and library resolution.
+pub mod app_util_opinion;
+
+// Ported from `ghidra.program.util` -- program diff, memory diff, function utilities,
+// symbolic propagator, string searcher, and address translation.
+pub mod program_util;
+
+// Ported from `ghidra.util.bytesearch` -- byte pattern matching and search.
+pub mod util_bytesearch;
+
+// Ported from `ghidra.util.table` -- table models for displaying program data.
+pub mod table_util;
+
+// Ported from `ghidra.app.util.xml` -- XML parsing and serialization.
+pub mod app_util_xml;
+
 // -- Top-level re-exports of base plugin modules --
 // These modules live under `base::` (ported from `ghidra.app.plugin.core.*`)
 // but are re-exported here for direct access via `ghidra_features::<module>`.

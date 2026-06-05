@@ -16,7 +16,9 @@ pub mod ingest;
 pub mod lsh;
 pub mod postgresql;
 pub mod protocol;
+pub mod server_cache;
 pub mod server_config;
+pub mod sf_query_service;
 pub mod tables;
 
 use std::fmt;

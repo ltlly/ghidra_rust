@@ -265,6 +265,14 @@ pub mod trace_db_listing_extras;
 pub mod trace_db_target_extras;
 pub mod trace_db_symbol_extras;
 
+// New modules ported from Framework-TraceModeling and Debugger
+pub mod trace_db_space_based;
+pub mod trace_db_property_impl;
+pub mod trace_db_addr_snap_map;
+pub mod trace_db_static_mapping;
+pub mod trace_db_content_handler_impl;
+pub mod trace_db_module_impl;
+
 pub use trace_db_field_codec::{
     DBTraceFieldCodec, EncodedField, FieldDataType, FieldValue, TraceObjectFieldCodecSet,
 };
@@ -291,4 +299,27 @@ pub use trace_db_symbol_extras::{
     DBTraceClassSymbolView, DBTraceEquate, DBTraceLabelSymbolView,
     MultiTypeSymbolView, SourceType as SymSourceType, SymbolType as SymType,
     TraceDbSymbolManager as SymManager, TraceSymbolEntry as SymEntry,
+};
+
+// Re-exports from new Framework-TraceModeling modules
+pub use trace_db_space_based::{
+    DbTraceSpaceBased, DbTraceSpaceEntry, DelegatingManager, RegisterContainerBinding,
+    SpaceBasedManager, TraceDbAddressSpace,
+};
+pub use trace_db_property_impl::{
+    known_properties, DbTraceAddressPropertyManager, PropertyMapEntry, PropertyMapValue,
+    TracePropertyMap,
+};
+pub use trace_db_addr_snap_map::{
+    AddressSnapPropertyEntry, AddressSnapPropertyMap, AddressSnapRange as AddrSnapPropertyRange,
+    PointQuery, RangeQuery,
+};
+pub use trace_db_static_mapping::{
+    DbTraceStaticMappingManager, StaticMapping,
+};
+pub use trace_db_content_handler_impl::{
+    LinkContentHandler, TraceContentHandler, TraceContentMetadata, TraceContentType,
+};
+pub use trace_db_module_impl::{
+    DbTraceModuleManager, TraceModuleEntry, TraceSectionEntry,
 };

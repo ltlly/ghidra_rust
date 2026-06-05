@@ -89,6 +89,7 @@ pub mod decompile_results;
 pub mod decompiled_function;
 pub mod decomp_interface;
 pub mod decompiler_clipboard_provider;
+pub mod decompiler_controller;
 pub mod decompiler_location_memento;
 pub mod decompiler_plugin;
 pub mod disposer;
@@ -252,6 +253,11 @@ pub use decompiler_location_memento::DecompilerLocationMemento;
 
 // Module initializer
 pub use decompiler_initializer::{DecompilerInitializer, DecompilerCommentsActionFactory};
+
+// Controller types (decompiler_controller provides implementations;
+// re-export only types not already exported from component/actions)
+pub use decompiler_controller::DecompilerControllerListener;
+pub use decompiler_controller::DecompilerSearchMatch;
 
 // ============================================================================
 // Tests

@@ -37,6 +37,7 @@ pub mod tracemgr_impl;
 pub mod url_impl;
 pub mod program_indexer;
 pub mod breakpoint_extras;
+pub mod trace_data_viewport_impl;
 
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
@@ -71,6 +72,11 @@ pub use breakpoint_extras::{
     BreakpointActionEntry, BreakpointActionKind, BreakpointActionSet,
     BreakpointKindEntry, LoneLogicalBreakpoint, MappedLogicalBreakpoint,
     ProgramBreakpoint, TraceBreakpointMode, TrackedTooSoonException,
+};
+
+// Re-exports from trace data viewport module
+pub use trace_data_viewport_impl::{
+    SingleSnapViewport, TraceTimeViewport as ServiceTraceTimeViewport,
 };
 
 use crate::api::breakpoint::LogicalBreakpoint;

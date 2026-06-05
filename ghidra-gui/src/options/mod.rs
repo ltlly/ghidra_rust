@@ -37,6 +37,7 @@ pub mod enum_editor;
 pub mod theme_options;
 pub mod property_editors;
 pub mod abstract_options;
+pub mod options_listener;
 
 pub use action_trigger::ActionTrigger;
 pub use editor_state::EditorState;
@@ -44,6 +45,7 @@ pub use file_options::FileOptions;
 pub use option::OptionEntry;
 pub use option_type::OptionType;
 pub use option_value::OptionValue;
+pub use options_listener::OptionsVetoException;
 pub use options_trait::{Options, OptionsChangeListener};
 pub use preference_state::PreferenceState;
 pub use sub_options::SubOptions;

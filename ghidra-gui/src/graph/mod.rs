@@ -43,6 +43,7 @@ pub mod graph_algorithms;
 pub mod graph_event;
 pub mod graph_factory;
 pub mod graph_path_set;
+pub mod graph_type_service;
 pub mod implicit_graph;
 pub mod job;
 pub mod graph_to_tree;
