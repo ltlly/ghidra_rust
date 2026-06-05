@@ -20,6 +20,11 @@
 /// and `FlowArrowPlugin`.
 pub mod provider;
 
+/// Flow arrow actions and configuration.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.flowarrow` action classes.
+pub mod actions;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

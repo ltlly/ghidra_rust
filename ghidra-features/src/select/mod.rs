@@ -19,6 +19,26 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.select` Java package.
 pub mod plugin;
 
+/// Flow-based selection plugin.
+///
+/// Ported from `ghidra.app.plugin.core.select.flow`.
+pub mod flow;
+
+/// Reference-based selection plugin.
+///
+/// Ported from `ghidra.app.plugin.core.select.reference`.
+pub mod reference;
+
+/// Qualified selection plugin.
+///
+/// Ported from `ghidra.app.plugin.core.select.qualified`.
+pub mod qualified;
+
+/// Program tree selection plugin.
+///
+/// Ported from `ghidra.app.plugin.core.select.programtree`.
+pub mod programtree_sel;
+
 use ghidra_core::Address;
 use std::collections::BTreeSet;
 

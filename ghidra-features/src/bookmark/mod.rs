@@ -19,6 +19,16 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.bookmark` Java package.
 pub mod plugin;
 
+/// Bookmark user actions (add, edit, delete, goto).
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.bookmark` action classes.
+pub mod actions;
+
+/// Bookmark table model for displaying bookmarks.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.bookmark.BookmarkTableModel`.
+pub mod table;
+
 use ghidra_core::Address;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;

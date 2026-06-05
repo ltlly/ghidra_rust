@@ -124,8 +124,7 @@ mod tests {
 
     #[test]
     fn test_viewed_range() {
-        let mut vp = TraceTimeViewport::new();
-        vp.set_snap(5);
+        let mut vp = TraceTimeViewport::at(5);
         vp.set_snap(15);
         vp.set_snap(3);
 

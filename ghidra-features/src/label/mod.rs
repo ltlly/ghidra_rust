@@ -18,6 +18,11 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.label` Java package.
 pub mod history;
 
+/// Label editing actions (add, edit, remove, rename).
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.label` action classes.
+pub mod actions;
+
 /// Symbol chooser -- search and select symbols from the program's symbol table.
 ///
 /// Ported from `ghidra.app.plugin.core.label.SymbolChooserDialog`.

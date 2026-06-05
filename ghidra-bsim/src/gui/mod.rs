@@ -7,6 +7,7 @@ pub mod filter_types;
 pub mod overview;
 pub mod results;
 pub mod search;
+pub mod overview_model;
 
 /// BSim search configuration.
 #[derive(Debug, Clone)]

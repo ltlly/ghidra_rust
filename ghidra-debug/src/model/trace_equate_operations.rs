@@ -189,19 +189,19 @@ mod tests {
     #[test]
     fn test_referring_addresses() {
         let mut ops = InMemoryEquateOps::new();
-        ops.add_reference(TraceEquateReference::new(1, 10, Lifespan::new(0, 100), 0x1000, "ram", 0));
-        ops.add_reference(TraceEquateReference::new(2, 10, Lifespan::new(0, 100), 0x2000, "ram", 0));
+        ops.add_reference(TraceEquateReference::new(1, 10, Lifespan::span(0, 100), 0x1000, "ram", 0));
+        ops.add_reference(TraceEquateReference::new(2, 10, Lifespan::span(0, 100), 0x2000, "ram", 0));
 
-        let addrs = ops.get_referring_addresses(&Lifespan::new(50, 50));
+        let addrs = ops.get_referring_addresses(&Lifespan::span(50, 50));
         assert_eq!(addrs.len(), 2);
     }
 
     #[test]
     fn test_get_references_for() {
         let mut ops = InMemoryEquateOps::new();
-        ops.add_reference(TraceEquateReference::new(1, 10, Lifespan::new(0, 100), 0x1000, "ram", 0));
-        ops.add_reference(TraceEquateReference::new(2, 10, Lifespan::new(0, 100), 0x2000, "ram", 1));
-        ops.add_reference(TraceEquateReference::new(3, 20, Lifespan::new(0, 100), 0x3000, "ram", 0));
+        ops.add_reference(TraceEquateReference::new(1, 10, Lifespan::span(0, 100), 0x1000, "ram", 0));
+        ops.add_reference(TraceEquateReference::new(2, 10, Lifespan::span(0, 100), 0x2000, "ram", 1));
+        ops.add_reference(TraceEquateReference::new(3, 20, Lifespan::span(0, 100), 0x3000, "ram", 0));
 
         let refs = ops.get_references_for(10);
         assert_eq!(refs.len(), 2);
@@ -210,8 +210,8 @@ mod tests {
     #[test]
     fn test_delete_references() {
         let mut ops = InMemoryEquateOps::new();
-        ops.add_reference(TraceEquateReference::new(1, 10, Lifespan::new(0, 100), 0x1000, "ram", 0));
-        ops.add_reference(TraceEquateReference::new(2, 20, Lifespan::new(0, 100), 0x2000, "ram", 0));
+        ops.add_reference(TraceEquateReference::new(1, 10, Lifespan::span(0, 100), 0x1000, "ram", 0));
+        ops.add_reference(TraceEquateReference::new(2, 20, Lifespan::span(0, 100), 0x2000, "ram", 0));
 
         ops.delete_references(10);
         assert_eq!(ops.references.len(), 1);

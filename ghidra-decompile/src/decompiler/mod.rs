@@ -109,6 +109,8 @@ pub mod token_iterator;
 pub mod util;
 pub mod validator;
 pub mod decompiler_initializer;
+pub mod empty_decompile_data;
+pub mod token_highlight;
 
 // ============================================================================
 // Re-exports for convenience

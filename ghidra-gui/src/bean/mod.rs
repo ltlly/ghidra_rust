@@ -8,8 +8,10 @@
 //! - [`glass_pane_painter`] -- Overlay painter for drag/selection feedback
 
 pub mod glass_pane_painter;
+pub mod gglass_pane;
 
 pub use glass_pane_painter::{GGlassPanePainter, PaintMode};
+pub use gglass_pane::{GGlassPane as FullGGlassPane, DirtyRegion, PainterId as GlassPainterId};
 
 /// Exception thrown when an option editor vetoes a proposed change.
 ///

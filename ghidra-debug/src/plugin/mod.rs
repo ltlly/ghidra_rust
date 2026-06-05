@@ -306,10 +306,14 @@ pub use disassembly_actions_concrete::{
 };
 pub use gui_panel_models::{
     CallTreeNode as GuiCallTreeNode, DebouncedTableModel,
+    DebuggerCoordinates as GuiDebuggerCoordinates,
+    DebuggerObjectActionContext as GuiObjectActionContext,
     FrameVariable as GuiFrameVariable, GuiColumnType as GuiColumnKind, GuiTableColumn,
     ListingActionContext as GuiListingActionContext,
     MemoryRegionEntry as GuiMemoryRegionEntry, ModuleEntry as GuiModuleEntry,
-    MultiProviderSaveBehavior, RegisterEntry as GuiRegisterEntry,
+    MultiProviderSaveBehavior, ObjectValueRef as GuiObjectValueRef,
+    ObjectsTableBasedPanelModel, QueryTablePanelModel,
+    RegisterEntry as GuiRegisterEntry,
     SectionEntry as GuiSectionEntry, SnapshotEntry as GuiSnapshotEntry,
     StackFrameEntry as GuiStackFrameEntry, ThreadEntry as GuiThreadEntry,
     ThreadState as GuiThreadState, WatchEntry as GuiWatchEntry,

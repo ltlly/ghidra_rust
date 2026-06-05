@@ -136,7 +136,7 @@ mod tests {
             key,
             addr,
             "ram",
-            Lifespan::new(snap_min, snap_max),
+            Lifespan::span(snap_min, snap_max),
             4,
             "MOV",
             vec![0x90; 4],
@@ -181,7 +181,7 @@ mod tests {
         space.add_unit(make_instruction(1, 0x1000, 0, 100));
         space.add_unit(make_instruction(2, 0x2000, 0, 100));
 
-        space.clear(&Lifespan::new(50, 150), 0x1000, 0x1000);
+        space.clear(&Lifespan::span(50, 150), 0x1000, 0x1000);
         assert_eq!(space.entries.len(), 1);
     }
 
@@ -192,7 +192,7 @@ mod tests {
             1,
             0x1000,
             "ram",
-            Lifespan::new(0, 100),
+            Lifespan::span(0, 100),
             8,
             "QWORD",
             vec![0; 8],

@@ -11,6 +11,11 @@
 //! - [`ReachabilityResult`] -- a single path between two functions.
 //! - [`ReachabilityAnalyzer`] -- computes reachability between functions.
 
+/// Reachability table model and result types.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.reachability` table classes.
+pub mod table;
+
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 

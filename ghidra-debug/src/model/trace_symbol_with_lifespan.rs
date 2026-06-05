@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_symbol_entry() {
-        let sym = TraceSymbol::label(1, "test", 0x1000, "ram", Lifespan::new(0, 100));
+        let sym = TraceSymbol::label(1, "test", 0x1000, "ram", Lifespan::span(0, 100));
         let entry = TraceSymbolEntry::user_primary(sym);
 
         assert_eq!(entry.source_type, SourceType::UserDefined);
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_scratch_detection() {
-        let sym = TraceSymbol::label(1, "test", 0x1000, "ram", Lifespan::new(0, i64::MAX));
+        let sym = TraceSymbol::label(1, "test", 0x1000, "ram", Lifespan::span(0, i64::MAX));
         let entry = TraceSymbolEntry::new(sym, SourceType::UserDefined);
         assert!(entry.is_scratch());
     }

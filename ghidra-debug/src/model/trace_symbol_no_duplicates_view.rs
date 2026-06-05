@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_no_duplicates_prefers_primary() {
         let symbols = vec![
-            TraceSymbol::label(1, "primary", 0x1000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "primary", 0x1000, "ram", Lifespan::span(0, 100)),
             TraceSymbol {
                 key: 2,
                 name: "secondary".into(),
@@ -101,7 +101,7 @@ mod tests {
                 space: Some("ram".into()),
                 kind: TraceSymbolKind::Label,
                 parent_key: Some(5),
-                lifespan: Lifespan::new(0, 100),
+                lifespan: Lifespan::span(0, 100),
             },
         ];
 
@@ -114,8 +114,8 @@ mod tests {
     #[test]
     fn test_get_at() {
         let symbols = vec![
-            TraceSymbol::label(1, "foo", 0x1000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(2, "bar", 0x2000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "foo", 0x1000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(2, "bar", 0x2000, "ram", Lifespan::span(0, 100)),
         ];
 
         let view = TraceSymbolNoDuplicatesView::new();
@@ -127,8 +127,8 @@ mod tests {
     #[test]
     fn test_different_addresses_not_deduplicated() {
         let symbols = vec![
-            TraceSymbol::label(1, "a", 0x1000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(2, "b", 0x2000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "a", 0x1000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(2, "b", 0x2000, "ram", Lifespan::span(0, 100)),
         ];
 
         let view = TraceSymbolNoDuplicatesView::new();

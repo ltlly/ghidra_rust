@@ -33,6 +33,8 @@ pub mod bsim_data_source;
 pub mod bsim_db_connect_task_manager;
 pub mod bsim_postgres_connection_manager;
 pub mod bsim_control_launchable;
+pub mod sql_function_database;
+pub mod parallel_decompile_task;
 
 use std::fmt;
 

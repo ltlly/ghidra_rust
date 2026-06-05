@@ -257,10 +257,10 @@ mod tests {
 
     fn make_units() -> Vec<TraceCodeUnit> {
         vec![
-            TraceCodeUnit::instruction(1, 0x1000, "ram", Lifespan::new(0, 100), 4, "MOV", vec![0x90; 4]),
-            TraceCodeUnit::instruction(2, 0x1004, "ram", Lifespan::new(0, 100), 4, "ADD", vec![0x90; 4]),
-            TraceCodeUnit::data(3, 0x2000, "ram", Lifespan::new(0, 100), 8, "QWORD", vec![0; 8]),
-            TraceCodeUnit::data(4, 0x2008, "ram", Lifespan::new(10, 100), 4, "DWORD", vec![0; 4]),
+            TraceCodeUnit::instruction(1, 0x1000, "ram", Lifespan::span(0, 100), 4, "MOV", vec![0x90; 4]),
+            TraceCodeUnit::instruction(2, 0x1004, "ram", Lifespan::span(0, 100), 4, "ADD", vec![0x90; 4]),
+            TraceCodeUnit::data(3, 0x2000, "ram", Lifespan::span(0, 100), 8, "QWORD", vec![0; 8]),
+            TraceCodeUnit::data(4, 0x2008, "ram", Lifespan::span(10, 100), 4, "DWORD", vec![0; 4]),
         ]
     }
 

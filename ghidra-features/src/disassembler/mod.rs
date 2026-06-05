@@ -13,6 +13,7 @@
 //! - [`actions`] -- disassembly action identifiers, flow overrides, dialogs, contexts, and call fixups.
 
 pub mod actions;
+pub mod address_table;
 pub mod address_table_analyzer;
 pub mod auto_table_disassembler;
 pub mod call_fixup_analyzer;

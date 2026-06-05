@@ -387,6 +387,254 @@ impl<T> DebouncedTableModel<T> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AbstractQueryTablePanel data model (ported from gui/model/AbstractQueryTablePanel)
+// ---------------------------------------------------------------------------
+
+/// Listener for cell activation events in a query table panel.
+///
+/// Ported from Ghidra's `AbstractQueryTablePanel.CellActivationListener`.
+pub trait CellActivationListener {
+    /// Called when a cell is activated (double-click or Enter key).
+    fn cell_activated(&self, row: usize, column: usize);
+}
+
+/// Coordinates tracking state for the debugger.
+///
+/// Ported from Ghidra's `DebuggerCoordinates` -- tracks the current
+/// trace, snap, thread, and process being viewed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DebuggerCoordinates {
+    /// The trace identifier (URL or key).
+    pub trace_key: Option<i64>,
+    /// The current snap (time point).
+    pub snap: i64,
+    /// The current thread key (if any).
+    pub thread_key: Option<i64>,
+    /// The current process key (if any).
+    pub process_key: Option<i64>,
+}
+
+impl DebuggerCoordinates {
+    /// "NOWHERE" sentinel -- no trace selected.
+    pub fn nowhere() -> Self {
+        Self {
+            trace_key: None,
+            snap: 0,
+            thread_key: None,
+            process_key: None,
+        }
+    }
+
+    /// Whether these coordinates point to an actual trace.
+    pub fn is_valid(&self) -> bool {
+        self.trace_key.is_some()
+    }
+}
+
+impl Default for DebuggerCoordinates {
+    fn default() -> Self {
+        Self::nowhere()
+    }
+}
+
+/// Data model for the abstract query table panel.
+///
+/// Ported from Ghidra's `AbstractQueryTablePanel`. Provides the table model
+/// state, filter state, and coordinates tracking that the Swing panel
+/// would use. In Rust, we provide the data model only; rendering is
+/// delegated to the front-end.
+#[derive(Debug)]
+pub struct QueryTablePanelModel<T> {
+    /// The rows in the table.
+    pub rows: Vec<T>,
+    /// The current filter text.
+    pub filter_text: String,
+    /// The filtered (visible) row indices.
+    pub filtered_indices: Vec<usize>,
+    /// Current debugger coordinates.
+    pub current: DebuggerCoordinates,
+    /// Whether to limit results to the current snap.
+    pub limit_to_snap: bool,
+    /// Whether to show hidden entries.
+    pub show_hidden: bool,
+    /// Registered cell activation listeners (just a count for the model).
+    pub activation_listener_count: usize,
+}
+
+impl<T: Clone> QueryTablePanelModel<T> {
+    /// Create a new empty query table model.
+    pub fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            filter_text: String::new(),
+            filtered_indices: Vec::new(),
+            current: DebuggerCoordinates::nowhere(),
+            limit_to_snap: false,
+            show_hidden: false,
+            activation_listener_count: 0,
+        }
+    }
+
+    /// Set the rows and reset the filter.
+    pub fn set_rows(&mut self, rows: Vec<T>) {
+        self.rows = rows;
+        self.filtered_indices = (0..self.rows.len()).collect();
+    }
+
+    /// Set the filter text and recompute visible indices.
+    pub fn set_filter(&mut self, filter: String)
+    where
+        T: std::fmt::Debug,
+    {
+        self.filter_text = filter;
+        if self.filter_text.is_empty() {
+            self.filtered_indices = (0..self.rows.len()).collect();
+        } else {
+            let lower_filter = self.filter_text.to_lowercase();
+            self.filtered_indices = (0..self.rows.len())
+                .filter(|&i| {
+                    format!("{:?}", self.rows[i])
+                        .to_lowercase()
+                        .contains(&lower_filter)
+                })
+                .collect();
+        }
+    }
+
+    /// Update the current coordinates.
+    pub fn set_coordinates(&mut self, coords: DebuggerCoordinates) {
+        self.current = coords;
+    }
+
+    /// Get the number of visible (filtered) rows.
+    pub fn visible_count(&self) -> usize {
+        self.filtered_indices.len()
+    }
+
+    /// Get a visible row by filtered index.
+    pub fn visible_row(&self, index: usize) -> Option<&T> {
+        self.filtered_indices
+            .get(index)
+            .and_then(|&real_idx| self.rows.get(real_idx))
+    }
+}
+
+impl<T: Clone> Default for QueryTablePanelModel<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AbstractObjectsTableBasedPanel data model (from gui/model/AbstractObjectsTableBasedPanel)
+// ---------------------------------------------------------------------------
+
+/// Action context for debugger object selections.
+///
+/// Ported from Ghidra's `DebuggerObjectActionContext`. Represents the
+/// currently selected objects in a table-based panel.
+#[derive(Debug, Clone, Default)]
+pub struct DebuggerObjectActionContext {
+    /// The selected object paths.
+    pub object_paths: Vec<Vec<String>>,
+    /// The selected object values (trace object references).
+    pub object_values: Vec<ObjectValueRef>,
+}
+
+/// A reference to a trace object value.
+///
+/// Ported from Ghidra's trace object value representation used in
+/// `DebuggerObjectActionContext`.
+#[derive(Debug, Clone)]
+pub struct ObjectValueRef {
+    /// The key path to the object.
+    pub path: Vec<String>,
+    /// Whether this value represents an object (vs. a primitive).
+    pub is_object: bool,
+    /// The object schema type name.
+    pub type_name: String,
+}
+
+impl ObjectValueRef {
+    /// Create a new object value reference.
+    pub fn new(path: Vec<String>, is_object: bool, type_name: impl Into<String>) -> Self {
+        Self {
+            path,
+            is_object,
+            type_name: type_name.into(),
+        }
+    }
+}
+
+/// Data model for the object table-based panel.
+///
+/// Ported from Ghidra's `AbstractObjectsTableBasedPanel`. Provides type-filtered
+/// object selection and activation semantics. In the Rust port, we capture
+/// the data model and query logic without Swing dependencies.
+#[derive(Debug)]
+pub struct ObjectsTableBasedPanelModel<U> {
+    /// The underlying table model.
+    pub table: QueryTablePanelModel<U>,
+    /// The object type filter (schema name to restrict to).
+    pub obj_type_filter: Option<String>,
+    /// Current action context with selected objects.
+    pub action_context: DebuggerObjectActionContext,
+    /// Whether to limit to current snap.
+    pub limit_to_snap: bool,
+    /// Whether to show hidden objects.
+    pub show_hidden: bool,
+}
+
+impl<U: Clone> ObjectsTableBasedPanelModel<U> {
+    /// Create a new object table panel model.
+    pub fn new(obj_type_filter: Option<String>) -> Self {
+        Self {
+            table: QueryTablePanelModel::new(),
+            obj_type_filter,
+            action_context: DebuggerObjectActionContext::default(),
+            limit_to_snap: true,
+            show_hidden: false,
+        }
+    }
+
+    /// Set the object type filter.
+    pub fn set_type_filter(&mut self, filter: Option<String>) {
+        self.obj_type_filter = filter;
+    }
+
+    /// Check if the current action context has any selections.
+    pub fn has_selection(&self) -> bool {
+        !self.action_context.object_values.is_empty()
+    }
+
+    /// Get the selected object values that match the type filter.
+    pub fn selected_matching_type(&self) -> Vec<&ObjectValueRef> {
+        self.action_context
+            .object_values
+            .iter()
+            .filter(|v| {
+                if let Some(ref filter) = self.obj_type_filter {
+                    v.is_object && v.type_name == *filter
+                } else {
+                    v.is_object
+                }
+            })
+            .collect()
+    }
+
+    /// Update the action context from selected rows.
+    pub fn set_selected_objects(&mut self, values: Vec<ObjectValueRef>) {
+        self.action_context.object_values = values;
+    }
+}
+
+impl<U: Clone> Default for ObjectsTableBasedPanelModel<U> {
+    fn default() -> Self {
+        Self::new(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,5 +808,219 @@ mod tests {
     #[test]
     fn test_multi_provider_save_behavior_default() {
         assert_eq!(MultiProviderSaveBehavior::default(), MultiProviderSaveBehavior::SaveActiveOnly);
+    }
+
+    // ====================================================================
+    // DebuggerCoordinates tests
+    // ====================================================================
+
+    #[test]
+    fn test_debugger_coordinates_nowhere() {
+        let coords = DebuggerCoordinates::nowhere();
+        assert!(!coords.is_valid());
+        assert_eq!(coords.snap, 0);
+        assert!(coords.trace_key.is_none());
+    }
+
+    #[test]
+    fn test_debugger_coordinates_valid() {
+        let coords = DebuggerCoordinates {
+            trace_key: Some(42),
+            snap: 10,
+            thread_key: Some(1),
+            process_key: Some(100),
+        };
+        assert!(coords.is_valid());
+        assert_eq!(coords.snap, 10);
+    }
+
+    #[test]
+    fn test_debugger_coordinates_default() {
+        let coords = DebuggerCoordinates::default();
+        assert_eq!(coords, DebuggerCoordinates::nowhere());
+    }
+
+    #[test]
+    fn test_debugger_coordinates_clone_eq() {
+        let a = DebuggerCoordinates {
+            trace_key: Some(1),
+            snap: 5,
+            thread_key: Some(2),
+            process_key: Some(3),
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    // ====================================================================
+    // QueryTablePanelModel tests
+    // ====================================================================
+
+    #[test]
+    fn test_query_table_model_new() {
+        let model = QueryTablePanelModel::<String>::new();
+        assert!(model.rows.is_empty());
+        assert!(model.filter_text.is_empty());
+        assert_eq!(model.visible_count(), 0);
+        assert!(!model.limit_to_snap);
+        assert!(!model.show_hidden);
+    }
+
+    #[test]
+    fn test_query_table_model_set_rows() {
+        let mut model = QueryTablePanelModel::new();
+        model.set_rows(vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]);
+        assert_eq!(model.rows.len(), 3);
+        assert_eq!(model.visible_count(), 3);
+    }
+
+    #[test]
+    fn test_query_table_model_filter() {
+        let mut model = QueryTablePanelModel::new();
+        model.set_rows(vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()]);
+
+        model.set_filter("alph".to_string());
+        // Only "alpha" contains "alph"
+        assert_eq!(model.visible_count(), 1);
+
+        model.set_filter("beta".to_string());
+        assert_eq!(model.visible_count(), 1);
+        assert_eq!(model.visible_row(0), Some(&"beta".to_string()));
+
+        model.set_filter("xyz".to_string());
+        assert_eq!(model.visible_count(), 0);
+    }
+
+    #[test]
+    fn test_query_table_model_filter_empty() {
+        let mut model = QueryTablePanelModel::new();
+        model.set_rows(vec!["a".to_string(), "b".to_string()]);
+        model.set_filter("a".to_string());
+        assert_eq!(model.visible_count(), 1);
+
+        model.set_filter(String::new());
+        assert_eq!(model.visible_count(), 2);
+    }
+
+    #[test]
+    fn test_query_table_model_visible_row_out_of_bounds() {
+        let mut model = QueryTablePanelModel::new();
+        model.set_rows(vec!["a".to_string()]);
+        assert!(model.visible_row(999).is_none());
+    }
+
+    #[test]
+    fn test_query_table_model_coordinates() {
+        let mut model = QueryTablePanelModel::<String>::new();
+        let coords = DebuggerCoordinates {
+            trace_key: Some(1),
+            snap: 5,
+            thread_key: None,
+            process_key: None,
+        };
+        model.set_coordinates(coords.clone());
+        assert_eq!(model.current, coords);
+    }
+
+    // ====================================================================
+    // ObjectValueRef tests
+    // ====================================================================
+
+    #[test]
+    fn test_object_value_ref() {
+        let obj_ref = ObjectValueRef::new(
+            vec!["root".into(), "process".into()],
+            true,
+            "Process",
+        );
+        assert!(obj_ref.is_object);
+        assert_eq!(obj_ref.type_name, "Process");
+        assert_eq!(obj_ref.path.len(), 2);
+    }
+
+    #[test]
+    fn test_object_value_ref_not_object() {
+        let obj_ref = ObjectValueRef::new(vec!["val".into()], false, "String");
+        assert!(!obj_ref.is_object);
+    }
+
+    // ====================================================================
+    // DebuggerObjectActionContext tests
+    // ====================================================================
+
+    #[test]
+    fn test_action_context_default() {
+        let ctx = DebuggerObjectActionContext::default();
+        assert!(ctx.object_paths.is_empty());
+        assert!(ctx.object_values.is_empty());
+    }
+
+    // ====================================================================
+    // ObjectsTableBasedPanelModel tests
+    // ====================================================================
+
+    #[test]
+    fn test_objects_table_panel_new() {
+        let model = ObjectsTableBasedPanelModel::<String>::new(Some("Process".into()));
+        assert_eq!(model.obj_type_filter, Some("Process".into()));
+        assert!(model.limit_to_snap);
+        assert!(!model.show_hidden);
+        assert!(!model.has_selection());
+    }
+
+    #[test]
+    fn test_objects_table_panel_no_filter() {
+        let model = ObjectsTableBasedPanelModel::<String>::new(None);
+        assert!(model.obj_type_filter.is_none());
+    }
+
+    #[test]
+    fn test_objects_table_panel_has_selection() {
+        let mut model = ObjectsTableBasedPanelModel::<String>::new(None);
+        assert!(!model.has_selection());
+
+        model.set_selected_objects(vec![
+            ObjectValueRef::new(vec!["proc".into()], true, "Process"),
+        ]);
+        assert!(model.has_selection());
+    }
+
+    #[test]
+    fn test_objects_table_panel_selected_matching_type() {
+        let mut model = ObjectsTableBasedPanelModel::<String>::new(Some("Thread".into()));
+        model.set_selected_objects(vec![
+            ObjectValueRef::new(vec!["t1".into()], true, "Thread"),
+            ObjectValueRef::new(vec!["p1".into()], true, "Process"),
+            ObjectValueRef::new(vec!["v1".into()], false, "String"),
+        ]);
+
+        let matching = model.selected_matching_type();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].type_name, "Thread");
+    }
+
+    #[test]
+    fn test_objects_table_panel_selected_no_filter() {
+        let mut model = ObjectsTableBasedPanelModel::<String>::new(None);
+        model.set_selected_objects(vec![
+            ObjectValueRef::new(vec!["t1".into()], true, "Thread"),
+            ObjectValueRef::new(vec!["v1".into()], false, "String"),
+        ]);
+
+        // Without type filter, all objects are returned
+        let matching = model.selected_matching_type();
+        assert_eq!(matching.len(), 1); // only is_object=true
+    }
+
+    #[test]
+    fn test_objects_table_panel_set_type_filter() {
+        let mut model = ObjectsTableBasedPanelModel::<String>::new(None);
+        assert!(model.obj_type_filter.is_none());
+
+        model.set_type_filter(Some("BreakpointSpec".into()));
+        assert_eq!(model.obj_type_filter, Some("BreakpointSpec".into()));
+
+        model.set_type_filter(None);
+        assert!(model.obj_type_filter.is_none());
     }
 }

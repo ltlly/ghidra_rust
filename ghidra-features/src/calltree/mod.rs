@@ -19,6 +19,16 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreeOptions`.
 pub mod options;
 
+/// Call tree table model.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreeTableModel`.
+pub mod table;
+
+/// Call tree provider and display configuration.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreeProvider`.
+pub mod provider;
+
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 

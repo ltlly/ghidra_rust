@@ -83,7 +83,7 @@ mod tests {
             program_max: 0x1000,
             trace_min: 0x400000,
             trace_max: 0x401000,
-            lifespan: Lifespan::new(0, i64::MAX),
+            lifespan: Lifespan::span(0, i64::MAX),
             matched_name: Some(".text".into()),
         };
         assert_eq!(entry.matched_name.as_deref(), Some(".text"));

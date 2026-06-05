@@ -16,6 +16,7 @@ pub mod layout_managers;
 pub mod test_utils;
 pub mod theme_events;
 pub mod web_colors;
+pub mod dynamic_help_location;
 
 pub use bean_utils::{OptionEditorModel, OptionEditorPanel, PropertyChangeEvent, PropertyValue};
 pub use color_utils::ColorUtils;
@@ -27,3 +28,4 @@ pub use test_utils::{GuiTestAssertions, MockProvider, TestEnvironment, ToolState
 pub use theme_events::{AllValuesChangedThemeEvent, ColorChangedThemeEvent, FontChangedThemeEvent, IconChangedThemeEvent, ThemeChangeType, ThemeEvent, ThemeListener};
 pub use html_element::{HTMLElement, HtmlLineSplitter, PreservingWhitespaceHandler, TrimmingWhitespaceHandler, WhitespaceHandler};
 pub use web_colors::WebColors;
+pub use dynamic_help_location::{DynamicHelpLocation as DynamicHelpLocationExt, HelpContext, ResolvedHelpLocation};

@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_equate_reference_creation() {
-        let r#ref = TraceEquateReference::new(1, 10, Lifespan::new(0, 100), 0x400000, "ram", 0);
+        let r#ref = TraceEquateReference::new(1, 10, Lifespan::span(0, 100), 0x400000, "ram", 0);
         assert_eq!(r#ref.equate_key, 10);
         assert_eq!(r#ref.address, 0x400000);
         assert!(r#ref.is_operand());
@@ -109,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_register_reference() {
-        let r#ref = TraceEquateReference::register(2, 10, Lifespan::new(0, 50), 1, 0x10, -1);
+        let r#ref = TraceEquateReference::register(2, 10, Lifespan::span(0, 50), 1, 0x10, -1);
         assert!(r#ref.is_register());
         assert!(r#ref.is_mnemonic());
         assert_eq!(r#ref.thread_key, Some(1));
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn test_lifespan_access() {
-        let r#ref = TraceEquateReference::new(1, 10, Lifespan::new(5, 100), 0x1000, "ram", 0);
+        let r#ref = TraceEquateReference::new(1, 10, Lifespan::span(5, 100), 0x1000, "ram", 0);
         assert_eq!(r#ref.start_snap(), 5);
         assert!(r#ref.lifespan.contains(50));
         assert!(!r#ref.lifespan.contains(0));
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn test_serde() {
-        let r#ref = TraceEquateReference::new(1, 10, Lifespan::new(0, 100), 0x400000, "ram", 2);
+        let r#ref = TraceEquateReference::new(1, 10, Lifespan::span(0, 100), 0x400000, "ram", 2);
         let json = serde_json::to_string(&r#ref).unwrap();
         let back: TraceEquateReference = serde_json::from_str(&json).unwrap();
         assert_eq!(back.key, 1);

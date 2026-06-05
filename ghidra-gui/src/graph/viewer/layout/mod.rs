@@ -16,6 +16,7 @@
 pub mod grid_location_map;
 pub mod layout_provider;
 pub mod abstract_layout_provider;
+pub mod calculate_layout_task;
 
 use std::collections::HashMap;
 

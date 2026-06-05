@@ -58,13 +58,13 @@ impl TraceLabelSymbolView {
     }
 
     /// Get a label at the given snap, thread, and address from a collection.
-    pub fn get_at(
+    pub fn get_at<'a>(
         &self,
         snap: i64,
         thread_key: Option<i64>,
         address: u64,
-        symbols: &[TraceSymbol],
-    ) -> Option<&TraceSymbol> {
+        symbols: &'a [TraceSymbol],
+    ) -> Option<&'a TraceSymbol> {
         symbols.iter().find(|s| {
             s.kind == TraceSymbolKind::Label
                 && s.lifespan.contains(snap)
@@ -74,11 +74,11 @@ impl TraceLabelSymbolView {
     }
 
     /// Get all labels at the given snap from a collection.
-    pub fn get_all_at(
+    pub fn get_all_at<'a>(
         &self,
         snap: i64,
-        symbols: &[TraceSymbol],
-    ) -> Vec<&TraceSymbol> {
+        symbols: &'a [TraceSymbol],
+    ) -> Vec<&'a TraceSymbol> {
         symbols
             .iter()
             .filter(|s| {
@@ -90,13 +90,13 @@ impl TraceLabelSymbolView {
     }
 
     /// Get labels contained in the given address range at a snap.
-    pub fn get_containing(
+    pub fn get_containing<'a>(
         &self,
         snap: i64,
         min_addr: u64,
         max_addr: u64,
-        symbols: &[TraceSymbol],
-    ) -> Vec<&TraceSymbol> {
+        symbols: &'a [TraceSymbol],
+    ) -> Vec<&'a TraceSymbol> {
         symbols
             .iter()
             .filter(|s| {
@@ -144,18 +144,18 @@ mod tests {
     #[test]
     fn test_label_view_matches() {
         let view = TraceLabelSymbolView::new();
-        let label = TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::new(0, 100));
+        let label = TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::span(0, 100));
         assert!(view.matches(&label));
 
-        let ns = TraceSymbol::namespace(2, "libc", None, Lifespan::new(0, 100));
+        let ns = TraceSymbol::namespace(2, "libc", None, Lifespan::span(0, 100));
         assert!(!view.matches(&ns));
     }
 
     #[test]
     fn test_label_view_space_filter() {
         let view = TraceLabelSymbolView::in_space("ram");
-        let label_ram = TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::new(0, 100));
-        let label_reg = TraceSymbol::label(2, "RAX", 0, "register", Lifespan::new(0, 100));
+        let label_ram = TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::span(0, 100));
+        let label_reg = TraceSymbol::label(2, "RAX", 0, "register", Lifespan::span(0, 100));
 
         assert!(view.matches(&label_ram));
         assert!(!view.matches(&label_reg));
@@ -164,9 +164,9 @@ mod tests {
     #[test]
     fn test_get_at() {
         let symbols = vec![
-            TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(2, "foo", 0x401000, "ram", Lifespan::new(10, 100)),
-            TraceSymbol::namespace(3, "libc", None, Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(2, "foo", 0x401000, "ram", Lifespan::span(10, 100)),
+            TraceSymbol::namespace(3, "libc", None, Lifespan::span(0, 100)),
         ];
         let view = TraceLabelSymbolView::new();
 
@@ -183,9 +183,9 @@ mod tests {
     #[test]
     fn test_get_containing() {
         let symbols = vec![
-            TraceSymbol::label(1, "a", 0x1000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(2, "b", 0x2000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(3, "c", 0x3000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "a", 0x1000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(2, "b", 0x2000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(3, "c", 0x3000, "ram", Lifespan::span(0, 100)),
         ];
         let view = TraceLabelSymbolView::new();
         let result = view.get_containing(0, 0x1000, 0x2000, &symbols);
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_create() {
-        let sym = TraceLabelSymbolView::create(1, "test", 0x100, "ram", Lifespan::new(0, 50));
+        let sym = TraceLabelSymbolView::create(1, "test", 0x100, "ram", Lifespan::span(0, 50));
         assert_eq!(sym.kind, TraceSymbolKind::Label);
         assert_eq!(sym.name, "test");
     }

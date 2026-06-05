@@ -47,8 +47,8 @@ impl TraceSymbolView {
     }
 
     /// Get all symbols at the given snap.
-    pub fn get_all_at(&self, snap: i64, symbols: &[TraceSymbol]) -> Vec<&TraceSymbol> {
-        let mut result: Vec<&TraceSymbol> = symbols
+    pub fn get_all_at<'a>(&self, snap: i64, symbols: &'a [TraceSymbol]) -> Vec<&'a TraceSymbol> {
+        let mut result: Vec<&'a TraceSymbol> = symbols
             .iter()
             .filter(|s| {
                 s.lifespan.contains(snap)
@@ -88,13 +88,13 @@ impl TraceSymbolView {
     }
 
     /// Get symbols contained in the given address range at a snap.
-    pub fn get_in_range(
+    pub fn get_in_range<'a>(
         &self,
         snap: i64,
         min_addr: u64,
         max_addr: u64,
-        symbols: &[TraceSymbol],
-    ) -> Vec<&TraceSymbol> {
+        symbols: &'a [TraceSymbol],
+    ) -> Vec<&'a TraceSymbol> {
         symbols
             .iter()
             .filter(|s| {
@@ -119,12 +119,12 @@ impl TraceSymbolView {
     }
 
     /// Get symbols matching a name pattern at the given snap.
-    pub fn get_by_name_contains(
+    pub fn get_by_name_contains<'a>(
         &self,
         snap: i64,
         pattern: &str,
-        symbols: &[TraceSymbol],
-    ) -> Vec<&TraceSymbol> {
+        symbols: &'a [TraceSymbol],
+    ) -> Vec<&'a TraceSymbol> {
         symbols
             .iter()
             .filter(|s| {
@@ -149,8 +149,8 @@ mod tests {
     #[test]
     fn test_all_symbols_view() {
         let symbols = vec![
-            TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::namespace(2, "global", None, Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::namespace(2, "global", None, Lifespan::span(0, 100)),
             TraceSymbol {
                 key: 3,
                 name: "MyClass".into(),
@@ -158,7 +158,7 @@ mod tests {
                 space: None,
                 kind: TraceSymbolKind::Class,
                 parent_key: None,
-                lifespan: Lifespan::new(0, 100),
+                lifespan: Lifespan::span(0, 100),
             },
         ];
 
@@ -169,8 +169,8 @@ mod tests {
     #[test]
     fn test_filtered_view() {
         let symbols = vec![
-            TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::namespace(2, "global", None, Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "main", 0x400000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::namespace(2, "global", None, Lifespan::span(0, 100)),
         ];
 
         let label_view = TraceSymbolView::of_kind(TraceSymbolKind::Label);
@@ -183,9 +183,9 @@ mod tests {
     #[test]
     fn test_sort_orders() {
         let symbols = vec![
-            TraceSymbol::label(1, "c_sym", 0x3000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(2, "a_sym", 0x1000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(3, "b_sym", 0x2000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "c_sym", 0x3000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(2, "a_sym", 0x1000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(3, "b_sym", 0x2000, "ram", Lifespan::span(0, 100)),
         ];
 
         let mut view = TraceSymbolView::of_kind(TraceSymbolKind::Label);
@@ -199,9 +199,9 @@ mod tests {
     #[test]
     fn test_name_search() {
         let symbols = vec![
-            TraceSymbol::label(1, "malloc", 0x1000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(2, "calloc", 0x2000, "ram", Lifespan::new(0, 100)),
-            TraceSymbol::label(3, "free", 0x3000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::label(1, "malloc", 0x1000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(2, "calloc", 0x2000, "ram", Lifespan::span(0, 100)),
+            TraceSymbol::label(3, "free", 0x3000, "ram", Lifespan::span(0, 100)),
         ];
 
         let view = TraceSymbolView::all();

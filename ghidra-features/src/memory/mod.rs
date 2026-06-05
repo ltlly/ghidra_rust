@@ -36,6 +36,11 @@ pub mod move_block;
 /// and `ImageBaseDialog`.
 pub mod block_ops;
 
+/// Memory map actions and block permissions.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.memory` action classes.
+pub mod actions;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

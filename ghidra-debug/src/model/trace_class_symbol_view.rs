@@ -62,9 +62,9 @@ mod tests {
     #[test]
     fn test_class_view() {
         let symbols = vec![
-            TraceSymbol::namespace(1, "global", None, Lifespan::new(0, 100)),
-            TraceClassSymbolView::create(2, "MyClass", Some(1), Lifespan::new(0, 100)),
-            TraceSymbol::label(3, "main", 0x400000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::namespace(1, "global", None, Lifespan::span(0, 100)),
+            TraceClassSymbolView::create(2, "MyClass", Some(1), Lifespan::span(0, 100)),
+            TraceSymbol::label(3, "main", 0x400000, "ram", Lifespan::span(0, 100)),
         ];
 
         let classes = TraceClassSymbolView::get_all_at(0, &symbols);
@@ -75,8 +75,8 @@ mod tests {
     #[test]
     fn test_class_by_name() {
         let symbols = vec![
-            TraceClassSymbolView::create(1, "MyClass", None, Lifespan::new(0, 100)),
-            TraceClassSymbolView::create(2, "OtherClass", None, Lifespan::new(0, 100)),
+            TraceClassSymbolView::create(1, "MyClass", None, Lifespan::span(0, 100)),
+            TraceClassSymbolView::create(2, "OtherClass", None, Lifespan::span(0, 100)),
         ];
 
         let found = TraceClassSymbolView::get_by_name(0, "MyClass", &symbols);

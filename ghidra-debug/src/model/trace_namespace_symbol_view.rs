@@ -76,9 +76,9 @@ mod tests {
     #[test]
     fn test_namespace_view_filter() {
         let symbols = vec![
-            TraceSymbol::namespace(1, "global", None, Lifespan::new(0, 100)),
-            TraceSymbol::namespace(2, "libc", Some(1), Lifespan::new(0, 100)),
-            TraceSymbol::label(3, "main", 0x400000, "ram", Lifespan::new(0, 100)),
+            TraceSymbol::namespace(1, "global", None, Lifespan::span(0, 100)),
+            TraceSymbol::namespace(2, "libc", Some(1), Lifespan::span(0, 100)),
+            TraceSymbol::label(3, "main", 0x400000, "ram", Lifespan::span(0, 100)),
         ];
 
         let namespaces = TraceNamespaceSymbolView::get_all_at(0, &symbols);
@@ -88,8 +88,8 @@ mod tests {
     #[test]
     fn test_namespace_by_name() {
         let symbols = vec![
-            TraceSymbol::namespace(1, "global", None, Lifespan::new(0, 100)),
-            TraceSymbol::namespace(2, "libc", Some(1), Lifespan::new(0, 100)),
+            TraceSymbol::namespace(1, "global", None, Lifespan::span(0, 100)),
+            TraceSymbol::namespace(2, "libc", Some(1), Lifespan::span(0, 100)),
         ];
 
         let ns = TraceNamespaceSymbolView::get_by_name(0, "libc", &symbols);
@@ -100,10 +100,10 @@ mod tests {
     #[test]
     fn test_namespace_children() {
         let symbols = vec![
-            TraceSymbol::namespace(1, "global", None, Lifespan::new(0, 100)),
-            TraceSymbol::namespace(2, "libc", Some(1), Lifespan::new(0, 100)),
-            TraceSymbol::namespace(3, "kernel", Some(1), Lifespan::new(0, 100)),
-            TraceSymbol::namespace(4, "net", Some(2), Lifespan::new(0, 100)),
+            TraceSymbol::namespace(1, "global", None, Lifespan::span(0, 100)),
+            TraceSymbol::namespace(2, "libc", Some(1), Lifespan::span(0, 100)),
+            TraceSymbol::namespace(3, "kernel", Some(1), Lifespan::span(0, 100)),
+            TraceSymbol::namespace(4, "net", Some(2), Lifespan::span(0, 100)),
         ];
 
         let children = TraceNamespaceSymbolView::get_children(0, Some(1), &symbols);
