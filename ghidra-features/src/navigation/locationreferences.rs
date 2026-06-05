@@ -742,4 +742,634 @@ mod tests {
         assert!(plugin.events()[0].contains("Address"));
         assert!(plugin.events()[1].contains("Label"));
     }
+
+    #[test]
+    fn test_location_references_service() {
+        let mut service = MockLocationReferencesService::new();
+        service.show_references_to_location("test.exe", addr(0x401000));
+        assert!(service.was_called());
+        assert_eq!(service.last_address(), Some(addr(0x401000)));
+    }
+
+    #[test]
+    fn test_location_references_table_model() {
+        let descriptor = LocationDescriptor::new(
+            DescriptorKind::Address,
+            addr(0x1000),
+            "main",
+            "test.exe",
+        );
+        let mut model = LocationReferencesTableModel::new(descriptor, "test.exe");
+        assert!(!model.is_loaded());
+        assert_eq!(model.row_count(), 0);
+
+        model.set_references(vec![
+            LocationReference::new(addr(0x2000)),
+            LocationReference::new(addr(0x3000)),
+        ]);
+        assert!(model.is_loaded());
+        assert_eq!(model.row_count(), 2);
+    }
+
+    #[test]
+    fn test_location_references_table_model_reload() {
+        let descriptor = LocationDescriptor::new(
+            DescriptorKind::Label,
+            addr(0x1000),
+            "my_func",
+            "test.exe",
+        );
+        let mut model = LocationReferencesTableModel::new(descriptor, "test.exe");
+        model.set_references(vec![LocationReference::new(addr(0x2000))]);
+        assert!(model.is_loaded());
+
+        model.request_reload();
+        assert!(!model.is_loaded());
+    }
+
+    #[test]
+    fn test_address_location_descriptor() {
+        let desc = AddressLocationDescriptor::new(addr(0x1000), "test.exe");
+        assert_eq!(desc.kind(), &DescriptorKind::Address);
+        assert!(!desc.label().is_empty());
+    }
+
+    #[test]
+    fn test_data_type_location_descriptor() {
+        let desc = DataTypeLocationDescriptor::new("int", addr(0x1000), "test.exe");
+        assert_eq!(desc.kind(), &DescriptorKind::DataType);
+        assert_eq!(desc.label(), "int");
+    }
+
+    #[test]
+    fn test_label_location_descriptor() {
+        let desc = LabelLocationDescriptor::new("main", addr(0x401000), "test.exe");
+        assert_eq!(desc.kind(), &DescriptorKind::Label);
+        assert_eq!(desc.label(), "main");
+        assert_eq!(desc.home_address(), addr(0x401000));
+    }
+
+    #[test]
+    fn test_mnemonic_location_descriptor() {
+        let desc = MnemonicLocationDescriptor::new("MOV", addr(0x1000), "test.exe");
+        assert_eq!(desc.kind(), &DescriptorKind::Mnemonic);
+        assert_eq!(desc.label(), "MOV");
+    }
+
+    #[test]
+    fn test_operand_location_descriptor() {
+        let desc = OperandLocationDescriptor::new("EAX", 0, addr(0x1000), "test.exe");
+        assert_eq!(desc.kind(), &DescriptorKind::Operand);
+        assert_eq!(desc.label(), "EAX");
+        assert_eq!(desc.operand_index(), 0);
+    }
+
+    #[test]
+    fn test_function_parameter_name_descriptor() {
+        let desc = FunctionParameterNameDescriptor::new(
+            "param1", "my_func", addr(0x1000), "test.exe",
+        );
+        assert_eq!(desc.kind(), &DescriptorKind::FunctionParameterName);
+        assert_eq!(desc.function_name(), "my_func");
+    }
+
+    #[test]
+    fn test_function_return_type_descriptor() {
+        let desc = FunctionReturnTypeDescriptor::new(
+            "int", "my_func", addr(0x1000), "test.exe",
+        );
+        assert_eq!(desc.kind(), &DescriptorKind::FunctionReturnType);
+        assert_eq!(desc.return_type(), "int");
+    }
+
+    #[test]
+    fn test_variable_name_descriptor() {
+        let desc = VariableNameDescriptor::new(
+            "local_var", "my_func", addr(0x1000), "test.exe",
+        );
+        assert_eq!(desc.kind(), &DescriptorKind::VariableName);
+        assert_eq!(desc.label(), "local_var");
+    }
+
+    #[test]
+    fn test_variable_xref_descriptor() {
+        let desc = VariableXRefLocationDescriptor::new(
+            "local_var", "my_func", addr(0x1000), "test.exe",
+        );
+        assert_eq!(desc.kind(), &DescriptorKind::VariableXRef);
+    }
+
+    #[test]
+    fn test_structure_member_descriptor() {
+        let desc = StructureMemberLocationDescriptor::new(
+            "my_struct", "field_a", addr(0x1000), "test.exe",
+        );
+        assert_eq!(desc.kind(), &DescriptorKind::StructureMember);
+        assert_eq!(desc.struct_name(), "my_struct");
+        assert_eq!(desc.field_name(), "field_a");
+    }
+
+    #[test]
+    fn test_descriptor_factory_create_for_location() {
+        let factory = DescriptorFactory::new("test.exe");
+
+        // Address descriptor
+        let desc = factory.create_for_address(addr(0x401000));
+        assert_eq!(desc.kind(), &DescriptorKind::Address);
+
+        // Label descriptor
+        let desc = factory.create_for_label("main", addr(0x401000));
+        assert_eq!(desc.kind(), &DescriptorKind::Label);
+
+        // Data type descriptor
+        let desc = factory.create_for_data_type("int", addr(0x1000));
+        assert_eq!(desc.kind(), &DescriptorKind::DataType);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocationReferencesService -- service interface for "Find References To"
+// ---------------------------------------------------------------------------
+
+/// A service that provides references to a given program location.
+///
+/// Ported from Ghidra's `LocationReferencesService.java`.
+pub trait LocationReferencesService {
+    /// The menu group for reference-related actions.
+    const MENU_GROUP: &'static str = "References";
+
+    /// Show references to the given location.
+    fn show_references_to_location(&mut self, program: &str, address: Address);
+
+    /// Whether the service is currently showing references.
+    fn is_showing(&self) -> bool;
+
+    /// Close the current references display.
+    fn close(&mut self);
+}
+
+// ---------------------------------------------------------------------------
+// MockLocationReferencesService -- for testing
+// ---------------------------------------------------------------------------
+
+/// A mock implementation of LocationReferencesService for testing.
+#[derive(Debug, Default)]
+pub struct MockLocationReferencesService {
+    called: bool,
+    last_address: Option<Address>,
+    last_program: Option<String>,
+    showing: bool,
+}
+
+impl MockLocationReferencesService {
+    /// Create a new mock service.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the service was called.
+    pub fn was_called(&self) -> bool {
+        self.called
+    }
+
+    /// The last address passed to show_references_to_location.
+    pub fn last_address(&self) -> Option<Address> {
+        self.last_address
+    }
+
+    /// The last program passed.
+    pub fn last_program(&self) -> Option<&str> {
+        self.last_program.as_deref()
+    }
+}
+
+impl LocationReferencesService for MockLocationReferencesService {
+    fn show_references_to_location(&mut self, program: &str, address: Address) {
+        self.called = true;
+        self.last_address = Some(address);
+        self.last_program = Some(program.to_string());
+        self.showing = true;
+    }
+
+    fn is_showing(&self) -> bool {
+        self.showing
+    }
+
+    fn close(&mut self) {
+        self.showing = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LocationReferencesTableModel -- table model for references display
+// ---------------------------------------------------------------------------
+
+/// Table model for displaying location references.
+///
+/// Ported from Ghidra's `LocationReferencesTableModel.java`.
+#[derive(Debug)]
+pub struct LocationReferencesTableModel {
+    /// The descriptor being queried.
+    descriptor: LocationDescriptor,
+    /// The program name.
+    program_name: String,
+    /// The collected references.
+    references: Vec<LocationReference>,
+    /// Whether the model data has been loaded.
+    loaded: bool,
+    /// Whether a reload has been requested.
+    reload_requested: bool,
+}
+
+impl LocationReferencesTableModel {
+    /// Create a new table model.
+    pub fn new(descriptor: LocationDescriptor, program_name: &str) -> Self {
+        Self {
+            descriptor,
+            program_name: program_name.to_string(),
+            references: Vec::new(),
+            loaded: false,
+            reload_requested: false,
+        }
+    }
+
+    /// The number of rows (references).
+    pub fn row_count(&self) -> usize {
+        self.references.len()
+    }
+
+    /// Whether the model data has been loaded.
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// Get the descriptor.
+    pub fn descriptor(&self) -> &LocationDescriptor {
+        &self.descriptor
+    }
+
+    /// Set the references (simulates loading).
+    pub fn set_references(&mut self, refs: Vec<LocationReference>) {
+        self.references = refs;
+        self.loaded = true;
+        self.reload_requested = false;
+    }
+
+    /// Request a reload of the data.
+    pub fn request_reload(&mut self) {
+        self.loaded = false;
+        self.reload_requested = true;
+        self.references.clear();
+    }
+
+    /// Whether a reload has been requested.
+    pub fn is_reload_requested(&self) -> bool {
+        self.reload_requested
+    }
+
+    /// Get a reference by row index.
+    pub fn get_row(&self, index: usize) -> Option<&LocationReference> {
+        self.references.get(index)
+    }
+
+    /// Get the reference address at a given row.
+    pub fn get_address_at_row(&self, index: usize) -> Option<Address> {
+        self.references.get(index).map(|r| r.location_of_use())
+    }
+
+    /// The program name.
+    pub fn program_name(&self) -> &str {
+        &self.program_name
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Specific descriptor types -- ported from locationreferences/*.java
+// ---------------------------------------------------------------------------
+
+/// Descriptor for an address.
+///
+/// Ported from `AddressLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct AddressLocationDescriptor {
+    inner: LocationDescriptor,
+}
+
+impl AddressLocationDescriptor {
+    /// Create a new address location descriptor.
+    pub fn new(address: Address, program_name: &str) -> Self {
+        let label = format!("{}", address);
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::Address, address, label, program_name),
+        }
+    }
+
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a data type.
+///
+/// Ported from `DataTypeLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct DataTypeLocationDescriptor {
+    inner: LocationDescriptor,
+    data_type_name: String,
+}
+
+impl DataTypeLocationDescriptor {
+    /// Create a new data type location descriptor.
+    pub fn new(data_type_name: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::DataType, address, data_type_name.to_string(), program_name),
+            data_type_name: data_type_name.to_string(),
+        }
+    }
+
+    /// The data type name.
+    pub fn data_type_name(&self) -> &str { &self.data_type_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a label (symbol name).
+///
+/// Ported from `LabelLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct LabelLocationDescriptor {
+    inner: LocationDescriptor,
+}
+
+impl LabelLocationDescriptor {
+    /// Create a new label location descriptor.
+    pub fn new(label: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::Label, address, label.to_string(), program_name),
+        }
+    }
+
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a mnemonic (instruction opcode).
+///
+/// Ported from `MnemonicLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct MnemonicLocationDescriptor {
+    inner: LocationDescriptor,
+}
+
+impl MnemonicLocationDescriptor {
+    /// Create a new mnemonic location descriptor.
+    pub fn new(mnemonic: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::Mnemonic, address, mnemonic.to_string(), program_name),
+        }
+    }
+
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for an operand.
+///
+/// Ported from `OperandLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct OperandLocationDescriptor {
+    inner: LocationDescriptor,
+    operand_index: usize,
+}
+
+impl OperandLocationDescriptor {
+    /// Create a new operand location descriptor.
+    pub fn new(operand_text: &str, operand_index: usize, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::Operand, address, operand_text.to_string(), program_name),
+            operand_index,
+        }
+    }
+
+    /// The operand index (0-based).
+    pub fn operand_index(&self) -> usize { self.operand_index }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a function parameter name.
+///
+/// Ported from `FunctionParameterNameLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct FunctionParameterNameDescriptor {
+    inner: LocationDescriptor,
+    function_name: String,
+}
+
+impl FunctionParameterNameDescriptor {
+    /// Create a new function parameter name descriptor.
+    pub fn new(param_name: &str, function_name: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::FunctionParameterName, address, param_name.to_string(), program_name),
+            function_name: function_name.to_string(),
+        }
+    }
+
+    /// The function name.
+    pub fn function_name(&self) -> &str { &self.function_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a function return type.
+///
+/// Ported from `FunctionReturnTypeLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct FunctionReturnTypeDescriptor {
+    inner: LocationDescriptor,
+    function_name: String,
+    return_type: String,
+}
+
+impl FunctionReturnTypeDescriptor {
+    /// Create a new function return type descriptor.
+    pub fn new(return_type: &str, function_name: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::FunctionReturnType, address, return_type.to_string(), program_name),
+            function_name: function_name.to_string(),
+            return_type: return_type.to_string(),
+        }
+    }
+
+    /// The function name.
+    pub fn function_name(&self) -> &str { &self.function_name }
+    /// The return type.
+    pub fn return_type(&self) -> &str { &self.return_type }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a variable name.
+///
+/// Ported from `VariableNameLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct VariableNameDescriptor {
+    inner: LocationDescriptor,
+    function_name: String,
+}
+
+impl VariableNameDescriptor {
+    /// Create a new variable name descriptor.
+    pub fn new(var_name: &str, function_name: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::VariableName, address, var_name.to_string(), program_name),
+            function_name: function_name.to_string(),
+        }
+    }
+
+    /// The function containing this variable.
+    pub fn function_name(&self) -> &str { &self.function_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a variable cross-reference.
+///
+/// Ported from `VariableXRefLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct VariableXRefLocationDescriptor {
+    inner: LocationDescriptor,
+    function_name: String,
+}
+
+impl VariableXRefLocationDescriptor {
+    /// Create a new variable xref descriptor.
+    pub fn new(var_name: &str, function_name: &str, address: Address, program_name: &str) -> Self {
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::VariableXRef, address, var_name.to_string(), program_name),
+            function_name: function_name.to_string(),
+        }
+    }
+
+    /// The function containing this variable.
+    pub fn function_name(&self) -> &str { &self.function_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+/// Descriptor for a structure member.
+///
+/// Ported from `StructureMemberLocationDescriptor.java`.
+#[derive(Debug, Clone)]
+pub struct StructureMemberLocationDescriptor {
+    inner: LocationDescriptor,
+    struct_name: String,
+    field_name: String,
+}
+
+impl StructureMemberLocationDescriptor {
+    /// Create a new structure member descriptor.
+    pub fn new(struct_name: &str, field_name: &str, address: Address, program_name: &str) -> Self {
+        let label = format!("{}.{}", struct_name, field_name);
+        Self {
+            inner: LocationDescriptor::new(DescriptorKind::StructureMember, address, label, program_name),
+            struct_name: struct_name.to_string(),
+            field_name: field_name.to_string(),
+        }
+    }
+
+    /// The structure name.
+    pub fn struct_name(&self) -> &str { &self.struct_name }
+    /// The field name.
+    pub fn field_name(&self) -> &str { &self.field_name }
+    /// Access the inner descriptor.
+    pub fn kind(&self) -> &DescriptorKind { self.inner.kind() }
+    /// The home address.
+    pub fn home_address(&self) -> Address { self.inner.home_address() }
+    /// The label.
+    pub fn label(&self) -> &str { self.inner.label() }
+}
+
+// ---------------------------------------------------------------------------
+// DescriptorFactory -- creates descriptors from program locations
+// ---------------------------------------------------------------------------
+
+/// Factory for creating location descriptors.
+///
+/// Ported from the descriptor creation logic in `LocationReferencesPlugin`.
+#[derive(Debug)]
+pub struct DescriptorFactory {
+    program_name: String,
+}
+
+impl DescriptorFactory {
+    /// Create a new descriptor factory.
+    pub fn new(program_name: impl Into<String>) -> Self {
+        Self { program_name: program_name.into() }
+    }
+
+    /// Create a descriptor for an address.
+    pub fn create_for_address(&self, address: Address) -> LocationDescriptor {
+        LocationDescriptor::new(DescriptorKind::Address, address, format!("{}", address), &self.program_name)
+    }
+
+    /// Create a descriptor for a label.
+    pub fn create_for_label(&self, label: &str, address: Address) -> LocationDescriptor {
+        LocationDescriptor::new(DescriptorKind::Label, address, label, &self.program_name)
+    }
+
+    /// Create a descriptor for a data type.
+    pub fn create_for_data_type(&self, data_type: &str, address: Address) -> LocationDescriptor {
+        LocationDescriptor::new(DescriptorKind::DataType, address, data_type, &self.program_name)
+    }
+
+    /// Create a descriptor for a mnemonic.
+    pub fn create_for_mnemonic(&self, mnemonic: &str, address: Address) -> LocationDescriptor {
+        LocationDescriptor::new(DescriptorKind::Mnemonic, address, mnemonic, &self.program_name)
+    }
+
+    /// Create a descriptor for an operand.
+    pub fn create_for_operand(&self, operand: &str, address: Address) -> LocationDescriptor {
+        LocationDescriptor::new(DescriptorKind::Operand, address, operand, &self.program_name)
+    }
+
+    /// The program name.
+    pub fn program_name(&self) -> &str {
+        &self.program_name
+    }
 }

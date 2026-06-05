@@ -63,6 +63,7 @@ pub mod trace_db_overlay;
 pub mod trace_db_program;
 pub mod trace_db_program_view;
 pub mod trace_db_property;
+pub mod trace_db_snapshot;
 pub mod trace_db_space;
 pub mod trace_db_spatial;
 pub mod trace_db_stack;
@@ -117,6 +118,7 @@ pub use trace_db_value_storage::{
 };
 pub use trace_db_event_scope::{DbEventScopeManager, DbObjectEventScope};
 pub use trace_db_method::{DbMethodManager, DbObjectMethod, MethodParameter};
+pub use trace_db_snapshot::{DbTraceSnapshot, DbTraceTimeManager};
 pub use trace_db_visitors::{
     AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,
     CanonicalSuccessorsRelativeVisitor, OrderedSuccessorsVisitor, SuccessorsRelativeVisitor,

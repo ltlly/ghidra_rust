@@ -52,6 +52,7 @@ pub mod thread;
 pub mod time;
 pub mod time_schedule;
 pub mod trace;
+pub mod trace_data_ops;
 pub mod trace_emulation;
 pub mod trace_event;
 pub mod trace_location;
@@ -119,6 +120,11 @@ pub use thread::{TraceProcess, TraceThread};
 pub use time::{TraceSchedule, TraceSnapshot, TraceTimeManager};
 pub use time_schedule::{CompareResult, PatchStep, ScheduleSequence, ScheduleStep, Scheduler, StepKind, TickStep};
 pub use trace::{Trace, TraceOptionsManager, TraceTimeViewport, TraceUserData};
+pub use trace_data_ops::{
+    CommentType, DataSettingsAdapter, DataTypeConflictHandler as DataOpConflictHandler,
+    ReferenceInfo, ReferenceType, SettingsValue, TraceDataSettings, TraceDataSettingsOperations,
+    TraceDataTypeEntry as DataOpDataTypeEntry,
+};
 pub use trace_emulation::{
     EmulationMode, EmulationStateSnapshot, EmulationStatus, TraceEmulationIntegration,
     UnknownStatePcodeExecutionException,

@@ -20,12 +20,35 @@ pub mod breakpoint_impl;
 pub mod console_impl;
 pub mod control_impl;
 pub mod emulation_impl;
+pub mod listing_impl;
 pub mod modules_impl;
 pub mod platform_impl;
 pub mod progress_impl;
+pub mod service_interfaces;
 pub mod target_impl;
 pub mod tracemgr_impl;
 pub mod url_impl;
+
+pub use service_interfaces::{
+    ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
+    DebuggerAutoMappingService as AutoMappingServiceExt,
+    DebuggerConsoleService as ConsoleServiceExt,
+    DebuggerEmulationService as EmulationServiceExt,
+    DebuggerListingService as ListingServiceExt,
+    DebuggerLogicalBreakpointService as LogicalBreakpointServiceExt,
+    DebuggerPlatformService as PlatformServiceExt,
+    DebuggerStaticMappingService as StaticMappingServiceExt,
+    DebuggerTargetService as TargetServiceExt,
+    DebuggerTraceManagerService as TraceManagerServiceExt,
+    DebuggerWatchesService as WatchesServiceExt,
+    EmulationDefiniteResult, EmulationRunResult,
+    EmulatorStateListener, LaunchOffer, LaunchParameter, LogicalBreakpointsChangeListener,
+    StateEditor as StateEditorExt, StaticMappingChangeListener, StaticMappingEntry,
+    TargetPublicationListener, TraceRmiLauncherService, TraceRmiService as TraceRmiServiceExt,
+};
+// The comprehensive service_interfaces module provides extended versions of each
+// service trait that match the full Java API surface. The simpler trait definitions
+// below are retained for backward compatibility with existing code.
 
 use crate::api::breakpoint::LogicalBreakpoint;
 use crate::model::Lifespan;

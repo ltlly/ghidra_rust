@@ -9,6 +9,8 @@ pub mod execution;
 pub mod integration;
 pub mod memory_state;
 pub mod sleigh_utils;
+pub mod trace_access;
+pub mod trace_data_access;
 
 pub use data::{
     PcodeTraceAccess, PcodeTraceDataAccess, PcodeTraceMemoryAccess,

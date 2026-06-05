@@ -28,6 +28,7 @@ pub mod rmi_types;
 pub mod static_mapping;
 pub mod target;
 pub mod trace_rmi_acceptor;
+pub mod val_str;
 pub mod trace_rmi_connection;
 pub mod tracemgr;
 pub mod tracermi;

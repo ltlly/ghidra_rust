@@ -13,3 +13,4 @@
 pub mod client;
 pub mod gui;
 pub mod service;
+pub mod tracermi_service;

@@ -440,4 +440,307 @@ mod tests {
         assert_eq!(p.x, 3.0);
         assert_eq!(p.y, 4.0);
     }
+
+    #[test]
+    fn test_conditional_flow_arrow() {
+        let arrow = ConditionalFlowArrow::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            true,
+        );
+        assert!(arrow.is_conditional);
+        assert_eq!(arrow.arrow_type(), FlowArrowType::ConditionalForward);
+        assert!(arrow.fallthrough_addr.is_some()); // forward => has fallthrough
+    }
+
+    #[test]
+    fn test_conditional_flow_arrow_backward() {
+        let arrow = ConditionalFlowArrow::new(
+            Address::new(0x2000),
+            Address::new(0x1000),
+            false,
+        );
+        assert_eq!(arrow.arrow_type(), FlowArrowType::ConditionalBackward);
+    }
+
+    #[test]
+    fn test_default_flow_arrow() {
+        let arrow = DefaultFlowArrow::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+        );
+        assert_eq!(arrow.arrow_type(), FlowArrowType::JumpForward);
+    }
+
+    #[test]
+    fn test_default_flow_arrow_backward() {
+        let arrow = DefaultFlowArrow::new(
+            Address::new(0x3000),
+            Address::new(0x1000),
+        );
+        assert_eq!(arrow.arrow_type(), FlowArrowType::JumpBackward);
+    }
+
+    #[test]
+    fn test_fallthrough_flow_arrow() {
+        let arrow = FallthroughFlowArrow::new(
+            Address::new(0x1000),
+            Address::new(0x1004),
+        );
+        assert_eq!(arrow.arrow_type(), FlowArrowType::FallThrough);
+        assert!(arrow.is_forward());
+        assert_eq!(arrow.distance(), 4);
+    }
+
+    #[test]
+    fn test_fallthrough_flow_arrow_create() {
+        let arrow = FallthroughFlowArrow::new(
+            Address::new(0x1000),
+            Address::new(0x1005),
+        );
+        assert!(arrow.to > arrow.from);
+        assert_eq!(arrow.arrow_type(), FlowArrowType::FallThrough);
+    }
+
+    #[test]
+    fn test_flow_arrow_shape_factory() {
+        let factory = FlowArrowShapeFactory::new(5.0, 12.0);
+        let arrow = FlowArrow::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            FlowArrowType::FallThrough,
+        );
+        let mut addr_to_y = BTreeMap::new();
+        addr_to_y.insert(0x1000, 10.0);
+        addr_to_y.insert(0x2000, 50.0);
+        let shape = factory.create_shape(&arrow, &addr_to_y);
+        assert_eq!(shape.column, 0);
+    }
+
+    #[test]
+    fn test_flow_arrow_shape_factory_backward() {
+        let factory = FlowArrowShapeFactory::new(5.0, 12.0);
+        let arrow = FlowArrow::new(
+            Address::new(0x2000),
+            Address::new(0x1000),
+            FlowArrowType::JumpBackward,
+        );
+        let mut addr_to_y = BTreeMap::new();
+        addr_to_y.insert(0x1000, 50.0);
+        addr_to_y.insert(0x2000, 10.0);
+        let shape = factory.create_shape(&arrow, &addr_to_y);
+        assert_eq!(shape.path.len(), 5); // curved
+    }
+
+    #[test]
+    fn test_flow_arrow_model_conditional_and_call_filters() {
+        let mut model = FlowArrowModel::new();
+        model.add_arrow(FlowArrow::new(Address::new(0x1000), Address::new(0x2000), FlowArrowType::ConditionalForward));
+        model.add_arrow(FlowArrow::new(Address::new(0x3000), Address::new(0x4000), FlowArrowType::Call));
+        model.add_arrow(FlowArrow::new(Address::new(0x5000), Address::new(0x6000), FlowArrowType::JumpForward));
+        assert_eq!(model.get_conditional_arrows().len(), 1);
+        assert_eq!(model.get_call_arrows().len(), 1);
+    }
+
+    #[test]
+    fn test_flow_arrow_model_remove_to() {
+        let mut model = FlowArrowModel::new();
+        model.add_arrow(FlowArrow::new(Address::new(0x1000), Address::new(0x2000), FlowArrowType::JumpForward));
+        model.add_arrow(FlowArrow::new(Address::new(0x3000), Address::new(0x2000), FlowArrowType::JumpForward));
+        model.remove_arrows_to(Address::new(0x2000));
+        assert_eq!(model.count(), 0);
+    }
+}
+
+// ============================================================================
+// ConditionalFlowArrow -- ported from ConditionalFlowArrow.java
+// ============================================================================
+
+/// A conditional branch flow arrow.
+///
+/// Ported from Ghidra's `ConditionalFlowArrow.java`.
+#[derive(Debug, Clone)]
+pub struct ConditionalFlowArrow {
+    /// The source address.
+    pub from: Address,
+    /// The branch target address.
+    pub to: Address,
+    /// Whether this is a conditional branch.
+    pub is_conditional: bool,
+    /// The fallthrough address (if the branch is not taken).
+    pub fallthrough_addr: Option<Address>,
+}
+
+impl ConditionalFlowArrow {
+    /// Create a new conditional flow arrow.
+    pub fn new(from: Address, to: Address, forward: bool) -> Self {
+        Self {
+            from,
+            to,
+            is_conditional: true,
+            fallthrough_addr: if forward { Some(Address::new(from.offset + 1)) } else { None },
+        }
+    }
+
+    /// Create with an explicit fallthrough address.
+    pub fn with_fallthrough(from: Address, to: Address, fallthrough: Address) -> Self {
+        Self {
+            from,
+            to,
+            is_conditional: true,
+            fallthrough_addr: Some(fallthrough),
+        }
+    }
+
+    /// The arrow type for this conditional flow.
+    pub fn arrow_type(&self) -> FlowArrowType {
+        if self.to > self.from {
+            FlowArrowType::ConditionalForward
+        } else {
+            FlowArrowType::ConditionalBackward
+        }
+    }
+
+    /// Convert to a generic FlowArrow.
+    pub fn to_flow_arrow(&self) -> FlowArrow {
+        FlowArrow::new(self.from, self.to, self.arrow_type())
+    }
+}
+
+// ============================================================================
+// DefaultFlowArrow -- ported from DefaultFlowArrow.java
+// ============================================================================
+
+/// An unconditional jump flow arrow.
+///
+/// Ported from Ghidra's `DefaultFlowArrow.java`.
+#[derive(Debug, Clone)]
+pub struct DefaultFlowArrow {
+    /// The source address.
+    pub from: Address,
+    /// The destination address.
+    pub to: Address,
+}
+
+impl DefaultFlowArrow {
+    /// Create a new default (unconditional jump) flow arrow.
+    pub fn new(from: Address, to: Address) -> Self {
+        Self { from, to }
+    }
+
+    /// The arrow type.
+    pub fn arrow_type(&self) -> FlowArrowType {
+        if self.to > self.from {
+            FlowArrowType::JumpForward
+        } else {
+            FlowArrowType::JumpBackward
+        }
+    }
+
+    /// Convert to a generic FlowArrow.
+    pub fn to_flow_arrow(&self) -> FlowArrow {
+        FlowArrow::new(self.from, self.to, self.arrow_type())
+    }
+}
+
+// ============================================================================
+// FallthroughFlowArrow -- ported from FallthroughFlowArrow.java
+// ============================================================================
+
+/// A fallthrough flow arrow (sequential execution).
+///
+/// Ported from Ghidra's `FallthroughFlowArrow.java`.
+#[derive(Debug, Clone)]
+pub struct FallthroughFlowArrow {
+    /// The source address.
+    pub from: Address,
+    /// The fallthrough address (next instruction).
+    pub to: Address,
+}
+
+impl FallthroughFlowArrow {
+    /// Create a new fallthrough flow arrow.
+    pub fn new(from: Address, to: Address) -> Self {
+        Self { from, to }
+    }
+
+    /// The arrow type (always FallThrough).
+    pub fn arrow_type(&self) -> FlowArrowType {
+        FlowArrowType::FallThrough
+    }
+
+    /// Whether this arrow points forward.
+    pub fn is_forward(&self) -> bool {
+        self.to > self.from
+    }
+
+    /// The distance.
+    pub fn distance(&self) -> u64 {
+        if self.to > self.from {
+            self.to.offset - self.from.offset
+        } else {
+            self.from.offset - self.to.offset
+        }
+    }
+
+    /// Convert to a generic FlowArrow.
+    pub fn to_flow_arrow(&self) -> FlowArrow {
+        FlowArrow::new(self.from, self.to, FlowArrowType::FallThrough)
+    }
+}
+
+// ============================================================================
+// FlowArrowShapeFactory -- ported from FlowArrowShapeFactory.java
+// ============================================================================
+
+/// Factory for creating arrow shapes from flow arrows.
+///
+/// Ported from Ghidra's `FlowArrowShapeFactory.java`.
+#[derive(Debug, Clone)]
+pub struct FlowArrowShapeFactory {
+    /// Base x position.
+    pub base_x: f64,
+    /// Column offset per lane.
+    pub column_offset: f64,
+}
+
+impl FlowArrowShapeFactory {
+    /// Create a new shape factory.
+    pub fn new(base_x: f64, column_offset: f64) -> Self {
+        Self { base_x, column_offset }
+    }
+
+    /// Create a shape for a flow arrow given address-to-y mappings.
+    pub fn create_shape(
+        &self,
+        arrow: &FlowArrow,
+        addr_to_y: &BTreeMap<u64, f64>,
+    ) -> FlowArrowShape {
+        let from_y = addr_to_y.get(&arrow.from.offset).copied().unwrap_or(0.0);
+        let to_y = addr_to_y.get(&arrow.to.offset).copied().unwrap_or(0.0);
+
+        match arrow.arrow_type {
+            FlowArrowType::FallThrough => FlowArrowShape::straight(
+                Point::new(self.base_x, from_y),
+                Point::new(self.base_x, to_y),
+                arrow.column,
+            ),
+            _ => FlowArrowShape::curved_right(
+                from_y,
+                to_y,
+                self.base_x,
+                arrow.column,
+                self.column_offset,
+            ),
+        }
+    }
+
+    /// Create shapes for multiple arrows.
+    pub fn create_shapes(
+        &self,
+        arrows: &[FlowArrow],
+        addr_to_y: &BTreeMap<u64, f64>,
+    ) -> Vec<FlowArrowShape> {
+        arrows.iter().map(|a| self.create_shape(a, addr_to_y)).collect()
+    }
 }

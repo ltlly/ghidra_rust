@@ -441,4 +441,438 @@ mod tests {
         let method = ByteSelectionMethod::ForwardFromCurrent;
         assert_eq!(method, ByteSelectionMethod::ForwardFromCurrent);
     }
+
+    #[test]
+    fn test_select_by_flow_engine() {
+        let mut engine = SelectByFlowEngine::new();
+        engine.add_flow_from(Address::new(0x1000), Address::new(0x2000), FlowDirection::Forward);
+        engine.add_flow_from(Address::new(0x2000), Address::new(0x3000), FlowDirection::Forward);
+        engine.add_flow_from(Address::new(0x2000), Address::new(0x1500), FlowDirection::Conditional);
+
+        let result = engine.select_all_flows_from(Address::new(0x1000), 10);
+        assert!(result.num_addresses() >= 2);
+        assert!(result.contains(Address::new(0x1000)));
+        assert!(result.contains(Address::new(0x2000)));
+    }
+
+    #[test]
+    fn test_select_by_flow_engine_backward() {
+        let mut engine = SelectByFlowEngine::new();
+        engine.add_flow_from(Address::new(0x1000), Address::new(0x2000), FlowDirection::Forward);
+        engine.add_flow_from(Address::new(0x2000), Address::new(0x1000), FlowDirection::Unconditional);
+
+        let result = engine.select_all_flows_to(Address::new(0x2000), 10);
+        assert!(result.contains(Address::new(0x2000)));
+        assert!(result.contains(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_select_by_flow_engine_subroutines() {
+        let mut engine = SelectByFlowEngine::new();
+        engine.add_subroutine(Address::new(0x1000), Address::new(0x10FF));
+        engine.add_subroutine(Address::new(0x2000), Address::new(0x20FF));
+
+        let result = engine.select_subroutines(Address::new(0x1050));
+        assert!(result.contains(Address::new(0x1000)));
+        assert!(result.contains(Address::new(0x10FF)));
+    }
+
+    #[test]
+    fn test_select_bytes_engine() {
+        let engine = SelectBytesEngine::new(
+            Address::new(0x1000),
+            Address::new(0xFFFF),
+        );
+        let result = engine.select_bytes(16, ByteSelectionMethod::ForwardFromCurrent, Address::new(0x1000));
+        assert_eq!(result.num_addresses(), 16);
+        assert!(result.contains(Address::new(0x1000)));
+        assert!(result.contains(Address::new(0x100F)));
+    }
+
+    #[test]
+    fn test_select_bytes_engine_from_start() {
+        let engine = SelectBytesEngine::new(
+            Address::new(0x1000),
+            Address::new(0x10FF),
+        );
+        let result = engine.select_bytes(4, ByteSelectionMethod::FromStart, Address::new(0x1080));
+        assert_eq!(result.num_addresses(), 4);
+        assert!(result.contains(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_select_bytes_engine_from_end() {
+        let engine = SelectBytesEngine::new(
+            Address::new(0x1000),
+            Address::new(0x10FF),
+        );
+        let result = engine.select_bytes(4, ByteSelectionMethod::FromEnd, Address::new(0x1080));
+        assert_eq!(result.num_addresses(), 4);
+        assert!(result.contains(Address::new(0x10FF)));
+    }
+
+    #[test]
+    fn test_restore_selection_engine() {
+        let mut engine = RestoreSelectionEngine::new();
+        let mut set = AddressSet::new();
+        set.add_range(Address::new(0x1000), Address::new(0x100F));
+        engine.save("selection1", set);
+        assert!(engine.has_saved("selection1"));
+
+        let restored = engine.restore("selection1");
+        assert!(restored.is_some());
+        assert_eq!(restored.unwrap().num_addresses(), 16);
+        assert!(!engine.has_saved("selection1"));
+    }
+
+    #[test]
+    fn test_restore_selection_engine_overwrite() {
+        let mut engine = RestoreSelectionEngine::new();
+        let mut set1 = AddressSet::new();
+        set1.add(Address::new(0x1000));
+        engine.save("sel", set1);
+
+        let mut set2 = AddressSet::new();
+        set2.add(Address::new(0x2000));
+        engine.save("sel", set2);
+
+        let restored = engine.restore("sel").unwrap();
+        assert!(restored.contains(Address::new(0x2000)));
+        assert!(!restored.contains(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_flow_direction() {
+        assert_eq!(FlowDirection::Forward, FlowDirection::Forward);
+        assert_ne!(FlowDirection::Forward, FlowDirection::Conditional);
+    }
+
+    #[test]
+    fn test_reference_selection_engine() {
+        let mut engine = ReferenceSelectionEngine::new();
+        engine.add_reference(Address::new(0x2000), Address::new(0x1000), "READ");
+        engine.add_reference(Address::new(0x3000), Address::new(0x1000), "WRITE");
+
+        let result = engine.select_references_to(Address::new(0x1000));
+        assert_eq!(result.num_addresses(), 2);
+        assert!(result.contains(Address::new(0x2000)));
+        assert!(result.contains(Address::new(0x3000)));
+    }
+
+    #[test]
+    fn test_reference_selection_engine_no_refs() {
+        let engine = ReferenceSelectionEngine::new();
+        let result = engine.select_references_to(Address::new(0x1000));
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_selection_type_display() {
+        assert_eq!(SelectionType::Address.display_name(), "Address");
+        assert_eq!(SelectionType::Flow.display_name(), "Code Flow");
+        assert_eq!(SelectionType::References.display_name(), "References");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FlowDirection -- direction of a control flow edge
+// ---------------------------------------------------------------------------
+
+/// Direction of a control flow edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowDirection {
+    /// Unconditional forward flow.
+    Forward,
+    /// Unconditional flow (may be forward or backward).
+    Unconditional,
+    /// Conditional branch.
+    Conditional,
+    /// Call to another function.
+    Call,
+    /// Return from function.
+    Return,
+}
+
+// ---------------------------------------------------------------------------
+// SelectByFlowEngine -- flow-based code selection
+// ---------------------------------------------------------------------------
+
+/// Engine for selecting code by control flow.
+///
+/// Ported from `SelectByFlowPlugin` and `SelectByFlowAction`.
+/// Builds a flow graph and traverses it to select reachable addresses.
+#[derive(Debug, Default)]
+pub struct SelectByFlowEngine {
+    /// Edges: (from, to, direction).
+    edges: Vec<(Address, Address, FlowDirection)>,
+    /// Subroutine ranges: (start, end).
+    subroutines: Vec<(Address, Address)>,
+}
+
+impl SelectByFlowEngine {
+    /// Create a new flow selection engine.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a flow edge from one address to another.
+    pub fn add_flow_from(&mut self, from: Address, to: Address, direction: FlowDirection) {
+        self.edges.push((from, to, direction));
+    }
+
+    /// Add a subroutine range.
+    pub fn add_subroutine(&mut self, start: Address, end: Address) {
+        self.subroutines.push((start, end));
+    }
+
+    /// Select all addresses reachable FROM the given address (BFS).
+    pub fn select_all_flows_from(&self, start: Address, max_depth: usize) -> AddressSet {
+        let mut result = AddressSet::new();
+        result.add(start);
+        let mut frontier = vec![start];
+        for _ in 0..max_depth {
+            let mut next_frontier = Vec::new();
+            for &addr in &frontier {
+                for &(from, to, _) in &self.edges {
+                    if from == addr && !result.contains(to) {
+                        result.add(to);
+                        next_frontier.push(to);
+                    }
+                }
+            }
+            if next_frontier.is_empty() {
+                break;
+            }
+            frontier = next_frontier;
+        }
+        result
+    }
+
+    /// Select all addresses that can reach the given address (reverse BFS).
+    pub fn select_all_flows_to(&self, target: Address, max_depth: usize) -> AddressSet {
+        let mut result = AddressSet::new();
+        result.add(target);
+        let mut frontier = vec![target];
+        for _ in 0..max_depth {
+            let mut next_frontier = Vec::new();
+            for &addr in &frontier {
+                for &(from, to, _) in &self.edges {
+                    if to == addr && !result.contains(from) {
+                        result.add(from);
+                        next_frontier.push(from);
+                    }
+                }
+            }
+            if next_frontier.is_empty() {
+                break;
+            }
+            frontier = next_frontier;
+        }
+        result
+    }
+
+    /// Select the subroutine containing the given address.
+    pub fn select_subroutines(&self, address: Address) -> AddressSet {
+        let mut result = AddressSet::new();
+        for &(start, end) in &self.subroutines {
+            if address.offset >= start.offset && address.offset <= end.offset {
+                result.add_range(start, end);
+            }
+        }
+        result
+    }
+
+    /// Select limited flows (only following conditional/unconditional, not calls).
+    pub fn select_limited_flows_from(&self, start: Address, max_depth: usize) -> AddressSet {
+        let mut result = AddressSet::new();
+        result.add(start);
+        let mut frontier = vec![start];
+        for _ in 0..max_depth {
+            let mut next_frontier = Vec::new();
+            for &addr in &frontier {
+                for &(from, to, direction) in &self.edges {
+                    if from == addr && !result.contains(to) && direction != FlowDirection::Call {
+                        result.add(to);
+                        next_frontier.push(to);
+                    }
+                }
+            }
+            if next_frontier.is_empty() {
+                break;
+            }
+            frontier = next_frontier;
+        }
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SelectBytesEngine -- byte-based selection
+// ---------------------------------------------------------------------------
+
+/// Engine for selecting addresses by byte count.
+///
+/// Ported from `SelectBytesPlugin` and `SelectBytesDialog`.
+#[derive(Debug)]
+pub struct SelectBytesEngine {
+    /// Minimum address in the program.
+    pub min_address: Address,
+    /// Maximum address in the program.
+    pub max_address: Address,
+}
+
+impl SelectBytesEngine {
+    /// Create a new byte selection engine.
+    pub fn new(min_address: Address, max_address: Address) -> Self {
+        Self { min_address, max_address }
+    }
+
+    /// Select `count` bytes using the given method starting from `current`.
+    pub fn select_bytes(
+        &self,
+        count: usize,
+        method: ByteSelectionMethod,
+        current: Address,
+    ) -> AddressSet {
+        let mut result = AddressSet::new();
+        let count = count as u64;
+
+        match method {
+            ByteSelectionMethod::FromStart => {
+                let end = self.min_address.offset.saturating_add(count - 1);
+                let end = end.min(self.max_address.offset);
+                result.add_range(self.min_address, Address::new(end));
+            }
+            ByteSelectionMethod::FromEnd => {
+                let start = self.max_address.offset.saturating_sub(count - 1);
+                let start = start.max(self.min_address.offset);
+                result.add_range(Address::new(start), self.max_address);
+            }
+            ByteSelectionMethod::ForwardFromCurrent => {
+                let start = current.offset.max(self.min_address.offset);
+                let end = start.saturating_add(count - 1);
+                let end = end.min(self.max_address.offset);
+                result.add_range(Address::new(start), Address::new(end));
+            }
+            ByteSelectionMethod::BackwardFromCurrent => {
+                let end = current.offset.min(self.max_address.offset);
+                let start = end.saturating_sub(count - 1);
+                let start = start.max(self.min_address.offset);
+                result.add_range(Address::new(start), Address::new(end));
+            }
+        }
+
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// RestoreSelectionEngine -- save/restore selection state
+// ---------------------------------------------------------------------------
+
+/// Engine for saving and restoring named selections.
+///
+/// Ported from `RestoreSelectionPlugin`.
+#[derive(Debug, Default)]
+pub struct RestoreSelectionEngine {
+    saved: std::collections::HashMap<String, AddressSet>,
+}
+
+impl RestoreSelectionEngine {
+    /// Create a new restore selection engine.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Save a selection under a name.
+    pub fn save(&mut self, name: impl Into<String>, selection: AddressSet) {
+        self.saved.insert(name.into(), selection);
+    }
+
+    /// Restore (and remove) a saved selection.
+    pub fn restore(&mut self, name: &str) -> Option<AddressSet> {
+        self.saved.remove(name)
+    }
+
+    /// Check if a selection is saved under a name.
+    pub fn has_saved(&self, name: &str) -> bool {
+        self.saved.contains_key(name)
+    }
+
+    /// List all saved selection names.
+    pub fn saved_names(&self) -> Vec<&str> {
+        self.saved.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReferenceSelectionEngine -- select by references
+// ---------------------------------------------------------------------------
+
+/// Engine for selecting addresses by references to a target.
+///
+/// Ported from `SelectRefsPlugin`, `SelectBackRefsAction`, `SelectForwardRefsAction`.
+#[derive(Debug, Default)]
+pub struct ReferenceSelectionEngine {
+    /// References: (from_address, to_address, ref_type).
+    references: Vec<(Address, Address, String)>,
+}
+
+impl ReferenceSelectionEngine {
+    /// Create a new reference selection engine.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a reference.
+    pub fn add_reference(
+        &mut self,
+        from: Address,
+        to: Address,
+        ref_type: &str,
+    ) {
+        self.references.push((from, to, ref_type.to_string()));
+    }
+
+    /// Select all addresses that reference the given target.
+    pub fn select_references_to(&self, target: Address) -> AddressSet {
+        let mut result = AddressSet::new();
+        for &(from, to, _) in &self.references {
+            if to == target {
+                result.add(from);
+            }
+        }
+        result
+    }
+
+    /// Select all addresses referenced by the given source.
+    pub fn select_references_from(&self, source: Address) -> AddressSet {
+        let mut result = AddressSet::new();
+        for &(from, to, _) in &self.references {
+            if from == source {
+                result.add(to);
+            }
+        }
+        result
+    }
+}
+
+impl SelectionType {
+    /// Human-readable display name.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Address => "Address",
+            Self::Function => "Function",
+            Self::Instruction => "Instruction",
+            Self::Range => "Address Range",
+            Self::All => "All",
+            Self::Flow => "Code Flow",
+            Self::References => "References",
+            Self::Invert => "Invert",
+            Self::Equate => "Equate",
+            Self::Bytes => "Bytes",
+            Self::ProgramTree => "Program Tree",
+            Self::Qualified => "Qualified",
+        }
+    }
 }

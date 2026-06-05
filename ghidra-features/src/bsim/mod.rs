@@ -38,6 +38,7 @@
 pub mod bulk_signatures;
 pub mod client;
 pub mod client_factory;
+pub mod compare_signatures;
 pub mod configuration;
 pub mod description;
 pub mod elastic_db;
@@ -134,6 +135,12 @@ pub use elastic_db::{
 
 // Re-export bulk signature types.
 pub use bulk_signatures::{BulkIngestStats, BulkSignatureGenerator};
+
+// Re-export compare_signatures types (ComparisonResult/CompareSignatures already
+// re-exported from description above; only import unique items here).
+pub use compare_signatures::{
+    ComparisonSummary, cosine_similarity, jaccard_index, weighted_overlap,
+};
 
 // Re-export scoring types (unique names to avoid conflicts with client re-exports).
 pub use scoring::{

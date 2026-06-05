@@ -8,6 +8,7 @@ pub mod color_utils;
 pub mod file_chooser;
 pub mod help_location;
 pub mod html;
+pub mod image_utils;
 pub mod layout_managers;
 pub mod theme_events;
 pub mod web_colors;

@@ -147,23 +147,35 @@ impl StringScorer {
     ///
     /// English text typically has higher frequency of letters like 'e', 't',
     /// 'a', 'o', 'i', 'n'. A uniform distribution of printable ASCII is
-    /// scored lower.
+    /// scored lower. Non-printable control characters are heavily penalised.
     fn score_char_distribution(&self, text: &str) -> f64 {
         if text.is_empty() {
             return 0.0;
         }
         let mut counts = [0u32; 128];
         let mut total = 0u32;
+        let mut printable_count = 0u32;
         for ch in text.chars() {
             let code = ch as u32;
             if code < 128 {
                 counts[code as usize] += 1;
                 total += 1;
+                // Printable range: 0x20..=0x7E (space through tilde)
+                if code >= 0x20 && code <= 0x7E {
+                    printable_count += 1;
+                }
             }
         }
         if total == 0 {
             return 0.0;
         }
+        // Penalise strings that contain non-printable characters
+        let printable_ratio = printable_count as f64 / total as f64;
+        if printable_ratio < 0.5 {
+            // More than half non-printable -> almost certainly not text
+            return 0.0;
+        }
+
         // Calculate entropy - lower entropy = more structured = more likely text
         let mut entropy = 0.0f64;
         for &count in &counts {
@@ -175,7 +187,10 @@ impl StringScorer {
         // Normalize: English text has entropy around 4.0-4.5 bits
         // Random bytes have entropy around 7.0 bits
         let max_entropy = 7.0f64;
-        (1.0 - (entropy / max_entropy)).max(0.0)
+        let entropy_score = (1.0 - (entropy / max_entropy)).max(0.0);
+
+        // Blend entropy score with printable ratio
+        (entropy_score * 0.6 + printable_ratio * 0.4).min(1.0)
     }
 }
 

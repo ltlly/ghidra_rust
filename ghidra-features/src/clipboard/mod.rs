@@ -45,6 +45,18 @@ impl ClipboardFormat {
             Self::AddressTable => "Address Table",
         }
     }
+
+    /// All available clipboard formats.
+    pub fn all() -> &'static [ClipboardFormat] {
+        &[
+            Self::Bytes,
+            Self::Text,
+            Self::Hex,
+            Self::Assembly,
+            Self::Xml,
+            Self::AddressTable,
+        ]
+    }
 }
 
 /// A single clipboard entry.
@@ -60,6 +72,19 @@ pub struct ClipboardEntry {
     pub text: String,
     /// The format of this entry.
     pub format: ClipboardFormat,
+}
+
+impl std::fmt::Display for ClipboardEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "[{:?}] {} ({} bytes): {}",
+            self.format,
+            self.as_hex(),
+            self.byte_count(),
+            self.text
+        )
+    }
 }
 
 impl ClipboardEntry {
@@ -375,5 +400,304 @@ mod tests {
         let pt = ProgramTransferable::new("prog", ClipboardFormat::Text);
         assert!(!pt.has_data());
         assert_eq!(pt.total_bytes(), 0);
+    }
+
+    #[test]
+    fn test_byte_content_provider() {
+        let provider = ByteContentProvider::new();
+        let entry = provider.provide_bytes(
+            Address::new(0x1000),
+            Address::new(0x1003),
+            &[0x48, 0x89, 0xD8, 0xC3],
+        );
+        assert_eq!(entry.data, vec![0x48, 0x89, 0xD8, 0xC3]);
+        assert_eq!(entry.format, ClipboardFormat::Bytes);
+    }
+
+    #[test]
+    fn test_text_content_provider() {
+        let provider = TextContentProvider::new();
+        let entry = provider.provide_text(
+            Address::new(0x1000),
+            Address::new(0x1003),
+            &["mov rax, rbx".to_string(), "ret".to_string()],
+        );
+        assert_eq!(entry.format, ClipboardFormat::Text);
+        assert!(entry.text.contains("mov rax, rbx"));
+        assert!(entry.text.contains("ret"));
+    }
+
+    #[test]
+    fn test_assembly_content_provider() {
+        let provider = AssemblyContentProvider::new();
+        let entry = provider.provide_assembly(
+            Address::new(0x1000),
+            &["mov rax, rbx".to_string(), "ret".to_string()],
+            &["0x48 0x89 0xD8".to_string(), "0xC3".to_string()],
+        );
+        assert_eq!(entry.format, ClipboardFormat::Assembly);
+        assert!(entry.text.contains("mov rax, rbx"));
+    }
+
+    #[test]
+    fn test_html_transferable() {
+        let mut ht = HtmlTransferable::new("test_program");
+        ht.add_text("mov rax, rbx\n");
+        ht.add_text("ret\n");
+        assert!(ht.has_content());
+        assert_eq!(ht.text_content(), "mov rax, rbx\nret\n");
+    }
+
+    #[test]
+    fn test_code_unit_transferable() {
+        let mut cut = CodeUnitTransferable::new("prog", ClipboardFormat::Text);
+        cut.add_code_unit(Address::new(0x1000), "mov rax, rbx", &[0x48, 0x89, 0xD8]);
+        cut.add_code_unit(Address::new(0x1003), "ret", &[0xC3]);
+        assert_eq!(cut.code_unit_count(), 2);
+        assert_eq!(cut.total_bytes(), 4);
+    }
+
+    #[test]
+    fn test_clipboard_format_all_variants() {
+        let formats = ClipboardFormat::all();
+        assert_eq!(formats.len(), 6);
+        assert!(formats.contains(&ClipboardFormat::Bytes));
+        assert!(formats.contains(&ClipboardFormat::Xml));
+    }
+
+    #[test]
+    fn test_clipboard_entry_display() {
+        let entry = ClipboardEntry::from_bytes(
+            Address::new(0x1000),
+            Address::new(0x1003),
+            vec![0x48, 0x89],
+        );
+        let s = format!("{}", entry);
+        assert!(s.contains("48"));
+        assert!(s.contains("89"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ByteContentProvider -- provides raw bytes to the clipboard
+// ---------------------------------------------------------------------------
+
+/// Provider that supplies raw bytes for clipboard operations.
+///
+/// Ported from the byte-content provider concept in Ghidra's clipboard package.
+#[derive(Debug, Default)]
+pub struct ByteContentProvider;
+
+impl ByteContentProvider {
+    /// Create a new byte content provider.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Provide bytes for a clipboard entry.
+    pub fn provide_bytes(
+        &self,
+        start: Address,
+        end: Address,
+        bytes: &[u8],
+    ) -> ClipboardEntry {
+        ClipboardEntry::from_bytes(start, end, bytes.to_vec())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TextContentProvider -- provides text representations to the clipboard
+// ---------------------------------------------------------------------------
+
+/// Provider that supplies text for clipboard operations.
+///
+/// Ported from the text-content provider concept in Ghidra's clipboard package.
+#[derive(Debug, Default)]
+pub struct TextContentProvider;
+
+impl TextContentProvider {
+    /// Create a new text content provider.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Provide text for a clipboard entry from code unit lines.
+    pub fn provide_text(
+        &self,
+        start: Address,
+        end: Address,
+        lines: &[String],
+    ) -> ClipboardEntry {
+        let text = lines.join("\n");
+        ClipboardEntry::from_text(start, end, text)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AssemblyContentProvider -- provides assembly text to the clipboard
+// ---------------------------------------------------------------------------
+
+/// Provider that supplies assembly text for clipboard operations.
+///
+/// Ported from the assembly-content provider concept in Ghidra's clipboard package.
+#[derive(Debug, Default)]
+pub struct AssemblyContentProvider;
+
+impl AssemblyContentProvider {
+    /// Create a new assembly content provider.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Provide assembly text with corresponding byte representations.
+    pub fn provide_assembly(
+        &self,
+        start: Address,
+        asm_lines: &[String],
+        _byte_lines: &[String],
+    ) -> ClipboardEntry {
+        let text = asm_lines.join("\n");
+        ClipboardEntry {
+            source_start: start,
+            source_end: Address::new(start.offset + asm_lines.len() as u64),
+            data: Vec::new(),
+            text,
+            format: ClipboardFormat::Assembly,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HtmlTransferable -- HTML-capable clipboard transferable
+// ---------------------------------------------------------------------------
+
+/// A transferable that can produce HTML content for clipboard operations.
+///
+/// Ported from the HTML transferable concept in Ghidra's clipboard package.
+#[derive(Debug, Clone)]
+pub struct HtmlTransferable {
+    /// Source program name.
+    pub source_program: String,
+    /// Plain text content.
+    text_content: String,
+}
+
+impl HtmlTransferable {
+    /// Create a new HTML transferable.
+    pub fn new(source_program: impl Into<String>) -> Self {
+        Self {
+            source_program: source_program.into(),
+            text_content: String::new(),
+        }
+    }
+
+    /// Add text content.
+    pub fn add_text(&mut self, text: &str) {
+        self.text_content.push_str(text);
+    }
+
+    /// Whether this transferable has content.
+    pub fn has_content(&self) -> bool {
+        !self.text_content.is_empty()
+    }
+
+    /// Get the plain text content.
+    pub fn text_content(&self) -> &str {
+        &self.text_content
+    }
+
+    /// Generate a basic HTML representation.
+    pub fn to_html(&self) -> String {
+        format!(
+            "<html><body><pre>{}</pre></body></html>",
+            self.text_content
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CodeUnitTransferable -- structured code unit clipboard data
+// ---------------------------------------------------------------------------
+
+/// A transferable for structured code unit data.
+///
+/// Ported from the CodeUnitTransferable concept in Ghidra's clipboard package.
+#[derive(Debug, Clone)]
+pub struct CodeUnitTransferable {
+    /// Source program.
+    pub source_program: String,
+    /// The preferred format.
+    pub preferred_format: ClipboardFormat,
+    /// Code unit entries.
+    entries: Vec<CodeUnitEntry>,
+}
+
+/// A single code unit entry for structured clipboard transfer.
+#[derive(Debug, Clone)]
+pub struct CodeUnitEntry {
+    /// The address.
+    pub address: Address,
+    /// The display text (instruction mnemonic, data label, etc.).
+    pub display_text: String,
+    /// The raw bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl CodeUnitTransferable {
+    /// Create a new code unit transferable.
+    pub fn new(source_program: impl Into<String>, preferred_format: ClipboardFormat) -> Self {
+        Self {
+            source_program: source_program.into(),
+            preferred_format,
+            entries: Vec::new(),
+        }
+    }
+
+    /// Add a code unit entry.
+    pub fn add_code_unit(
+        &mut self,
+        address: Address,
+        display_text: &str,
+        bytes: &[u8],
+    ) {
+        self.entries.push(CodeUnitEntry {
+            address,
+            display_text: display_text.to_string(),
+            bytes: bytes.to_vec(),
+        });
+    }
+
+    /// The number of code units.
+    pub fn code_unit_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Total bytes across all entries.
+    pub fn total_bytes(&self) -> usize {
+        self.entries.iter().map(|e| e.bytes.len()).sum()
+    }
+
+    /// Get all entries.
+    pub fn entries(&self) -> &[CodeUnitEntry] {
+        &self.entries
+    }
+
+    /// Get the text representation of all code units.
+    pub fn to_text(&self) -> String {
+        self.entries
+            .iter()
+            .map(|e| format!("{}: {}", e.address, e.display_text))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Get the hex dump of all bytes.
+    pub fn to_hex_dump(&self) -> String {
+        self.entries
+            .iter()
+            .flat_map(|e| e.bytes.iter())
+            .map(|b| format!("{:02X}", b))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }

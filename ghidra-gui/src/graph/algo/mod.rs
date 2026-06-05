@@ -13,6 +13,8 @@
 pub mod dominance;
 pub mod dijkstra;
 pub mod find_paths;
+pub mod graph_navigator;
+pub mod iterative_find_paths;
 pub mod johnson;
 pub mod tarjan;
 pub mod dfs_sorter;

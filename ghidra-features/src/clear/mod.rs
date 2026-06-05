@@ -363,4 +363,392 @@ mod tests {
         let refs = opts.reference_source_types_to_clear();
         assert!(refs.is_empty());
     }
+
+    #[test]
+    fn test_clear_cmd_basic() {
+        let mut cmd = ClearCmd::new(
+            Address::new(0x1000),
+            Address::new(0x1FFF),
+            ClearOptions::instructions_and_data(),
+        );
+        assert_eq!(cmd.status_msg(), "");
+        assert!(!cmd.has_error());
+
+        cmd.apply_to_program();
+        assert!(cmd.was_applied());
+        assert_eq!(cmd.cleared_items().len(), 2); // Instructions + Data
+    }
+
+    #[test]
+    fn test_clear_cmd_preserves_labels() {
+        let mut cmd = ClearCmd::new(
+            Address::new(0x1000),
+            Address::new(0x1FFF),
+            ClearOptions::instructions_and_data(),
+        );
+        cmd.set_clear_labels(false);
+        assert!(!cmd.should_clear_labels());
+
+        cmd.apply_to_program();
+        assert!(cmd.was_applied());
+    }
+
+    #[test]
+    fn test_clear_flow_and_repair_cmd() {
+        let mut cmd = ClearFlowAndRepairCmd::new(
+            Address::new(0x1000),
+            true,  // clear data
+            false, // clear labels
+            true,  // repair
+        );
+        assert_eq!(cmd.command_name(), "Clear Flow");
+        assert!(cmd.should_repair());
+        assert!(!cmd.has_protected_set());
+
+        cmd.apply_to_program();
+        assert!(cmd.was_applied());
+    }
+
+    #[test]
+    fn test_clear_flow_and_repair_cmd_with_protected() {
+        let mut protected = std::collections::HashSet::new();
+        protected.insert(Address::new(0x1500));
+
+        let cmd = ClearFlowAndRepairCmd::with_protected(
+            Address::new(0x1000),
+            Address::new(0x1FFF),
+            true,
+            false,
+            true,
+            protected,
+        );
+        assert!(cmd.has_protected_set());
+        assert!(cmd.is_protected(Address::new(0x1500)));
+        assert!(!cmd.is_protected(Address::new(0x1200)));
+    }
+
+    #[test]
+    fn test_clear_flow_and_repair_repair_functions() {
+        let mut cmd = ClearFlowAndRepairCmd::new(
+            Address::new(0x1000),
+            true,
+            false,
+            true,
+        );
+        cmd.set_repair_functions(true);
+        assert!(cmd.should_repair_functions());
+    }
+
+    #[test]
+    fn test_clear_flow_and_repair_no_repair() {
+        let cmd = ClearFlowAndRepairCmd::new(
+            Address::new(0x1000),
+            true,
+            true,
+            false,
+        );
+        assert!(!cmd.should_repair());
+    }
+
+    #[test]
+    fn test_clear_cmd_display() {
+        let cmd = ClearCmd::new(
+            Address::new(0x1000),
+            Address::new(0x1FFF),
+            ClearOptions::all(),
+        );
+        let s = format!("{}", cmd);
+        assert!(s.contains("Clear"));
+    }
+
+    #[test]
+    fn test_clear_flow_and_repair_display() {
+        let cmd = ClearFlowAndRepairCmd::new(
+            Address::new(0x1000),
+            true,
+            false,
+            true,
+        );
+        let s = format!("{}", cmd);
+        assert!(s.contains("Clear Flow"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClearCmd -- command to clear code/data at addresses
+// ---------------------------------------------------------------------------
+
+/// Command that clears code units, data, labels, and other items at an address range.
+///
+/// Ported from Ghidra's `ClearCmd.java`.
+#[derive(Debug, Clone)]
+pub struct ClearCmd {
+    start: Address,
+    end: Address,
+    options: ClearOptions,
+    clear_labels: bool,
+    clear_bytes: bool,
+    applied: bool,
+    cleared_items: Vec<ClearType>,
+    status_msg: String,
+}
+
+impl ClearCmd {
+    /// Create a new clear command.
+    pub fn new(start: Address, end: Address, options: ClearOptions) -> Self {
+        Self {
+            start,
+            end,
+            options,
+            clear_labels: true,
+            clear_bytes: false,
+            applied: false,
+            cleared_items: Vec::new(),
+            status_msg: String::new(),
+        }
+    }
+
+    /// Whether to clear labels/symbols.
+    pub fn set_clear_labels(&mut self, clear: bool) {
+        self.clear_labels = clear;
+    }
+
+    /// Whether labels should be cleared.
+    pub fn should_clear_labels(&self) -> bool {
+        self.clear_labels
+    }
+
+    /// Whether to clear bytes.
+    pub fn set_clear_bytes(&mut self, clear: bool) {
+        self.clear_bytes = clear;
+    }
+
+    /// The start address.
+    pub fn start(&self) -> Address {
+        self.start
+    }
+
+    /// The end address.
+    pub fn end(&self) -> Address {
+        self.end
+    }
+
+    /// The clear options.
+    pub fn options(&self) -> &ClearOptions {
+        &self.options
+    }
+
+    /// Apply the clear to a program (simulated).
+    pub fn apply_to_program(&mut self) {
+        self.cleared_items.clear();
+        for &clear_type in ClearType::all() {
+            if self.options.should_clear(clear_type) {
+                self.cleared_items.push(clear_type);
+            }
+        }
+        self.applied = true;
+        self.status_msg = format!("Cleared {} types over {} addresses",
+            self.cleared_items.len(),
+            self.end.offset.saturating_sub(self.start.offset) + 1
+        );
+    }
+
+    /// Whether the command was applied.
+    pub fn was_applied(&self) -> bool {
+        self.applied
+    }
+
+    /// Get the list of cleared item types.
+    pub fn cleared_items(&self) -> &[ClearType] {
+        &self.cleared_items
+    }
+
+    /// The status message.
+    pub fn status_msg(&self) -> &str {
+        &self.status_msg
+    }
+
+    /// Whether an error occurred.
+    pub fn has_error(&self) -> bool {
+        self.status_msg.contains("ERROR")
+    }
+}
+
+impl std::fmt::Display for ClearCmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Clear {:?} to {:?} ({})", self.start, self.end, self.status_msg)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClearFlowAndRepairCmd -- clear flow and optionally repair
+// ---------------------------------------------------------------------------
+
+/// Command that clears code flow at an address and optionally repairs it.
+///
+/// Ported from Ghidra's `ClearFlowAndRepairCmd.java`.
+/// This is the most complex clear command, handling:
+/// - Clearing code units
+/// - Removing references
+/// - Repairing flow (re-disassembling fallthrough paths)
+/// - Handling protected address sets
+#[derive(Debug, Clone)]
+pub struct ClearFlowAndRepairCmd {
+    start: Address,
+    end: Address,
+    clear_data: bool,
+    clear_labels: bool,
+    repair: bool,
+    repair_functions: bool,
+    clear_computed_ptr_refs: bool,
+    clear_offcut: bool,
+    protected: HashSet<Address>,
+    applied: bool,
+    status_msg: String,
+}
+
+impl ClearFlowAndRepairCmd {
+    /// The fallthrough search limit for repair operations.
+    pub const FALLTHROUGH_SEARCH_LIMIT: usize = 12;
+
+    /// Create a new clear-flow-and-repair command.
+    pub fn new(
+        start: Address,
+        clear_data: bool,
+        clear_labels: bool,
+        repair: bool,
+    ) -> Self {
+        Self {
+            start,
+            end: start,
+            clear_data,
+            clear_labels,
+            repair,
+            repair_functions: false,
+            clear_computed_ptr_refs: true,
+            clear_offcut: true,
+            protected: HashSet::new(),
+            applied: false,
+            status_msg: String::new(),
+        }
+    }
+
+    /// Create with a protected address set.
+    pub fn with_protected(
+        start: Address,
+        end: Address,
+        clear_data: bool,
+        clear_labels: bool,
+        repair: bool,
+        protected: HashSet<Address>,
+    ) -> Self {
+        Self {
+            start,
+            end,
+            clear_data,
+            clear_labels,
+            repair,
+            repair_functions: false,
+            clear_computed_ptr_refs: true,
+            clear_offcut: true,
+            protected,
+            applied: false,
+            status_msg: String::new(),
+        }
+    }
+
+    /// The command name.
+    pub fn command_name(&self) -> &str {
+        "Clear Flow"
+    }
+
+    /// Whether this command should repair flow.
+    pub fn should_repair(&self) -> bool {
+        self.repair
+    }
+
+    /// Whether to clear data.
+    pub fn should_clear_data(&self) -> bool {
+        self.clear_data
+    }
+
+    /// Whether to clear labels.
+    pub fn should_clear_labels(&self) -> bool {
+        self.clear_labels
+    }
+
+    /// Whether to repair functions.
+    pub fn should_repair_functions(&self) -> bool {
+        self.repair_functions
+    }
+
+    /// Set whether to repair functions.
+    pub fn set_repair_functions(&mut self, repair: bool) {
+        self.repair_functions = repair;
+    }
+
+    /// Whether to clear computed pointer references.
+    pub fn should_clear_computed_ptr_refs(&self) -> bool {
+        self.clear_computed_ptr_refs
+    }
+
+    /// Set whether to clear computed pointer references.
+    pub fn set_clear_computed_ptr_refs(&mut self, clear: bool) {
+        self.clear_computed_ptr_refs = clear;
+    }
+
+    /// Whether to clear offcut references.
+    pub fn should_clear_offcut(&self) -> bool {
+        self.clear_offcut
+    }
+
+    /// Set whether to clear offcut references.
+    pub fn set_clear_offcut(&mut self, clear: bool) {
+        self.clear_offcut = clear;
+    }
+
+    /// Whether a protected set is configured.
+    pub fn has_protected_set(&self) -> bool {
+        !self.protected.is_empty()
+    }
+
+    /// Check if an address is protected.
+    pub fn is_protected(&self, address: Address) -> bool {
+        self.protected.contains(&address)
+    }
+
+    /// Apply the command to a program (simulated).
+    pub fn apply_to_program(&mut self) {
+        self.applied = true;
+        self.status_msg = format!(
+            "Cleared flow at {:?}-{:?} (repair={}, data={}, labels={})",
+            self.start, self.end, self.repair, self.clear_data, self.clear_labels
+        );
+    }
+
+    /// Whether the command was applied.
+    pub fn was_applied(&self) -> bool {
+        self.applied
+    }
+
+    /// The status message.
+    pub fn status_msg(&self) -> &str {
+        &self.status_msg
+    }
+
+    /// The start address.
+    pub fn start(&self) -> Address {
+        self.start
+    }
+
+    /// The end address.
+    pub fn end(&self) -> Address {
+        self.end
+    }
+}
+
+impl std::fmt::Display for ClearFlowAndRepairCmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Clear Flow {:?}-{:?}", self.start, self.end)
+    }
 }

@@ -40,6 +40,7 @@ pub mod decompiler_view;
 pub mod docking;
 pub mod graph;
 pub mod gui_event;
+pub mod gui_test;
 pub mod gui_util;
 pub mod layout_util;
 pub mod listing;

@@ -1042,4 +1042,195 @@ mod tests {
         mgr.clear();
         assert_eq!(mgr.marker_set_count(), 0);
     }
+
+    #[test]
+    fn test_modifiable_address_set_collection() {
+        let mut coll = ModifiableAddressSetCollection::new();
+        coll.add_range(0x1000, 0x10FF);
+        coll.add_range(0x2000, 0x20FF);
+        assert_eq!(coll.range_count(), 2);
+        assert!(coll.contains(0x1050));
+        assert!(coll.contains(0x2050));
+        assert!(!coll.contains(0x3000));
+    }
+
+    #[test]
+    fn test_modifiable_address_set_collection_remove() {
+        let mut coll = ModifiableAddressSetCollection::new();
+        coll.add_range(0x1000, 0x10FF);
+        coll.remove_range(0x1050, 0x10AF);
+        assert!(coll.contains(0x1040));
+        assert!(!coll.contains(0x1070));
+        assert!(coll.contains(0x10B0));
+    }
+
+    #[test]
+    fn test_modifiable_address_set_collection_intersect() {
+        let mut coll = ModifiableAddressSetCollection::new();
+        coll.add_range(0x1000, 0x10FF);
+        let intersected = coll.intersects_range(0x1050, 0x10AF);
+        assert!(intersected);
+
+        let not_intersected = coll.intersects_range(0x2000, 0x20FF);
+        assert!(!not_intersected);
+    }
+
+    #[test]
+    fn test_modifiable_address_set_collection_clear() {
+        let mut coll = ModifiableAddressSetCollection::new();
+        coll.add_range(0x1000, 0x10FF);
+        coll.add_range(0x2000, 0x20FF);
+        coll.clear();
+        assert_eq!(coll.range_count(), 0);
+        assert!(!coll.contains(0x1050));
+    }
+
+    #[test]
+    fn test_modifiable_address_set_collection_num_addresses() {
+        let mut coll = ModifiableAddressSetCollection::new();
+        coll.add_range(0x1000, 0x100F);
+        assert_eq!(coll.num_addresses(), 16);
+    }
+
+    #[test]
+    fn test_marker_manager_get_marker_sets() {
+        let mut mgr = MarkerManager::new();
+        mgr.add_marker_set(Box::new(AreaMarkerSetImpl::new("Bookmarks", "", 5, RgbColor::BLUE)));
+        mgr.add_marker_set(Box::new(AreaMarkerSetImpl::new("Errors", "", 10, RgbColor::RED)));
+        let bookmarks = mgr.get_marker_sets("Bookmarks");
+        assert_eq!(bookmarks.len(), 1);
+    }
+
+    #[test]
+    fn test_marker_manager_priority_ordering() {
+        let mut mgr = MarkerManager::new();
+        let mut low = AreaMarkerSetImpl::new("Low", "", 1, RgbColor::GREEN);
+        low.add_range(0x1000, 0x1000);
+        let mut high = AreaMarkerSetImpl::new("High", "", 10, RgbColor::RED);
+        high.add_range(0x1000, 0x1000);
+        mgr.add_marker_set(Box::new(low));
+        mgr.add_marker_set(Box::new(high));
+        let marker = mgr.get_marker_at(0x1000);
+        assert!(marker.is_some());
+        assert_eq!(marker.unwrap().name(), "High");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ModifiableAddressSetCollection -- ported from ModifiableAddressSetCollection.java
+// ---------------------------------------------------------------------------
+
+/// A collection of address ranges that can be modified.
+///
+/// Ported from Ghidra's `ModifiableAddressSetCollection.java`.
+/// Used by marker sets to track which addresses contain markers.
+#[derive(Debug, Clone, Default)]
+pub struct ModifiableAddressSetCollection {
+    /// Sorted address ranges (start, end) inclusive.
+    ranges: Vec<(u64, u64)>,
+}
+
+impl ModifiableAddressSetCollection {
+    /// Create a new empty collection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an address range [start, end] inclusive.
+    pub fn add_range(&mut self, start: u64, end: u64) {
+        if start > end {
+            return;
+        }
+        self.ranges.push((start, end));
+        self.normalize();
+    }
+
+    /// Remove an address range [start, end] inclusive.
+    pub fn remove_range(&mut self, start: u64, end: u64) {
+        if start > end {
+            return;
+        }
+        let mut new_ranges = Vec::new();
+        for &(rs, re) in &self.ranges {
+            if re < start || rs > end {
+                // No overlap
+                new_ranges.push((rs, re));
+            } else {
+                // Overlap -- split if needed
+                if rs < start {
+                    new_ranges.push((rs, start - 1));
+                }
+                if re > end {
+                    new_ranges.push((end + 1, re));
+                }
+            }
+        }
+        self.ranges = new_ranges;
+    }
+
+    /// Check if a given address is contained in any range.
+    pub fn contains(&self, address: u64) -> bool {
+        self.ranges.iter().any(|&(s, e)| address >= s && address <= e)
+    }
+
+    /// Check if a given range intersects with any stored range.
+    pub fn intersects_range(&self, start: u64, end: u64) -> bool {
+        self.ranges.iter().any(|&(rs, re)| rs <= end && re >= start)
+    }
+
+    /// The number of contiguous ranges.
+    pub fn range_count(&self) -> usize {
+        self.ranges.len()
+    }
+
+    /// The total number of addresses across all ranges.
+    pub fn num_addresses(&self) -> u64 {
+        self.ranges.iter().map(|&(s, e)| e - s + 1).sum()
+    }
+
+    /// Whether the collection is empty.
+    pub fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
+    }
+
+    /// Clear all ranges.
+    pub fn clear(&mut self) {
+        self.ranges.clear();
+    }
+
+    /// Get the minimum address.
+    pub fn min_address(&self) -> Option<u64> {
+        self.ranges.first().map(|&(s, _)| s)
+    }
+
+    /// Get the maximum address.
+    pub fn max_address(&self) -> Option<u64> {
+        self.ranges.last().map(|(_, e)| *e)
+    }
+
+    /// Get all ranges as a slice.
+    pub fn ranges(&self) -> &[(u64, u64)] {
+        &self.ranges
+    }
+
+    /// Merge overlapping and adjacent ranges.
+    fn normalize(&mut self) {
+        if self.ranges.is_empty() {
+            return;
+        }
+        self.ranges.sort_by_key(|&(s, _)| s);
+        let mut merged = Vec::new();
+        let (mut cur_start, mut cur_end) = self.ranges[0];
+        for &(s, e) in &self.ranges[1..] {
+            if s <= cur_end + 1 {
+                cur_end = cur_end.max(e);
+            } else {
+                merged.push((cur_start, cur_end));
+                cur_start = s;
+                cur_end = e;
+            }
+        }
+        merged.push((cur_start, cur_end));
+        self.ranges = merged;
+    }
 }

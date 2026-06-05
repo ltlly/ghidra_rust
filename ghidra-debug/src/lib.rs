@@ -36,6 +36,7 @@ pub mod api;
 pub mod db;
 mod debug_integration_test;
 mod debug_new_modules_test;
+mod debug_port_integration_test;
 mod debug_port_modules_test;
 mod debug_remaining_modules_test;
 pub mod framework;
