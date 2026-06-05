@@ -344,3 +344,17 @@ pub use trace_db_symbol_internals::{
     AbstractDBTraceSymbolSingleTypeView, AbstractDBTraceSymbolSingleTypeWithAddressView,
     AbstractDBTraceSymbolSingleTypeWithLocationView, SymbolQueryFilter,
 };
+
+// New modules from remaining Debug port (Framework-TraceModeling / Debugger)
+pub mod trace_db_address_encode;
+pub mod trace_db_property_api_view;
+pub mod trace_db_program_byte_cache;
+pub mod trace_db_program_mem_blocks;
+pub mod trace_db_program_context_view;
+pub mod trace_db_program_property_maps;
+pub mod trace_db_program_root_module;
+pub mod trace_db_program_symbol_table;
+pub mod trace_db_program_func_manager;
+pub mod trace_db_program_ref_manager_view;
+pub mod trace_db_raw_data_adapter;
+pub mod trace_db_raw_code_unit_adapter;

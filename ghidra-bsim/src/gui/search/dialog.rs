@@ -473,6 +473,276 @@ impl FunctionSymbolMapper {
     }
 }
 
+/// Dialog for managing BSim database server definitions.
+///
+/// Ports `ghidra.features.bsim.gui.search.dialog.BSimServerDialog`.
+#[derive(Debug, Clone)]
+pub struct BSimServerDialog {
+    /// Title of the dialog.
+    pub title: String,
+    /// The server table model.
+    pub server_model: BSimServerTableModel,
+    /// Whether the dialog is currently visible.
+    pub visible: bool,
+    /// Preferred width.
+    pub preferred_width: u32,
+    /// Preferred height.
+    pub preferred_height: u32,
+    /// Last added server info (for auto-selecting).
+    pub last_added: Option<String>,
+    /// Whether the database connection is active.
+    pub db_connection_active: bool,
+}
+
+impl BSimServerDialog {
+    /// Create a new server dialog.
+    pub fn new() -> Self {
+        Self {
+            title: "BSim Server Manager".into(),
+            server_model: BSimServerTableModel::new(),
+            visible: false,
+            preferred_width: 600,
+            preferred_height: 400,
+            last_added: None,
+            db_connection_active: false,
+        }
+    }
+
+    /// Show the dialog.
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+
+    /// Dismiss the dialog.
+    pub fn dismiss(&mut self) {
+        self.visible = false;
+    }
+
+    /// Add a new server.
+    pub fn add_server(&mut self, entry: BSimServerTableEntry) {
+        self.last_added = Some(entry.name.clone());
+        self.server_model.add(entry);
+    }
+
+    /// Toggle the database connection state.
+    pub fn toggle_connection(&mut self) {
+        self.db_connection_active = !self.db_connection_active;
+    }
+}
+
+impl Default for BSimServerDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Dialog for the BSim overview (showing all known databases/executables).
+///
+/// Ports `ghidra.features.bsim.gui.search.dialog.BSimOverviewDialog`.
+#[derive(Debug, Clone)]
+pub struct BSimOverviewDialog {
+    /// Title of the dialog.
+    pub title: String,
+    /// Overview entries.
+    pub entries: Vec<BSimOverviewEntry>,
+    /// Currently selected entry index.
+    pub selected_index: Option<usize>,
+    /// Whether the dialog is visible.
+    pub visible: bool,
+}
+
+/// A single entry in the BSim overview.
+#[derive(Debug, Clone)]
+pub struct BSimOverviewEntry {
+    /// Database/server name.
+    pub server_name: String,
+    /// Executable name.
+    pub executable_name: String,
+    /// Architecture.
+    pub architecture: String,
+    /// Number of functions.
+    pub function_count: usize,
+    /// Database type.
+    pub db_type: String,
+}
+
+impl BSimOverviewDialog {
+    /// Create a new overview dialog.
+    pub fn new() -> Self {
+        Self {
+            title: "BSim Database Overview".into(),
+            entries: Vec::new(),
+            selected_index: None,
+            visible: false,
+        }
+    }
+
+    /// Add an entry.
+    pub fn add_entry(&mut self, entry: BSimOverviewEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Get the selected entry.
+    pub fn selected(&self) -> Option<&BSimOverviewEntry> {
+        self.selected_index.and_then(|i| self.entries.get(i))
+    }
+
+    /// Select an entry by index.
+    pub fn select(&mut self, index: usize) {
+        if index < self.entries.len() {
+            self.selected_index = Some(index);
+        }
+    }
+
+    /// Show the dialog.
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+
+    /// Dismiss the dialog.
+    pub fn dismiss(&mut self) {
+        self.visible = false;
+    }
+
+    /// Get the number of entries.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+impl Default for BSimOverviewDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A widget for configuring a single BSim filter.
+///
+/// Ports `ghidra.features.bsim.gui.filters.FilterWidget`.
+#[derive(Debug, Clone)]
+pub struct FilterWidget {
+    /// The filter type name.
+    pub filter_type: String,
+    /// The filter value.
+    pub value: String,
+    /// Whether the filter is enabled.
+    pub enabled: bool,
+    /// Whether this is a negated filter.
+    pub negated: bool,
+}
+
+impl FilterWidget {
+    /// Create a new filter widget.
+    pub fn new(filter_type: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            filter_type: filter_type.into(),
+            value: value.into(),
+            enabled: true,
+            negated: false,
+        }
+    }
+
+    /// Create a negated filter widget.
+    pub fn negated(filter_type: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            filter_type: filter_type.into(),
+            value: value.into(),
+            enabled: true,
+            negated: true,
+        }
+    }
+
+    /// Toggle the enabled state.
+    pub fn toggle(&mut self) {
+        self.enabled = !self.enabled;
+    }
+
+    /// Set the value.
+    pub fn set_value(&mut self, value: impl Into<String>) {
+        self.value = value.into();
+    }
+
+    /// Get the display label for this filter.
+    pub fn display_label(&self) -> String {
+        let prefix = if self.negated { "NOT " } else { "" };
+        format!("{}{}: {}", prefix, self.filter_type, self.value)
+    }
+}
+
+/// The main BSim search plugin entry point.
+///
+/// Ports `ghidra.features.bsim.gui.BSimSearchPlugin`.
+#[derive(Debug)]
+pub struct BSimSearchPlugin {
+    /// Plugin name.
+    pub name: String,
+    /// Whether the plugin is enabled.
+    pub enabled: bool,
+    /// Search service.
+    pub search_service: BSimSearchService,
+    /// Server dialog reference.
+    pub server_dialog: BSimServerDialog,
+    /// Overview dialog reference.
+    pub overview_dialog: BSimOverviewDialog,
+    /// Active filter widgets.
+    pub filter_widgets: Vec<FilterWidget>,
+}
+
+impl BSimSearchPlugin {
+    /// Create a new BSim search plugin.
+    pub fn new() -> Self {
+        Self {
+            name: "BSimSearchPlugin".into(),
+            enabled: true,
+            search_service: BSimSearchService::new(),
+            server_dialog: BSimServerDialog::new(),
+            overview_dialog: BSimOverviewDialog::new(),
+            filter_widgets: Vec::new(),
+        }
+    }
+
+    /// Add a filter widget.
+    pub fn add_filter(&mut self, widget: FilterWidget) {
+        self.filter_widgets.push(widget);
+    }
+
+    /// Remove a filter by type name.
+    pub fn remove_filter(&mut self, filter_type: &str) {
+        self.filter_widgets.retain(|w| w.filter_type != filter_type);
+    }
+
+    /// Get the number of active filters.
+    pub fn active_filter_count(&self) -> usize {
+        self.filter_widgets.iter().filter(|w| w.enabled).count()
+    }
+
+    /// Open the server manager dialog.
+    pub fn open_server_dialog(&mut self) {
+        self.server_dialog.show();
+    }
+
+    /// Open the overview dialog.
+    pub fn open_overview_dialog(&mut self) {
+        self.overview_dialog.show();
+    }
+
+    /// Start a search with current settings.
+    pub fn start_search(&mut self) {
+        self.search_service.start_search();
+    }
+
+    /// Get the search state.
+    pub fn search_state(&self) -> &super::BSimSearchState {
+        &self.search_service.state
+    }
+}
+
+impl Default for BSimSearchPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// A dialog for selecting functions to search.
 #[derive(Debug, Clone, Default)]
 pub struct SelectedFunctionsTableDialog {
@@ -781,5 +1051,130 @@ mod tests {
 
         let mapper = FunctionSymbolMapper::new("printf", 0x4000, 0x4000);
         assert_eq!(mapper.qualified_name(), "printf");
+    }
+
+    #[test]
+    fn test_bsim_server_dialog() {
+        let mut dialog = BSimServerDialog::new();
+        assert_eq!(dialog.title, "BSim Server Manager");
+        assert!(!dialog.visible);
+        assert_eq!(dialog.preferred_width, 600);
+
+        dialog.show();
+        assert!(dialog.visible);
+        dialog.dismiss();
+        assert!(!dialog.visible);
+    }
+
+    #[test]
+    fn test_bsim_server_dialog_add_server() {
+        let mut dialog = BSimServerDialog::new();
+        dialog.add_server(BSimServerTableEntry {
+            name: "test".into(),
+            backend_type: "postgresql".into(),
+            hostname: "localhost".into(),
+            port: 5432,
+            database: "bsim".into(),
+            connected: false,
+            last_error: None,
+        });
+        assert_eq!(dialog.server_model.len(), 1);
+        assert_eq!(dialog.last_added, Some("test".into()));
+    }
+
+    #[test]
+    fn test_bsim_server_dialog_toggle_connection() {
+        let mut dialog = BSimServerDialog::new();
+        assert!(!dialog.db_connection_active);
+        dialog.toggle_connection();
+        assert!(dialog.db_connection_active);
+    }
+
+    #[test]
+    fn test_bsim_overview_dialog() {
+        let mut dialog = BSimOverviewDialog::new();
+        assert!(dialog.visible == false);
+        assert_eq!(dialog.entry_count(), 0);
+
+        dialog.add_entry(BSimOverviewEntry {
+            server_name: "server1".into(),
+            executable_name: "libc.so".into(),
+            architecture: "x86".into(),
+            function_count: 1000,
+            db_type: "postgresql".into(),
+        });
+        assert_eq!(dialog.entry_count(), 1);
+
+        dialog.select(0);
+        assert!(dialog.selected().is_some());
+        assert_eq!(dialog.selected().unwrap().executable_name, "libc.so");
+
+        dialog.show();
+        assert!(dialog.visible);
+    }
+
+    #[test]
+    fn test_bsim_overview_dialog_select_out_of_bounds() {
+        let mut dialog = BSimOverviewDialog::new();
+        dialog.select(9999); // no entries
+        assert!(dialog.selected().is_none());
+    }
+
+    #[test]
+    fn test_filter_widget() {
+        let widget = FilterWidget::new("architecture", "x86");
+        assert!(widget.enabled);
+        assert!(!widget.negated);
+        assert_eq!(widget.display_label(), "architecture: x86");
+    }
+
+    #[test]
+    fn test_filter_widget_negated() {
+        let widget = FilterWidget::negated("architecture", "arm");
+        assert!(widget.negated);
+        assert_eq!(widget.display_label(), "NOT architecture: arm");
+    }
+
+    #[test]
+    fn test_filter_widget_toggle() {
+        let mut widget = FilterWidget::new("compiler", "gcc");
+        assert!(widget.enabled);
+        widget.toggle();
+        assert!(!widget.enabled);
+    }
+
+    #[test]
+    fn test_bsim_search_plugin() {
+        let mut plugin = BSimSearchPlugin::new();
+        assert_eq!(plugin.name, "BSimSearchPlugin");
+        assert!(plugin.enabled);
+        assert_eq!(plugin.filter_widgets.len(), 0);
+
+        plugin.add_filter(FilterWidget::new("architecture", "x86"));
+        plugin.add_filter(FilterWidget::new("compiler", "gcc"));
+        assert_eq!(plugin.filter_widgets.len(), 2);
+        assert_eq!(plugin.active_filter_count(), 2);
+
+        plugin.remove_filter("architecture");
+        assert_eq!(plugin.filter_widgets.len(), 1);
+    }
+
+    #[test]
+    fn test_bsim_search_plugin_search() {
+        let mut plugin = BSimSearchPlugin::new();
+        assert!(!plugin.search_state().is_searching());
+
+        plugin.start_search();
+        assert!(plugin.search_state().is_searching());
+    }
+
+    #[test]
+    fn test_bsim_search_plugin_dialogs() {
+        let mut plugin = BSimSearchPlugin::new();
+        plugin.open_server_dialog();
+        assert!(plugin.server_dialog.visible);
+
+        plugin.open_overview_dialog();
+        assert!(plugin.overview_dialog.visible);
     }
 }

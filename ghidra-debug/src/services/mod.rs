@@ -54,6 +54,27 @@ pub mod breakpoint_lifecycle_impl;
 pub mod emulation_data_access;
 pub mod emulation_integration_ext;
 
+// New modules from remaining Debug port (Debugger-api / Debugger)
+pub mod emulator_factory_impl;
+pub mod mapping_proposals_impl;
+pub mod breakpoint_action_items;
+pub mod progress_closeable_monitor;
+pub mod progress_monitor_receiver;
+pub mod platform_service_plugin;
+pub mod control_service_plugin;
+pub mod target_service_impl;
+pub mod map_modules_background_cmd;
+pub mod map_regions_background_cmd;
+pub mod map_sections_background_cmd;
+pub mod emulation_default_access;
+pub mod emulation_default_memory;
+pub mod emulation_default_registers;
+pub mod emulation_default_property;
+pub mod emulation_program_utils;
+pub mod region_map_proposal_impl;
+pub mod section_map_proposal_impl;
+pub mod module_map_proposal_impl;
+
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
     DebuggerAutoMappingService as AutoMappingServiceExt,

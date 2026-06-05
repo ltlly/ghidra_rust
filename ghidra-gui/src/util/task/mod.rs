@@ -163,6 +163,130 @@ impl DummyCancellableTaskMonitor {
     }
 }
 
+/// Listener that receives busy/idle notifications from tasks.
+///
+/// Ports `ghidra.util.task.BusyListener` from Ghidra's Java source.
+///
+/// Used by animations and long-running operations to signal to the UI
+/// that the application is busy and should show a wait cursor or progress indicator.
+pub trait BusyListener: Send + Sync {
+    /// Called when the task becomes busy.
+    fn set_busy(&self, busy: bool);
+}
+
+/// A `BusyListener` implementation that tracks the busy state via an atomic flag.
+///
+/// This is useful for testing and for components that need to check the busy state
+/// from the UI thread without blocking.
+#[derive(Debug, Clone)]
+pub struct AtomicBusyListener {
+    busy: Arc<AtomicBool>,
+}
+
+impl AtomicBusyListener {
+    /// Create a new atomic busy listener (initially not busy).
+    pub fn new() -> Self {
+        Self {
+            busy: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Check if currently busy.
+    pub fn is_busy(&self) -> bool {
+        self.busy.load(Ordering::SeqCst)
+    }
+}
+
+impl Default for AtomicBusyListener {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BusyListener for AtomicBusyListener {
+    fn set_busy(&self, busy: bool) {
+        self.busy.store(busy, Ordering::SeqCst);
+    }
+}
+
+/// Wraps a `TaskMonitor` to report progress to a parent task, dividing
+/// the parent's progress range into a sub-range.
+///
+/// Ports `ghidra.util.task.UnknownProgressWrappingTaskMonitor`.
+#[derive(Debug)]
+pub struct UnknownProgressWrappingTaskMonitor {
+    /// The parent monitor.
+    parent: TaskMonitor,
+    /// Minimum progress value in parent's range.
+    min_progress: u64,
+    /// Maximum progress value in parent's range.
+    max_progress: u64,
+    /// Whether the maximum is unknown (indeterminate mode).
+    indeterminate: bool,
+    /// The current indeterminate tick.
+    indeterminate_tick: u64,
+}
+
+impl UnknownProgressWrappingTaskMonitor {
+    /// Create a new wrapping monitor.
+    pub fn new(parent: TaskMonitor) -> Self {
+        Self {
+            parent,
+            min_progress: 0,
+            max_progress: 100,
+            indeterminate: true,
+            indeterminate_tick: 0,
+        }
+    }
+
+    /// Set the progress range in the parent monitor.
+    pub fn set_progress_range(&mut self, min: u64, max: u64) {
+        self.min_progress = min;
+        self.max_progress = max;
+        self.indeterminate = false;
+    }
+
+    /// Set indeterminate mode (unknown progress).
+    pub fn set_indeterminate(&mut self) {
+        self.indeterminate = true;
+    }
+
+    /// Update progress in the parent monitor.
+    pub fn set_progress(&self, value: u64) {
+        if !self.indeterminate {
+            let range = self.max_progress.saturating_sub(self.min_progress);
+            self.parent.set_progress(self.min_progress + value.min(range));
+        }
+    }
+
+    /// Check if the parent has been cancelled.
+    pub fn is_cancelled(&self) -> bool {
+        self.parent.is_cancelled()
+    }
+
+    /// Advance the indeterminate tick (for progress bar animation).
+    pub fn increment_indeterminate(&mut self) {
+        self.indeterminate_tick = self.indeterminate_tick.wrapping_add(1);
+    }
+}
+
+/// A `BusyListener` that is a no-op (does nothing).
+///
+/// Useful as a default when no busy listener is needed.
+#[derive(Debug, Clone, Default)]
+pub struct NoOpBusyListener;
+
+impl NoOpBusyListener {
+    /// Create a new no-op busy listener.
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl BusyListener for NoOpBusyListener {
+    fn set_busy(&self, _busy: bool) {}
+}
+
 /// Swing update manager that debounces frequent UI updates.
 ///
 /// Ports `ghidra.util.task.SwingUpdateManager`.
@@ -269,5 +393,59 @@ mod tests {
         let monitor = TaskMonitor::new();
         monitor.set_maximum(500);
         assert_eq!(monitor.maximum(), 500);
+    }
+
+    #[test]
+    fn atomic_busy_listener() {
+        let listener = AtomicBusyListener::new();
+        assert!(!listener.is_busy());
+        listener.set_busy(true);
+        assert!(listener.is_busy());
+        listener.set_busy(false);
+        assert!(!listener.is_busy());
+    }
+
+    #[test]
+    fn noop_busy_listener() {
+        let listener = NoOpBusyListener::new();
+        listener.set_busy(true);
+        listener.set_busy(false);
+        // No panic, no state change to verify.
+    }
+
+    #[test]
+    fn wrapping_monitor_progress() {
+        let parent = TaskMonitor::with_max(1000);
+        let mut wrapper = UnknownProgressWrappingTaskMonitor::new(parent.clone());
+        wrapper.set_progress_range(100, 200);
+        wrapper.set_progress(50);
+        assert_eq!(parent.progress(), 150);
+    }
+
+    #[test]
+    fn wrapping_monitor_indeterminate() {
+        let parent = TaskMonitor::new();
+        let mut wrapper = UnknownProgressWrappingTaskMonitor::new(parent);
+        wrapper.set_indeterminate();
+        wrapper.set_progress(50); // should be no-op
+        assert_eq!(wrapper.indeterminate, true);
+    }
+
+    #[test]
+    fn wrapping_monitor_cancelled() {
+        let parent = TaskMonitor::new();
+        let wrapper = UnknownProgressWrappingTaskMonitor::new(parent.clone());
+        assert!(!wrapper.is_cancelled());
+        parent.cancel();
+        assert!(wrapper.is_cancelled());
+    }
+
+    #[test]
+    fn wrapping_monitor_indeterminate_tick() {
+        let parent = TaskMonitor::new();
+        let mut wrapper = UnknownProgressWrappingTaskMonitor::new(parent);
+        assert_eq!(wrapper.indeterminate_tick, 0);
+        wrapper.increment_indeterminate();
+        assert_eq!(wrapper.indeterminate_tick, 1);
     }
 }

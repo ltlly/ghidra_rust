@@ -242,3 +242,9 @@ pub mod trace_emulation_state;
 pub use trace_emulation_state::{
     TraceByteState, TraceMemoryStateArithmetic, TraceMemoryStatePiece,
 };
+
+// New model modules from remaining Debug port
+pub mod trace_property_map_ops;
+pub mod trace_program_view_ext;
+pub mod trace_memory_space_input_stream;
+pub mod trace_data_type_ops;

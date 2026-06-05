@@ -1607,6 +1607,768 @@ impl<'a> Write for CountingWriter<'a> {
 }
 
 // ---------------------------------------------------------------------------
+// ExportResult -- result of an export operation
+// ---------------------------------------------------------------------------
+
+/// Result of an export operation, containing summary information.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterDialog`
+/// result display logic.
+#[derive(Debug, Clone)]
+pub struct ExportResult {
+    /// Whether the export succeeded.
+    pub success: bool,
+    /// The output file path.
+    pub output_path: String,
+    /// The size of the output file in bytes.
+    pub output_size: u64,
+    /// The format name used for export.
+    pub format_name: String,
+    /// Log messages from the export operation.
+    pub messages: Vec<String>,
+    /// Whether the domain file was exported directly (without opening).
+    pub exported_domain_file: bool,
+}
+
+impl ExportResult {
+    /// Create a successful export result.
+    pub fn success(
+        output_path: impl Into<String>,
+        output_size: u64,
+        format_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            success: true,
+            output_path: output_path.into(),
+            output_size,
+            format_name: format_name.into(),
+            messages: Vec::new(),
+            exported_domain_file: false,
+        }
+    }
+
+    /// Create a failed export result.
+    pub fn failure(output_path: impl Into<String>, format_name: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            output_path: output_path.into(),
+            output_size: 0,
+            format_name: format_name.into(),
+            messages: Vec::new(),
+            exported_domain_file: false,
+        }
+    }
+
+    /// Add a message to the result log.
+    pub fn add_message(&mut self, msg: impl Into<String>) {
+        self.messages.push(msg.into());
+    }
+
+    /// Generate a formatted summary string.
+    ///
+    /// Mirrors `ExporterDialog.displaySummaryResults()`.
+    pub fn summary(&self) -> String {
+        let mut buf = String::new();
+        buf.push_str(&format!("Destination file:       {}\n\n", self.output_path));
+        buf.push_str(&format!("Destination file Size:  {}\n", self.output_size));
+        buf.push_str(&format!("Format:                 {}\n\n", self.format_name));
+        for msg in &self.messages {
+            buf.push_str(msg);
+            buf.push('\n');
+        }
+        buf
+    }
+}
+
+impl fmt::Display for ExportResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.success {
+            write!(
+                f,
+                "Export to {} succeeded ({} bytes, {})",
+                self.output_path, self.output_size, self.format_name
+            )
+        } else {
+            write!(f, "Export to {} failed ({})", self.output_path, self.format_name)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ExporterDialogModel -- state/logic for the export dialog
+// ---------------------------------------------------------------------------
+
+/// Validation status for the export dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidationStatus {
+    /// The dialog is ready to export.
+    Valid,
+    /// No exporter format is selected.
+    NoFormatSelected,
+    /// No output file path is specified.
+    NoOutputFile,
+    /// The output path is a directory, not a file.
+    OutputIsDirectory,
+    /// The output file is read-only.
+    OutputReadOnly,
+    /// The output file will be overwritten (warning, not error).
+    OverwriteWarning(String),
+    /// An XML lossy warning should be shown.
+    XmlLossyWarning,
+    /// A SARIF lossy warning should be shown.
+    SarifLossyWarning,
+    /// No applicable exporters for the domain object type.
+    NoApplicableExporters,
+    /// Custom validation error.
+    Error(String),
+}
+
+impl ValidationStatus {
+    /// Returns `true` if the export can proceed.
+    pub fn is_valid(&self) -> bool {
+        matches!(
+            self,
+            ValidationStatus::Valid
+                | ValidationStatus::OverwriteWarning(_)
+                | ValidationStatus::XmlLossyWarning
+                | ValidationStatus::SarifLossyWarning
+        )
+    }
+
+    /// Returns `true` if this is a warning (not an error).
+    pub fn is_warning(&self) -> bool {
+        matches!(
+            self,
+            ValidationStatus::OverwriteWarning(_)
+                | ValidationStatus::XmlLossyWarning
+                | ValidationStatus::SarifLossyWarning
+        )
+    }
+
+    /// Returns the status message, if any.
+    pub fn message(&self) -> Option<&str> {
+        match self {
+            ValidationStatus::Valid => None,
+            ValidationStatus::NoFormatSelected => Some("Please select an exporter format."),
+            ValidationStatus::NoOutputFile => Some("Please enter a destination file."),
+            ValidationStatus::OutputIsDirectory => Some("The specified output file is a directory."),
+            ValidationStatus::OutputReadOnly => Some("The specified output file is read-only."),
+            ValidationStatus::OverwriteWarning(path) => Some(path.as_str()),
+            ValidationStatus::XmlLossyWarning => Some(
+                "Warning: XML is lossy and intended only for transferring data to external tools. \
+                 GZF is the recommended format for saving and sharing program data.",
+            ),
+            ValidationStatus::SarifLossyWarning => Some(
+                "Warning: SARIF is lossy and intended only for transferring data to external tools. \
+                 GZF is the recommended format for saving and sharing program data.",
+            ),
+            ValidationStatus::NoApplicableExporters => {
+                Some("No available exporters for content type")
+            }
+            ValidationStatus::Error(msg) => Some(msg.as_str()),
+        }
+    }
+}
+
+impl fmt::Display for ValidationStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.message() {
+            Some(msg) => write!(f, "{}", msg),
+            None => write!(f, "Valid"),
+        }
+    }
+}
+
+/// The state and logic model for the ExporterDialog.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterDialog`.
+///
+/// This struct manages dialog state without any GUI dependencies -- format
+/// selection, output path validation, selection-only mode, option management,
+/// and the export execution pipeline.
+///
+/// # Example
+///
+/// ```ignore
+/// let mut dialog = ExporterDialogModel::new("my_binary.elf");
+/// dialog.set_format(ExportFormat::Binary);
+/// dialog.set_output_path("/tmp/output.bin");
+/// assert!(dialog.validate().is_valid());
+/// ```
+pub struct ExporterDialogModel {
+    /// The name of the domain file being exported.
+    domain_file_name: String,
+    /// Whether the domain object was supplied by the caller (vs opened internally).
+    domain_object_was_supplied: bool,
+    /// The currently selected export format.
+    selected_format: Option<ExportFormat>,
+    /// The output file path.
+    output_path: String,
+    /// Whether to export only the selected addresses.
+    selection_only: bool,
+    /// Whether a valid address selection exists.
+    has_selection: bool,
+    /// The current export options for the selected format.
+    options: Vec<ExportOption>,
+    /// The exporter registry.
+    registry: ExporterRegistry,
+    /// Whether we're in front-end mode (no code browser).
+    front_end_mode: bool,
+    /// Last used format name (for persistence).
+    last_used_format: Option<String>,
+    /// Export event log.
+    events: Vec<String>,
+}
+
+impl ExporterDialogModel {
+    /// Create a new dialog model for exporting the given domain file.
+    pub fn new(domain_file_name: impl Into<String>) -> Self {
+        Self {
+            domain_file_name: domain_file_name.into(),
+            domain_object_was_supplied: false,
+            selected_format: None,
+            output_path: String::new(),
+            selection_only: false,
+            has_selection: false,
+            options: Vec::new(),
+            registry: ExporterRegistry::with_defaults(),
+            front_end_mode: false,
+            last_used_format: None,
+            events: Vec::new(),
+        }
+    }
+
+    /// Create a new dialog model in front-end mode (no code browser).
+    pub fn new_front_end(domain_file_name: impl Into<String>) -> Self {
+        let mut model = Self::new(domain_file_name);
+        model.front_end_mode = true;
+        model
+    }
+
+    /// Set whether the domain object was supplied (already open) vs needs opening.
+    pub fn set_domain_object_supplied(&mut self, supplied: bool) {
+        self.domain_object_was_supplied = supplied;
+    }
+
+    /// Get the domain file name being exported.
+    pub fn domain_file_name(&self) -> &str {
+        &self.domain_file_name
+    }
+
+    /// Whether this dialog is in front-end mode.
+    pub fn is_front_end_mode(&self) -> bool {
+        self.front_end_mode
+    }
+
+    // -- Format selection --
+
+    /// Get all applicable export formats.
+    pub fn applicable_formats(&self) -> &[ExportFormat] {
+        ExportFormat::all()
+    }
+
+    /// Set the selected export format.
+    pub fn set_format(&mut self, format: ExportFormat) {
+        self.selected_format = Some(format);
+        self.last_used_format = Some(format.exporter_name().to_string());
+        self.events
+            .push(format!("Format changed: {}", format.display_name()));
+    }
+
+    /// Get the selected export format, if any.
+    pub fn selected_format(&self) -> Option<ExportFormat> {
+        self.selected_format
+    }
+
+    /// Restore the last used format.
+    pub fn restore_last_used_format(&mut self) {
+        if let Some(ref name) = self.last_used_format {
+            for fmt in ExportFormat::all() {
+                if fmt.exporter_name() == name {
+                    self.selected_format = Some(*fmt);
+                    return;
+                }
+            }
+        }
+        // Default to Binary if last-used not found
+        self.selected_format = Some(ExportFormat::Binary);
+    }
+
+    // -- Output path --
+
+    /// Set the output file path.
+    pub fn set_output_path(&mut self, path: impl Into<String>) {
+        self.output_path = path.into();
+    }
+
+    /// Get the output file path.
+    pub fn output_path(&self) -> &str {
+        &self.output_path
+    }
+
+    /// Generate a default output file name based on the domain file name.
+    pub fn default_output_filename(&self) -> String {
+        let ext = self
+            .selected_format
+            .map(|f| format!(".{}", f.default_extension()))
+            .unwrap_or_default();
+        format!("{}{}", self.domain_file_name, ext)
+    }
+
+    /// Append the exporter's file extension to the output path if missing.
+    pub fn output_path_with_extension(&self) -> String {
+        let path = self.output_path.trim().to_string();
+        if path.is_empty() {
+            return path;
+        }
+        if let Some(format) = self.selected_format {
+            let ext = format!(".{}", format.default_extension());
+            if !path.to_lowercase().ends_with(&ext.to_lowercase()) {
+                return format!("{}{}", path, ext);
+            }
+        }
+        path
+    }
+
+    // -- Selection --
+
+    /// Set whether a valid address selection exists.
+    pub fn set_has_selection(&mut self, has: bool) {
+        self.has_selection = has;
+    }
+
+    /// Set the selection-only flag.
+    pub fn set_selection_only(&mut self, selection_only: bool) {
+        self.selection_only = selection_only;
+    }
+
+    /// Get the selection-only flag.
+    pub fn is_selection_only(&self) -> bool {
+        self.selection_only
+    }
+
+    /// Whether the selection checkbox should be enabled.
+    ///
+    /// Mirrors `ExporterDialog.shouldEnableCheckbox()`.
+    pub fn should_enable_selection_checkbox(&self) -> bool {
+        if !self.has_selection {
+            return false;
+        }
+        if self.front_end_mode {
+            return false;
+        }
+        self.selected_format
+            .map(|f| {
+                let name = f.exporter_name();
+                self.registry
+                    .find_by_name(name)
+                    .map(|e| e.supports_address_restricted_export())
+                    .unwrap_or(false)
+            })
+            .unwrap_or(false)
+    }
+
+    // -- Options --
+
+    /// Get the current export options.
+    pub fn options(&self) -> &[ExportOption] {
+        &self.options
+    }
+
+    /// Set the export options.
+    pub fn set_options(&mut self, options: Vec<ExportOption>) {
+        self.options = options;
+    }
+
+    /// Whether the current format has options.
+    pub fn has_options(&self) -> bool {
+        !self.options.is_empty()
+    }
+
+    /// Validate a single option value.
+    ///
+    /// Returns `Ok(())` if valid, or an error message.
+    pub fn validate_option(&self, name: &str, value: &ExportOptionValue) -> Result<(), String> {
+        if let Some(opt) = self.options.iter().find(|o| o.name == name) {
+            match (&opt.option_type, value) {
+                (ExportOptionType::Boolean, ExportOptionValue::Boolean(_)) => Ok(()),
+                (ExportOptionType::String, ExportOptionValue::String(_)) => Ok(()),
+                (ExportOptionType::Integer, ExportOptionValue::Integer(v)) => {
+                    if *v < 0 {
+                        Err("Value must be non-negative".into())
+                    } else {
+                        Ok(())
+                    }
+                }
+                (ExportOptionType::HexInteger, ExportOptionValue::HexInteger(_)) => Ok(()),
+                (ExportOptionType::Choice(choices), ExportOptionValue::String(v)) => {
+                    if choices.contains(v) {
+                        Ok(())
+                    } else {
+                        Err(format!("Invalid choice: '{}'. Valid: {:?}", v, choices))
+                    }
+                }
+                _ => Err("Option type mismatch".into()),
+            }
+        } else {
+            Err(format!("Unknown option: {}", name))
+        }
+    }
+
+    // -- Validation --
+
+    /// Validate the current dialog state.
+    ///
+    /// Mirrors `ExporterDialog.validate()`.
+    pub fn validate(&self) -> ValidationStatus {
+        if self.selected_format.is_none() {
+            return ValidationStatus::NoFormatSelected;
+        }
+
+        let path = self.output_path.trim();
+        if path.is_empty() {
+            return ValidationStatus::NoOutputFile;
+        }
+
+        // Check if output path is a directory (in a real system)
+        let output_file = std::path::Path::new(path);
+        if output_file.exists() && output_file.is_dir() {
+            return ValidationStatus::OutputIsDirectory;
+        }
+
+        // Check format-specific warnings
+        let format = self.selected_format.unwrap();
+        match format {
+            ExportFormat::Xml => return ValidationStatus::XmlLossyWarning,
+            ExportFormat::Html => {} // no warning
+            _ => {}
+        }
+
+        // Check for SARIF (not in our enum, but check by name pattern)
+        if format.exporter_name().contains("SARIF") {
+            return ValidationStatus::SarifLossyWarning;
+        }
+
+        ValidationStatus::Valid
+    }
+
+    // -- Export execution --
+
+    /// Execute the export operation.
+    ///
+    /// Returns an `ExportResult` with success/failure status and summary info.
+    ///
+    /// Mirrors `ExporterDialog.ExportTask.run()`.
+    pub fn execute_export(
+        &mut self,
+        program: &Program,
+        memory: Option<&MemoryModel>,
+        writer: &mut dyn Write,
+        log: &mut LoaderMessageLog,
+    ) -> ExportResult {
+        let format = match self.selected_format {
+            Some(f) => f,
+            None => {
+                let mut result = ExportResult::failure(&self.output_path, "None");
+                result.add_message("No export format selected");
+                return result;
+            }
+        };
+
+        let exporter_name = format.exporter_name();
+        self.events
+            .push(format!("Export started: {} -> {}", exporter_name, self.output_path));
+
+        let mut counting = CountingWriter::new(writer);
+        let result = self.registry.export(
+            exporter_name,
+            program,
+            None,
+            memory,
+            &mut counting,
+            log,
+        );
+
+        match result {
+            Ok(true) => {
+                let bytes = counting.bytes_written();
+                self.events.push(format!("Export completed: {} bytes", bytes));
+                let mut export_result =
+                    ExportResult::success(&self.output_path, bytes, format.display_name());
+                export_result.exported_domain_file = !self.domain_object_was_supplied;
+                export_result
+            }
+            Ok(false) => {
+                self.events.push("Export returned false (partial/empty)".into());
+                let mut export_result = ExportResult::failure(&self.output_path, format.display_name());
+                export_result.add_message("Export returned false (possibly empty or unsupported address space)");
+                export_result
+            }
+            Err(e) => {
+                let msg = format!("Export error: {}", e);
+                self.events.push(msg.clone());
+                let mut export_result = ExportResult::failure(&self.output_path, format.display_name());
+                export_result.add_message(msg);
+                export_result
+            }
+        }
+    }
+
+    /// Get the event log.
+    pub fn events(&self) -> &[String] {
+        &self.events
+    }
+
+    /// Get a mutable reference to the exporter registry.
+    pub fn registry_mut(&mut self) -> &mut ExporterRegistry {
+        &mut self.registry
+    }
+
+    /// Get a reference to the exporter registry.
+    pub fn registry(&self) -> &ExporterRegistry {
+        &self.registry
+    }
+}
+
+impl Default for ExporterDialogModel {
+    fn default() -> Self {
+        Self::new("untitled")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// FrontEndExportAction -- project-tree export action
+// ---------------------------------------------------------------------------
+
+/// Model for the front-end project-tree export action.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterPlugin`
+/// (`createFrontEndAction` method).
+///
+/// This represents the "Export..." action available in the Ghidra project
+/// manager's right-click context menu on domain files.
+#[derive(Debug, Clone)]
+pub struct FrontEndExportAction {
+    /// The action name.
+    pub name: String,
+    /// The owner plugin name.
+    pub owner: String,
+    /// The popup menu path.
+    pub menu_path: Vec<String>,
+    /// The menu group.
+    pub menu_group: String,
+    /// Description text.
+    pub description: String,
+    /// Help topic.
+    pub help_topic: Option<HelpLocation>,
+    /// Whether the action is currently enabled.
+    enabled: bool,
+}
+
+/// Help location for export actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelpLocation {
+    /// The help set name.
+    pub help_set: String,
+    /// The topic name.
+    pub topic: String,
+    /// The anchor within the topic.
+    pub anchor: Option<String>,
+}
+
+impl HelpLocation {
+    /// Create a new help location.
+    pub fn new(help_set: impl Into<String>, topic: impl Into<String>) -> Self {
+        Self {
+            help_set: help_set.into(),
+            topic: topic.into(),
+            anchor: None,
+        }
+    }
+
+    /// Create a help location with an anchor.
+    pub fn with_anchor(mut self, anchor: impl Into<String>) -> Self {
+        self.anchor = Some(anchor.into());
+        self
+    }
+}
+
+impl FrontEndExportAction {
+    /// Create the standard front-end export action.
+    ///
+    /// Mirrors the action created in `ExporterPlugin.createFrontEndAction()`.
+    pub fn new() -> Self {
+        Self {
+            name: "Export".into(),
+            owner: "ExporterPlugin".into(),
+            menu_path: vec!["Export...".into()],
+            menu_group: "Export".into(),
+            description: "Export Program/Datatype Archives".into(),
+            help_topic: Some(HelpLocation::new("ExporterPlugin", "Export")),
+            enabled: true,
+        }
+    }
+
+    /// Check if the action should be enabled for the given context.
+    ///
+    /// Mirrors `ExporterPlugin.createFrontEndAction().isEnabledForContext()`.
+    pub fn is_enabled_for_context(&self, ctx: &ProjectDataContext) -> bool {
+        // Not enabled if folders are selected
+        if !ctx.selected_folders.is_empty() {
+            return false;
+        }
+        // Must select exactly one file
+        if ctx.selected_files.len() != 1 {
+            return false;
+        }
+        // Not enabled for folder links
+        let file = &ctx.selected_files[0];
+        if file.is_link && file.is_folder_link {
+            return false;
+        }
+        true
+    }
+
+    /// Get the selected domain file from the context, if valid.
+    pub fn get_selected_file<'a>(&self, ctx: &'a ProjectDataContext) -> Option<&'a DomainFileInfo> {
+        if !self.is_enabled_for_context(ctx) {
+            return None;
+        }
+        ctx.selected_files.first()
+    }
+}
+
+impl Default for FrontEndExportAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Model for the tool-level export action.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.exporter.ExporterPlugin`
+/// (`createToolAction` method).
+#[derive(Debug, Clone)]
+pub struct ToolExportAction {
+    /// The action name.
+    pub name: String,
+    /// The owner plugin name.
+    pub owner: String,
+    /// The menu bar path.
+    pub menu_path: Vec<String>,
+    /// The menu group.
+    pub menu_group: String,
+    /// The menu sub-group (for ordering).
+    pub menu_sub_group: String,
+    /// The key binding (virtual key code).
+    pub key_binding: Option<u32>,
+    /// Description text.
+    pub description: String,
+    /// Help topic.
+    pub help_topic: Option<HelpLocation>,
+}
+
+impl ToolExportAction {
+    /// Create the standard tool export action.
+    ///
+    /// Mirrors the action created in `ExporterPlugin.createToolAction()`.
+    pub fn new() -> Self {
+        Self {
+            name: "Export Program".into(),
+            owner: "ExporterPlugin".into(),
+            menu_path: vec!["&File".into(), "Export Program...".into()],
+            menu_group: "Import Export".into(),
+            menu_sub_group: "z".into(),
+            key_binding: Some(79), // VK_O = 79 (Ctrl+O convention)
+            description: "This plugin exports a program or datatype archive to an external file."
+                .into(),
+            help_topic: Some(HelpLocation::new("ExporterPlugin", "Export")),
+        }
+    }
+}
+
+impl Default for ToolExportAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProjectDataContext / DomainFileInfo -- minimal models for action context
+// ---------------------------------------------------------------------------
+
+/// Minimal model of a domain file in the project tree.
+///
+/// Ported from `ghidra.framework.model.DomainFile`.
+#[derive(Debug, Clone)]
+pub struct DomainFileInfo {
+    /// The file name.
+    pub name: String,
+    /// Whether this is a link.
+    pub is_link: bool,
+    /// Whether this is a folder link (only meaningful when `is_link` is true).
+    pub is_folder_link: bool,
+    /// The content type class name.
+    pub content_type: String,
+}
+
+impl DomainFileInfo {
+    /// Create a new domain file info.
+    pub fn new(name: impl Into<String>, content_type: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            is_link: false,
+            is_folder_link: false,
+            content_type: content_type.into(),
+        }
+    }
+
+    /// Create a linked domain file info.
+    pub fn new_link(
+        name: impl Into<String>,
+        content_type: impl Into<String>,
+        is_folder_link: bool,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            is_link: true,
+            is_folder_link,
+            content_type: content_type.into(),
+        }
+    }
+}
+
+/// Minimal model of the project data context for action enablement.
+///
+/// Ported from `ghidra.framework.main.datatable.ProjectDataContext`.
+#[derive(Debug, Clone, Default)]
+pub struct ProjectDataContext {
+    /// Selected files in the project tree.
+    pub selected_files: Vec<DomainFileInfo>,
+    /// Selected folders in the project tree.
+    pub selected_folders: Vec<String>,
+}
+
+impl ProjectDataContext {
+    /// Create a new project data context.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a selected file.
+    pub fn with_file(mut self, file: DomainFileInfo) -> Self {
+        self.selected_files.push(file);
+        self
+    }
+
+    /// Add a selected folder.
+    pub fn with_folder(mut self, folder: impl Into<String>) -> Self {
+        self.selected_folders.push(folder.into());
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2031,5 +2793,693 @@ mod tests {
         assert_eq!(bytes, 32);
         assert_eq!(output.len(), 32);
         assert_eq!(plugin.events().len(), 1);
+    }
+
+    // ========================================================================
+    // ExportResult tests
+    // ========================================================================
+
+    #[test]
+    fn test_export_result_success() {
+        let result = ExportResult::success("/tmp/out.bin", 1024, "Raw Binary (*.bin)");
+        assert!(result.success);
+        assert_eq!(result.output_size, 1024);
+        assert_eq!(result.format_name, "Raw Binary (*.bin)");
+        assert!(result.messages.is_empty());
+    }
+
+    #[test]
+    fn test_export_result_failure() {
+        let result = ExportResult::failure("/tmp/out.bin", "Raw Binary (*.bin)");
+        assert!(!result.success);
+        assert_eq!(result.output_size, 0);
+    }
+
+    #[test]
+    fn test_export_result_add_message() {
+        let mut result = ExportResult::success("/tmp/out.bin", 100, "XML");
+        result.add_message("Exported 100 bytes");
+        assert_eq!(result.messages.len(), 1);
+        assert_eq!(result.messages[0], "Exported 100 bytes");
+    }
+
+    #[test]
+    fn test_export_result_summary() {
+        let mut result = ExportResult::success("/tmp/test.bin", 256, "Raw Binary (*.bin)");
+        result.add_message("No warnings");
+        let summary = result.summary();
+        assert!(summary.contains("Destination file:       /tmp/test.bin"));
+        assert!(summary.contains("Destination file Size:  256"));
+        assert!(summary.contains("Format:                 Raw Binary (*.bin)"));
+        assert!(summary.contains("No warnings"));
+    }
+
+    #[test]
+    fn test_export_result_display() {
+        let success = ExportResult::success("/tmp/out.bin", 100, "Binary");
+        assert!(success.to_string().contains("succeeded"));
+        assert!(success.to_string().contains("100 bytes"));
+
+        let failure = ExportResult::failure("/tmp/out.bin", "Binary");
+        assert!(failure.to_string().contains("failed"));
+    }
+
+    // ========================================================================
+    // ValidationStatus tests
+    // ========================================================================
+
+    #[test]
+    fn test_validation_status_is_valid() {
+        assert!(ValidationStatus::Valid.is_valid());
+        assert!(ValidationStatus::XmlLossyWarning.is_valid());
+        assert!(ValidationStatus::SarifLossyWarning.is_valid());
+        assert!(ValidationStatus::OverwriteWarning("exists".into()).is_valid());
+        assert!(!ValidationStatus::NoFormatSelected.is_valid());
+        assert!(!ValidationStatus::NoOutputFile.is_valid());
+        assert!(!ValidationStatus::OutputIsDirectory.is_valid());
+        assert!(!ValidationStatus::OutputReadOnly.is_valid());
+        assert!(!ValidationStatus::NoApplicableExporters.is_valid());
+    }
+
+    #[test]
+    fn test_validation_status_is_warning() {
+        assert!(ValidationStatus::XmlLossyWarning.is_warning());
+        assert!(ValidationStatus::SarifLossyWarning.is_warning());
+        assert!(ValidationStatus::OverwriteWarning("x".into()).is_warning());
+        assert!(!ValidationStatus::Valid.is_warning());
+        assert!(!ValidationStatus::NoFormatSelected.is_warning());
+    }
+
+    #[test]
+    fn test_validation_status_message() {
+        assert!(ValidationStatus::Valid.message().is_none());
+        assert_eq!(
+            ValidationStatus::NoFormatSelected.message(),
+            Some("Please select an exporter format.")
+        );
+        assert_eq!(
+            ValidationStatus::NoOutputFile.message(),
+            Some("Please enter a destination file.")
+        );
+        assert!(ValidationStatus::XmlLossyWarning
+            .message()
+            .unwrap()
+            .contains("XML is lossy"));
+        assert!(ValidationStatus::SarifLossyWarning
+            .message()
+            .unwrap()
+            .contains("SARIF is lossy"));
+    }
+
+    #[test]
+    fn test_validation_status_display() {
+        assert_eq!(ValidationStatus::Valid.to_string(), "Valid");
+        assert!(ValidationStatus::NoFormatSelected
+            .to_string()
+            .contains("select an exporter"));
+    }
+
+    // ========================================================================
+    // ExporterDialogModel tests
+    // ========================================================================
+
+    #[test]
+    fn test_dialog_model_new() {
+        let dialog = ExporterDialogModel::new("test.elf");
+        assert_eq!(dialog.domain_file_name(), "test.elf");
+        assert!(!dialog.is_front_end_mode());
+        assert!(dialog.selected_format().is_none());
+        assert!(dialog.output_path().is_empty());
+        assert!(!dialog.is_selection_only());
+        assert!(dialog.options().is_empty());
+    }
+
+    #[test]
+    fn test_dialog_model_front_end() {
+        let dialog = ExporterDialogModel::new_front_end("test.elf");
+        assert!(dialog.is_front_end_mode());
+    }
+
+    #[test]
+    fn test_dialog_model_format_selection() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        assert!(dialog.selected_format().is_none());
+
+        dialog.set_format(ExportFormat::Binary);
+        assert_eq!(dialog.selected_format(), Some(ExportFormat::Binary));
+
+        dialog.set_format(ExportFormat::IntelHex);
+        assert_eq!(dialog.selected_format(), Some(ExportFormat::IntelHex));
+
+        assert_eq!(dialog.events().len(), 2);
+    }
+
+    #[test]
+    fn test_dialog_model_last_used_format() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_format(ExportFormat::IntelHex);
+
+        let mut dialog2 = ExporterDialogModel::new("test.elf");
+        dialog2.last_used_format = Some("Intel Hex".to_string());
+        dialog2.restore_last_used_format();
+        assert_eq!(dialog2.selected_format(), Some(ExportFormat::IntelHex));
+    }
+
+    #[test]
+    fn test_dialog_model_last_used_format_fallback() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.last_used_format = Some("Nonexistent".to_string());
+        dialog.restore_last_used_format();
+        assert_eq!(dialog.selected_format(), Some(ExportFormat::Binary));
+    }
+
+    #[test]
+    fn test_dialog_model_output_path() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_output_path("/tmp/output.bin");
+        assert_eq!(dialog.output_path(), "/tmp/output.bin");
+    }
+
+    #[test]
+    fn test_dialog_model_default_output_filename() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_format(ExportFormat::Binary);
+        assert_eq!(dialog.default_output_filename(), "test.elf.bin");
+
+        dialog.set_format(ExportFormat::Xml);
+        assert_eq!(dialog.default_output_filename(), "test.elf.xml");
+    }
+
+    #[test]
+    fn test_dialog_model_output_path_with_extension() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_format(ExportFormat::Binary);
+
+        // Path already has extension
+        dialog.set_output_path("/tmp/out.bin");
+        assert_eq!(dialog.output_path_with_extension(), "/tmp/out.bin");
+
+        // Path missing extension
+        dialog.set_output_path("/tmp/out");
+        assert_eq!(dialog.output_path_with_extension(), "/tmp/out.bin");
+
+        // Case insensitive extension check
+        dialog.set_output_path("/tmp/out.BIN");
+        assert_eq!(dialog.output_path_with_extension(), "/tmp/out.BIN");
+
+        // Empty path
+        dialog.set_output_path("");
+        assert_eq!(dialog.output_path_with_extension(), "");
+    }
+
+    #[test]
+    fn test_dialog_model_selection() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        assert!(!dialog.is_selection_only());
+
+        dialog.set_has_selection(true);
+        dialog.set_selection_only(true);
+        assert!(dialog.is_selection_only());
+    }
+
+    #[test]
+    fn test_dialog_model_selection_checkbox() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+
+        // No selection, no format -> disabled
+        assert!(!dialog.should_enable_selection_checkbox());
+
+        // Selection exists, no format -> disabled
+        dialog.set_has_selection(true);
+        assert!(!dialog.should_enable_selection_checkbox());
+
+        // Selection + format -> enabled
+        dialog.set_format(ExportFormat::Binary);
+        assert!(dialog.should_enable_selection_checkbox());
+
+        // Front-end mode -> disabled
+        let mut fe_dialog = ExporterDialogModel::new_front_end("test.elf");
+        fe_dialog.set_has_selection(true);
+        fe_dialog.set_format(ExportFormat::Binary);
+        assert!(!fe_dialog.should_enable_selection_checkbox());
+    }
+
+    #[test]
+    fn test_dialog_model_options() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        assert!(!dialog.has_options());
+
+        dialog.set_options(vec![
+            ExportOption {
+                name: "Record Size".into(),
+                option_type: ExportOptionType::Integer,
+                default_value: ExportOptionValue::Integer(16),
+                description: Some("HEX record size".into()),
+            },
+        ]);
+        assert!(dialog.has_options());
+        assert_eq!(dialog.options().len(), 1);
+    }
+
+    #[test]
+    fn test_dialog_model_validate_option() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_options(vec![
+            ExportOption {
+                name: "Record Size".into(),
+                option_type: ExportOptionType::Integer,
+                default_value: ExportOptionValue::Integer(16),
+                description: None,
+            },
+            ExportOption {
+                name: "Format".into(),
+                option_type: ExportOptionType::Choice(vec!["S1".into(), "S2".into(), "S3".into()]),
+                default_value: ExportOptionValue::String("S3".into()),
+                description: None,
+            },
+        ]);
+
+        // Valid integer
+        assert!(dialog.validate_option("Record Size", &ExportOptionValue::Integer(32)).is_ok());
+
+        // Negative integer
+        assert!(dialog.validate_option("Record Size", &ExportOptionValue::Integer(-1)).is_err());
+
+        // Valid choice
+        assert!(dialog.validate_option("Format", &ExportOptionValue::String("S1".into())).is_ok());
+
+        // Invalid choice
+        assert!(dialog.validate_option("Format", &ExportOptionValue::String("S4".into())).is_err());
+
+        // Unknown option
+        assert!(dialog.validate_option("Unknown", &ExportOptionValue::Boolean(true)).is_err());
+
+        // Type mismatch
+        assert!(dialog.validate_option("Record Size", &ExportOptionValue::Boolean(true)).is_err());
+    }
+
+    #[test]
+    fn test_dialog_model_validate() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+
+        // No format selected
+        assert_eq!(dialog.validate(), ValidationStatus::NoFormatSelected);
+
+        // Format selected, no output file
+        dialog.set_format(ExportFormat::Binary);
+        assert_eq!(dialog.validate(), ValidationStatus::NoOutputFile);
+
+        // Format + output -> valid
+        dialog.set_output_path("/tmp/out.bin");
+        assert_eq!(dialog.validate(), ValidationStatus::Valid);
+
+        // XML format -> lossy warning
+        dialog.set_format(ExportFormat::Xml);
+        assert_eq!(dialog.validate(), ValidationStatus::XmlLossyWarning);
+    }
+
+    #[test]
+    fn test_dialog_model_execute_export() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_format(ExportFormat::Binary);
+        dialog.set_output_path("/tmp/out.bin");
+        dialog.set_domain_object_supplied(true);
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(result.success);
+        assert_eq!(result.output_size, 32);
+        assert_eq!(output.len(), 32);
+        assert!(!result.exported_domain_file);
+        assert!(result.summary().contains("Raw Binary"));
+    }
+
+    #[test]
+    fn test_dialog_model_execute_export_no_format() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        // No format set
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(!result.success);
+        assert!(result.messages[0].contains("No export format selected"));
+    }
+
+    #[test]
+    fn test_dialog_model_execute_export_domain_file() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_format(ExportFormat::Binary);
+        dialog.set_output_path("/tmp/out.bin");
+        dialog.set_domain_object_supplied(false);
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(result.success);
+        assert!(result.exported_domain_file);
+    }
+
+    #[test]
+    fn test_dialog_model_execute_export_events() {
+        let mut dialog = ExporterDialogModel::new("test.elf");
+        dialog.set_format(ExportFormat::Binary);
+        dialog.set_output_path("/tmp/out.bin");
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+
+        // Should have format change + export started + export completed
+        let events = dialog.events();
+        assert!(events.len() >= 3);
+        assert!(events.iter().any(|e| e.contains("Format changed")));
+        assert!(events.iter().any(|e| e.contains("Export started")));
+        assert!(events.iter().any(|e| e.contains("Export completed")));
+    }
+
+    #[test]
+    fn test_dialog_model_default() {
+        let dialog = ExporterDialogModel::default();
+        assert_eq!(dialog.domain_file_name(), "untitled");
+    }
+
+    // ========================================================================
+    // FrontEndExportAction tests
+    // ========================================================================
+
+    #[test]
+    fn test_front_end_export_action_new() {
+        let action = FrontEndExportAction::new();
+        assert_eq!(action.name, "Export");
+        assert_eq!(action.owner, "ExporterPlugin");
+        assert_eq!(action.menu_path, vec!["Export..."]);
+        assert!(action.help_topic.is_some());
+    }
+
+    #[test]
+    fn test_front_end_action_enabled_single_file() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new("test.elf", "Program"));
+        assert!(action.is_enabled_for_context(&ctx));
+    }
+
+    #[test]
+    fn test_front_end_action_disabled_no_selection() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new();
+        assert!(!action.is_enabled_for_context(&ctx));
+    }
+
+    #[test]
+    fn test_front_end_action_disabled_multiple_files() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new("a.elf", "Program"))
+            .with_file(DomainFileInfo::new("b.elf", "Program"));
+        assert!(!action.is_enabled_for_context(&ctx));
+    }
+
+    #[test]
+    fn test_front_end_action_disabled_folder_selected() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new("test.elf", "Program"))
+            .with_folder("my_folder");
+        assert!(!action.is_enabled_for_context(&ctx));
+    }
+
+    #[test]
+    fn test_front_end_action_disabled_folder_link() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new_link("test.elf", "Program", true));
+        assert!(!action.is_enabled_for_context(&ctx));
+    }
+
+    #[test]
+    fn test_front_end_action_enabled_file_link() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new_link("test.elf", "Program", false));
+        assert!(action.is_enabled_for_context(&ctx));
+    }
+
+    #[test]
+    fn test_front_end_action_get_selected_file() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new("test.elf", "Program"));
+        let file = action.get_selected_file(&ctx);
+        assert!(file.is_some());
+        assert_eq!(file.unwrap().name, "test.elf");
+    }
+
+    #[test]
+    fn test_front_end_action_get_selected_file_none() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new();
+        assert!(action.get_selected_file(&ctx).is_none());
+    }
+
+    #[test]
+    fn test_front_end_action_default() {
+        let action = FrontEndExportAction::default();
+        assert_eq!(action.name, "Export");
+    }
+
+    // ========================================================================
+    // ToolExportAction tests
+    // ========================================================================
+
+    #[test]
+    fn test_tool_export_action_new() {
+        let action = ToolExportAction::new();
+        assert_eq!(action.name, "Export Program");
+        assert_eq!(action.owner, "ExporterPlugin");
+        assert_eq!(action.menu_path, vec!["&File", "Export Program..."]);
+        assert_eq!(action.menu_group, "Import Export");
+        assert_eq!(action.menu_sub_group, "z");
+        assert_eq!(action.key_binding, Some(79)); // VK_O
+        assert!(action.description.contains("exports a program"));
+    }
+
+    #[test]
+    fn test_tool_export_action_default() {
+        let action = ToolExportAction::default();
+        assert_eq!(action.name, "Export Program");
+    }
+
+    // ========================================================================
+    // DomainFileInfo tests
+    // ========================================================================
+
+    #[test]
+    fn test_domain_file_info_new() {
+        let file = DomainFileInfo::new("test.elf", "Program");
+        assert_eq!(file.name, "test.elf");
+        assert_eq!(file.content_type, "Program");
+        assert!(!file.is_link);
+        assert!(!file.is_folder_link);
+    }
+
+    #[test]
+    fn test_domain_file_info_new_link() {
+        let file = DomainFileInfo::new_link("test.elf", "Program", false);
+        assert!(file.is_link);
+        assert!(!file.is_folder_link);
+
+        let folder_link = DomainFileInfo::new_link("test.elf", "Program", true);
+        assert!(folder_link.is_link);
+        assert!(folder_link.is_folder_link);
+    }
+
+    // ========================================================================
+    // ProjectDataContext tests
+    // ========================================================================
+
+    #[test]
+    fn test_project_data_context_default() {
+        let ctx = ProjectDataContext::new();
+        assert!(ctx.selected_files.is_empty());
+        assert!(ctx.selected_folders.is_empty());
+    }
+
+    #[test]
+    fn test_project_data_context_builder() {
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new("test.elf", "Program"))
+            .with_folder("my_folder");
+        assert_eq!(ctx.selected_files.len(), 1);
+        assert_eq!(ctx.selected_folders.len(), 1);
+    }
+
+    // ========================================================================
+    // HelpLocation tests
+    // ========================================================================
+
+    #[test]
+    fn test_help_location_new() {
+        let loc = HelpLocation::new("ExporterPlugin", "Export");
+        assert_eq!(loc.help_set, "ExporterPlugin");
+        assert_eq!(loc.topic, "Export");
+        assert!(loc.anchor.is_none());
+    }
+
+    #[test]
+    fn test_help_location_with_anchor() {
+        let loc = HelpLocation::new("ExporterPlugin", "Export").with_anchor("Options");
+        assert_eq!(loc.anchor, Some("Options".into()));
+    }
+
+    // ========================================================================
+    // Cross-type integration tests
+    // ========================================================================
+
+    #[test]
+    fn test_full_export_workflow_binary() {
+        let mut dialog = ExporterDialogModel::new("program.exe");
+        dialog.set_format(ExportFormat::Binary);
+        dialog.set_output_path("/tmp/program.exe.bin");
+        dialog.set_domain_object_supplied(true);
+        dialog.set_has_selection(true);
+        dialog.set_selection_only(false);
+
+        let status = dialog.validate();
+        assert!(status.is_valid(), "Expected valid, got: {}", status);
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(result.success);
+        assert_eq!(result.output_size, 32);
+        assert!(result.summary().contains("Raw Binary"));
+    }
+
+    #[test]
+    fn test_full_export_workflow_intel_hex() {
+        let mut dialog = ExporterDialogModel::new("firmware.bin");
+        dialog.set_format(ExportFormat::IntelHex);
+        dialog.set_output_path("/tmp/firmware.hex");
+        dialog.set_domain_object_supplied(true);
+
+        let status = dialog.validate();
+        assert!(status.is_valid());
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(result.success);
+
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains(":00000001FF"));
+    }
+
+    #[test]
+    fn test_full_export_workflow_xml_warning() {
+        let mut dialog = ExporterDialogModel::new("program.exe");
+        dialog.set_format(ExportFormat::Xml);
+        dialog.set_output_path("/tmp/program.xml");
+
+        let status = dialog.validate();
+        assert!(status.is_valid()); // Warnings are still valid
+        assert!(status.is_warning());
+        assert!(status.message().unwrap().contains("XML is lossy"));
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(result.success);
+
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("<?xml"));
+    }
+
+    #[test]
+    fn test_full_export_workflow_html() {
+        let mut dialog = ExporterDialogModel::new("program.exe");
+        dialog.set_format(ExportFormat::Html);
+        dialog.set_output_path("/tmp/program.html");
+
+        let status = dialog.validate();
+        assert!(status.is_valid());
+
+        let prog = make_test_program();
+        let mem = make_test_memory();
+        let mut output = Vec::new();
+        let mut log = LoaderMessageLog::new();
+
+        let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+        assert!(result.success);
+
+        let text = String::from_utf8(output).unwrap();
+        assert!(text.contains("<!DOCTYPE html>"));
+    }
+
+    #[test]
+    fn test_front_end_action_with_export_dialog() {
+        let action = FrontEndExportAction::new();
+        let ctx = ProjectDataContext::new()
+            .with_file(DomainFileInfo::new("my_binary.elf", "Program"));
+
+        assert!(action.is_enabled_for_context(&ctx));
+        let file = action.get_selected_file(&ctx).unwrap();
+
+        let mut dialog = ExporterDialogModel::new(&file.name);
+        dialog.set_format(ExportFormat::Binary);
+        dialog.set_output_path(format!("/tmp/{}.bin", file.name));
+
+        let status = dialog.validate();
+        assert!(status.is_valid());
+    }
+
+    #[test]
+    fn test_all_formats_through_dialog() {
+        let prog = make_test_program();
+        let mem = make_test_memory();
+
+        for format in ExportFormat::all() {
+            let mut dialog = ExporterDialogModel::new("test");
+            dialog.set_format(*format);
+            dialog.set_output_path(format!("/tmp/test.{}", format.default_extension()));
+            dialog.set_domain_object_supplied(true);
+
+            let mut output = Vec::new();
+            let mut log = LoaderMessageLog::new();
+            let result = dialog.execute_export(&prog, Some(&mem), &mut output, &mut log);
+            assert!(
+                result.success,
+                "Export failed for format: {}",
+                format.display_name()
+            );
+            assert!(
+                !output.is_empty(),
+                "No output for format: {}",
+                format.display_name()
+            );
+        }
     }
 }
