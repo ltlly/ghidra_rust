@@ -54,6 +54,7 @@ pub mod thread;
 pub mod step_trait;
 pub mod time;
 pub mod time_schedule;
+pub mod schedule;
 pub mod trace;
 pub mod trace_data_ops;
 pub mod trace_data_viewport;

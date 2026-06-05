@@ -6,6 +6,7 @@
 pub mod icons;
 pub mod icons_ext;
 pub mod multi_icon;
+pub mod resource_manager_ext;
 
 pub use icons::{
     ColorIcon, ColorIcon3D, DerivedImageIcon, DisabledImageIcon, EmptyIcon, OvalColorIcon,

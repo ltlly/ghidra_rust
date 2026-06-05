@@ -3,6 +3,9 @@
 //! Provides non-GUI types for graph visualization: layout, picking, options,
 //! satellite view parameters, and shape routing.
 
+pub mod abstract_visual_graph_layout;
+pub mod graph_perspective;
+pub mod graph_viewer_utils;
 pub mod layout_provider;
 pub mod visual_types;
 

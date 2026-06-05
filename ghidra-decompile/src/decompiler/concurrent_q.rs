@@ -1,311 +1,244 @@
 //! Concurrent decompilation queue.
 //!
-//! Port of Ghidra's `ghidra.app.util.DecompilerConcurrentQ`.
+//! Port of Ghidra's `app.util.DecompilerConcurrentQ`.
+//! Provides a thread-safe queue for managing parallel decompilation tasks.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
-/// A result from processing one item through the concurrent queue.
-#[derive(Debug, Clone)]
-pub struct QResult<I, R> {
-    /// The input that was processed.
-    pub input: I,
-    /// The result of processing, or an error message.
-    pub result: Result<R, String>,
+/// Result type for decompiler concurrent queue operations.
+pub type QResult<T> = Result<T, String>;
+
+/// Callback type for asynchronous decompiler queue operations.
+pub type QCallback<T> = Box<dyn FnOnce(QResult<T>) + Send + 'static>;
+
+/// A concurrent queue for decompilation tasks.
+///
+/// Supports multiple producers and a single consumer. Tasks are executed
+/// in FIFO order. The queue can be bounded (blocks producers when full)
+/// or unbounded.
+#[derive(Debug)]
+pub struct DecompilerConcurrentQ<T: Send> {
+    inner: Arc<ConcurrentQInner<T>>,
 }
 
-impl<I, R> QResult<I, R> {
-    /// Create a successful result.
-    pub fn success(input: I, result: R) -> Self {
-        Self {
-            input,
-            result: Ok(result),
-        }
-    }
+struct ConcurrentQInner<T: Send> {
+    queue: Mutex<VecDeque<T>>,
+    not_empty: Condvar,
+    not_full: Condvar,
+    capacity: Option<usize>,
+    closed: Mutex<bool>,
+}
 
-    /// Create a failure result.
-    pub fn failure(input: I, error: impl Into<String>) -> Self {
-        Self {
-            input,
-            result: Err(error.into()),
-        }
-    }
-
-    /// Get the result, if successful.
-    pub fn get_result(&self) -> Option<&R> {
-        self.result.as_ref().ok()
-    }
-
-    /// Whether this result was successful.
-    pub fn is_success(&self) -> bool {
-        self.result.is_ok()
+impl<T: Send> std::fmt::Debug for ConcurrentQInner<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConcurrentQInner")
+            .field("capacity", &self.capacity)
+            .field("closed", &self.closed)
+            .finish()
     }
 }
 
-/// A concurrent processing queue for decompilation tasks.
-///
-/// This mirrors Ghidra's `DecompilerConcurrentQ<I, R>`. It allows items
-/// to be queued and processed concurrently using a configurable number
-/// of worker threads. Results are collected and returned.
-///
-/// # Type Parameters
-///
-/// * `I` -- Input item type (e.g., function entry points to decompile)
-/// * `R` -- Result type (e.g., decompiled function output)
-///
-/// # Usage
-///
-/// ```ignore
-/// use ghidra_decompile::decompiler::concurrent_q::DecompilerConcurrentQ;
-///
-/// let mut queue = DecompilerConcurrentQ::new(4); // 4 threads
-/// queue.add(0x1000u64);
-/// queue.add(0x2000u64);
-/// queue.process_all(|input| {
-///     Ok(format!("decompiled_{:x}", input))
-/// });
-/// let results = queue.take_results();
-/// ```
-pub struct DecompilerConcurrentQ<I: Send + 'static, R: Send + 'static> {
-    /// Number of worker threads.
-    num_threads: usize,
-    /// Input items pending processing.
-    pending: VecDeque<I>,
-    /// Completed results.
-    results: Arc<Mutex<Vec<QResult<I, R>>>>,
-    /// Whether the queue has been disposed.
-    disposed: bool,
-    /// Total items added.
-    total_added: usize,
-    /// Total items processed.
-    total_processed: usize,
-}
-
-impl<I: Send + 'static, R: Send + 'static> DecompilerConcurrentQ<I, R> {
-    /// Create a new concurrent queue with the given number of threads.
-    pub fn new(num_threads: usize) -> Self {
+impl<T: Send> DecompilerConcurrentQ<T> {
+    /// Create an unbounded concurrent queue.
+    pub fn new() -> Self {
         Self {
-            num_threads: num_threads.max(1),
-            pending: VecDeque::new(),
-            results: Arc::new(Mutex::new(Vec::new())),
-            disposed: false,
-            total_added: 0,
-            total_processed: 0,
+            inner: Arc::new(ConcurrentQInner {
+                queue: Mutex::new(VecDeque::new()),
+                not_empty: Condvar::new(),
+                not_full: Condvar::new(),
+                capacity: None,
+                closed: Mutex::new(false),
+            }),
         }
     }
 
-    /// Add a single item to the queue.
-    pub fn add(&mut self, item: I) {
-        self.pending.push_back(item);
-        self.total_added += 1;
-    }
-
-    /// Add multiple items to the queue.
-    pub fn add_all(&mut self, items: impl IntoIterator<Item = I>) {
-        for item in items {
-            self.pending.push_back(item);
-            self.total_added += 1;
-        }
-    }
-
-    /// Number of items waiting to be processed.
-    pub fn pending_count(&self) -> usize {
-        self.pending.len()
-    }
-
-    /// Total items added to the queue.
-    pub fn total_added(&self) -> usize {
-        self.total_added
-    }
-
-    /// Total items that have been processed.
-    pub fn total_processed(&self) -> usize {
-        self.total_processed
-    }
-
-    /// Whether the queue has work remaining.
-    pub fn has_work(&self) -> bool {
-        !self.pending.is_empty()
-    }
-
-    /// Process all pending items using the given callback.
+    /// Create a bounded concurrent queue.
     ///
-    /// In a single-threaded Rust implementation, this processes items
-    /// sequentially. A multi-threaded implementation would use a thread pool.
-    pub fn process_all<F>(&mut self, callback: F)
-    where
-        F: Fn(I) -> Result<R, String>,
-    {
-        let mut results = self.results.lock().unwrap();
-        while let Some(item) = self.pending.pop_front() {
-            let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                callback(/* move */ unsafe { std::ptr::read(&item as *const I) })
-            })) {
-                Ok(r) => match r {
-                    Ok(value) => QResult::success(unsafe { std::ptr::read(&item as *const I) }, value),
-                    Err(e) => QResult::failure(unsafe { std::ptr::read(&item as *const I) }, e),
-                },
-                Err(_) => QResult::failure(unsafe { std::ptr::read(&item as *const I) }, "panic during processing"),
-            };
-            // We need a safer approach -- process without unsafe
-            self.total_processed += 1;
-            results.push(result);
+    /// Producers will block when the queue reaches the given capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            inner: Arc::new(ConcurrentQInner {
+                queue: Mutex::new(VecDeque::new()),
+                not_empty: Condvar::new(),
+                not_full: Condvar::new(),
+                capacity: Some(capacity),
+                closed: Mutex::new(false),
+            }),
         }
     }
 
-    /// Process items using a simple sequential approach (safe version).
+    /// Push an item to the back of the queue.
     ///
-    /// Takes ownership of all pending items and processes them.
-    pub fn drain_and_process<F>(&mut self, callback: F)
-    where
-        F: Fn(&I) -> Result<R, String>,
-        I: Clone,
-    {
-        let items: Vec<I> = self.pending.drain(..).collect();
-        let mut results = self.results.lock().unwrap();
-        for item in items {
-            let result = match callback(&item) {
-                Ok(value) => QResult::success(item, value),
-                Err(e) => QResult::failure(item, e),
-            };
-            self.total_processed += 1;
-            results.push(result);
+    /// Returns `Err(item)` if the queue has been closed.
+    /// Blocks if the queue is at capacity.
+    pub fn push(&self, item: T) -> Result<(), T> {
+        if *self.inner.closed.lock().unwrap() {
+            return Err(item);
         }
+
+        let mut queue = self.inner.queue.lock().unwrap();
+
+        // Wait if bounded and full
+        if let Some(cap) = self.inner.capacity {
+            while queue.len() >= cap && !*self.inner.closed.lock().unwrap() {
+                queue = self.inner.not_full.wait(queue).unwrap();
+            }
+        }
+
+        if *self.inner.closed.lock().unwrap() {
+            return Err(item);
+        }
+
+        queue.push_back(item);
+        self.inner.not_empty.notify_one();
+        Ok(())
     }
 
-    /// Take all collected results, leaving the results list empty.
-    pub fn take_results(&mut self) -> Vec<QResult<I, R>> {
-        let mut results = self.results.lock().unwrap();
-        std::mem::take(&mut *results)
+    /// Pop an item from the front of the queue, blocking until one is available.
+    ///
+    /// Returns `None` if the queue is empty and has been closed.
+    pub fn pop(&self) -> Option<T> {
+        let mut queue = self.inner.queue.lock().unwrap();
+
+        while queue.is_empty() {
+            if *self.inner.closed.lock().unwrap() {
+                return None;
+            }
+            queue = self.inner.not_empty.wait(queue).unwrap();
+        }
+
+        let item = queue.pop_front();
+        self.inner.not_full.notify_one();
+        item
     }
 
-    /// Get a snapshot of the results count.
-    pub fn result_count(&self) -> usize {
-        self.results.lock().unwrap().len()
+    /// Try to pop an item without blocking.
+    pub fn try_pop(&self) -> Option<T> {
+        let mut queue = self.inner.queue.lock().unwrap();
+        let item = queue.pop_front();
+        if item.is_some() {
+            self.inner.not_full.notify_one();
+        }
+        item
     }
 
-    /// Whether there are any results ready.
-    pub fn has_results(&self) -> bool {
-        !self.results.lock().unwrap().is_empty()
+    /// Get the current size of the queue.
+    pub fn len(&self) -> usize {
+        self.inner.queue.lock().unwrap().len()
     }
 
-    /// Dispose of the queue, releasing resources.
-    pub fn dispose(&mut self) {
-        self.disposed = true;
-        self.pending.clear();
+    /// Check if the queue is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.queue.lock().unwrap().is_empty()
     }
 
-    /// Whether the queue has been disposed.
-    pub fn is_disposed(&self) -> bool {
-        self.disposed
+    /// Close the queue, preventing further pushes and unblocking waiting pops.
+    pub fn close(&self) {
+        *self.inner.closed.lock().unwrap() = true;
+        self.inner.not_empty.notify_all();
+        self.inner.not_full.notify_all();
     }
 
-    /// The configured number of threads.
-    pub fn thread_count(&self) -> usize {
-        self.num_threads
+    /// Check if the queue is closed.
+    pub fn is_closed(&self) -> bool {
+        *self.inner.closed.lock().unwrap()
+    }
+
+    /// Drain all items from the queue without blocking.
+    pub fn drain(&self) -> Vec<T> {
+        let mut queue = self.inner.queue.lock().unwrap();
+        queue.drain(..).collect()
     }
 }
 
-// ============================================================================
-// Convenience alias matching Java's QCallback pattern
-// ============================================================================
+impl<T: Send> Default for DecompilerConcurrentQ<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-/// A callback function type for processing queue items.
-pub type QCallback<I, R> = Box<dyn Fn(&I) -> Result<R, String> + Send + Sync>;
+impl<T: Send> Clone for DecompilerConcurrentQ<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
-    fn concurrent_queue_basic() {
-        let mut queue = DecompilerConcurrentQ::<u64, String>::new(2);
-        queue.add(0x1000);
-        queue.add(0x2000);
-        queue.add(0x3000);
-        assert_eq!(queue.pending_count(), 3);
-        assert_eq!(queue.total_added(), 3);
-        assert!(queue.has_work());
+    fn test_queue_push_pop() {
+        let q = DecompilerConcurrentQ::new();
+        q.push(1).unwrap();
+        q.push(2).unwrap();
+        q.push(3).unwrap();
+        assert_eq!(q.len(), 3);
+        assert_eq!(q.pop(), Some(1));
+        assert_eq!(q.pop(), Some(2));
+        assert_eq!(q.pop(), Some(3));
+        assert!(q.is_empty());
     }
 
     #[test]
-    fn concurrent_queue_process() {
-        let mut queue = DecompilerConcurrentQ::<u64, String>::new(2);
-        queue.add(0x1000);
-        queue.add(0x2000);
+    fn test_queue_try_pop() {
+        let q = DecompilerConcurrentQ::new();
+        assert_eq!(q.try_pop(), None);
+        q.push(42).unwrap();
+        assert_eq!(q.try_pop(), Some(42));
+        assert_eq!(q.try_pop(), None);
+    }
 
-        queue.drain_and_process(|input| {
-            Ok(format!("fn_{:x}", input))
+    #[test]
+    fn test_queue_close() {
+        let q = DecompilerConcurrentQ::new();
+        q.push(1).unwrap();
+        q.close();
+        assert!(q.is_closed());
+        assert!(q.push(2).is_err());
+        assert_eq!(q.pop(), Some(1));
+        assert_eq!(q.pop(), None);
+    }
+
+    #[test]
+    fn test_queue_drain() {
+        let q = DecompilerConcurrentQ::new();
+        q.push(1).unwrap();
+        q.push(2).unwrap();
+        let items = q.drain();
+        assert_eq!(items, vec![1, 2]);
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn test_bounded_queue() {
+        let q = DecompilerConcurrentQ::with_capacity(2);
+        q.push(1).unwrap();
+        q.push(2).unwrap();
+        assert_eq!(q.len(), 2);
+
+        // Spawn a thread to pop after a short delay
+        let q2 = q.clone();
+        let handle = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            q2.pop()
         });
 
-        assert_eq!(queue.result_count(), 2);
-        assert!(!queue.has_work());
-        assert_eq!(queue.total_processed(), 2);
-
-        let results = queue.take_results();
-        assert!(results.iter().all(|r| r.is_success()));
-        assert_eq!(results.len(), 2);
+        // This should block until the other thread pops
+        q.push(3).unwrap();
+        assert_eq!(handle.join().unwrap(), Some(1));
     }
 
     #[test]
-    fn concurrent_queue_error_handling() {
-        let mut queue = DecompilerConcurrentQ::<u64, String>::new(1);
-        queue.add(0x1000);
-
-        queue.drain_and_process(|_input| {
-            Err("decompilation failed".to_string())
-        });
-
-        let results = queue.take_results();
-        assert_eq!(results.len(), 1);
-        assert!(!results[0].is_success());
-        assert!(results[0].result.as_ref().unwrap_err().contains("failed"));
-    }
-
-    #[test]
-    fn concurrent_queue_dispose() {
-        let mut queue = DecompilerConcurrentQ::<u64, String>::new(2);
-        queue.add(0x1000);
-        assert!(!queue.is_disposed());
-        queue.dispose();
-        assert!(queue.is_disposed());
-        assert_eq!(queue.pending_count(), 0);
-    }
-
-    #[test]
-    fn concurrent_queue_add_all() {
-        let mut queue = DecompilerConcurrentQ::<u64, String>::new(2);
-        let items: Vec<u64> = vec![0x1000, 0x2000, 0x3000, 0x4000];
-        queue.add_all(items);
-        assert_eq!(queue.pending_count(), 4);
-        assert_eq!(queue.total_added(), 4);
-    }
-
-    #[test]
-    fn concurrent_queue_empty_results() {
-        let mut queue = DecompilerConcurrentQ::<u64, String>::new(2);
-        let results = queue.take_results();
-        assert!(results.is_empty());
-        assert!(!queue.has_results());
-    }
-
-    #[test]
-    fn concurrent_queue_thread_count() {
-        let queue = DecompilerConcurrentQ::<u64, String>::new(0);
-        assert_eq!(queue.thread_count(), 1); // minimum 1
-    }
-
-    #[test]
-    fn q_result_success() {
-        let r = QResult::success(42u32, "ok".to_string());
-        assert!(r.is_success());
-        assert_eq!(r.get_result(), Some(&"ok".to_string()));
-    }
-
-    #[test]
-    fn q_result_failure() {
-        let r = QResult::<u32, String>::failure(42, "error");
-        assert!(!r.is_success());
-        assert!(r.get_result().is_none());
+    fn test_queue_clone_shares_state() {
+        let q1 = DecompilerConcurrentQ::new();
+        let q2 = q1.clone();
+        q1.push(10).unwrap();
+        assert_eq!(q2.pop(), Some(10));
     }
 }

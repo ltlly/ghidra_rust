@@ -75,6 +75,7 @@ pub mod clang_token_types;
 pub mod comments;
 pub mod component;
 pub mod concurrent_q;
+pub mod data_type_dependency_orderer;
 pub mod cpp_exporter;
 pub mod decompiler_commands;
 pub mod decompiler_init;

@@ -61,6 +61,7 @@ pub mod hash_graph;
 pub mod factory;
 pub mod graph_to_tree;
 pub mod algo;
+pub mod animation_jobs;
 pub mod service;
 pub mod event;
 pub mod job;
