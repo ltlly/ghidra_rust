@@ -283,3 +283,36 @@ pub mod gui_model_ext;
 
 // Dynamic-static synchronization
 pub mod dynamic_static_sync;
+
+// Remaining Debugger module ports (GUI control actions, concrete disassembly,
+// panel data models, export background command, extended action specs)
+pub mod gui_control_actions;
+pub mod disassembly_actions_concrete;
+pub mod gui_panel_models;
+pub mod export_background_cmd;
+pub mod gui_action_specs_ext;
+
+pub use gui_control_actions::{
+    ControlExecutionState as ControlExecState, DebuggerControlMode as DbgControlMode,
+    SnapNavigationEntry,
+};
+pub use disassembly_actions_concrete::{
+    AbstractTraceDisassembleAction, CurrentPlatformTracePatchInstructionAction,
+    FixedPlatformTracePatchInstructionAction, PlatformMode,
+};
+pub use gui_panel_models::{
+    CallTreeNode as GuiCallTreeNode, DebouncedTableModel,
+    FrameVariable as GuiFrameVariable, GuiColumnType as GuiColumnKind, GuiTableColumn,
+    ListingActionContext as GuiListingActionContext,
+    MemoryRegionEntry as GuiMemoryRegionEntry, ModuleEntry as GuiModuleEntry,
+    MultiProviderSaveBehavior, RegisterEntry as GuiRegisterEntry,
+    SectionEntry as GuiSectionEntry, SnapshotEntry as GuiSnapshotEntry,
+    StackFrameEntry as GuiStackFrameEntry, ThreadEntry as GuiThreadEntry,
+    ThreadState as GuiThreadState, WatchEntry as GuiWatchEntry,
+};
+pub use export_background_cmd::{ExportTraceBackgroundCmd, TraceExportFormat};
+pub use gui_action_specs_ext::{
+    AutoReadMemorySpecResult, AutoReadMode, BasicAutoReadMemorySpecFactory,
+    BasicLocationTrackingSpecFactory, DebuggerReadsMemoryTrait, DebuggerTrackLocationTrait,
+    LocationTrackingSpecResult, LocationTrackingStrategy, WatchLocationTrackingSpecFactory,
+};

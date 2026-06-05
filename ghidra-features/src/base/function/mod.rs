@@ -26,6 +26,10 @@ pub mod data_actions;
 pub mod extra_analyzers;
 pub mod editor_ui;
 pub mod tags_ui;
+pub mod table_model;
+pub mod cycle_group;
+pub mod function_data_view;
+pub mod storage_editor;
 
 pub use plugin::*;
 pub use actions::*;
@@ -39,3 +43,7 @@ pub use data_actions::*;
 pub use extra_analyzers::*;
 pub use editor_ui::*;
 pub use tags_ui::*;
+pub use table_model::*;
+pub use cycle_group::*;
+pub use function_data_view::*;
+pub use storage_editor::*;

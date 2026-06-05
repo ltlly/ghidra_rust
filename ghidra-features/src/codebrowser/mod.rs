@@ -66,6 +66,12 @@ pub mod listing_model;
 /// Ported from `ghidra.app.plugin.core.codebrowser.ListingMiddleMouseHighlightProvider`.
 pub mod middle_mouse_highlight;
 
+/// Code viewer actions and field edit types for the listing.
+///
+/// Ported from action classes and field-related classes in
+/// `ghidra.app.plugin.core.codebrowser`.
+pub mod code_viewer_actions;
+
 // Re-export key types at the module root for convenience.
 pub use action_context::{CodeViewerActionContext, OtherPanelContext};
 pub use address_range_info::AddressRangeInfo;

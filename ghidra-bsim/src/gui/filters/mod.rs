@@ -1,9 +1,19 @@
 //! BSim search filter types.
 //!
 //! Ports `ghidra.features.bsim.gui.filters` from Ghidra's Java source.
+//!
+//! # Filter Categories
+//!
+//! - **Architecture/Compiler** filters: match by processor or compiler
+//! - **Executable** filters: match by name, path, MD5, or category
+//! - **Date** filters: match by date range
+//! - **Function** filters: match by tag or child name
+//! - **Value editors**: UI components for editing filter values
 
+pub mod architecture_filters;
 pub mod date_filters;
 pub mod executable_filters;
+pub mod value_editors;
 
 /// A BSim filter that can be applied to search results.
 #[derive(Debug, Clone)]

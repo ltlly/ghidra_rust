@@ -49,6 +49,13 @@ pub mod gtree;
 /// Ported from action classes in `ghidra.app.plugin.core.symboltree.actions`.
 pub mod symbol_ops;
 
+/// Symbol tree action types (create namespace, class, library, external
+/// location, edit, delete, rename, cut/paste, pin, show references).
+///
+/// Ported from the many action classes in
+/// `ghidra.app.plugin.core.symboltree.actions`.
+pub mod symbol_tree_actions;
+
 use std::collections::BTreeMap;
 
 /// Options category name.

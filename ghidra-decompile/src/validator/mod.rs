@@ -2,8 +2,28 @@
 //!
 //! Port of `ghidra.app.plugin.core.decompiler.validator`:
 //! validators that check decompiler output for consistency and correctness.
+//!
+//! # Validators
+//!
+//! - [`ValidationResult`] -- result of a validation check
+//! - [`DecompilerValidator`] -- trait for all validators
+//! - [`ConsistencyValidator`] -- checks instruction-stream consistency
+//! - [`DataTypeValidator`] -- checks data type consistency
+//! - [`VariableReferenceValidator`] -- checks variable references
+//! - [`DecompilerParameterIdValidator`] -- validates parameter identification
+//! - [`CCodeValidator`] -- validates generated C code
+//! - [`SyntaxTreeValidator`] -- validates Clang AST structure
+//! - [`CallConventionValidator`] -- validates calling convention detection
+//! - [`AggregateValidator`] -- runs multiple validators and collects results
+
+pub mod decompiler_validator;
 
 use serde::{Deserialize, Serialize};
+
+pub use decompiler_validator::{
+    AggregateValidator, CCodeValidator, CallConventionValidator,
+    DecompilerParameterIdValidator, ParameterInfo, SyntaxTreeValidator,
+};
 
 /// Result of a decompiler validation check.
 #[derive(Debug, Clone, Serialize, Deserialize)]

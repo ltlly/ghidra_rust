@@ -46,6 +46,19 @@ pub mod validator;
 /// `AnalysisBackgroundCommand`, and `OneShotAnalysisCommand`.
 pub mod auto_analysis;
 
+/// Analysis scheduler, task descriptors, and option management.
+///
+/// Ported from `AnalysisScheduler.java`, `AnalysisTask.java`,
+/// `AnalysisTaskList.java`, `AnalysisOptionsUpdater.java`, and
+/// `AnalysisBackgroundCommand.java`.
+pub mod scheduler;
+
+/// Demangler analyzer for C++/Rust/D/Java/Swift symbol demangling.
+///
+/// Ported from `AbstractDemanglerAnalyzer.java` and
+/// `DemanglerAnalyzer.java`.
+pub mod demangler_analyzer;
+
 /// Reference analyzers: data operand, operand, scalar, and external symbol resolver.
 ///
 /// Ported from `ghidra.app.plugin.core.analysis.DataOperandReferenceAnalyzer`,

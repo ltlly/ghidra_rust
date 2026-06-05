@@ -48,6 +48,12 @@ pub mod viewer;
 pub mod model;
 
 /// Combined string searcher merging multiple search strategies.
+
+/// String translation support for decoding translated strings.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate` and
+/// `ghidra.app.plugin.core.string.translate.libretranslate`.
+pub mod translate;
 ///
 /// Ported from `ghidra.app.plugin.core.string.CombinedStringSearcher`.
 pub mod combined_searcher;

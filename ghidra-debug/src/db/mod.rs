@@ -330,3 +330,17 @@ pub use trace_db_module_impl::{
 // Additional modules from remaining Debug module ports
 pub mod trace_db_transaction;
 pub use trace_db_transaction::{TraceTransaction, TraceTransactionManager};
+
+// Internal listing/symbol view abstractions ported from Framework-TraceModeling
+pub mod trace_db_listing_internals;
+pub mod trace_db_symbol_internals;
+pub use trace_db_listing_internals::{
+    AbstractBaseDBTraceDefinedUnitsView, AbstractDBTraceDataComponent,
+    AbstractSingleDBTraceCodeUnitsView, AbstractWithUndefinedDBTraceCodeUnitsMemoryView,
+    InternalCodeUnitKind, InternalTraceBaseDefinedUnitsView, InternalTraceDefinedDataView,
+    ListingClearOp,
+};
+pub use trace_db_symbol_internals::{
+    AbstractDBTraceSymbolSingleTypeView, AbstractDBTraceSymbolSingleTypeWithAddressView,
+    AbstractDBTraceSymbolSingleTypeWithLocationView, SymbolQueryFilter,
+};

@@ -83,6 +83,7 @@ pub mod actions_impl;
 ///
 /// Ported from `ghidra.app.plugin.core.compositeeditor.BitFieldEditorDialog`.
 pub mod bitfield_dialog;
+pub mod undo_actions;
 
 use serde::{Deserialize, Serialize};
 

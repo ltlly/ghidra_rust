@@ -274,6 +274,260 @@ pub struct ResponseVectorMatch {
     pub matches: Vec<VectorMatchResult>,
 }
 
+// ============================================================================
+// Missing protocol types (ported from Java)
+// ============================================================================
+
+/// A BSim query object that wraps a query message with metadata.
+///
+/// Port of `BSimQuery.java` -- the base class for all BSim queries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BSimQuery {
+    /// The type of query.
+    pub query_type: BSimQueryType,
+    /// The database to query.
+    pub database: String,
+    /// Filter atoms applied to this query.
+    pub filters: Vec<FilterAtom>,
+    /// The type filter.
+    pub type_filter: Option<FilterType>,
+}
+
+/// The type of BSim query.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BSimQueryType {
+    /// Query for nearest neighbors.
+    Nearest,
+    /// Query by name.
+    Name,
+    /// Query for pairs.
+    Pair,
+    /// Query for children.
+    Children,
+    /// Query for cluster info.
+    Cluster,
+    /// Query for info.
+    Info,
+    /// Query for delete.
+    Delete,
+    /// Query for exe count.
+    ExeCount,
+    /// Query for exe info.
+    ExeInfo,
+    /// Query for nearest vector.
+    NearestVector,
+    /// Query for vector ID.
+    VectorId,
+    /// Query for vector match.
+    VectorMatch,
+    /// Query for optional existence.
+    OptionalExist,
+    /// Query for optional values.
+    OptionalValues,
+    /// Query for update.
+    Update,
+}
+
+/// Cluster note data in a BSim response.
+///
+/// Port of `ClusterNote.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterNote {
+    /// Function name.
+    pub function_name: String,
+    /// Cluster ID.
+    pub cluster_id: usize,
+    /// Confidence score.
+    pub confidence: f64,
+    /// Optional note text.
+    pub note: Option<String>,
+}
+
+/// A similarity note attached to a function match.
+///
+/// Port of `SimilarityNote.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarityNote {
+    /// The function this note is attached to.
+    pub function_name: String,
+    /// The similarity score.
+    pub similarity: f64,
+    /// Additional information about the similarity.
+    pub details: Vec<(String, String)>,
+}
+
+/// A similarity result record.
+///
+/// Port of `SimilarityResult.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarityResult {
+    /// The matched function name.
+    pub function_name: String,
+    /// The executable name.
+    pub executable_name: String,
+    /// The similarity score.
+    pub score: f64,
+    /// The similarity metric used.
+    pub metric: String,
+    /// MD5 of the executable.
+    pub md5: Option<String>,
+    /// Optional address of the function.
+    pub address: Option<String>,
+}
+
+/// A vector-based similarity result.
+///
+/// Port of `SimilarityVectorResult.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SimilarityVectorResult {
+    /// The matched function name.
+    pub function_name: String,
+    /// The similarity score.
+    pub score: f64,
+    /// The feature vector.
+    pub vector: Vec<f64>,
+    /// The executable name.
+    pub executable_name: Option<String>,
+}
+
+/// Deduplication info for executable results.
+///
+/// Port of `ExecutableResultWithDeDuping.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutableResultWithDeDuping {
+    /// The executable name.
+    pub name: String,
+    /// Number of functions.
+    pub function_count: usize,
+    /// Number of unique functions (after dedup).
+    pub unique_count: usize,
+    /// MD5 hash.
+    pub md5: Option<String>,
+    /// Architecture name.
+    pub architecture: Option<String>,
+}
+
+/// A function entry in the BSim database.
+///
+/// Port of `FunctionEntry.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionEntry {
+    /// Function name.
+    pub name: String,
+    /// Function address (hex string).
+    pub address: String,
+    /// Function size in bytes.
+    pub size: u32,
+    /// The executable this function belongs to.
+    pub executable_name: Option<String>,
+    /// The function's feature vector.
+    pub vector: Option<Vec<f64>>,
+    /// Tags associated with this function.
+    pub tags: Vec<String>,
+}
+
+/// Function staging for batch insert operations.
+///
+/// Port of `FunctionStaging.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionStaging {
+    /// Staged function entries.
+    pub entries: Vec<FunctionEntry>,
+    /// The executable these functions belong to.
+    pub executable_name: String,
+    /// Batch id for tracking.
+    pub batch_id: String,
+}
+
+/// Response to a prewarm request.
+///
+/// Port of `ResponsePrewarm.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponsePrewarm {
+    /// Whether prewarming was successful.
+    pub success: bool,
+    /// Number of pages warmed.
+    pub pages_loaded: usize,
+}
+
+/// Response to a nearest query.
+///
+/// Port of `ResponseNearest.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseNearest {
+    /// The matched results.
+    pub results: Vec<SimilarityResult>,
+}
+
+/// Insert request data for batch insertions.
+///
+/// Port of `InsertRequest.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InsertRequest {
+    /// The executable specifier.
+    pub exe: ExeSpecifier,
+    /// Function entries to insert.
+    pub entries: Vec<FunctionEntry>,
+    /// Whether to overwrite existing entries.
+    pub overwrite: bool,
+}
+
+/// Password change request.
+///
+/// Port of `PasswordChange.java`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PasswordChange {
+    /// The database name.
+    pub database: String,
+    /// Old password.
+    pub old_password: String,
+    /// New password.
+    pub new_password: String,
+}
+
+/// Function staging manager for managing batch inserts.
+///
+/// Port of `StagingManager.java` (already in protocol.rs, this adds
+/// the staging manager operations).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StagingManagerState {
+    /// Current staging entries.
+    pub staged: Vec<FunctionStaging>,
+    /// Maximum entries per batch.
+    pub batch_size: usize,
+    /// Total entries staged so far.
+    pub total_staged: usize,
+}
+
+impl StagingManagerState {
+    /// Create a new staging manager state.
+    pub fn new(batch_size: usize) -> Self {
+        Self {
+            staged: Vec::new(),
+            batch_size,
+            total_staged: 0,
+        }
+    }
+
+    /// Add a function staging batch.
+    pub fn add_batch(&mut self, staging: FunctionStaging) {
+        self.total_staged += staging.entries.len();
+        self.staged.push(staging);
+    }
+
+    /// Check if staging is full.
+    pub fn is_full(&self) -> bool {
+        self.staged.len() >= self.batch_size
+    }
+
+    /// Flush all staged entries (return them and clear).
+    pub fn flush(&mut self) -> Vec<FunctionStaging> {
+        let result = std::mem::take(&mut self.staged);
+        self.total_staged = 0;
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -313,5 +567,179 @@ mod tests {
         let json = serde_json::to_string(&r).unwrap();
         let back: ResponseInsert = serde_json::from_str(&json).unwrap();
         assert_eq!(back.count, 42);
+    }
+
+    #[test]
+    fn test_bsim_query() {
+        let q = BSimQuery {
+            query_type: BSimQueryType::Nearest,
+            database: "testdb".into(),
+            filters: vec![],
+            type_filter: None,
+        };
+        assert_eq!(q.query_type, BSimQueryType::Nearest);
+        let json = serde_json::to_string(&q).unwrap();
+        let back: BSimQuery = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.database, "testdb");
+    }
+
+    #[test]
+    fn test_cluster_note() {
+        let cn = ClusterNote {
+            function_name: "main".into(),
+            cluster_id: 42,
+            confidence: 0.95,
+            note: Some("high confidence".into()),
+        };
+        assert_eq!(cn.cluster_id, 42);
+    }
+
+    #[test]
+    fn test_similarity_result() {
+        let sr = SimilarityResult {
+            function_name: "func_a".into(),
+            executable_name: "exe_a".into(),
+            score: 0.85,
+            metric: "cosine".into(),
+            md5: Some("abc123".into()),
+            address: Some("0x1000".into()),
+        };
+        assert!(sr.score > 0.8);
+    }
+
+    #[test]
+    fn test_similarity_vector_result() {
+        let svr = SimilarityVectorResult {
+            function_name: "func_b".into(),
+            score: 0.75,
+            vector: vec![1.0, 2.0, 3.0],
+            executable_name: None,
+        };
+        assert_eq!(svr.vector.len(), 3);
+    }
+
+    #[test]
+    fn test_executable_result_with_deduping() {
+        let er = ExecutableResultWithDeDuping {
+            name: "test.exe".into(),
+            function_count: 100,
+            unique_count: 85,
+            md5: Some("def456".into()),
+            architecture: Some("x86".into()),
+        };
+        assert!(er.unique_count <= er.function_count);
+    }
+
+    #[test]
+    fn test_function_entry() {
+        let fe = FunctionEntry {
+            name: "main".into(),
+            address: "0x1000".into(),
+            size: 64,
+            executable_name: Some("test.exe".into()),
+            vector: Some(vec![0.1, 0.2]),
+            tags: vec!["entry".into()],
+        };
+        assert_eq!(fe.name, "main");
+        assert_eq!(fe.size, 64);
+    }
+
+    #[test]
+    fn test_function_staging() {
+        let fs = FunctionStaging {
+            entries: vec![
+                FunctionEntry {
+                    name: "a".into(),
+                    address: "0x1000".into(),
+                    size: 16,
+                    executable_name: None,
+                    vector: None,
+                    tags: vec![],
+                },
+            ],
+            executable_name: "test.exe".into(),
+            batch_id: "batch1".into(),
+        };
+        assert_eq!(fs.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_staging_manager_state() {
+        let mut sm = StagingManagerState::new(10);
+        assert!(!sm.is_full());
+
+        sm.add_batch(FunctionStaging {
+            entries: vec![
+                FunctionEntry {
+                    name: "f1".into(),
+                    address: "0x1000".into(),
+                    size: 16,
+                    executable_name: None,
+                    vector: None,
+                    tags: vec![],
+                },
+            ],
+            executable_name: "exe".into(),
+            batch_id: "b1".into(),
+        });
+        assert_eq!(sm.total_staged, 1);
+
+        let flushed = sm.flush();
+        assert_eq!(flushed.len(), 1);
+        assert_eq!(sm.total_staged, 0);
+    }
+
+    #[test]
+    fn test_response_nearest() {
+        let rn = ResponseNearest {
+            results: vec![SimilarityResult {
+                function_name: "f1".into(),
+                executable_name: "e1".into(),
+                score: 0.9,
+                metric: "cosine".into(),
+                md5: None,
+                address: None,
+            }],
+        };
+        assert_eq!(rn.results.len(), 1);
+    }
+
+    #[test]
+    fn test_response_prewarm() {
+        let rp = ResponsePrewarm {
+            success: true,
+            pages_loaded: 1024,
+        };
+        assert!(rp.success);
+    }
+
+    #[test]
+    fn test_password_change() {
+        let pc = PasswordChange {
+            database: "mydb".into(),
+            old_password: "old".into(),
+            new_password: "new".into(),
+        };
+        assert_eq!(pc.database, "mydb");
+    }
+
+    #[test]
+    fn test_insert_request() {
+        let ir = InsertRequest {
+            exe: ExeSpecifier::new("test.exe"),
+            entries: vec![],
+            overwrite: false,
+        };
+        assert!(!ir.overwrite);
+    }
+
+    #[test]
+    fn test_similarity_note() {
+        let sn = SimilarityNote {
+            function_name: "main".into(),
+            similarity: 0.95,
+            details: vec![("type".into(), "exact".into())],
+        };
+        assert_eq!(sn.similarity, 0.95);
     }
 }

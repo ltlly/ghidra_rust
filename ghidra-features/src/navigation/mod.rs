@@ -36,6 +36,18 @@ pub mod address_table;
 /// `ghidra.app.plugin.core.navigation.locationreferences`.
 pub mod descriptors;
 
+/// Location descriptor and reference types for navigation.
+///
+/// Ported from `LocationDescriptor.java`, `LocationReference.java`,
+/// and related classes in `ghidra.app.plugin.core.navigation.locationreferences`.
+pub mod location_descriptors;
+
+/// Extended navigation settings and starting location options.
+///
+/// Ported from `ProgramStartingLocationOptions.java` and
+/// range-navigation option classes.
+pub mod navigation_settings;
+
 use std::collections::HashMap;
 
 use ghidra_core::Address;
