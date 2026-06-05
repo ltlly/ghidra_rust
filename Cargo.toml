@@ -17,6 +17,7 @@ ghidra-emulation = { path = "ghidra-emulation" }
 resolver = "2"
 members = [
     "ghidra-app",
+    "ghidra-bsim",
     "ghidra-build",
     "ghidra-core",
     "ghidra-debug",

@@ -239,7 +239,7 @@ fn test_decompiler_clipboard_provider() {
 
 #[test]
 fn test_decompiler_concurrent_q() {
-    let _q = DecompilerConcurrentQ::<String, String>::new(4);
+    let _q = DecompilerConcurrentQ::<String>::new();
 }
 
 // ============================================================================
@@ -349,12 +349,12 @@ fn test_decompiler_action_context_type() {
 
 #[test]
 fn test_q_result_success() {
-    let result = QResult::success("input".to_string(), "output".to_string());
-    assert!(result.result.is_ok());
+    let result: QResult<String> = Ok("output".to_string());
+    assert!(result.is_ok());
 }
 
 #[test]
 fn test_q_result_error() {
-    let result: QResult<String, String> = QResult::failure("input".to_string(), "test error");
-    assert!(!result.is_success());
+    let result: QResult<String> = Err("test error".to_string());
+    assert!(result.is_err());
 }

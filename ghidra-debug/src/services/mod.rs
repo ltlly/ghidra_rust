@@ -22,6 +22,7 @@ pub mod control_impl;
 pub mod debugger_service_impls;
 pub mod emulation_extras;
 pub mod emulation_impl;
+pub mod emulation_utils;
 pub mod listing_impl;
 pub mod mapping_proposals;
 pub mod mapping_utils;
@@ -55,6 +56,13 @@ pub use service_interfaces::{
 // The comprehensive service_interfaces module provides extended versions of each
 // service trait that match the full Java API surface. The simpler trait definitions
 // below are retained for backward compatibility with existing code.
+
+// Re-exports from emulation_utils module
+pub use emulation_utils::{
+    DefaultEmulatorFactory, DefaultPcodeDebuggerMemoryAccess, DefaultPcodeDebuggerRegistersAccess,
+    EmulationMode, EmulatorOutOfMemoryException, ProgramEmulationUtils, BLOCK_NAME_STACK,
+    EMULATION_STARTED_AT, EMU_CTX_XML,
+};
 
 use crate::api::breakpoint::LogicalBreakpoint;
 use crate::model::Lifespan;

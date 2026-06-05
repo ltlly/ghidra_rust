@@ -17,15 +17,24 @@
 pub mod attributes;
 pub mod buffer;
 pub mod charset;
+pub mod color_resolver;
 pub mod handler;
 pub mod line;
+pub mod output;
 pub mod parser;
 pub mod state;
 
 pub use attributes::{AnsiColor, AnsiFont, Blink, Intensity, ReverseVideo, Underline, VtAttributes};
 pub use buffer::VtBuffer;
 pub use charset::{GSet, VtCharset};
+pub use color_resolver::{
+    resolve_color, ReverseVideo as ColorReverseVideo, WhichGround,
+};
 pub use handler::VtHandler;
 pub use line::VtLine;
+pub use output::{
+    CollectingOutput, DefaultResponseEncoder, EncoderWithOutput, VtOutput, VtResponseEncoder,
+    PASTE_END, PASTE_START,
+};
 pub use parser::VtParser;
 pub use state::VtState;

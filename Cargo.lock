@@ -1619,6 +1619,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidra-bsim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ghidra-core",
+ "ghidra-decompile",
+ "log",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 2.0.18",
+ "uuid",
+]
+
+[[package]]
 name = "ghidra-build"
 version = "0.1.0"
 dependencies = [

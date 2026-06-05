@@ -1,0 +1,21 @@
+[package]
+name = "ghidra-bsim"
+version = "0.1.0"
+edition = "2021"
+description = "Ghidra Rust - BSim: Binary Similarity feature for function-level similarity search and matching"
+
+[dependencies]
+ghidra-core = { path = "../ghidra-core" }
+ghidra-decompile = { path = "../ghidra-decompile" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+log = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+rusqlite = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,0 +1,41 @@
+//! Ghidra BSim -- Binary Similarity feature.
+//!
+//! Ports Ghidra's `Features/BSim` Java package into Rust.  Provides:
+//!
+//! - **Query engine** ([`query`]): `FunctionDatabase` trait and implementations
+//!   for PostgreSQL, Elasticsearch, and file-based backends.
+//! - **Client** ([`query::client`]): `BSimClientFactory` and connection management.
+//! - **Description types** ([`query::description`]): Function signatures,
+//!   executable descriptions, and similarity metrics.
+//! - **Protocol** ([`query::protocol`]): Wire-format types for BSim RPC.
+//! - **Ingest** ([`query::ingest`]): Signature ingestion pipeline.
+//! - **Facade** ([`query::facade`]): High-level convenience API.
+//! - **GUI** ([`gui`]): Filters, overview, and search dialogs.
+//!
+//! # Architecture
+//!
+//! ```text
+//! ┌──────────────────────────────────────────────┐
+//! │            FunctionDatabase (trait)           │
+//! │  Core query interface for BSim backends       │
+//! └──────────────────────────────────────────────┘
+//!     │             │              │
+//!     ▼             ▼              ▼
+//! ┌─────────┐  ┌──────────┐  ┌─────────┐
+//! │PostgreSQL│  │Elastic   │  │  File   │
+//! │ Backend  │  │Backend   │  │ Backend │
+//! └─────────┘  └──────────┘  └─────────┘
+//! ```
+
+pub mod query;
+pub mod gui;
+
+// Re-export key types
+pub use query::description::{
+    BSimExecutableInfo, BSimFunctionDescription, BSimResultSet,
+    FunctionSignatureInfo, SimilarityMetric,
+};
+pub use query::server_config::ServerConfig;
+pub use query::bsim_server_info::BSimServerInfo;
+pub use query::function_database::FunctionDatabase;
+pub use query::lsh::LSHException;

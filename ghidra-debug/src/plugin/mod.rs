@@ -33,6 +33,7 @@
 //! - `auto_map`: Auto-mapping specifications for dynamic-to-static mapping.
 
 pub mod abstract_plugin;
+pub mod action_specs;
 pub mod auto_map;
 pub mod control_actions;
 pub mod debugger_go_to;
@@ -235,3 +236,13 @@ pub use service_tracemgr_ext::{
 pub use gui_calltree_ext::*;
 pub use gui_memview_ext::*;
 pub use gui_pcode_ext::*;
+
+// Re-exports from action_specs module
+pub use action_specs::{
+    BasicAutoReadMemorySpec, ByModuleAutoMapSpec, ByRegionAutoMapSpec, BySectionAutoMapSpec,
+    NoneAutoMapSpec, NoneAutoReadMemorySpec, NoneLocationTrackingSpec, OneToOneAutoMapSpec,
+    PcByRegisterLocationTrackingSpec, PcByStackLocationTrackingSpec, PcLocationTrackingSpec,
+    RegisterLocationTrackingSpec, SpLocationTrackingSpec, WatchLocationTrackingSpec,
+    builtin_location_tracking_specs, register_builtin_auto_map_specs,
+    register_builtin_auto_read_specs,
+};
