@@ -5,11 +5,13 @@
 pub mod bsim_server_info;
 pub mod client;
 pub mod compare_signatures;
+pub mod decompile_function_task;
 pub mod description;
 pub mod elastic;
 pub mod facade;
 pub mod file;
 pub mod function_database;
+pub mod gen_signatures;
 pub mod ingest;
 pub mod lsh;
 pub mod postgresql;

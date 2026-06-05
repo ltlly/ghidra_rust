@@ -32,6 +32,7 @@ pub mod target;
 pub mod trace_rmi_acceptor;
 pub mod val_str;
 pub mod trace_rmi_connection;
+pub mod tracermi_listener;
 pub mod tracemgr;
 pub mod tracermi;
 pub mod watch;
@@ -67,6 +68,10 @@ pub use trace_rmi_connection::{
     TraceRmiError, TraceRmiLaunchOffer,
 };
 pub use watch::{ValStr, ValueFormat, WatchRow};
+pub use tracermi_listener::{
+    CompositeTraceRmiServiceListener, ConnectMode, RecordingServiceListener,
+    TraceRmiServiceEvent, TraceRmiServiceListener,
+};
 
 // Factory modules from remaining Debugger-api port
 pub use action::factories::{

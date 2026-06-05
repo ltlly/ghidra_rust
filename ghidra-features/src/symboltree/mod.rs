@@ -44,6 +44,11 @@ pub mod filter;
 /// `DisconnectedSymbolTreeProvider` in Ghidra's symbol tree package.
 pub mod gtree;
 
+/// Symbol table operations (create namespaces, rename, move, delete symbols).
+///
+/// Ported from action classes in `ghidra.app.plugin.core.symboltree.actions`.
+pub mod symbol_ops;
+
 use std::collections::BTreeMap;
 
 /// Options category name.
@@ -106,7 +111,7 @@ impl SymbolCategory {
 // ---------------------------------------------------------------------------
 
 /// Types of symbols in the tree.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum SymbolType {
     /// Function symbol.
     Function,

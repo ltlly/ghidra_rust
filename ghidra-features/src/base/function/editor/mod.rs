@@ -17,6 +17,11 @@
 //! | `ModelChangeListener`    | `ModelChangeListener`         |
 //! | `ParameterTableModel`    | `ParameterTableModel`         |
 
+pub mod storage_model;
+pub mod varnode_table;
+
+pub use storage_model::StorageAddressModel;
+
 use std::fmt;
 
 use ghidra_core::addr::Address;

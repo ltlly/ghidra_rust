@@ -120,6 +120,8 @@ pub mod trace_db_target_storage_ext;
 pub mod trace_db_value_box;
 pub mod trace_db_value_query;
 pub mod trace_db_object_aggregate;
+pub mod trace_db_field_codec;
+pub mod trace_db_spatial_tree;
 
 pub use trace_db::TraceDatabase;
 pub use trace_db_database::{
@@ -257,3 +259,8 @@ pub use trace_db_target_storage_ext::{
     AddressRange, CachedValueEntry, ObjectValueMapAddressSetView,
     ObjectValueWriteBehindCache, TraceObjectValueStorage,
 };
+
+pub use trace_db_field_codec::{
+    DBTraceFieldCodec, EncodedField, FieldDataType, FieldValue, TraceObjectFieldCodecSet,
+};
+pub use trace_db_spatial_tree::{RStarEntry, RStarTree, SpatialRect};

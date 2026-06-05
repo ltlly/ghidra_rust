@@ -30,6 +30,12 @@ pub mod provider;
 /// Ported from `ghidra.app.plugin.core.navigation` table-related classes.
 pub mod address_table;
 
+/// Specialized location descriptor types for "Find References To".
+///
+/// Ported from the many `*LocationDescriptor.java` subclasses in
+/// `ghidra.app.plugin.core.navigation.locationreferences`.
+pub mod descriptors;
+
 use std::collections::HashMap;
 
 use ghidra_core::Address;

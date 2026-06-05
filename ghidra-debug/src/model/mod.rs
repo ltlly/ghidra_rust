@@ -191,6 +191,12 @@ pub use map_proposal::{
     MapProposal, MapProposalSet, MapProposalSource, ModuleMapProposal, ProposedMapping,
     RegionMapProposal, RegionPermissions, SectionMapProposal, SectionMapping,
 };
+
+pub mod trace_address_snap_space;
+pub use trace_address_snap_space::{
+    AddressSnapRange, TraceAddressSnapSpace, for_address_space,
+};
+
 pub use experiment::{
     DebugExperiment, DiagnosticBoundingBox, RStarTreeDiagnostics, TracePerformanceMetrics,
 };

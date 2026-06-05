@@ -101,6 +101,7 @@ pub mod taint;
 pub mod trace_exporters;
 pub mod trace_plugin_events;
 pub mod utils;
+pub mod utils_extras;
 
 // New modules from Debugger service/plugin port
 pub mod service_breakpoint_impl;

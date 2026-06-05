@@ -63,6 +63,18 @@ pub mod actions_ext;
 /// `ghidra.app.plugin.core.datamgr.actions`.
 pub mod clipboard;
 
+/// Data type tree operations (create/rename/delete categories and types).
+///
+/// Ported from action and tree management classes in
+/// `ghidra.app.plugin.core.datamgr.actions` and
+/// `ghidra.app.plugin.core.datamgr.tree`.
+pub mod tree_ops;
+
+/// Data type association management (sync, commit, revert, update).
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.actions.associate`.
+pub mod associate;
+
 // Re-export the most-used public types at the datamgr level.
 pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArchive,
                    ProjectArchive, InvalidFileArchive, ArchiveManagerListener};
