@@ -342,6 +342,261 @@ impl Default for BundleHost {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Dependency resolution
+// ---------------------------------------------------------------------------
+
+/// Result of resolving bundle dependencies.
+///
+/// Ported from dependency resolution logic in `BundleHost`.
+#[derive(Debug, Clone)]
+pub struct DependencyResolution {
+    /// The bundle being resolved.
+    pub bundle_name: String,
+    /// Bundles that this bundle depends on.
+    pub dependencies: Vec<String>,
+    /// Missing dependencies (not found in the bundle map).
+    pub missing: Vec<String>,
+    /// Circular dependency chains detected.
+    pub cycles: Vec<Vec<String>>,
+    /// Whether resolution was successful.
+    pub success: bool,
+}
+
+impl DependencyResolution {
+    /// Create a new dependency resolution result.
+    pub fn new(bundle_name: impl Into<String>) -> Self {
+        Self {
+            bundle_name: bundle_name.into(),
+            dependencies: Vec::new(),
+            missing: Vec::new(),
+            cycles: Vec::new(),
+            success: true,
+        }
+    }
+
+    /// Whether all dependencies are resolved.
+    pub fn is_fully_resolved(&self) -> bool {
+        self.missing.is_empty() && self.cycles.is_empty()
+    }
+}
+
+/// Dependency resolver for bundles.
+///
+/// Ported from dependency resolution in `BundleHost`.
+pub struct DependencyResolver;
+
+impl DependencyResolver {
+    /// Resolve dependencies for a specific bundle.
+    pub fn resolve(bundle_map: &BundleMap, bundle_name: &str) -> DependencyResolution {
+        let mut resolution = DependencyResolution::new(bundle_name);
+
+        if let Some(bundle) = bundle_map.get(bundle_name) {
+            resolution.dependencies = bundle.dependencies.clone();
+
+            for dep in &bundle.dependencies {
+                if !bundle_map.bundles.contains_key(dep) {
+                    resolution.missing.push(dep.clone());
+                    resolution.success = false;
+                }
+            }
+
+            // Check for cycles
+            let mut visited = Vec::new();
+            if Self::has_cycle(bundle_map, bundle_name, &mut visited) {
+                resolution.cycles.push(visited);
+                resolution.success = false;
+            }
+        } else {
+            resolution.success = false;
+        }
+
+        resolution
+    }
+
+    /// Resolve dependencies for all bundles.
+    pub fn resolve_all(bundle_map: &BundleMap) -> Vec<DependencyResolution> {
+        bundle_map
+            .names()
+            .iter()
+            .map(|name| Self::resolve(bundle_map, name))
+            .collect()
+    }
+
+    /// Get the start order for all bundles based on dependencies.
+    ///
+    /// Returns bundles in dependency-first order (topological sort).
+    pub fn start_order(bundle_map: &BundleMap) -> Result<Vec<String>, String> {
+        let names: Vec<String> = bundle_map.names().iter().map(|s| s.to_string()).collect();
+        let mut visited = std::collections::HashSet::new();
+        let mut in_stack = std::collections::HashSet::new();
+        let mut order = Vec::new();
+
+        for name in &names {
+            if !visited.contains(name) {
+                Self::topological_sort(
+                    bundle_map,
+                    name,
+                    &mut visited,
+                    &mut in_stack,
+                    &mut order,
+                )?;
+            }
+        }
+
+        Ok(order)
+    }
+
+    fn topological_sort(
+        bundle_map: &BundleMap,
+        name: &str,
+        visited: &mut std::collections::HashSet<String>,
+        in_stack: &mut std::collections::HashSet<String>,
+        order: &mut Vec<String>,
+    ) -> Result<(), String> {
+        if in_stack.contains(name) {
+            return Err(format!("Circular dependency detected involving '{}'", name));
+        }
+        if visited.contains(name) {
+            return Ok(());
+        }
+
+        in_stack.insert(name.to_string());
+
+        if let Some(bundle) = bundle_map.get(name) {
+            for dep in &bundle.dependencies {
+                if bundle_map.bundles.contains_key(dep) {
+                    Self::topological_sort(bundle_map, dep, visited, in_stack, order)?;
+                }
+            }
+        }
+
+        in_stack.remove(name);
+        visited.insert(name.to_string());
+        order.push(name.to_string());
+        Ok(())
+    }
+
+    fn has_cycle(
+        bundle_map: &BundleMap,
+        name: &str,
+        visited: &mut Vec<String>,
+    ) -> bool {
+        if visited.contains(&name.to_string()) {
+            return true;
+        }
+        visited.push(name.to_string());
+
+        if let Some(bundle) = bundle_map.get(name) {
+            for dep in &bundle.dependencies {
+                if Self::has_cycle(bundle_map, dep, visited) {
+                    return true;
+                }
+            }
+        }
+
+        visited.pop();
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Start level management
+// ---------------------------------------------------------------------------
+
+/// Start level for bundle ordering during system startup.
+///
+/// Lower start levels are started first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct StartLevel(pub u32);
+
+impl StartLevel {
+    /// System bundle start level (started first).
+    pub const SYSTEM: StartLevel = StartLevel(0);
+    /// Default start level for user bundles.
+    pub const DEFAULT: StartLevel = StartLevel(10);
+    /// Extension bundle start level.
+    pub const EXTENSION: StartLevel = StartLevel(5);
+}
+
+/// Bundle start configuration.
+#[derive(Debug, Clone)]
+pub struct BundleStartConfig {
+    /// The bundle name.
+    pub bundle_name: String,
+    /// The start level.
+    pub start_level: StartLevel,
+    /// Whether to start automatically.
+    pub auto_start: bool,
+    /// Whether the bundle is lazy-started (only started when a class is loaded).
+    pub lazy_start: bool,
+}
+
+impl BundleStartConfig {
+    /// Create a new start configuration.
+    pub fn new(bundle_name: impl Into<String>) -> Self {
+        Self {
+            bundle_name: bundle_name.into(),
+            start_level: StartLevel::DEFAULT,
+            auto_start: true,
+            lazy_start: false,
+        }
+    }
+}
+
+/// Manages bundle start levels and ordering.
+#[derive(Debug, Default)]
+pub struct StartLevelManager {
+    configs: HashMap<String, BundleStartConfig>,
+    current_level: u32,
+}
+
+impl StartLevelManager {
+    /// Create a new start level manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the start configuration for a bundle.
+    pub fn set_config(&mut self, config: BundleStartConfig) {
+        self.configs.insert(config.bundle_name.clone(), config);
+    }
+
+    /// Get the start configuration for a bundle.
+    pub fn get_config(&self, name: &str) -> Option<&BundleStartConfig> {
+        self.configs.get(name)
+    }
+
+    /// Get bundles at a specific start level.
+    pub fn bundles_at_level(&self, level: StartLevel) -> Vec<&BundleStartConfig> {
+        self.configs
+            .values()
+            .filter(|c| c.start_level == level)
+            .collect()
+    }
+
+    /// Get the current start level.
+    pub fn current_level(&self) -> u32 {
+        self.current_level
+    }
+
+    /// Advance the start level.
+    pub fn advance_level(&mut self) {
+        self.current_level += 1;
+    }
+
+    /// Get all auto-start bundles sorted by start level.
+    pub fn auto_start_bundles(&self) -> Vec<&BundleStartConfig> {
+        let mut bundles: Vec<&BundleStartConfig> = self
+            .configs
+            .values()
+            .filter(|c| c.auto_start)
+            .collect();
+        bundles.sort_by_key(|c| c.start_level.0);
+        bundles
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -437,5 +692,126 @@ mod tests {
         let entry = bundle.status_entry();
         assert_eq!(entry.name, "b");
         assert_eq!(entry.status, BundleStatus::Installed);
+    }
+
+    #[test]
+    fn test_dependency_resolution_success() {
+        let mut map = BundleMap::new();
+        let mut lib = GhidraBundle::new("lib", "Library", "1.0", "/lib.jar");
+        lib.dependencies = vec![];
+        map.insert(lib);
+
+        let mut app = GhidraBundle::new("app", "App", "1.0", "/app.jar");
+        app.dependencies = vec!["lib".into()];
+        map.insert(app);
+
+        let resolution = DependencyResolver::resolve(&map, "app");
+        assert!(resolution.success);
+        assert!(resolution.missing.is_empty());
+        assert!(resolution.is_fully_resolved());
+    }
+
+    #[test]
+    fn test_dependency_resolution_missing() {
+        let mut map = BundleMap::new();
+        let mut app = GhidraBundle::new("app", "App", "1.0", "/app.jar");
+        app.dependencies = vec!["missing_lib".into()];
+        map.insert(app);
+
+        let resolution = DependencyResolver::resolve(&map, "app");
+        assert!(!resolution.success);
+        assert_eq!(resolution.missing, vec!["missing_lib"]);
+        assert!(!resolution.is_fully_resolved());
+    }
+
+    #[test]
+    fn test_dependency_start_order() {
+        let mut map = BundleMap::new();
+        let mut a = GhidraBundle::new("a", "A", "1.0", "/a.jar");
+        a.dependencies = vec!["b".into()];
+        map.insert(a);
+
+        let b = GhidraBundle::new("b", "B", "1.0", "/b.jar");
+        map.insert(b);
+
+        let order = DependencyResolver::start_order(&map).unwrap();
+        assert_eq!(order[0], "b");
+        assert_eq!(order[1], "a");
+    }
+
+    #[test]
+    fn test_dependency_circular_detection() {
+        let mut map = BundleMap::new();
+        let mut a = GhidraBundle::new("a", "A", "1.0", "/a.jar");
+        a.dependencies = vec!["b".into()];
+        map.insert(a);
+
+        let mut b = GhidraBundle::new("b", "B", "1.0", "/b.jar");
+        b.dependencies = vec!["a".into()];
+        map.insert(b);
+
+        let order = DependencyResolver::start_order(&map);
+        assert!(order.is_err());
+    }
+
+    #[test]
+    fn test_dependency_resolve_all() {
+        let mut map = BundleMap::new();
+        let mut a = GhidraBundle::new("a", "A", "1.0", "/a.jar");
+        a.dependencies = vec!["b".into()];
+        map.insert(a);
+
+        let b = GhidraBundle::new("b", "B", "1.0", "/b.jar");
+        map.insert(b);
+
+        let results = DependencyResolver::resolve_all(&map);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.success));
+    }
+
+    #[test]
+    fn test_start_level_ordering() {
+        assert!(StartLevel::SYSTEM < StartLevel::EXTENSION);
+        assert!(StartLevel::EXTENSION < StartLevel::DEFAULT);
+    }
+
+    #[test]
+    fn test_bundle_start_config() {
+        let config = BundleStartConfig::new("my.bundle");
+        assert_eq!(config.bundle_name, "my.bundle");
+        assert_eq!(config.start_level, StartLevel::DEFAULT);
+        assert!(config.auto_start);
+        assert!(!config.lazy_start);
+    }
+
+    #[test]
+    fn test_start_level_manager() {
+        let mut mgr = StartLevelManager::new();
+        assert_eq!(mgr.current_level(), 0);
+
+        let mut config = BundleStartConfig::new("b1");
+        config.start_level = StartLevel::SYSTEM;
+        mgr.set_config(config);
+
+        let mut config2 = BundleStartConfig::new("b2");
+        config2.start_level = StartLevel::DEFAULT;
+        mgr.set_config(config2);
+
+        let sys_bundles = mgr.bundles_at_level(StartLevel::SYSTEM);
+        assert_eq!(sys_bundles.len(), 1);
+        assert_eq!(sys_bundles[0].bundle_name, "b1");
+
+        let auto_start = mgr.auto_start_bundles();
+        assert_eq!(auto_start.len(), 2);
+        assert_eq!(auto_start[0].bundle_name, "b1"); // SYSTEM level first
+    }
+
+    #[test]
+    fn test_start_level_manager_advance() {
+        let mut mgr = StartLevelManager::new();
+        mgr.advance_level();
+        assert_eq!(mgr.current_level(), 1);
+        mgr.advance_level();
+        assert_eq!(mgr.current_level(), 2);
     }
 }

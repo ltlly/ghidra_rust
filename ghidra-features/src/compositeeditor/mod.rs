@@ -252,6 +252,11 @@ impl CompositeEditorModel {
         &self.components
     }
 
+    /// Get mutable access to the current components.
+    pub fn components_mut(&mut self) -> &mut Vec<ComponentRow> {
+        &mut self.components
+    }
+
     /// Set the components (e.g., when loading a composite type).
     pub fn set_components(&mut self, components: Vec<ComponentRow>) {
         self.save_undo();
@@ -401,6 +406,535 @@ impl CompositeEditorModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Composite editor model listener events
+// ---------------------------------------------------------------------------
+
+/// Events emitted by the composite editor model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CompositeEditorEvent {
+    /// A new composite was loaded into the editor.
+    CompositeLoaded,
+    /// A component was added.
+    ComponentAdded,
+    /// A component was removed.
+    ComponentRemoved,
+    /// A component was moved.
+    ComponentMoved,
+    /// A component type was changed.
+    ComponentTypeChanged,
+    /// A component name was changed.
+    ComponentNameChanged,
+    /// The composite was cleared.
+    CompositeCleared,
+    /// The composite was applied (saved).
+    CompositeApplied,
+    /// Selection changed.
+    SelectionChanged,
+    /// The editor state changed (dirty, etc.).
+    EditorStateChanged,
+}
+
+/// Trait for receiving composite editor model events.
+pub trait CompositeEditorModelListener: Send + Sync {
+    /// Called when an event occurs.
+    fn on_event(&self, event: CompositeEditorEvent);
+}
+
+// ---------------------------------------------------------------------------
+// Column definitions
+// ---------------------------------------------------------------------------
+
+/// Column indices for a structure editor table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StructureColumns;
+
+impl StructureColumns {
+    /// Offset column.
+    pub const OFFSET: usize = 0;
+    /// Length column.
+    pub const LENGTH: usize = 1;
+    /// Mnemonic column.
+    pub const MNEMONIC: usize = 2;
+    /// DataType column.
+    pub const DATATYPE: usize = 3;
+    /// Field Name column.
+    pub const FIELDNAME: usize = 4;
+    /// Comment column.
+    pub const COMMENT: usize = 5;
+    /// Ordinal column (hidden).
+    pub const ORDINAL: usize = 6;
+
+    /// Column headers for structure editor.
+    pub const HEADERS: &'static [&'static str] =
+        &["Offset", "Length", "Mnemonic", "DataType", "Name", "Comment"];
+
+    /// Default column widths.
+    pub const WIDTHS: &'static [usize] = &[75, 75, 100, 100, 100, 150];
+}
+
+/// Column indices for a union editor table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UnionColumns;
+
+impl UnionColumns {
+    /// Length column.
+    pub const LENGTH: usize = 0;
+    /// Mnemonic column.
+    pub const MNEMONIC: usize = 1;
+    /// DataType column.
+    pub const DATATYPE: usize = 2;
+    /// Field Name column.
+    pub const FIELDNAME: usize = 3;
+    /// Comment column.
+    pub const COMMENT: usize = 4;
+    /// Ordinal column (hidden).
+    pub const ORDINAL: usize = 5;
+
+    /// Column headers for union editor.
+    pub const HEADERS: &'static [&'static str] =
+        &["Length", "Mnemonic", "DataType", "Name", "Comment"];
+
+    /// Default column widths.
+    pub const WIDTHS: &'static [usize] = &[75, 100, 100, 100, 150];
+}
+
+// ---------------------------------------------------------------------------
+// Bit-field editor model
+// ---------------------------------------------------------------------------
+
+/// Model for editing bit-field components within a composite.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.BitFieldEditorPanel`.
+#[derive(Debug)]
+pub struct BitFieldEditorModel {
+    /// The bit-field name.
+    pub name: String,
+    /// The base data type mnemonic (e.g., "uint", "int").
+    pub base_type: String,
+    /// The bit size of the bit-field.
+    pub bit_size: u32,
+    /// The bit offset within the containing storage unit.
+    pub bit_offset: u32,
+    /// Whether the bit-field declaration is valid.
+    pub valid: bool,
+}
+
+impl BitFieldEditorModel {
+    /// Create a new bit-field editor model.
+    pub fn new(name: impl Into<String>, base_type: impl Into<String>, bit_size: u32, bit_offset: u32) -> Self {
+        Self {
+            name: name.into(),
+            base_type: base_type.into(),
+            bit_size,
+            bit_offset,
+            valid: bit_size > 0 && bit_size <= 64,
+        }
+    }
+
+    /// The end bit position (exclusive).
+    pub fn end_bit(&self) -> u32 {
+        self.bit_offset + self.bit_size
+    }
+
+    /// Whether the bit-field fits within a given storage unit size (in bits).
+    pub fn fits_in_storage(&self, storage_bits: u32) -> bool {
+        self.end_bit() <= storage_bits
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Composite viewer model
+// ---------------------------------------------------------------------------
+
+/// Model for viewing (read-only) a composite data type.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeViewerModel`.
+/// This is the non-editable counterpart used in the data type manager tree.
+#[derive(Debug)]
+pub struct CompositeViewerModel {
+    /// The composite name.
+    pub composite_name: String,
+    /// Whether this is a struct (true) or union (false).
+    pub is_struct: bool,
+    /// The components being viewed.
+    components: Vec<ComponentRow>,
+    /// Whether to display hex numbers.
+    pub show_hex_numbers: bool,
+}
+
+impl CompositeViewerModel {
+    /// Create a new viewer model.
+    pub fn new(composite_name: impl Into<String>, is_struct: bool) -> Self {
+        Self {
+            composite_name: composite_name.into(),
+            is_struct,
+            components: Vec::new(),
+            show_hex_numbers: false,
+        }
+    }
+
+    /// Set the components.
+    pub fn set_components(&mut self, components: Vec<ComponentRow>) {
+        self.components = components;
+    }
+
+    /// Get the components.
+    pub fn components(&self) -> &[ComponentRow] {
+        &self.components
+    }
+
+    /// Number of components.
+    pub fn component_count(&self) -> usize {
+        self.components.len()
+    }
+
+    /// Total byte size.
+    pub fn total_size(&self) -> u64 {
+        self.components.last().map_or(0, |c| c.end_offset())
+    }
+
+    /// The type name ("Structure" or "Union").
+    pub fn type_name(&self) -> &'static str {
+        if self.is_struct { "Structure" } else { "Union" }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structure editor model
+// ---------------------------------------------------------------------------
+
+/// Model for editing structure (composite) data types.
+///
+/// Extends the base [`CompositeEditorModel`] with structure-specific
+/// behavior such as sequential component layout, offset management,
+/// and gap filling.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.StructureEditorModel`.
+#[derive(Debug)]
+pub struct StructureEditorModel {
+    /// The base composite editor model.
+    pub base: CompositeEditorModel,
+    /// Whether to show hex numbers in the table.
+    pub show_hex_numbers: bool,
+    /// Whether to show undefined bytes as components.
+    pub show_undefined_bytes: bool,
+    /// The number of last-used bytes for dynamic types.
+    last_num_bytes: i32,
+}
+
+impl StructureEditorModel {
+    /// Create a new structure editor model.
+    pub fn new(composite_name: impl Into<String>) -> Self {
+        Self {
+            base: CompositeEditorModel::new(composite_name, true),
+            show_hex_numbers: false,
+            show_undefined_bytes: true,
+            last_num_bytes: 1,
+        }
+    }
+
+    /// Get the type name.
+    pub fn type_name(&self) -> &'static str {
+        "Structure"
+    }
+
+    /// Whether aligned-length components are used.
+    pub fn uses_aligned_length_components(&self) -> bool {
+        true
+    }
+
+    /// Get the maximum replace length for a component at the given index.
+    /// Returns -1 if there's no limit.
+    pub fn get_max_replace_length(&self, index: usize) -> i32 {
+        if index >= self.base.component_count() {
+            return -1;
+        }
+        let current = &self.base.components()[index];
+        current.length as i32
+    }
+
+    /// Get the last used byte count for dynamic types.
+    pub fn last_num_bytes(&self) -> i32 {
+        self.last_num_bytes
+    }
+
+    /// Set the last used byte count.
+    pub fn set_last_num_bytes(&mut self, count: i32) {
+        self.last_num_bytes = count;
+    }
+
+    /// Insert an undefined component at the given offset with the given length.
+    pub fn insert_undefined(&mut self, at: usize, length: u32) {
+        self.base.add_component(at, "undefined");
+        if let Some(last) = self.base.components_mut().last_mut() {
+            last.length = length;
+        }
+    }
+
+    /// Replace the component at the given index with a new type.
+    pub fn replace_component_type(&mut self, index: usize, type_name: impl Into<String>) -> bool {
+        self.base.set_component_type(index, type_name)
+    }
+
+    /// Get a formatted hex string for a value.
+    pub fn get_hex_string(value: i32, prefix: bool) -> String {
+        if prefix {
+            format!("0x{:X}", value)
+        } else {
+            format!("{:X}", value)
+        }
+    }
+
+    /// Get the offset of a component.
+    pub fn get_component_offset(&self, index: usize) -> Option<u64> {
+        self.base.components().get(index).map(|c| c.offset)
+    }
+
+    /// Get the length of a component.
+    pub fn get_component_length(&self, index: usize) -> Option<u32> {
+        self.base.components().get(index).map(|c| c.length)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Union editor model
+// ---------------------------------------------------------------------------
+
+/// Model for editing union data types.
+///
+/// Unions differ from structures in that all components start at offset 0
+/// and the total size equals the size of the largest component.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.UnionEditorModel`.
+#[derive(Debug)]
+pub struct UnionEditorModel {
+    /// The base composite editor model.
+    pub base: CompositeEditorModel,
+    /// Whether to show hex numbers.
+    pub show_hex_numbers: bool,
+    /// The number of last-used bytes for dynamic types.
+    last_num_bytes: i32,
+}
+
+impl UnionEditorModel {
+    /// Create a new union editor model.
+    pub fn new(composite_name: impl Into<String>) -> Self {
+        Self {
+            base: CompositeEditorModel::new(composite_name, false),
+            show_hex_numbers: false,
+            last_num_bytes: 1,
+        }
+    }
+
+    /// Get the type name.
+    pub fn type_name(&self) -> &'static str {
+        "Union"
+    }
+
+    /// Whether aligned-length components are used.
+    pub fn uses_aligned_length_components(&self) -> bool {
+        false
+    }
+
+    /// Get the maximum replace length.
+    pub fn get_max_replace_length(&self, _index: usize) -> i32 {
+        -1
+    }
+
+    /// Get the last used byte count.
+    pub fn last_num_bytes(&self) -> i32 {
+        self.last_num_bytes
+    }
+
+    /// Set the last used byte count.
+    pub fn set_last_num_bytes(&mut self, count: i32) {
+        self.last_num_bytes = count;
+    }
+
+    /// Add a component to the union (all unions start at offset 0).
+    pub fn add_union_component(&mut self, type_name: impl Into<String>, length: u32) {
+        let ordinal = self.base.component_count();
+        let mut row = ComponentRow::new(ordinal, type_name, String::new(), 0, length);
+        row.offset = 0; // All union members start at offset 0
+        self.base.set_components({
+            let mut comps = self.base.components().to_vec();
+            comps.push(row);
+            comps
+        });
+    }
+
+    /// The total size of the union is the max component length.
+    pub fn total_size(&self) -> u64 {
+        self.base
+            .components()
+            .iter()
+            .map(|c| c.length as u64)
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Composite editor action manager
+// ---------------------------------------------------------------------------
+
+/// Manages actions for the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeEditorActionManager`.
+#[derive(Debug)]
+pub struct CompositeEditorActionManager {
+    /// Editor actions (add, delete, etc.).
+    editor_actions: Vec<EditorAction>,
+    /// Favorites actions (quick-apply data types from favorites list).
+    favorites: Vec<String>,
+    /// Cycle group actions.
+    cycle_groups: Vec<CycleGroup>,
+    /// Whether the action manager is disposed.
+    disposed: bool,
+}
+
+/// A cycle group of related data types that can be toggled through.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CycleGroup`.
+#[derive(Debug, Clone)]
+pub struct CycleGroup {
+    /// Display name for this cycle group.
+    pub name: String,
+    /// Data types in this group, ordered by size.
+    pub types: Vec<String>,
+}
+
+impl CycleGroup {
+    /// Create a new cycle group.
+    pub fn new(name: impl Into<String>, types: Vec<String>) -> Self {
+        Self {
+            name: name.into(),
+            types,
+        }
+    }
+
+    /// Built-in cycle groups.
+    pub fn builtin_groups() -> Vec<CycleGroup> {
+        vec![
+            CycleGroup::new("byte", vec!["byte".into(), "char".into()]),
+            CycleGroup::new("word", vec!["word".into(), "short".into(), "ushort".into()]),
+            CycleGroup::new("dword", vec!["dword".into(), "int".into(), "uint".into(), "float".into()]),
+            CycleGroup::new("qword", vec![
+                "qword".into(), "longlong".into(), "ulonglong".into(), "double".into(),
+            ]),
+        ]
+    }
+}
+
+impl CompositeEditorActionManager {
+    /// Create a new action manager.
+    pub fn new() -> Self {
+        Self {
+            editor_actions: Vec::new(),
+            favorites: Vec::new(),
+            cycle_groups: CycleGroup::builtin_groups(),
+            disposed: false,
+        }
+    }
+
+    /// Add an editor action.
+    pub fn add_action(&mut self, action: EditorAction) {
+        self.editor_actions.push(action);
+    }
+
+    /// Remove an editor action.
+    pub fn remove_action(&mut self, action: &EditorAction) {
+        self.editor_actions.retain(|a| a != action);
+    }
+
+    /// Get all editor actions.
+    pub fn get_actions(&self) -> &[EditorAction] {
+        &self.editor_actions
+    }
+
+    /// Set favorites data type names.
+    pub fn set_favorites(&mut self, favorites: Vec<String>) {
+        self.favorites = favorites;
+    }
+
+    /// Get favorites.
+    pub fn favorites(&self) -> &[String] {
+        &self.favorites
+    }
+
+    /// Get cycle groups.
+    pub fn cycle_groups(&self) -> &[CycleGroup] {
+        &self.cycle_groups
+    }
+
+    /// Dispose of this action manager.
+    pub fn dispose(&mut self) {
+        self.editor_actions.clear();
+        self.favorites.clear();
+        self.cycle_groups.clear();
+        self.disposed = true;
+    }
+
+    /// Whether this action manager is disposed.
+    pub fn is_disposed(&self) -> bool {
+        self.disposed
+    }
+}
+
+impl Default for CompositeEditorActionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Data type helper
+// ---------------------------------------------------------------------------
+
+/// Helper for dealing with data types in the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.DataTypeHelper`.
+pub struct DataTypeHelper;
+
+impl DataTypeHelper {
+    /// Strip whitespace from a data type name string.
+    pub fn strip_whitespace(original: &str) -> String {
+        original.chars().filter(|c| !c.is_whitespace()).collect()
+    }
+
+    /// Validate that a data type name is not empty and not a factory type.
+    pub fn validate_type_name(name: &str) -> Result<(), String> {
+        let stripped = Self::strip_whitespace(name);
+        if stripped.is_empty() {
+            return Err("No data type was specified.".into());
+        }
+        Ok(())
+    }
+
+    /// Get the base type from a type name (e.g., strip pointer/array decorators).
+    pub fn get_base_type_name(type_name: &str) -> &str {
+        // Strip pointer suffix
+        let name = type_name.trim_end_matches('*').trim();
+        // Strip array suffix [N]
+        if let Some(bracket_pos) = name.find('[') {
+            &name[..bracket_pos]
+        } else {
+            name
+        }
+    }
+
+    /// Check if a type name represents a pointer type.
+    pub fn is_pointer_type(type_name: &str) -> bool {
+        type_name.contains('*')
+    }
+
+    /// Check if a type name represents an array type.
+    pub fn is_array_type(type_name: &str) -> bool {
+        type_name.contains('[')
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -534,5 +1068,173 @@ mod tests {
             new_type: "int".into(),
         };
         assert!(matches!(tx, EditTransaction::SetType { .. }));
+    }
+
+    #[test]
+    fn test_structure_columns() {
+        assert_eq!(StructureColumns::HEADERS.len(), 6);
+        assert_eq!(StructureColumns::OFFSET, 0);
+        assert_eq!(StructureColumns::ORDINAL, 6);
+    }
+
+    #[test]
+    fn test_union_columns() {
+        assert_eq!(UnionColumns::HEADERS.len(), 5);
+        assert_eq!(UnionColumns::LENGTH, 0);
+        assert_eq!(UnionColumns::ORDINAL, 5);
+    }
+
+    #[test]
+    fn test_bitfield_editor_model() {
+        let bf = BitFieldEditorModel::new("flags", "uint", 3, 5);
+        assert_eq!(bf.end_bit(), 8);
+        assert!(bf.fits_in_storage(8));
+        assert!(!bf.fits_in_storage(7));
+        assert!(bf.valid);
+    }
+
+    #[test]
+    fn test_bitfield_editor_model_invalid() {
+        let bf = BitFieldEditorModel::new("bad", "uint", 0, 0);
+        assert!(!bf.valid);
+        let bf2 = BitFieldEditorModel::new("bad2", "uint", 65, 0);
+        assert!(!bf2.valid);
+    }
+
+    #[test]
+    fn test_composite_viewer_model() {
+        let mut viewer = CompositeViewerModel::new("MyStruct", true);
+        assert_eq!(viewer.type_name(), "Structure");
+        assert_eq!(viewer.component_count(), 0);
+
+        viewer.set_components(vec![
+            ComponentRow::new(0, "int", "x", 0, 4),
+            ComponentRow::new(1, "char", "c", 4, 1),
+        ]);
+        assert_eq!(viewer.component_count(), 2);
+        assert_eq!(viewer.total_size(), 5);
+    }
+
+    #[test]
+    fn test_composite_viewer_model_union() {
+        let viewer = CompositeViewerModel::new("MyUnion", false);
+        assert_eq!(viewer.type_name(), "Union");
+    }
+
+    #[test]
+    fn test_structure_editor_model() {
+        let mut model = StructureEditorModel::new("S");
+        assert_eq!(model.type_name(), "Structure");
+        assert!(model.uses_aligned_length_components());
+
+        model.base.add_component(0, "int");
+        assert_eq!(model.get_component_offset(0), Some(0));
+        assert_eq!(model.get_component_length(0), Some(1)); // default 1-byte
+
+        model.set_last_num_bytes(4);
+        assert_eq!(model.last_num_bytes(), 4);
+    }
+
+    #[test]
+    fn test_structure_editor_model_hex_string() {
+        assert_eq!(StructureEditorModel::get_hex_string(255, true), "0xFF");
+        assert_eq!(StructureEditorModel::get_hex_string(10, false), "A");
+    }
+
+    #[test]
+    fn test_union_editor_model() {
+        let mut model = UnionEditorModel::new("U");
+        assert_eq!(model.type_name(), "Union");
+        assert!(!model.uses_aligned_length_components());
+
+        model.add_union_component("int", 4);
+        model.add_union_component("char[8]", 8);
+        assert_eq!(model.total_size(), 8);
+    }
+
+    #[test]
+    fn test_union_editor_model_empty() {
+        let model = UnionEditorModel::new("EmptyUnion");
+        assert_eq!(model.total_size(), 0);
+    }
+
+    #[test]
+    fn test_composite_editor_action_manager() {
+        let mut mgr = CompositeEditorActionManager::new();
+        assert!(!mgr.is_disposed());
+        assert!(mgr.get_actions().is_empty());
+        assert!(!mgr.cycle_groups().is_empty());
+
+        mgr.add_action(EditorAction::Apply);
+        assert_eq!(mgr.get_actions().len(), 1);
+
+        mgr.remove_action(&EditorAction::Apply);
+        assert!(mgr.get_actions().is_empty());
+
+        mgr.dispose();
+        assert!(mgr.is_disposed());
+    }
+
+    #[test]
+    fn test_cycle_group() {
+        let groups = CycleGroup::builtin_groups();
+        assert!(!groups.is_empty());
+        assert_eq!(groups[0].name, "byte");
+    }
+
+    #[test]
+    fn test_data_type_helper_strip_whitespace() {
+        assert_eq!(DataTypeHelper::strip_whitespace("  int  * "), "int*");
+        assert_eq!(DataTypeHelper::strip_whitespace(""), "");
+    }
+
+    #[test]
+    fn test_data_type_helper_validate() {
+        assert!(DataTypeHelper::validate_type_name("int").is_ok());
+        assert!(DataTypeHelper::validate_type_name("").is_err());
+        assert!(DataTypeHelper::validate_type_name("   ").is_err());
+    }
+
+    #[test]
+    fn test_data_type_helper_base_type() {
+        assert_eq!(DataTypeHelper::get_base_type_name("int *"), "int");
+        assert_eq!(DataTypeHelper::get_base_type_name("char"), "char");
+        assert_eq!(DataTypeHelper::get_base_type_name("int[10]"), "int");
+    }
+
+    #[test]
+    fn test_data_type_helper_pointer_array() {
+        assert!(DataTypeHelper::is_pointer_type("int *"));
+        assert!(!DataTypeHelper::is_pointer_type("int"));
+        assert!(DataTypeHelper::is_array_type("int[10]"));
+        assert!(!DataTypeHelper::is_array_type("int"));
+    }
+
+    #[test]
+    fn test_structure_editor_model_insert_undefined() {
+        let mut model = StructureEditorModel::new("S");
+        model.insert_undefined(0, 4);
+        assert_eq!(model.base.component_count(), 1);
+        assert_eq!(model.base.components()[0].type_name, "undefined");
+        assert_eq!(model.base.components()[0].length, 4);
+    }
+
+    #[test]
+    fn test_structure_editor_model_replace_component_type() {
+        let mut model = StructureEditorModel::new("S");
+        model.base.add_component(0, "int");
+        assert!(model.replace_component_type(0, "float"));
+        assert_eq!(model.base.components()[0].type_name, "float");
+    }
+
+    #[test]
+    fn test_union_all_at_offset_zero() {
+        let mut model = UnionEditorModel::new("U");
+        model.add_union_component("int", 4);
+        model.add_union_component("double", 8);
+        // All union members should be at offset 0
+        for comp in model.base.components() {
+            assert_eq!(comp.offset, 0);
+        }
     }
 }

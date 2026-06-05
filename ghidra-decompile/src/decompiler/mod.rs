@@ -65,6 +65,7 @@ pub mod actions;
 pub mod analysis_cmd;
 pub mod clang_line;
 pub mod clang_node;
+pub mod clang_token_types;
 pub mod component;
 pub mod concurrent_q;
 pub mod cpp_exporter;
@@ -78,6 +79,7 @@ pub mod decompile_results;
 pub mod decompiled_function;
 pub mod decomp_interface;
 pub mod disposer;
+pub mod fill_out_structure;
 pub mod flatapi;
 pub mod highlighter;
 pub mod location;
@@ -103,6 +105,11 @@ pub use clang_node::{
     SyntaxType, COMMENT_COLOR, CONST_COLOR, DEFAULT_COLOR, ERROR_COLOR, FUNCTION_COLOR,
     GLOBAL_COLOR, KEYWORD_COLOR, MAX_COLOR, NULL_NODE, PARAMETER_COLOR, SPECIAL_COLOR,
     TYPE_COLOR, VARIABLE_COLOR,
+};
+
+// Extended Clang token type traits and classifier
+pub use clang_token_types::{
+    ClangOpTokenExt, ClangTokenClassifier, ClangTypeTokenExt, ClangVariableDeclExt, TokenCategory,
 };
 
 // ClangLine
@@ -168,8 +175,13 @@ pub use actions::{
 
 // Utility types
 pub use util::{
-    DataTypeDependencyOrderer, FillOutStructureHelper, StructFieldEntry,
+    DataTypeDependencyOrderer, FillOutStructureHelper as UtilFillOutStructureHelper, StructFieldEntry as UtilStructFieldEntry,
     find_token_at, line_display_width, to_lines, to_plain_text,
+};
+
+// FillOutStructure types
+pub use fill_out_structure::{
+    FillOutStructureHelper, FillOutStructureResult, StructFieldEntry,
 };
 
 // CppExporter types

@@ -4,11 +4,17 @@
 //! and `resources.MultiIcon` / `resources.MultiIconBuilder`.
 
 pub mod icons;
+pub mod icons_ext;
 pub mod multi_icon;
 
 pub use icons::{
     ColorIcon, ColorIcon3D, DerivedImageIcon, DisabledImageIcon, EmptyIcon, OvalColorIcon,
     ReflectedIcon, RotateIcon, RotationAngle, ScaledImageIcon, TranslateIcon,
+};
+pub use icons_ext::{
+    BytesImageIcon, CenterTranslateIcon, DisabledImageIconWrapper, FileBasedIcon, IconWrapper,
+    ImageIconWrapper, LazyImageIcon, OvalBackgroundColorIcon, ScaledImageIconWrapper,
+    UnresolvedIcon, UrlImageIcon,
 };
 pub use multi_icon::{BuiltinIcon, IconId, IconOverlay, MultiIcon, MultiIconBuilder, Quadrant};
 

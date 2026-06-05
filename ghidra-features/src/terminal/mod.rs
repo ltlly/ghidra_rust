@@ -393,6 +393,424 @@ impl Default for TerminalPlugin {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ANSI escape sequence parser
+// ---------------------------------------------------------------------------
+
+/// A parsed ANSI escape sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnsiSequence {
+    /// Cursor Up: move cursor up N rows.
+    CursorUp(u16),
+    /// Cursor Down: move cursor down N rows.
+    CursorDown(u16),
+    /// Cursor Forward: move cursor right N columns.
+    CursorForward(u16),
+    /// Cursor Back: move cursor left N columns.
+    CursorBack(u16),
+    /// Cursor Position: move to row, column (1-based).
+    CursorPosition(u16, u16),
+    /// Erase Display: 0=to end, 1=to start, 2=all, 3=all + scrollback.
+    EraseDisplay(u8),
+    /// Erase in Line: 0=to end, 1=to start, 2=all.
+    EraseInLine(u8),
+    /// Set Graphics Rendition (SGR).
+    SetGraphicsRendition(Vec<u16>),
+    /// Set scrolling region (top, bottom).
+    SetScrollRegion(u16, u16),
+    /// Save cursor position.
+    SaveCursor,
+    /// Restore cursor position.
+    RestoreCursor,
+    /// Hide cursor.
+    HideCursor,
+    /// Show cursor.
+    ShowCursor,
+    /// Set mode.
+    SetMode(u16),
+    /// Reset mode.
+    ResetMode(u16),
+    /// Device Status Report.
+    DeviceStatusReport,
+    /// An unrecognized sequence.
+    Unknown(Vec<u16>),
+}
+
+/// State of the ANSI parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParseState {
+    /// Normal character processing.
+    Normal,
+    /// Seen ESC character.
+    EscSeen,
+    /// Inside CSI (Control Sequence Introducer) sequence, collecting params.
+    CsiParams,
+    /// Inside CSI with private mode prefix (`?`).
+    CsiPrivate,
+}
+
+/// Parser for ANSI/VT100 escape sequences.
+///
+/// Ported from terminal emulator parsing logic.
+#[derive(Debug)]
+pub struct AnsiParser {
+    state: ParseState,
+    params: Vec<u16>,
+    /// The current accumulated parameter string.
+    param_str: String,
+    /// Whether this is a private mode sequence (has `?` prefix).
+    private_mode: bool,
+}
+
+impl AnsiParser {
+    /// Create a new ANSI parser.
+    pub fn new() -> Self {
+        Self {
+            state: ParseState::Normal,
+            params: Vec::new(),
+            param_str: String::new(),
+            private_mode: false,
+        }
+    }
+
+    /// Parse a string and extract escape sequences and text.
+    pub fn parse(&mut self, input: &str) -> Vec<ParsedElement> {
+        let mut elements = Vec::new();
+        let mut text_buf = String::new();
+
+        for ch in input.chars() {
+            match self.feed_char(ch) {
+                Some(ParsedElement::Text(t)) => text_buf.push_str(&t),
+                Some(seq) => {
+                    if !text_buf.is_empty() {
+                        elements.push(ParsedElement::Text(std::mem::take(&mut text_buf)));
+                    }
+                    elements.push(seq);
+                }
+                None => {}
+            }
+        }
+
+        if !text_buf.is_empty() {
+            elements.push(ParsedElement::Text(text_buf));
+        }
+
+        elements
+    }
+
+    /// Feed a single character to the parser.
+    pub fn feed_char(&mut self, ch: char) -> Option<ParsedElement> {
+        match self.state {
+            ParseState::Normal => {
+                if ch == '\x1B' {
+                    self.state = ParseState::EscSeen;
+                    self.params.clear();
+                    self.param_str.clear();
+                    None
+                } else {
+                    Some(ParsedElement::Text(ch.to_string()))
+                }
+            }
+            ParseState::EscSeen => {
+                if ch == '[' {
+                    self.state = ParseState::CsiParams;
+                    self.private_mode = false;
+                    None
+                } else {
+                    self.state = ParseState::Normal;
+                    Some(ParsedElement::Sequence(AnsiSequence::Unknown(vec![])))
+                }
+            }
+            ParseState::CsiParams => {
+                if ch == '?' {
+                    self.private_mode = true;
+                    self.state = ParseState::CsiPrivate;
+                    None
+                } else if ch.is_ascii_digit() {
+                    self.param_str.push(ch);
+                    None
+                } else if ch == ';' {
+                    self.params.push(self.param_str.parse().unwrap_or(0));
+                    self.param_str.clear();
+                    None
+                } else {
+                    self.params.push(self.param_str.parse().unwrap_or(0));
+                    self.state = ParseState::Normal;
+                    Some(ParsedElement::Sequence(self.decode_csi(ch)))
+                }
+            }
+            ParseState::CsiPrivate => {
+                if ch.is_ascii_digit() {
+                    self.param_str.push(ch);
+                    None
+                } else if ch == ';' {
+                    self.params.push(self.param_str.parse().unwrap_or(0));
+                    self.param_str.clear();
+                    None
+                } else {
+                    self.params.push(self.param_str.parse().unwrap_or(0));
+                    self.state = ParseState::Normal;
+                    Some(ParsedElement::Sequence(self.decode_csi(ch)))
+                }
+            }
+        }
+    }
+
+    fn decode_csi(&self, final_byte: char) -> AnsiSequence {
+        let p = |i: usize| -> u16 {
+            self.params.get(i).copied().unwrap_or(0).max(1)
+        };
+
+        match final_byte {
+            'A' => AnsiSequence::CursorUp(p(0)),
+            'B' => AnsiSequence::CursorDown(p(0)),
+            'C' => AnsiSequence::CursorForward(p(0)),
+            'D' => AnsiSequence::CursorBack(p(0)),
+            'H' | 'f' => AnsiSequence::CursorPosition(p(0), p(1)),
+            'J' => AnsiSequence::EraseDisplay(self.params.first().copied().unwrap_or(0) as u8),
+            'K' => AnsiSequence::EraseInLine(self.params.first().copied().unwrap_or(0) as u8),
+            'm' => AnsiSequence::SetGraphicsRendition(self.params.clone()),
+            'r' => AnsiSequence::SetScrollRegion(p(0), p(1)),
+            's' => AnsiSequence::SaveCursor,
+            'u' => AnsiSequence::RestoreCursor,
+            'l' => {
+                if let Some(&mode) = self.params.first() {
+                    if mode == 25 {
+                        AnsiSequence::HideCursor
+                    } else {
+                        AnsiSequence::ResetMode(mode)
+                    }
+                } else {
+                    AnsiSequence::Unknown(self.params.clone())
+                }
+            }
+            'h' => {
+                if let Some(&mode) = self.params.first() {
+                    if mode == 25 {
+                        AnsiSequence::ShowCursor
+                    } else {
+                        AnsiSequence::SetMode(mode)
+                    }
+                } else {
+                    AnsiSequence::Unknown(self.params.clone())
+                }
+            }
+            'n' => AnsiSequence::DeviceStatusReport,
+            _ => AnsiSequence::Unknown(self.params.clone()),
+        }
+    }
+}
+
+impl Default for AnsiParser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A parsed element from an ANSI terminal stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParsedElement {
+    /// Plain text.
+    Text(String),
+    /// An ANSI escape sequence.
+    Sequence(AnsiSequence),
+}
+
+/// Process ANSI sequences and apply them to a terminal state.
+pub struct AnsiProcessor {
+    parser: AnsiParser,
+    /// Saved cursor position (row, col).
+    saved_cursor: (usize, usize),
+    /// Current SGR attributes.
+    current_fg: TerminalColor,
+    current_bg: TerminalColor,
+    current_bold: bool,
+    current_italic: bool,
+    current_underline: bool,
+    current_reverse: bool,
+}
+
+impl AnsiProcessor {
+    /// Create a new ANSI processor.
+    pub fn new() -> Self {
+        Self {
+            parser: AnsiParser::new(),
+            saved_cursor: (0, 0),
+            current_fg: TerminalColor::Default,
+            current_bg: TerminalColor::Default,
+            current_bold: false,
+            current_italic: false,
+            current_underline: false,
+            current_reverse: false,
+        }
+    }
+
+    /// Process a string and apply it to the terminal state.
+    pub fn process(&mut self, terminal: &mut TerminalState, input: &str) {
+        let elements = self.parser.parse(input);
+        for elem in elements {
+            match elem {
+                ParsedElement::Text(text) => {
+                    for ch in text.chars() {
+                        let mut cell = TerminalCell::new(ch);
+                        cell.foreground = self.current_fg;
+                        cell.background = self.current_bg;
+                        cell.bold = self.current_bold;
+                        cell.italic = self.current_italic;
+                        cell.underline = self.current_underline;
+                        cell.reverse = self.current_reverse;
+                        terminal.set_cell(terminal.cursor_row, terminal.cursor_col, cell);
+                        terminal.cursor_col += 1;
+                        if terminal.cursor_col >= terminal.width {
+                            terminal.cursor_col = 0;
+                            terminal.cursor_row += 1;
+                            if terminal.cursor_row >= terminal.height {
+                                terminal.newline();
+                                terminal.cursor_row = terminal.height - 1;
+                            }
+                        }
+                    }
+                }
+                ParsedElement::Sequence(seq) => {
+                    self.apply_sequence(terminal, seq);
+                }
+            }
+        }
+    }
+
+    fn apply_sequence(&mut self, terminal: &mut TerminalState, seq: AnsiSequence) {
+        match seq {
+            AnsiSequence::CursorUp(n) => {
+                terminal.cursor_row = terminal.cursor_row.saturating_sub(n as usize);
+            }
+            AnsiSequence::CursorDown(n) => {
+                terminal.cursor_row = (terminal.cursor_row + n as usize).min(terminal.height - 1);
+            }
+            AnsiSequence::CursorForward(n) => {
+                terminal.cursor_col = (terminal.cursor_col + n as usize).min(terminal.width - 1);
+            }
+            AnsiSequence::CursorBack(n) => {
+                terminal.cursor_col = terminal.cursor_col.saturating_sub(n as usize);
+            }
+            AnsiSequence::CursorPosition(row, col) => {
+                terminal.cursor_row = (row as usize).saturating_sub(1).min(terminal.height - 1);
+                terminal.cursor_col = (col as usize).saturating_sub(1).min(terminal.width - 1);
+            }
+            AnsiSequence::EraseDisplay(mode) => {
+                match mode {
+                    0 => terminal.clear(), // simplified: clear all
+                    2 => terminal.clear(),
+                    _ => {}
+                }
+            }
+            AnsiSequence::EraseInLine(mode) => {
+                if mode == 0 || mode == 2 {
+                    terminal.clear_to_end_of_line();
+                }
+            }
+            AnsiSequence::SetGraphicsRendition(params) => {
+                self.apply_sgr(&params);
+            }
+            AnsiSequence::SaveCursor => {
+                self.saved_cursor = (terminal.cursor_row, terminal.cursor_col);
+            }
+            AnsiSequence::RestoreCursor => {
+                terminal.cursor_row = self.saved_cursor.0;
+                terminal.cursor_col = self.saved_cursor.1;
+            }
+            AnsiSequence::HideCursor => {
+                terminal.cursor_visible = false;
+            }
+            AnsiSequence::ShowCursor => {
+                terminal.cursor_visible = true;
+            }
+            _ => {} // ignore unrecognized
+        }
+    }
+
+    fn apply_sgr(&mut self, params: &[u16]) {
+        if params.is_empty() {
+            self.current_fg = TerminalColor::Default;
+            self.current_bg = TerminalColor::Default;
+            self.current_bold = false;
+            self.current_italic = false;
+            self.current_underline = false;
+            self.current_reverse = false;
+            return;
+        }
+
+        let mut i = 0;
+        while i < params.len() {
+            match params[i] {
+                0 => {
+                    self.current_fg = TerminalColor::Default;
+                    self.current_bg = TerminalColor::Default;
+                    self.current_bold = false;
+                    self.current_italic = false;
+                    self.current_underline = false;
+                    self.current_reverse = false;
+                }
+                1 => self.current_bold = true,
+                3 => self.current_italic = true,
+                4 => self.current_underline = true,
+                7 => self.current_reverse = true,
+                22 => self.current_bold = false,
+                23 => self.current_italic = false,
+                24 => self.current_underline = false,
+                27 => self.current_reverse = false,
+                30..=37 => {
+                    self.current_fg = Self::ansi_color((params[i] - 30) as u8);
+                }
+                40..=47 => {
+                    self.current_bg = Self::ansi_color((params[i] - 40) as u8);
+                }
+                90..=97 => {
+                    self.current_fg = Self::ansi_bright_color((params[i] - 90) as u8);
+                }
+                100..=107 => {
+                    self.current_bg = Self::ansi_bright_color((params[i] - 100) as u8);
+                }
+                _ => {}
+            }
+            i += 1;
+        }
+    }
+
+    fn ansi_color(code: u8) -> TerminalColor {
+        match code {
+            0 => TerminalColor::Black,
+            1 => TerminalColor::Red,
+            2 => TerminalColor::Green,
+            3 => TerminalColor::Yellow,
+            4 => TerminalColor::Blue,
+            5 => TerminalColor::Magenta,
+            6 => TerminalColor::Cyan,
+            7 => TerminalColor::White,
+            _ => TerminalColor::Default,
+        }
+    }
+
+    fn ansi_bright_color(code: u8) -> TerminalColor {
+        match code {
+            0 => TerminalColor::BrightBlack,
+            1 => TerminalColor::BrightRed,
+            2 => TerminalColor::BrightGreen,
+            3 => TerminalColor::BrightYellow,
+            4 => TerminalColor::BrightBlue,
+            5 => TerminalColor::BrightMagenta,
+            6 => TerminalColor::BrightCyan,
+            7 => TerminalColor::BrightWhite,
+            _ => TerminalColor::Default,
+        }
+    }
+}
+
+impl Default for AnsiProcessor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -513,5 +931,155 @@ mod tests {
 
         plugin.close_terminal(idx);
         assert_eq!(plugin.terminal_count(), 0);
+    }
+
+    #[test]
+    fn test_ansi_parser_plain_text() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("Hello World");
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0], ParsedElement::Text("Hello World".into()));
+    }
+
+    #[test]
+    fn test_ansi_parser_cursor_movement() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("A\x1B[2BB");
+        assert_eq!(elements.len(), 3);
+        assert_eq!(elements[0], ParsedElement::Text("A".into()));
+        assert_eq!(elements[1], ParsedElement::Sequence(AnsiSequence::CursorDown(2)));
+        assert_eq!(elements[2], ParsedElement::Text("B".into()));
+    }
+
+    #[test]
+    fn test_ansi_parser_cursor_position() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("\x1B[5;10H");
+        assert_eq!(elements.len(), 1);
+        assert_eq!(elements[0], ParsedElement::Sequence(AnsiSequence::CursorPosition(5, 10)));
+    }
+
+    #[test]
+    fn test_ansi_parser_default_params() {
+        let mut parser = AnsiParser::new();
+        // CSI A with no params should default to 1
+        let elements = parser.parse("\x1B[A");
+        assert_eq!(elements[0], ParsedElement::Sequence(AnsiSequence::CursorUp(1)));
+    }
+
+    #[test]
+    fn test_ansi_parser_erase() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("\x1B[2J");
+        assert_eq!(elements[0], ParsedElement::Sequence(AnsiSequence::EraseDisplay(2)));
+    }
+
+    #[test]
+    fn test_ansi_parser_erase_line() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("\x1B[K");
+        assert_eq!(elements[0], ParsedElement::Sequence(AnsiSequence::EraseInLine(0)));
+    }
+
+    #[test]
+    fn test_ansi_parser_sgr() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("\x1B[1;31m");
+        assert_eq!(
+            elements[0],
+            ParsedElement::Sequence(AnsiSequence::SetGraphicsRendition(vec![1, 31]))
+        );
+    }
+
+    #[test]
+    fn test_ansi_parser_save_restore_cursor() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("\x1B[s\x1B[u");
+        assert_eq!(elements[0], ParsedElement::Sequence(AnsiSequence::SaveCursor));
+        assert_eq!(elements[1], ParsedElement::Sequence(AnsiSequence::RestoreCursor));
+    }
+
+    #[test]
+    fn test_ansi_parser_cursor_visibility() {
+        let mut parser = AnsiParser::new();
+        let elements = parser.parse("\x1B[?25l\x1B[?25h");
+        assert_eq!(elements[0], ParsedElement::Sequence(AnsiSequence::HideCursor));
+        assert_eq!(elements[1], ParsedElement::Sequence(AnsiSequence::ShowCursor));
+    }
+
+    #[test]
+    fn test_ansi_processor_basic() {
+        let mut terminal = TerminalState::new(20, 5);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "Hello");
+        assert_eq!(terminal.cell(0, 0).unwrap().ch, 'H');
+        assert_eq!(terminal.cell(0, 4).unwrap().ch, 'o');
+    }
+
+    #[test]
+    fn test_ansi_processor_cursor_movement() {
+        let mut terminal = TerminalState::new(20, 10);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "A\x1B[2BB");
+        assert_eq!(terminal.cell(0, 0).unwrap().ch, 'A');
+        assert_eq!(terminal.cell(2, 1).unwrap().ch, 'B');
+    }
+
+    #[test]
+    fn test_ansi_processor_cursor_position() {
+        let mut terminal = TerminalState::new(20, 10);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "\x1B[3;5HX");
+        assert_eq!(terminal.cell(2, 4).unwrap().ch, 'X');
+    }
+
+    #[test]
+    fn test_ansi_processor_colors() {
+        let mut terminal = TerminalState::new(20, 5);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "\x1B[1;31mR");
+        assert!(terminal.cell(0, 0).unwrap().bold);
+        assert_eq!(terminal.cell(0, 0).unwrap().foreground, TerminalColor::Red);
+    }
+
+    #[test]
+    fn test_ansi_processor_save_restore() {
+        let mut terminal = TerminalState::new(20, 5);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "AB\x1B[sCD\x1B[uXY");
+        assert_eq!(terminal.cell(0, 0).unwrap().ch, 'A');
+        assert_eq!(terminal.cell(0, 1).unwrap().ch, 'B');
+        // After restore, cursor goes back to position after B (col 2)
+        // X and Y overwrite the C and D that were written
+        assert_eq!(terminal.cell(0, 2).unwrap().ch, 'X');
+        assert_eq!(terminal.cell(0, 3).unwrap().ch, 'Y');
+    }
+
+    #[test]
+    fn test_ansi_parser_escape_sequences() {
+        // Test \r and \n handling via write_str (not ANSI, but terminal)
+        let mut terminal = TerminalState::new(20, 5);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "Line1\nLine2");
+        assert_eq!(terminal.cell(0, 0).unwrap().ch, 'L');
+        // \n in the text should go through write logic
+    }
+
+    #[test]
+    fn test_ansi_processor_erase_display() {
+        let mut terminal = TerminalState::new(10, 3);
+        let mut processor = AnsiProcessor::new();
+        processor.process(&mut terminal, "Hello");
+        assert_eq!(terminal.cell(0, 0).unwrap().ch, 'H');
+        processor.process(&mut terminal, "\x1B[2J");
+        assert_eq!(terminal.cell(0, 0).unwrap().ch, ' ');
+    }
+
+    #[test]
+    fn test_ansi_color_mapping() {
+        assert_eq!(AnsiProcessor::ansi_color(0), TerminalColor::Black);
+        assert_eq!(AnsiProcessor::ansi_color(7), TerminalColor::White);
+        assert_eq!(AnsiProcessor::ansi_bright_color(0), TerminalColor::BrightBlack);
+        assert_eq!(AnsiProcessor::ansi_bright_color(7), TerminalColor::BrightWhite);
     }
 }

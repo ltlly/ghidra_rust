@@ -297,6 +297,109 @@ impl CallTreeBuilder {
 }
 
 // ============================================================================
+// CallTreeStatistics -- compute statistics about a call tree
+// ============================================================================
+
+/// Statistics about a call tree.
+#[derive(Debug, Clone)]
+pub struct CallTreeStatistics {
+    /// Total number of unique functions.
+    pub total_functions: usize,
+    /// Maximum call depth.
+    pub max_depth: usize,
+    /// The function with the most callers/callees.
+    pub most_connected: Option<String>,
+    /// Number of direct calls (vs references).
+    pub direct_calls: usize,
+    /// Number of references (non-call).
+    pub references: usize,
+    /// The average number of children per node.
+    pub avg_children: f64,
+}
+
+impl CallTreeStatistics {
+    /// Compute statistics from a call tree.
+    pub fn from_tree(tree: &CallTree) -> Self {
+        let total = tree.root.node_count();
+        let max_depth = tree.root.max_depth();
+        let mut most_connected_name = None;
+        let mut max_children = 0;
+        let mut total_children = 0;
+        let mut direct_calls = 0;
+        let mut references = 0;
+
+        Self::walk_tree(&tree.root, &mut most_connected_name, &mut max_children,
+                        &mut total_children, &mut direct_calls, &mut references);
+
+        let avg_children = if total > 0 {
+            total_children as f64 / total as f64
+        } else {
+            0.0
+        };
+
+        Self {
+            total_functions: total,
+            max_depth,
+            most_connected: most_connected_name,
+            direct_calls,
+            references,
+            avg_children,
+        }
+    }
+
+    fn walk_tree(
+        node: &CallTreeNode,
+        most_connected: &mut Option<String>,
+        max_children: &mut usize,
+        total_children: &mut usize,
+        direct_calls: &mut usize,
+        references: &mut usize,
+    ) {
+        let child_count = node.children.len();
+        *total_children += child_count;
+        if child_count > *max_children {
+            *max_children = child_count;
+            *most_connected = Some(node.name.clone());
+        }
+
+        for child in &node.children {
+            match child.edge_type {
+                CallTreeEdgeType::Call => *direct_calls += 1,
+                CallTreeEdgeType::Reference => *references += 1,
+            }
+            Self::walk_tree(child, most_connected, max_children, total_children, direct_calls, references);
+        }
+    }
+}
+
+/// Find all paths from the root to a specific function in the tree.
+pub fn find_paths_to(root: &CallTreeNode, target_address: Address) -> Vec<Vec<String>> {
+    let mut paths = Vec::new();
+    let mut current_path = Vec::new();
+    find_paths_recursive(root, target_address, &mut current_path, &mut paths);
+    paths
+}
+
+fn find_paths_recursive(
+    node: &CallTreeNode,
+    target: Address,
+    current_path: &mut Vec<String>,
+    all_paths: &mut Vec<Vec<String>>,
+) {
+    current_path.push(node.name.clone());
+
+    if node.address == target {
+        all_paths.push(current_path.clone());
+    }
+
+    for child in &node.children {
+        find_paths_recursive(child, target, current_path, all_paths);
+    }
+
+    current_path.pop();
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -399,5 +502,57 @@ mod tests {
         );
         let tree = builder.build_outgoing(Address::new(0x1000), 10);
         assert_eq!(tree.root.children[0].edge_type, CallTreeEdgeType::Reference);
+    }
+
+    #[test]
+    fn test_call_tree_statistics() {
+        let builder = setup_builder();
+        let tree = builder.build_outgoing(Address::new(0x1000), 10);
+        let stats = CallTreeStatistics::from_tree(&tree);
+        assert_eq!(stats.total_functions, 4);
+        assert_eq!(stats.max_depth, 2);
+        assert!(stats.direct_calls > 0);
+        assert_eq!(stats.references, 0); // all are calls in setup
+    }
+
+    #[test]
+    fn test_find_paths_to() {
+        let builder = setup_builder();
+        let tree = builder.build_outgoing(Address::new(0x1000), 10);
+        let paths = find_paths_to(&tree.root, Address::new(0x3000));
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0], vec!["main", "foo", "bar"]);
+    }
+
+    #[test]
+    fn test_find_paths_to_nonexistent() {
+        let builder = setup_builder();
+        let tree = builder.build_outgoing(Address::new(0x1000), 10);
+        let paths = find_paths_to(&tree.root, Address::new(0x9999));
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn test_statistics_most_connected() {
+        let builder = setup_builder();
+        let tree = builder.build_outgoing(Address::new(0x1000), 10);
+        let stats = CallTreeStatistics::from_tree(&tree);
+        // foo has 2 children (bar, baz) so it should be most connected
+        assert_eq!(stats.most_connected, Some("foo".into()));
+    }
+
+    #[test]
+    fn test_statistics_with_references() {
+        let mut builder = CallTreeBuilder::new();
+        builder.add_function(FunctionRef::new("main", Address::new(0x1000)));
+        builder.add_function(FunctionRef::new("func", Address::new(0x2000)));
+        builder.add_function(FunctionRef::new("data", Address::new(0x3000)));
+        builder.add_call(Address::new(0x1000), Address::new(0x2000), CallTreeEdgeType::Call);
+        builder.add_call(Address::new(0x1000), Address::new(0x3000), CallTreeEdgeType::Reference);
+
+        let tree = builder.build_outgoing(Address::new(0x1000), 10);
+        let stats = CallTreeStatistics::from_tree(&tree);
+        assert_eq!(stats.direct_calls, 1);
+        assert_eq!(stats.references, 1);
     }
 }
