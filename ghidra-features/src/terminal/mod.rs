@@ -14,6 +14,11 @@
 //! - [`TerminalColor`] -- ANSI color representation
 //! - [`TerminalFindOptions`] -- Options for text search in the terminal
 
+/// VT100 terminal emulator internals (parser, buffer, attributes, state machine).
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.terminal.vt` package.
+pub mod vt;
+
 use std::collections::VecDeque;
 
 /// Default terminal width in columns.

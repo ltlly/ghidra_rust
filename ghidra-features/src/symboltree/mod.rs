@@ -13,6 +13,16 @@
 //! - [`SymbolNode`] -- A node representing a single symbol
 //! - [`SymbolTreeService`] -- Service trait for symbol tree operations
 
+/// Symbol tree node types (function, code, class, library, etc.).
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.symboltree.nodes` package.
+pub mod nodes;
+
+/// Symbol tree user actions (delete, rename, create, cut/paste, etc.).
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.symboltree.actions` package.
+pub mod actions;
+
 use std::collections::BTreeMap;
 
 /// Options category name.

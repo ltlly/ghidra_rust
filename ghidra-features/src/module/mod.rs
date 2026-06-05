@@ -3,7 +3,16 @@
 //! Ported from Ghidra's `ghidra.app.plugin.core.module` Java package.
 //!
 //! Provides logic for managing the hierarchical module/fragment organization
-//! of a program's address space.
+//! of a program's address space. Supports creating, renaming, moving, and
+//! removing modules; adding and removing fragments; and tree traversal
+//! operations.
+//!
+//! # Key Types
+//!
+//! - [`ModuleAction`] -- types of module operations
+//! - [`ModuleInfo`] -- a program tree module (directory node)
+//! - [`FragmentInfo`] -- a fragment (leaf node with address range)
+//! - [`ProgramTreeModel`] -- manages the full program tree structure
 
 use ghidra_core::Address;
 
@@ -82,6 +91,11 @@ impl FragmentInfo {
     pub fn size(&self) -> u64 {
         self.end.offset.saturating_sub(self.start.offset) + 1
     }
+
+    /// Whether this fragment contains the given address.
+    pub fn contains(&self, address: Address) -> bool {
+        address.offset >= self.start.offset && address.offset <= self.end.offset
+    }
 }
 
 /// Manages the program tree structure.
@@ -90,6 +104,8 @@ pub struct ProgramTreeModel {
     modules: Vec<ModuleInfo>,
     fragments: Vec<FragmentInfo>,
     next_id: u64,
+    /// History of actions for undo support.
+    history: Vec<ModuleAction>,
 }
 
 impl ProgramTreeModel {
@@ -103,12 +119,95 @@ impl ProgramTreeModel {
         let id = self.next_id;
         self.next_id += 1;
         self.modules.push(ModuleInfo::new(name, id, parent_id));
+        self.history.push(ModuleAction::Create);
         id
     }
 
     /// Get all modules.
     pub fn get_modules(&self) -> &[ModuleInfo] {
         &self.modules
+    }
+
+    /// Get a module by ID.
+    pub fn get_module(&self, id: u64) -> Option<&ModuleInfo> {
+        self.modules.iter().find(|m| m.id == id)
+    }
+
+    /// Rename a module by ID.
+    pub fn rename_module(&mut self, id: u64, new_name: &str) -> bool {
+        if let Some(m) = self.modules.iter_mut().find(|m| m.id == id) {
+            m.name = new_name.to_string();
+            self.history.push(ModuleAction::Rename);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Move a module to a new parent.
+    pub fn move_module(&mut self, id: u64, new_parent_id: Option<u64>) -> bool {
+        // Prevent cycles: new parent must not be a descendant of id
+        if let Some(parent_id) = new_parent_id {
+            if self.is_ancestor(id, parent_id) {
+                return false;
+            }
+        }
+        if let Some(m) = self.modules.iter_mut().find(|m| m.id == id) {
+            m.parent_id = new_parent_id;
+            m.is_root = new_parent_id.is_none();
+            self.history.push(ModuleAction::Move);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Check if `ancestor_id` is an ancestor of `descendant_id`.
+    pub fn is_ancestor(&self, ancestor_id: u64, descendant_id: u64) -> bool {
+        let mut current = descendant_id;
+        loop {
+            if current == ancestor_id {
+                return true;
+            }
+            match self.modules.iter().find(|m| m.id == current) {
+                Some(m) => match m.parent_id {
+                    Some(pid) => current = pid,
+                    None => return false,
+                },
+                None => return false,
+            }
+        }
+    }
+
+    /// Get the children of a module.
+    pub fn get_children(&self, parent_id: u64) -> Vec<&ModuleInfo> {
+        self.modules
+            .iter()
+            .filter(|m| m.parent_id == Some(parent_id))
+            .collect()
+    }
+
+    /// Get the root modules (those with no parent).
+    pub fn get_roots(&self) -> Vec<&ModuleInfo> {
+        self.modules.iter().filter(|m| m.is_root).collect()
+    }
+
+    /// Get the depth of a module in the tree (root = 0).
+    pub fn get_depth(&self, id: u64) -> usize {
+        let mut depth = 0;
+        let mut current = id;
+        loop {
+            match self.modules.iter().find(|m| m.id == current) {
+                Some(m) => match m.parent_id {
+                    Some(pid) => {
+                        depth += 1;
+                        current = pid;
+                    }
+                    None => return depth,
+                },
+                None => return depth,
+            }
+        }
     }
 
     /// Add a fragment to a module.
@@ -121,6 +220,7 @@ impl ProgramTreeModel {
     ) {
         self.fragments
             .push(FragmentInfo::new(name, module_id, start, end));
+        self.history.push(ModuleAction::AddFragment);
     }
 
     /// Get all fragments.
@@ -136,10 +236,63 @@ impl ProgramTreeModel {
             .collect()
     }
 
-    /// Remove a module by ID.
+    /// Get all fragments that contain the given address.
+    pub fn get_fragments_at_address(&self, address: Address) -> Vec<&FragmentInfo> {
+        self.fragments.iter().filter(|f| f.contains(address)).collect()
+    }
+
+    /// Remove a fragment by name and module ID.
+    pub fn remove_fragment(&mut self, name: &str, module_id: u64) -> bool {
+        let original_len = self.fragments.len();
+        self.fragments
+            .retain(|f| !(f.name == name && f.parent_module_id == module_id));
+        if self.fragments.len() < original_len {
+            self.history.push(ModuleAction::RemoveFragment);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a module by ID (also removes all child modules and fragments).
     pub fn remove_module(&mut self, id: u64) {
-        self.modules.retain(|m| m.id != id);
-        self.fragments.retain(|f| f.parent_module_id != id);
+        // Collect all descendant module IDs
+        let mut to_remove = vec![id];
+        let mut i = 0;
+        while i < to_remove.len() {
+            let current = to_remove[i];
+            for m in &self.modules {
+                if m.parent_id == Some(current) {
+                    to_remove.push(m.id);
+                }
+            }
+            i += 1;
+        }
+        self.modules.retain(|m| !to_remove.contains(&m.id));
+        self.fragments
+            .retain(|f| !to_remove.contains(&f.parent_module_id));
+        self.history.push(ModuleAction::Remove);
+    }
+
+    /// Get the number of modules.
+    pub fn module_count(&self) -> usize {
+        self.modules.len()
+    }
+
+    /// Get the number of fragments.
+    pub fn fragment_count(&self) -> usize {
+        self.fragments.len()
+    }
+
+    /// Get the action history.
+    pub fn history(&self) -> &[ModuleAction] {
+        &self.history
+    }
+
+    /// Find the module that contains a given address (via its fragments).
+    pub fn find_module_for_address(&self, address: Address) -> Option<&ModuleInfo> {
+        let frag = self.fragments.iter().find(|f| f.contains(address))?;
+        self.modules.iter().find(|m| m.id == frag.parent_module_id)
     }
 }
 
@@ -185,5 +338,135 @@ mod tests {
         model.remove_module(id);
         assert_eq!(model.get_modules().len(), 0);
         assert_eq!(model.get_fragments().len(), 0);
+    }
+
+    #[test]
+    fn test_rename_module() {
+        let mut model = ProgramTreeModel::new();
+        let id = model.create_module("old_name", None);
+        assert!(model.rename_module(id, "new_name"));
+        assert_eq!(model.get_module(id).unwrap().name, "new_name");
+        assert!(!model.rename_module(999, "nope"));
+    }
+
+    #[test]
+    fn test_move_module() {
+        let mut model = ProgramTreeModel::new();
+        let root = model.create_module("root", None);
+        let child = model.create_module("child", Some(root));
+        let grandchild = model.create_module("grandchild", Some(child));
+        // Move grandchild to root
+        assert!(model.move_module(grandchild, Some(root)));
+        assert_eq!(model.get_module(grandchild).unwrap().parent_id, Some(root));
+    }
+
+    #[test]
+    fn test_move_module_prevent_cycle() {
+        let mut model = ProgramTreeModel::new();
+        let root = model.create_module("root", None);
+        let child = model.create_module("child", Some(root));
+        // Cannot move root under its own child
+        assert!(!model.move_module(root, Some(child)));
+    }
+
+    #[test]
+    fn test_is_ancestor() {
+        let mut model = ProgramTreeModel::new();
+        let root = model.create_module("root", None);
+        let child = model.create_module("child", Some(root));
+        let grandchild = model.create_module("grandchild", Some(child));
+        assert!(model.is_ancestor(root, grandchild));
+        assert!(model.is_ancestor(child, grandchild));
+        assert!(!model.is_ancestor(grandchild, root));
+    }
+
+    #[test]
+    fn test_get_children() {
+        let mut model = ProgramTreeModel::new();
+        let root = model.create_module("root", None);
+        model.create_module("a", Some(root));
+        model.create_module("b", Some(root));
+        assert_eq!(model.get_children(root).len(), 2);
+    }
+
+    #[test]
+    fn test_get_roots() {
+        let mut model = ProgramTreeModel::new();
+        let r1 = model.create_module("r1", None);
+        let r2 = model.create_module("r2", None);
+        model.create_module("child", Some(r1));
+        assert_eq!(model.get_roots().len(), 2);
+    }
+
+    #[test]
+    fn test_get_depth() {
+        let mut model = ProgramTreeModel::new();
+        let root = model.create_module("root", None);
+        let child = model.create_module("child", Some(root));
+        let grandchild = model.create_module("grandchild", Some(child));
+        assert_eq!(model.get_depth(root), 0);
+        assert_eq!(model.get_depth(child), 1);
+        assert_eq!(model.get_depth(grandchild), 2);
+    }
+
+    #[test]
+    fn test_fragment_contains() {
+        let frag = FragmentInfo::new(".text", 0, Address::new(0x1000), Address::new(0x1FFF));
+        assert!(frag.contains(Address::new(0x1500)));
+        assert!(!frag.contains(Address::new(0x2000)));
+        assert_eq!(frag.size(), 0x1000);
+    }
+
+    #[test]
+    fn test_remove_module_with_descendants() {
+        let mut model = ProgramTreeModel::new();
+        let root = model.create_module("root", None);
+        let child = model.create_module("child", Some(root));
+        model.create_module("grandchild", Some(child));
+        model.add_fragment(".text", child, Address::new(0x1000), Address::new(0x1FFF));
+        model.remove_module(root);
+        assert_eq!(model.module_count(), 0);
+        assert_eq!(model.fragment_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_fragment() {
+        let mut model = ProgramTreeModel::new();
+        let id = model.create_module("root", None);
+        model.add_fragment(".text", id, Address::new(0x1000), Address::new(0x1FFF));
+        assert!(model.remove_fragment(".text", id));
+        assert_eq!(model.fragment_count(), 0);
+        assert!(!model.remove_fragment(".text", id));
+    }
+
+    #[test]
+    fn test_get_fragments_at_address() {
+        let mut model = ProgramTreeModel::new();
+        let id = model.create_module("root", None);
+        model.add_fragment(".text", id, Address::new(0x1000), Address::new(0x1FFF));
+        model.add_fragment(".data", id, Address::new(0x2000), Address::new(0x2FFF));
+        let frags = model.get_fragments_at_address(Address::new(0x1500));
+        assert_eq!(frags.len(), 1);
+        assert_eq!(frags[0].name, ".text");
+    }
+
+    #[test]
+    fn test_find_module_for_address() {
+        let mut model = ProgramTreeModel::new();
+        let id = model.create_module("code", None);
+        model.add_fragment(".text", id, Address::new(0x1000), Address::new(0x1FFF));
+        let module = model.find_module_for_address(Address::new(0x1500));
+        assert!(module.is_some());
+        assert_eq!(module.unwrap().name, "code");
+        assert!(model.find_module_for_address(Address::new(0x5000)).is_none());
+    }
+
+    #[test]
+    fn test_history_tracking() {
+        let mut model = ProgramTreeModel::new();
+        let id = model.create_module("root", None);
+        model.rename_module(id, "new");
+        model.add_fragment(".text", id, Address::new(0x1000), Address::new(0x1FFF));
+        assert!(model.history().len() >= 3);
     }
 }

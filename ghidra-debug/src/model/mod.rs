@@ -11,25 +11,36 @@ pub mod breakpoint;
 pub mod changeset;
 pub mod context;
 pub mod data_type;
+pub mod duplicate_key;
 pub mod execution_state;
 pub mod guest;
 pub mod lifespan;
 pub mod listing;
 pub mod map;
 pub mod memory;
+pub mod memory_ext;
 pub mod memory_flag;
 pub mod module;
+pub mod options;
 pub mod program;
 pub mod property;
+pub mod register;
 pub mod register_context;
+pub mod reference_ext;
 pub mod stack;
 pub mod symbol;
+pub mod symbol_views;
 pub mod target_iface;
+pub mod target_info;
+pub mod target_manager;
+pub mod target_object;
 pub mod target_schema;
+pub mod target_value;
 pub mod thread;
 pub mod time;
 pub mod time_schedule;
 pub mod trace;
+pub mod trace_location;
 pub mod trace_span;
 
 pub use address_snap::{AddressSnap, TraceAddressSnapRange};
@@ -38,29 +49,43 @@ pub use breakpoint::{BreakpointKindSet, TraceBreakpointKind};
 pub use changeset::{ChangeType, TraceChangeRecord, TraceChangeSet};
 pub use context::{ContextAddressRange, ContextRegisterValue, LanguageId, RegisterId, TraceRegisterContextOperations};
 pub use data_type::{DataTypeConflictHandler, TraceBasedDataTypeManager, TraceDataType};
+pub use duplicate_key::DuplicateKeyException;
 pub use execution_state::TraceExecutionState;
 pub use guest::{TraceGuestPlatformMappedRange, TracePlatform, TracePlatformManager};
 pub use lifespan::{is_scratch, Lifespan};
 pub use listing::{CodeUnitType, TraceCodeManager, TraceCodeUnit, TraceCodeIndex};
 pub use map::TraceAddressSnapRangePropertyMap;
 pub use memory::{TraceMemoryRegion, TraceMemoryState};
+pub use memory_ext::{MemoryRegionBuilder, TraceMemorySpaceInputStream, TraceOverlappedRegionException};
 pub use memory_flag::{MemoryFlagSet, RegisterValueConverter, RegisterValueError, TraceMemoryFlag};
 pub use module::{TraceModule, TraceSection, TraceStaticMapping};
+pub use options::{CompilerSpecId, TraceLanguageId, TraceOptionsManagerExt};
 pub use program::{TickSpecificTraceView, TraceProgramView, TraceProgramViewMemory, TraceVariableSnapProgramView};
 pub use property::{TracePropertyMap, TraceBoolPropertyMap, TraceIntPropertyMap, TraceStringPropertyMap};
+pub use register::{TraceRegister, TraceRegisterContainer, TraceRegisterGroup};
 pub use register_context::{RegisterDefinedState, TraceRegisterContextManager, TraceRegisterValue};
+pub use reference_ext::{TraceOffsetReference, TraceReferenceVariant, TraceShiftedReference, TraceStackReference};
 pub use stack::{TraceStack, TraceStackFrame, TraceStackManager};
 pub use symbol::{
     TraceEquate, TraceEquateReference, TraceReference, TraceReferenceKind,
     TraceSymbol, TraceSymbolKind, TraceSymbolManager,
 };
+pub use symbol_views::{
+    TraceClassSymbolView, TraceEquateView, TraceLabelSymbolView, TraceNamespaceSymbolView,
+    TraceReferenceView, TraceSymbolNoDuplicatesView, TraceSymbolView,
+};
 pub use target_iface::{
     ExecutionState, TraceActivatable, TraceAggregate, TraceEnvironment, TraceEventScope,
     TraceExecutionStateful, TraceFocusScope, TraceMethod, TraceObjectInterface, TraceTogglable,
 };
+pub use target_info::{builtin as target_builtin, TraceObjectInfo, TraceObjectInterfaceFactory, TraceObjectInterfaceRegistry};
+pub use target_manager::{TargetObjectError, TraceObjectManager};
+pub use target_object::{ConflictResolution, TraceObject};
 pub use target_schema::{AttributeSchema, SchemaBuilder, SchemaContext, SchemaName, TraceObjectSchemaDef};
+pub use target_value::{PrimitiveValue, TraceObjectValPath, TraceObjectValue, TruncateResult};
 pub use thread::{TraceProcess, TraceThread};
 pub use time::{TraceSchedule, TraceSnapshot, TraceTimeManager};
 pub use time_schedule::{CompareResult, PatchStep, ScheduleSequence, ScheduleStep, Scheduler, StepKind, TickStep};
 pub use trace::{Trace, TraceOptionsManager, TraceTimeViewport, TraceUserData};
+pub use trace_location::{TraceClosedException, TraceLocation, TraceUniqueObject, UniqueObjectBase};
 pub use trace_span::TraceSpan;

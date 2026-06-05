@@ -1,6 +1,18 @@
 //! Highlight Plugin -- highlight matching text and patterns.
 //!
 //! Ported from Ghidra's `ghidra.app.plugin.core.highlight` Java package.
+//!
+//! Provides logic for highlighting addresses in the listing based on
+//! text matching, address ranges, and named highlight groups. Supports
+//! a provider-based system where different highlight sources can
+//! contribute colors independently.
+//!
+//! # Key Types
+//!
+//! - [`HighlightColor`] -- RGBA highlight color
+//! - [`HighlightEntry`] -- a single highlighted address
+//! - [`HighlightGroup`] -- a named group of highlights that can be toggled
+//! - [`HighlightManager`] -- manages highlights with group support
 
 use ghidra_core::Address;
 use std::collections::HashMap;
@@ -43,6 +55,21 @@ impl HighlightColor {
     pub fn cyan() -> Self {
         Self::new(0, 255, 255, 128)
     }
+
+    /// Blue highlight.
+    pub fn blue() -> Self {
+        Self::new(0, 100, 255, 128)
+    }
+
+    /// Orange highlight.
+    pub fn orange() -> Self {
+        Self::new(255, 165, 0, 128)
+    }
+
+    /// Whether two highlight colors have the same RGBA values.
+    pub fn rgba_equals(&self, other: &HighlightColor) -> bool {
+        self.r == other.r && self.g == other.g && self.b == other.b && self.a == other.a
+    }
 }
 
 /// A highlight entry at a specific address.
@@ -54,12 +81,49 @@ pub struct HighlightEntry {
     pub color: HighlightColor,
     /// The highlighted text (optional).
     pub text: Option<String>,
+    /// The group this entry belongs to.
+    pub group: String,
 }
 
-/// Manages highlights in the listing.
+// ---------------------------------------------------------------------------
+// HighlightGroup -- a named, toggleable group of highlights
+// ---------------------------------------------------------------------------
+
+/// A named group of highlights that can be independently toggled on/off.
+#[derive(Debug, Clone)]
+pub struct HighlightGroup {
+    /// The group name.
+    pub name: String,
+    /// Whether this group is currently visible.
+    pub enabled: bool,
+    /// The default color for highlights in this group.
+    pub default_color: HighlightColor,
+}
+
+impl HighlightGroup {
+    /// Create a new highlight group.
+    pub fn new(name: impl Into<String>, default_color: HighlightColor) -> Self {
+        Self {
+            name: name.into(),
+            enabled: true,
+            default_color,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HighlightManager
+// ---------------------------------------------------------------------------
+
+/// Manages highlights in the listing with group support.
+///
+/// Ported from `ghidra.app.plugin.core.highlight.HighlightManager`.
 #[derive(Debug, Default)]
 pub struct HighlightManager {
+    /// All highlight entries keyed by address offset.
     entries: HashMap<u64, HighlightEntry>,
+    /// Named groups for organizing highlights.
+    groups: HashMap<String, HighlightGroup>,
 }
 
 impl HighlightManager {
@@ -68,14 +132,63 @@ impl HighlightManager {
         Self::default()
     }
 
-    /// Set a highlight at an address.
+    /// Register a highlight group.
+    pub fn register_group(&mut self, group: HighlightGroup) {
+        self.groups.insert(group.name.clone(), group);
+    }
+
+    /// Toggle a group on/off.
+    pub fn set_group_enabled(&mut self, group_name: &str, enabled: bool) {
+        if let Some(group) = self.groups.get_mut(group_name) {
+            group.enabled = enabled;
+        }
+    }
+
+    /// Check if a group is enabled.
+    pub fn is_group_enabled(&self, group_name: &str) -> bool {
+        self.groups
+            .get(group_name)
+            .map(|g| g.enabled)
+            .unwrap_or(false)
+    }
+
+    /// Set a highlight at an address in the default group.
     pub fn set_highlight(&mut self, address: Address, color: HighlightColor) {
+        self.set_highlight_in_group(address, color, "default");
+    }
+
+    /// Set a highlight at an address in a specific group.
+    pub fn set_highlight_in_group(
+        &mut self,
+        address: Address,
+        color: HighlightColor,
+        group_name: &str,
+    ) {
         self.entries.insert(
             address.offset,
             HighlightEntry {
                 address,
                 color,
                 text: None,
+                group: group_name.to_string(),
+            },
+        );
+    }
+
+    /// Set a highlight with associated text.
+    pub fn set_highlight_with_text(
+        &mut self,
+        address: Address,
+        color: HighlightColor,
+        text: impl Into<String>,
+    ) {
+        self.entries.insert(
+            address.offset,
+            HighlightEntry {
+                address,
+                color,
+                text: Some(text.into()),
+                group: "default".to_string(),
             },
         );
     }
@@ -85,14 +198,29 @@ impl HighlightManager {
         self.entries.remove(&address.offset);
     }
 
-    /// Get the highlight at an address.
+    /// Get the highlight at an address (respects group visibility).
     pub fn get_highlight(&self, address: Address) -> Option<&HighlightEntry> {
+        self.entries.get(&address.offset).filter(|e| {
+            self.groups
+                .get(&e.group)
+                .map(|g| g.enabled)
+                .unwrap_or(true)
+        })
+    }
+
+    /// Get the raw highlight at an address (ignoring group visibility).
+    pub fn get_raw_highlight(&self, address: Address) -> Option<&HighlightEntry> {
         self.entries.get(&address.offset)
     }
 
-    /// Check if an address is highlighted.
+    /// Check if an address has a visible highlight.
     pub fn is_highlighted(&self, address: Address) -> bool {
-        self.entries.contains_key(&address.offset)
+        self.get_highlight(address).is_some()
+    }
+
+    /// Clear all highlights in a specific group.
+    pub fn clear_group(&mut self, group_name: &str) {
+        self.entries.retain(|_, e| e.group != group_name);
     }
 
     /// Clear all highlights.
@@ -100,9 +228,49 @@ impl HighlightManager {
         self.entries.clear();
     }
 
-    /// Return the number of highlighted addresses.
+    /// Return the number of highlighted addresses (all groups).
     pub fn count(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Return the number of highlighted addresses in a specific group.
+    pub fn count_in_group(&self, group_name: &str) -> usize {
+        self.entries.values().filter(|e| e.group == group_name).count()
+    }
+
+    /// Search for highlights whose text contains the given query
+    /// (case-insensitive).
+    pub fn search_by_text(&self, query: &str) -> Vec<&HighlightEntry> {
+        let q = query.to_lowercase();
+        self.entries
+            .values()
+            .filter(|e| {
+                e.text
+                    .as_ref()
+                    .map(|t| t.to_lowercase().contains(&q))
+                    .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    /// Get all highlighted addresses in a range, sorted.
+    pub fn get_highlights_in_range(
+        &self,
+        start: Address,
+        end: Address,
+    ) -> Vec<&HighlightEntry> {
+        let mut result: Vec<&HighlightEntry> = self
+            .entries
+            .values()
+            .filter(|e| e.address.offset >= start.offset && e.address.offset <= end.offset)
+            .collect();
+        result.sort_by_key(|e| e.address.offset);
+        result
+    }
+
+    /// Get all registered group names.
+    pub fn group_names(&self) -> Vec<&str> {
+        self.groups.keys().map(|s| s.as_str()).collect()
     }
 }
 
@@ -134,5 +302,115 @@ mod tests {
         mgr.set_highlight(Address::new(0x2000), HighlightColor::cyan());
         mgr.clear_all();
         assert_eq!(mgr.count(), 0);
+    }
+
+    #[test]
+    fn test_highlight_with_text() {
+        let mut mgr = HighlightManager::new();
+        mgr.set_highlight_with_text(
+            Address::new(0x1000),
+            HighlightColor::yellow(),
+            "function main",
+        );
+        let entry = mgr.get_highlight(Address::new(0x1000)).unwrap();
+        assert_eq!(entry.text.as_deref(), Some("function main"));
+    }
+
+    #[test]
+    fn test_highlight_groups() {
+        let mut mgr = HighlightManager::new();
+        mgr.register_group(HighlightGroup::new("search", HighlightColor::yellow()));
+        mgr.register_group(HighlightGroup::new("bookmarks", HighlightColor::green()));
+
+        mgr.set_highlight_in_group(
+            Address::new(0x1000),
+            HighlightColor::yellow(),
+            "search",
+        );
+        assert_eq!(mgr.count_in_group("search"), 1);
+        assert_eq!(mgr.count_in_group("bookmarks"), 0);
+    }
+
+    #[test]
+    fn test_group_toggle() {
+        let mut mgr = HighlightManager::new();
+        mgr.register_group(HighlightGroup::new("search", HighlightColor::yellow()));
+        mgr.set_highlight_in_group(
+            Address::new(0x1000),
+            HighlightColor::yellow(),
+            "search",
+        );
+        assert!(mgr.is_highlighted(Address::new(0x1000)));
+        mgr.set_group_enabled("search", false);
+        assert!(!mgr.is_highlighted(Address::new(0x1000)));
+        // raw highlight still exists
+        assert!(mgr.get_raw_highlight(Address::new(0x1000)).is_some());
+    }
+
+    #[test]
+    fn test_clear_group() {
+        let mut mgr = HighlightManager::new();
+        mgr.register_group(HighlightGroup::new("g1", HighlightColor::red()));
+        mgr.register_group(HighlightGroup::new("g2", HighlightColor::blue()));
+        mgr.set_highlight_in_group(Address::new(0x1000), HighlightColor::red(), "g1");
+        mgr.set_highlight_in_group(Address::new(0x2000), HighlightColor::blue(), "g2");
+        mgr.clear_group("g1");
+        assert_eq!(mgr.count_in_group("g1"), 0);
+        assert_eq!(mgr.count_in_group("g2"), 1);
+    }
+
+    #[test]
+    fn test_search_by_text() {
+        let mut mgr = HighlightManager::new();
+        mgr.set_highlight_with_text(
+            Address::new(0x1000),
+            HighlightColor::yellow(),
+            "function main",
+        );
+        mgr.set_highlight_with_text(
+            Address::new(0x2000),
+            HighlightColor::green(),
+            "data table",
+        );
+        let results = mgr.search_by_text("main");
+        assert_eq!(results.len(), 1);
+        let results2 = mgr.search_by_text("TABLE");
+        assert_eq!(results2.len(), 1);
+    }
+
+    #[test]
+    fn test_get_highlights_in_range() {
+        let mut mgr = HighlightManager::new();
+        mgr.set_highlight(Address::new(0x1000), HighlightColor::red());
+        mgr.set_highlight(Address::new(0x2000), HighlightColor::blue());
+        mgr.set_highlight(Address::new(0x3000), HighlightColor::green());
+        let in_range = mgr.get_highlights_in_range(Address::new(0x1000), Address::new(0x2FFF));
+        assert_eq!(in_range.len(), 2);
+        assert_eq!(in_range[0].address.offset, 0x1000);
+        assert_eq!(in_range[1].address.offset, 0x2000);
+    }
+
+    #[test]
+    fn test_highlight_color_presets() {
+        assert_eq!(HighlightColor::yellow().r, 255);
+        assert_eq!(HighlightColor::blue().b, 255);
+        assert_eq!(HighlightColor::orange().r, 255);
+    }
+
+    #[test]
+    fn test_rgba_equals() {
+        let a = HighlightColor::new(10, 20, 30, 40);
+        let b = HighlightColor::new(10, 20, 30, 40);
+        let c = HighlightColor::new(10, 20, 30, 41);
+        assert!(a.rgba_equals(&b));
+        assert!(!a.rgba_equals(&c));
+    }
+
+    #[test]
+    fn test_group_names() {
+        let mut mgr = HighlightManager::new();
+        mgr.register_group(HighlightGroup::new("search", HighlightColor::yellow()));
+        mgr.register_group(HighlightGroup::new("custom", HighlightColor::cyan()));
+        assert_eq!(mgr.group_names().len(), 2);
     }
 }

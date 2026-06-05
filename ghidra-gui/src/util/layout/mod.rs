@@ -1,6 +1,20 @@
 //! Layout managers for arranging UI components.
 //!
 //! Ports `ghidra.util.layout` package.
+//!
+//! # Sub-modules
+//!
+//! - [`pair_layout`] -- Two-column label/value layout (PairLayout)
+//! - [`middle_layout`] -- Centering, stretching, and variable layouts
+
+pub mod middle_layout;
+pub mod pair_layout;
+
+pub use middle_layout::{
+    MaximizeColumnGridLayout, MiddleLayout, RightSidedBuddyLayout, StretchLayout,
+    VariableHeightPairLayout, VariableRowHeightGridLayout,
+};
+pub use pair_layout::{LayoutItemSize, PairLayout, PairLayoutResult};
 
 /// A layout hint specifying how a component should be placed.
 #[derive(Debug, Clone, Copy, PartialEq)]

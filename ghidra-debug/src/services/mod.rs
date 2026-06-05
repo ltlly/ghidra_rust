@@ -15,6 +15,7 @@
 //! - `target_impl`: Target service implementation.
 //! - `console_impl`: Console service implementation.
 
+pub mod auto_map_impl;
 pub mod breakpoint_impl;
 pub mod console_impl;
 pub mod control_impl;

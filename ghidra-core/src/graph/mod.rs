@@ -41,6 +41,16 @@
 //! ## Graph Viewer (ported from `ghidra.graph.viewer`)
 //!
 //! - [`viewer::PathHighlightMode`], [`viewer::ViewState`], [`viewer::GraphViewerConfig`]
+//!
+//! ## Visual Graph Types (ported from `ghidra.graph.graphs`)
+//!
+//! - [`visual_graph::VisualGraph`], [`visual_graph::VisualVertex`], [`visual_graph::VisualEdge`]
+//! - [`graphs::DefaultVisualGraph`]: base visual graph with selection/focus/listeners
+//! - [`graphs::FilteringVisualGraph`]: visual graph with vertex/edge filtering
+//! - [`graphs::GroupingVisualGraph`]: visual graph with vertex grouping
+//! - [`implicit_graph::GImplicitDirectedGraph`]: lazy/computed-on-demand graph trait
+//! - [`mutable_wrapper::MutableGDirectedGraphWrapper`]: additive overlay graph
+//! - [`graph_algorithms`]: static utility functions (sources, sinks, density, reachability)
 
 // Submodules for the generic graph framework
 pub mod traits;
@@ -55,6 +65,11 @@ pub mod service;
 pub mod event;
 pub mod job;
 pub mod viewer;
+pub mod implicit_graph;
+pub mod mutable_wrapper;
+pub mod visual_graph;
+pub mod graph_algorithms;
+pub mod graphs;
 mod tests_new;
 
 use std::collections::{HashMap, HashSet, VecDeque};

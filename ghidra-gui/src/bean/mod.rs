@@ -2,6 +2,14 @@
 //!
 //! Ports Ghidra's `ghidra.util.bean` types for option editor panels and
 //! chooser widgets.
+//!
+//! # Sub-modules
+//!
+//! - [`glass_pane_painter`] -- Overlay painter for drag/selection feedback
+
+pub mod glass_pane_painter;
+
+pub use glass_pane_painter::{GGlassPanePainter, PaintMode};
 
 /// Exception thrown when an option editor vetoes a proposed change.
 ///

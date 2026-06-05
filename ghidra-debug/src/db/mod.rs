@@ -25,11 +25,16 @@
 //! - `trace_db_time`: Time/snap manager.
 //! - `trace_db_time_viewport`: Time viewport for viewing.
 
+pub mod listing;
+pub mod target_impl;
 pub mod trace_db;
 pub mod trace_db_address;
 pub mod trace_db_bookmark;
 pub mod trace_db_breakpoint;
+pub mod trace_db_cache_containing;
+pub mod trace_db_cache_sequence;
 pub mod trace_db_content;
+pub mod trace_db_content_handler;
 pub mod trace_db_context;
 pub mod trace_db_data;
 pub mod trace_db_guest;

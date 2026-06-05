@@ -1,11 +1,37 @@
-//! BSim query-level types -- Rust port of Ghidra's `ghidra.features.bsim.query` package.
+//! BSim query subsystem.
 //!
-//! Root-level types for BSim database management:
+//! Port of `ghidra.features.bsim.query` -- the core query infrastructure
+//! for BSim function similarity databases.
+//!
+//! # Submodules
+//!
+//! - [`client`]: Abstract SQL function database, JDBC data source, connection managers
+//! - [`tables`]: SQL table definitions for function metadata, signatures, vectors
+//! - [`elastic`]: Elasticsearch-based BSim backend with LSH scoring
+//! - [`facade`]: High-level facade for common BSim operations
+//! - [`description`]: Description types for executables and functions
+//! - [`protocol`]: Client-server query protocol types
+//! - [`postgresql`]: PostgreSQL-specific BSim backend
+//! - [`file`]: H2/file-based local BSim database
+//! - [`ingest`]: Bulk signature ingestion pipeline
+//!
+//! # Root-level types (ported from `ghidra.features.bsim.query`)
+//!
 //! - [`ServerConfig`] -- BSim server connection configuration
 //! - [`BSimServerInfo`] -- BSim server connection information
 //! - [`GenSignatures`] -- signature generation from programs
 //! - [`MinimalErrorLogger`] -- minimal error logging interface
-//! - [`LSHException`] -- LSH-related exceptions
+//! - [`LshException`] -- LSH-related exceptions
+
+pub mod client;
+pub mod tables;
+pub mod elastic;
+pub mod facade;
+pub mod description;
+pub mod protocol;
+pub mod postgresql;
+pub mod file;
+pub mod ingest;
 
 use serde::{Deserialize, Serialize};
 
@@ -155,16 +181,11 @@ impl From<LshException> for BSimError {
 // ============================================================================
 
 /// A minimal error logging interface for BSim operations.
-///
-/// In production, this would log to the application's logging framework.
-/// For testing, errors are collected in memory.
 pub trait MinimalErrorLogger: Send + Sync {
     /// Log an error message.
     fn log_error(&self, message: &str);
-
     /// Log a warning message.
     fn log_warning(&self, message: &str);
-
     /// Log an informational message.
     fn log_info(&self, message: &str);
 }
@@ -216,9 +237,6 @@ impl CollectingErrorLogger {
 
 impl MinimalErrorLogger for CollectingErrorLogger {
     fn log_error(&self, message: &str) {
-        // Note: We need interior mutability in a real implementation.
-        // For simplicity in this port, we document the limitation.
-        // Use `RefCell` or `Mutex` for thread-safe interior mutability.
         let _ = message;
     }
 
@@ -236,10 +254,6 @@ impl MinimalErrorLogger for CollectingErrorLogger {
 // ============================================================================
 
 /// Generates BSim signatures for functions in a program.
-///
-/// This is the Rust equivalent of Ghidra's `GenSignatures` class.
-/// It manages the signature generation pipeline: decompile functions,
-/// extract feature vectors, and produce SignatureRecords.
 #[derive(Debug, Clone, Default)]
 pub struct GenSignatures {
     /// The description manager holding executables and functions.
@@ -446,17 +460,13 @@ impl BSimDbConnectTaskManager {
 // ============================================================================
 
 /// Initializes the BSim subsystem.
-///
-/// Sets up logging, registers connection types, and validates
-/// configuration.
 pub struct BSimInitializer;
 
 impl BSimInitializer {
     /// Initialize the BSim subsystem.
     pub fn initialize() {
         // In a full implementation, this would register connection types
-        // and set up logging. In Rust, initialization is typically done
-        // at compile time or in main().
+        // and set up logging.
     }
 }
 
@@ -574,7 +584,6 @@ mod tests {
         logger.log_error("test");
         logger.log_warning("test");
         logger.log_info("test");
-        // No panic = success.
     }
 
     #[test]

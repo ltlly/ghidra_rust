@@ -4,6 +4,7 @@
 //! Provides the bridge between pcode execution engines and trace data.
 
 pub mod data;
+pub mod data_access;
 pub mod execution;
 pub mod integration;
 pub mod memory_state;

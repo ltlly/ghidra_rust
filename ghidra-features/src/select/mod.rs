@@ -3,12 +3,27 @@
 //! Ported from Ghidra's `ghidra.app.plugin.core.select` Java package.
 //!
 //! Provides logic for managing address range selections in a program,
-//! including selecting by function, by flow, by reference, and more.
+//! including selecting by function, by flow, by reference, by bytes,
+//! and more. Supports flow-based selection with forward, backward,
+//! and subroutine-following strategies.
+//!
+//! # Key Types
+//!
+//! - [`SelectionType`] -- the kind of selection operation
+//! - [`FlowSelectionType`] -- flow-based selection strategies
+//! - [`AddressSet`] -- an ordered set of addresses representing a selection
+//! - [`SelectionModel`] -- model managing the current program selection
 
 use ghidra_core::Address;
 use std::collections::BTreeSet;
 
+// ---------------------------------------------------------------------------
+// SelectionType
+// ---------------------------------------------------------------------------
+
 /// The type of selection operation.
+///
+/// Ported from the various selection plugins in `ghidra.app.plugin.core.select`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionType {
     /// Select the current address.
@@ -29,9 +44,61 @@ pub enum SelectionType {
     Invert,
     /// Select by equate value.
     Equate,
+    /// Select by bytes (user-specified count).
+    Bytes,
+    /// Select by program tree.
+    ProgramTree,
+    /// Select by qualified selection (function + address).
+    Qualified,
 }
 
+// ---------------------------------------------------------------------------
+// FlowSelectionType -- flow-based selection strategies
+// ---------------------------------------------------------------------------
+
+/// Flow-based selection strategies.
+///
+/// Ported from `SelectByFlowAction.selectionType` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlowSelectionType {
+    /// Select all flows FROM the current address/selection.
+    AllFlowsFrom,
+    /// Select limited flows FROM (respecting follow properties).
+    LimitedFlowsFrom,
+    /// Select all subroutines containing the current address.
+    Subroutines,
+    /// Select all flows TO the current address/selection.
+    AllFlowsTo,
+    /// Select limited flows TO (respecting follow properties).
+    LimitedFlowsTo,
+}
+
+// ---------------------------------------------------------------------------
+// ByteSelectionMethod
+// ---------------------------------------------------------------------------
+
+/// Method for byte-based selection.
+///
+/// Ported from `SelectBytesDialog` method radio buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ByteSelectionMethod {
+    /// Select N bytes from the start of the program.
+    FromStart,
+    /// Select N bytes from the end of the program.
+    FromEnd,
+    /// Select N bytes forward from the current address.
+    ForwardFromCurrent,
+    /// Select N bytes backward from the current address.
+    BackwardFromCurrent,
+}
+
+// ---------------------------------------------------------------------------
+// AddressSet
+// ---------------------------------------------------------------------------
+
 /// An address set representing a selection.
+///
+/// Uses a BTreeSet for ordered address storage.
 #[derive(Debug, Clone, Default)]
 pub struct AddressSet {
     /// The addresses in this set.
@@ -61,6 +128,13 @@ impl AddressSet {
         self.addresses.remove(&address.offset);
     }
 
+    /// Remove a range of addresses.
+    pub fn remove_range(&mut self, start: Address, end: Address) {
+        for addr in start.offset..=end.offset {
+            self.addresses.remove(&addr);
+        }
+    }
+
     /// Check if the set contains an address.
     pub fn contains(&self, address: Address) -> bool {
         self.addresses.contains(&address.offset)
@@ -87,6 +161,35 @@ impl AddressSet {
         self.addresses = new_set;
     }
 
+    /// Compute the union of two address sets.
+    pub fn union(&self, other: &AddressSet) -> AddressSet {
+        let mut result = self.clone();
+        for &addr in &other.addresses {
+            result.addresses.insert(addr);
+        }
+        result
+    }
+
+    /// Compute the intersection of two address sets.
+    pub fn intersection(&self, other: &AddressSet) -> AddressSet {
+        let addresses = self
+            .addresses
+            .intersection(&other.addresses)
+            .copied()
+            .collect();
+        AddressSet { addresses }
+    }
+
+    /// Compute the difference (self minus other).
+    pub fn difference(&self, other: &AddressSet) -> AddressSet {
+        let addresses = self
+            .addresses
+            .difference(&other.addresses)
+            .copied()
+            .collect();
+        AddressSet { addresses }
+    }
+
     /// Get the minimum address in the set.
     pub fn min_address(&self) -> Option<Address> {
         self.addresses.iter().next().map(|&a| Address::new(a))
@@ -101,12 +204,41 @@ impl AddressSet {
     pub fn to_vec(&self) -> Vec<Address> {
         self.addresses.iter().map(|&a| Address::new(a)).collect()
     }
+
+    /// Get contiguous ranges as (start, end) pairs.
+    pub fn to_ranges(&self) -> Vec<(Address, Address)> {
+        let mut ranges = Vec::new();
+        let mut iter = self.addresses.iter();
+        if let Some(&start) = iter.next() {
+            let mut range_start = start;
+            let mut range_end = start;
+            for &addr in iter {
+                if addr == range_end + 1 {
+                    range_end = addr;
+                } else {
+                    ranges.push((Address::new(range_start), Address::new(range_end)));
+                    range_start = addr;
+                    range_end = addr;
+                }
+            }
+            ranges.push((Address::new(range_start), Address::new(range_end)));
+        }
+        ranges
+    }
 }
 
+// ---------------------------------------------------------------------------
+// SelectionModel
+// ---------------------------------------------------------------------------
+
 /// Selection model managing the current program selection.
+///
+/// Supports undo by maintaining a selection history stack.
 #[derive(Debug, Default)]
 pub struct SelectionModel {
     current: AddressSet,
+    /// Stack of previous selections for undo.
+    history: Vec<AddressSet>,
 }
 
 impl SelectionModel {
@@ -115,9 +247,10 @@ impl SelectionModel {
         Self::default()
     }
 
-    /// Set the current selection.
+    /// Set the current selection (pushes the previous selection to history).
     pub fn set_selection(&mut self, selection: AddressSet) {
-        self.current = selection;
+        let old = std::mem::replace(&mut self.current, selection);
+        self.history.push(old);
     }
 
     /// Get the current selection.
@@ -125,14 +258,29 @@ impl SelectionModel {
         &self.current
     }
 
-    /// Clear the current selection.
+    /// Clear the current selection (pushes previous to history).
     pub fn clear(&mut self) {
-        self.current = AddressSet::new();
+        self.set_selection(AddressSet::new());
     }
 
     /// Whether there is an active selection.
     pub fn has_selection(&self) -> bool {
         !self.current.is_empty()
+    }
+
+    /// Undo the last selection change.
+    pub fn undo(&mut self) -> bool {
+        if let Some(previous) = self.history.pop() {
+            self.current = previous;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whether undo is available.
+    pub fn can_undo(&self) -> bool {
+        !self.history.is_empty()
     }
 }
 
@@ -185,5 +333,107 @@ mod tests {
         assert!(model.has_selection());
         model.clear();
         assert!(!model.has_selection());
+    }
+
+    #[test]
+    fn test_address_set_union() {
+        let mut a = AddressSet::new();
+        a.add(Address::new(0x1000));
+        a.add(Address::new(0x2000));
+        let mut b = AddressSet::new();
+        b.add(Address::new(0x2000));
+        b.add(Address::new(0x3000));
+        let c = a.union(&b);
+        assert_eq!(c.num_addresses(), 3);
+        assert!(c.contains(Address::new(0x1000)));
+        assert!(c.contains(Address::new(0x3000)));
+    }
+
+    #[test]
+    fn test_address_set_intersection() {
+        let mut a = AddressSet::new();
+        a.add(Address::new(0x1000));
+        a.add(Address::new(0x2000));
+        let mut b = AddressSet::new();
+        b.add(Address::new(0x2000));
+        b.add(Address::new(0x3000));
+        let c = a.intersection(&b);
+        assert_eq!(c.num_addresses(), 1);
+        assert!(c.contains(Address::new(0x2000)));
+    }
+
+    #[test]
+    fn test_address_set_difference() {
+        let mut a = AddressSet::new();
+        a.add(Address::new(0x1000));
+        a.add(Address::new(0x2000));
+        let mut b = AddressSet::new();
+        b.add(Address::new(0x2000));
+        let c = a.difference(&b);
+        assert_eq!(c.num_addresses(), 1);
+        assert!(c.contains(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_address_set_remove_range() {
+        let mut set = AddressSet::new();
+        set.add_range(Address::new(0x1000), Address::new(0x100F));
+        set.remove_range(Address::new(0x1005), Address::new(0x100A));
+        assert_eq!(set.num_addresses(), 10);
+        assert!(!set.contains(Address::new(0x1007)));
+        assert!(set.contains(Address::new(0x1004)));
+        assert!(set.contains(Address::new(0x100B)));
+    }
+
+    #[test]
+    fn test_address_set_to_ranges() {
+        let mut set = AddressSet::new();
+        set.add_range(Address::new(0x1000), Address::new(0x1004));
+        set.add_range(Address::new(0x2000), Address::new(0x2002));
+        let ranges = set.to_ranges();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].0.offset, 0x1000);
+        assert_eq!(ranges[0].1.offset, 0x1004);
+        assert_eq!(ranges[1].0.offset, 0x2000);
+        assert_eq!(ranges[1].1.offset, 0x2002);
+    }
+
+    #[test]
+    fn test_selection_model_undo() {
+        let mut model = SelectionModel::new();
+        let mut set1 = AddressSet::new();
+        set1.add(Address::new(0x1000));
+        model.set_selection(set1);
+        assert_eq!(model.get_selection().num_addresses(), 1);
+
+        let mut set2 = AddressSet::new();
+        set2.add(Address::new(0x2000));
+        model.set_selection(set2);
+        assert_eq!(model.get_selection().num_addresses(), 1);
+        assert!(model.get_selection().contains(Address::new(0x2000)));
+
+        assert!(model.can_undo());
+        assert!(model.undo());
+        assert!(model.get_selection().contains(Address::new(0x1000)));
+        assert!(!model.get_selection().contains(Address::new(0x2000)));
+    }
+
+    #[test]
+    fn test_selection_model_undo_empty() {
+        let mut model = SelectionModel::new();
+        assert!(!model.undo());
+    }
+
+    #[test]
+    fn test_flow_selection_type() {
+        let fst = FlowSelectionType::AllFlowsFrom;
+        assert_eq!(fst, FlowSelectionType::AllFlowsFrom);
+        assert_ne!(fst, FlowSelectionType::Subroutines);
+    }
+
+    #[test]
+    fn test_byte_selection_method() {
+        let method = ByteSelectionMethod::ForwardFromCurrent;
+        assert_eq!(method, ByteSelectionMethod::ForwardFromCurrent);
     }
 }

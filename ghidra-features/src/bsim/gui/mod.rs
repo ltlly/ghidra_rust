@@ -1,7 +1,8 @@
-//! BSim GUI components: filters, overview, search dialogs.
+//! BSim GUI components: filters, overview, search dialogs, apply tasks.
 //!
 //! Ports `ghidra.features.bsim.gui` and sub-packages.
 
+pub mod apply_tasks;
 pub mod filters;
 pub mod filter_types;
 pub mod overview;

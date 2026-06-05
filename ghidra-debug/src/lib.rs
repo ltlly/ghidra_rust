@@ -34,6 +34,7 @@
 
 pub mod api;
 pub mod db;
+pub mod framework;
 pub mod isf;
 pub mod jdi;
 pub mod model;
