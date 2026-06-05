@@ -14,6 +14,11 @@
 //! - [`FragmentInfo`] -- a fragment (leaf node with address range)
 //! - [`ProgramTreeModel`] -- manages the full program tree structure
 
+/// Module tree provider for displaying program modules.
+///
+/// Ported from `ghidra.app.plugin.core.module` provider classes.
+pub mod provider;
+
 use ghidra_core::Address;
 
 /// Action types for module operations.

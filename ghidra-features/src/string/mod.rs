@@ -26,6 +26,16 @@ pub mod ngram;
 /// `ghidra.app.plugin.core.string.StringEvent`.
 pub mod events;
 
+/// Word analysis and string scoring.
+///
+/// Ported from `ghidra.app.plugin.core.string` word analysis classes.
+pub mod word_analyzer;
+
+/// String table viewer with sorting, filtering, and selection.
+///
+/// Ported from `ghidra.app.plugin.core.string` viewer-related classes.
+pub mod viewer;
+
 /// Minimum default string length to find.
 pub const DEFAULT_MIN_LENGTH: usize = 5;
 

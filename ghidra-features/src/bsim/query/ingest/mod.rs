@@ -157,6 +157,63 @@ impl IterateRepoDirectories {
     }
 }
 
+/// Iterator over repository files for BSim signature processing.
+///
+/// This is a higher-level iterator that walks a directory tree
+/// and yields file paths matching the configured extension filter.
+/// It wraps `IterateRepoDirectories` with a standard Iterator interface.
+#[derive(Debug)]
+pub struct IterateRepository {
+    /// The underlying directory iterator.
+    inner: IterateRepoDirectories,
+    /// Current iteration index.
+    current: usize,
+}
+
+impl IterateRepository {
+    /// Create a new repository iterator.
+    pub fn new(root: impl Into<String>, extension: impl Into<String>) -> Self {
+        Self {
+            inner: IterateRepoDirectories::new(root, extension),
+            current: 0,
+        }
+    }
+
+    /// Add a file path.
+    pub fn add_path(&mut self, path: impl Into<String>) {
+        self.inner.add_path(path);
+    }
+
+    /// Get the total number of paths.
+    pub fn total_paths(&self) -> usize {
+        self.inner.path_count()
+    }
+
+    /// Reset the iterator to the beginning.
+    pub fn reset(&mut self) {
+        self.current = 0;
+    }
+
+    /// Get remaining path count.
+    pub fn remaining(&self) -> usize {
+        self.inner.path_count().saturating_sub(self.current)
+    }
+}
+
+impl Iterator for IterateRepository {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current < self.inner.paths.len() {
+            let path = self.inner.paths[self.current].clone();
+            self.current += 1;
+            Some(path)
+        } else {
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +249,49 @@ mod tests {
         iter.add_path("/tmp/repo/a.sig");
         iter.add_path("/tmp/repo/b.sig");
         assert_eq!(iter.path_count(), 2);
+    }
+
+    #[test]
+    fn iterate_repository_basic() {
+        let mut repo = IterateRepository::new("/tmp/repo", ".sig");
+        repo.add_path("/tmp/repo/a.sig");
+        repo.add_path("/tmp/repo/b.sig");
+        repo.add_path("/tmp/repo/c.sig");
+
+        assert_eq!(repo.total_paths(), 3);
+        assert_eq!(repo.remaining(), 3);
+
+        let first = repo.next().unwrap();
+        assert_eq!(first, "/tmp/repo/a.sig");
+        assert_eq!(repo.remaining(), 2);
+
+        let second = repo.next().unwrap();
+        assert_eq!(second, "/tmp/repo/b.sig");
+
+        let third = repo.next().unwrap();
+        assert_eq!(third, "/tmp/repo/c.sig");
+
+        assert!(repo.next().is_none());
+        assert_eq!(repo.remaining(), 0);
+    }
+
+    #[test]
+    fn iterate_repository_reset() {
+        let mut repo = IterateRepository::new("/tmp/repo", ".sig");
+        repo.add_path("/tmp/repo/a.sig");
+
+        repo.next();
+        assert_eq!(repo.remaining(), 0);
+
+        repo.reset();
+        assert_eq!(repo.remaining(), 1);
+        assert!(repo.next().is_some());
+    }
+
+    #[test]
+    fn iterate_repository_empty() {
+        let mut repo = IterateRepository::new("/tmp/repo", ".sig");
+        assert_eq!(repo.total_paths(), 0);
+        assert!(repo.next().is_none());
     }
 }

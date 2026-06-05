@@ -74,9 +74,10 @@ pub type BSimResult<T> = Result<T, BSimError>;
 // ============================================================================
 
 /// Connection type for the database backend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ConnectionType {
     /// PostgreSQL database.
+    #[default]
     Postgresql,
     /// Elasticsearch backend.
     Elasticsearch,

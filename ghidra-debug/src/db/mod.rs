@@ -29,6 +29,7 @@ pub mod listing;
 pub mod target_impl;
 pub mod trace_db;
 pub mod trace_db_address;
+pub mod trace_db_addr_property;
 pub mod trace_db_bookmark;
 pub mod trace_db_breakpoint;
 pub mod trace_db_cache_containing;
@@ -43,6 +44,7 @@ pub mod trace_db_data_settings;
 pub mod trace_db_data_type_mgr;
 pub mod trace_db_direct_listener;
 pub mod trace_db_equate;
+pub mod trace_db_equate_space;
 pub mod trace_db_fragment;
 pub mod trace_db_guest;
 pub mod trace_db_instruction;
@@ -57,6 +59,7 @@ pub mod trace_db_module;
 pub mod trace_db_obj_internals;
 pub mod trace_db_overlay;
 pub mod trace_db_program;
+pub mod trace_db_program_view;
 pub mod trace_db_property;
 pub mod trace_db_space;
 pub mod trace_db_spatial;
@@ -70,7 +73,9 @@ pub mod trace_db_time_viewport;
 pub mod trace_db_user_data;
 pub mod trace_db_util;
 pub mod trace_db_utils;
+pub mod trace_db_value_storage;
 pub mod trace_db_visitor_ext;
+pub mod trace_db_visitors;
 
 pub use trace_db::TraceDatabase;
 pub use trace_db_data_settings::{DataSettingsAdapter, DataSettingsOperations, SettingsValue};
@@ -96,3 +101,20 @@ pub use trace_db_direct_listener::{
 pub use trace_db_time_viewport::{SingleSnapViewport, TraceTimeViewport};
 pub use trace_db_user_data::{DbTraceUserData, UserDataEntry};
 pub use trace_db_utils::{TraceDatabaseInfo, TraceDbUtils};
+pub use trace_db_addr_property::{
+    AddressPropertyEntry, DBTraceAddressPropertyApiView, DBTraceAddressPropertyManager,
+};
+pub use trace_db_equate_space::DBTraceEquateSpace;
+pub use trace_db_program_view::{
+    ProgramViewBookmark, ProgramViewBookmarkManager, ProgramViewChangeSet, ProgramViewEquate,
+    ProgramViewEquateTable, ProgramViewFragment, ProgramViewFunction, ProgramViewFunctionManager,
+    ProgramViewSnapshot,
+};
+pub use trace_db_value_storage::{
+    ImmutableValueBox, ImmutableValueShape, ValueBox, ValueShape, ValueSpace, ValueTriple,
+};
+pub use trace_db_visitors::{
+    AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,
+    CanonicalSuccessorsRelativeVisitor, OrderedSuccessorsVisitor, SuccessorsRelativeVisitor,
+    TraceObjectVisitor, TraversalDirection, TreeTraversal, VisitorAction,
+};

@@ -13,6 +13,11 @@
 //! - [`DataWindowFilter`] -- Filtering configuration
 //! - [`DataColumn`] -- Column definitions for the table
 
+/// Data window provider for displaying data items.
+///
+/// Ported from `ghidra.app.plugin.core.datawindow.DataWindowProvider`.
+pub mod provider;
+
 use std::collections::{BTreeMap, HashMap};
 
 /// Display name for the data value column.

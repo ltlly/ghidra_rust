@@ -387,6 +387,267 @@ impl Default for BSimServerManager {
 }
 
 // ============================================================================
+// BSimServerManagerListener
+// ============================================================================
+
+/// Listener for BSim server manager events.
+///
+/// Port of `ghidra.features.bsim.gui.search.dialog.BSimServerManagerListener`.
+///
+/// Notified when servers are added, removed, or when the default
+/// server changes.
+pub trait BSimServerManagerListener: Send + Sync {
+    /// Called when a server is added.
+    fn server_added(&self, server: &BSimServerInfo);
+
+    /// Called when a server is removed.
+    fn server_removed(&self, url: &str);
+
+    /// Called when the default server changes.
+    fn default_server_changed(&self, url: Option<&str>);
+}
+
+/// No-op listener that discards all events.
+#[derive(Debug, Clone, Default)]
+pub struct NullServerManagerListener;
+
+impl BSimServerManagerListener for NullServerManagerListener {
+    fn server_added(&self, _server: &BSimServerInfo) {}
+    fn server_removed(&self, _url: &str) {}
+    fn default_server_changed(&self, _url: Option<&str>) {}
+}
+
+// ============================================================================
+// BSimServerTableModel
+// ============================================================================
+
+/// Table model for displaying BSim server configurations.
+///
+/// Port of `ghidra.features.bsim.gui.search.dialog.BSimServerTableModel`.
+///
+/// Provides row/column access for displaying server info in a table.
+#[derive(Debug, Clone, Default)]
+pub struct BSimServerTableModel {
+    /// Column names.
+    pub columns: Vec<String>,
+    /// Server entries.
+    entries: Vec<BSimServerInfo>,
+}
+
+impl BSimServerTableModel {
+    /// Create a new server table model with default columns.
+    pub fn new() -> Self {
+        Self {
+            columns: vec![
+                "URL".to_string(),
+                "Database".to_string(),
+                "Type".to_string(),
+                "SSL".to_string(),
+            ],
+            entries: Vec::new(),
+        }
+    }
+
+    /// Add a server entry.
+    pub fn add_entry(&mut self, server: BSimServerInfo) {
+        self.entries.push(server);
+    }
+
+    /// Remove a server entry by URL.
+    pub fn remove_entry(&mut self, url: &str) -> bool {
+        let len_before = self.entries.len();
+        self.entries.retain(|s| s.url != url);
+        self.entries.len() < len_before
+    }
+
+    /// Get the number of rows.
+    pub fn row_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Get the number of columns.
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Get a cell value as a string.
+    pub fn get_value_at(&self, row: usize, col: usize) -> Option<String> {
+        let entry = self.entries.get(row)?;
+        match col {
+            0 => Some(entry.url.clone()),
+            1 => Some(entry.database_name.clone()),
+            2 => Some(format!("{:?}", entry.connection_type)),
+            3 => Some(if entry.use_ssl { "Yes" } else { "No" }.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Get a server entry by row index.
+    pub fn get_entry(&self, row: usize) -> Option<&BSimServerInfo> {
+        self.entries.get(row)
+    }
+
+    /// Get all entries.
+    pub fn entries(&self) -> &[BSimServerInfo] {
+        &self.entries
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+}
+
+// ============================================================================
+// CreateBsimServerInfoDialog
+// ============================================================================
+
+/// State for the "create BSim server info" dialog.
+///
+/// Port of `ghidra.features.bsim.gui.search.dialog.CreateBsimServerInfoDialog`.
+///
+/// Manages the form state for creating a new BSim server configuration.
+#[derive(Debug, Clone)]
+pub struct CreateBsimServerInfoDialog {
+    /// Server URL being configured.
+    pub url: String,
+    /// Database name.
+    pub database_name: String,
+    /// Connection type.
+    pub connection_type: ConnectionType,
+    /// Whether SSL is enabled.
+    pub use_ssl: bool,
+    /// Username (optional).
+    pub username: String,
+    /// Whether the dialog was confirmed.
+    pub confirmed: bool,
+}
+
+impl CreateBsimServerInfoDialog {
+    /// Create a new dialog state with defaults.
+    pub fn new() -> Self {
+        Self {
+            url: String::new(),
+            database_name: String::new(),
+            connection_type: ConnectionType::PostgreSQL,
+            use_ssl: false,
+            username: String::new(),
+            confirmed: false,
+        }
+    }
+
+    /// Set the URL.
+    pub fn with_url(mut self, url: impl Into<String>) -> Self {
+        self.url = url.into();
+        self
+    }
+
+    /// Set the database name.
+    pub fn with_database(mut self, name: impl Into<String>) -> Self {
+        self.database_name = name.into();
+        self
+    }
+
+    /// Set the connection type.
+    pub fn with_connection_type(mut self, ct: ConnectionType) -> Self {
+        self.connection_type = ct;
+        self
+    }
+
+    /// Confirm the dialog.
+    pub fn confirm(&mut self) {
+        self.confirmed = true;
+    }
+
+    /// Create a BSimServerInfo from the dialog state.
+    pub fn to_server_info(&self) -> BSimServerInfo {
+        BSimServerInfo {
+            url: self.url.clone(),
+            database_name: self.database_name.clone(),
+            connection_type: self.connection_type,
+            use_ssl: self.use_ssl,
+            username: if self.username.is_empty() {
+                None
+            } else {
+                Some(self.username.clone())
+            },
+        }
+    }
+
+    /// Whether the form is valid (URL and database name are non-empty).
+    pub fn is_valid(&self) -> bool {
+        !self.url.is_empty() && !self.database_name.is_empty()
+    }
+}
+
+impl Default for CreateBsimServerInfoDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// SelectedFunctionsTableDialog
+// ============================================================================
+
+/// State for the "selected functions table" dialog.
+///
+/// Port of `ghidra.features.bsim.gui.search.dialog.SelectedFunctionsTableDialog`.
+///
+/// Displays and manages the set of functions selected for BSim querying.
+#[derive(Debug, Clone, Default)]
+pub struct SelectedFunctionsTableDialog {
+    /// Selected function names.
+    pub function_names: Vec<String>,
+    /// Whether the dialog was confirmed.
+    pub confirmed: bool,
+    /// Title for the dialog.
+    pub title: String,
+}
+
+impl SelectedFunctionsTableDialog {
+    /// Create a new dialog.
+    pub fn new(title: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            ..Default::default()
+        }
+    }
+
+    /// Add a function name.
+    pub fn add_function(&mut self, name: impl Into<String>) {
+        self.function_names.push(name.into());
+    }
+
+    /// Remove a function name.
+    pub fn remove_function(&mut self, name: &str) -> bool {
+        let len_before = self.function_names.len();
+        self.function_names.retain(|n| n != name);
+        self.function_names.len() < len_before
+    }
+
+    /// Get the number of selected functions.
+    pub fn function_count(&self) -> usize {
+        self.function_names.len()
+    }
+
+    /// Confirm the dialog.
+    pub fn confirm(&mut self) {
+        self.confirmed = true;
+    }
+
+    /// Get the selected function names as a slice.
+    pub fn functions(&self) -> &[String] {
+        &self.function_names
+    }
+
+    /// Clear all selected functions.
+    pub fn clear(&mut self) {
+        self.function_names.clear();
+    }
+}
+
+// ============================================================================
 // BSimExecutablesSummaryModel
 // ============================================================================
 
@@ -915,5 +1176,158 @@ mod tests {
 
         model.sort_by_name();
         assert_eq!(model.all_results()[0].matched_function_name, "a");
+    }
+
+    // --- BSimServerManagerListener tests ---
+
+    #[test]
+    fn null_server_manager_listener() {
+        let listener = NullServerManagerListener;
+        let server = make_server("localhost:5432");
+        listener.server_added(&server);
+        listener.server_removed("localhost:5432");
+        listener.default_server_changed(Some("localhost:5432"));
+    }
+
+    // --- BSimServerTableModel tests ---
+
+    #[test]
+    fn server_table_model_creation() {
+        let model = BSimServerTableModel::new();
+        assert_eq!(model.column_count(), 4);
+        assert_eq!(model.row_count(), 0);
+    }
+
+    #[test]
+    fn server_table_model_add_remove() {
+        let mut model = BSimServerTableModel::new();
+        model.add_entry(make_server("a:5432"));
+        model.add_entry(make_server("b:5432"));
+        assert_eq!(model.row_count(), 2);
+
+        model.remove_entry("a:5432");
+        assert_eq!(model.row_count(), 1);
+        assert!(!model.remove_entry("nonexistent"));
+    }
+
+    #[test]
+    fn server_table_model_values() {
+        let mut model = BSimServerTableModel::new();
+        model.add_entry(make_server("localhost:5432"));
+        assert_eq!(model.get_value_at(0, 0), Some("localhost:5432".to_string()));
+        assert_eq!(model.get_value_at(0, 1), Some("test_db".to_string()));
+        assert_eq!(model.get_value_at(0, 3), Some("No".to_string()));
+        assert!(model.get_value_at(0, 99).is_none());
+        assert!(model.get_value_at(99, 0).is_none());
+    }
+
+    #[test]
+    fn server_table_model_clear() {
+        let mut model = BSimServerTableModel::new();
+        model.add_entry(make_server("a:5432"));
+        model.clear();
+        assert_eq!(model.row_count(), 0);
+    }
+
+    // --- CreateBsimServerInfoDialog tests ---
+
+    #[test]
+    fn create_dialog_defaults() {
+        let dialog = CreateBsimServerInfoDialog::new();
+        assert!(dialog.url.is_empty());
+        assert!(!dialog.confirmed);
+        assert!(!dialog.is_valid());
+    }
+
+    #[test]
+    fn create_dialog_builder() {
+        let dialog = CreateBsimServerInfoDialog::new()
+            .with_url("localhost:5432")
+            .with_database("bsim_db")
+            .with_connection_type(ConnectionType::Elastic);
+        assert_eq!(dialog.url, "localhost:5432");
+        assert_eq!(dialog.database_name, "bsim_db");
+        assert!(dialog.is_valid());
+    }
+
+    #[test]
+    fn create_dialog_confirm() {
+        let mut dialog = CreateBsimServerInfoDialog::new()
+            .with_url("localhost:5432")
+            .with_database("bsim");
+        dialog.confirm();
+        assert!(dialog.confirmed);
+    }
+
+    #[test]
+    fn create_dialog_to_server_info() {
+        let dialog = CreateBsimServerInfoDialog::new()
+            .with_url("localhost:5432")
+            .with_database("bsim");
+        let info = dialog.to_server_info();
+        assert_eq!(info.url, "localhost:5432");
+        assert_eq!(info.database_name, "bsim");
+        assert!(info.username.is_none());
+    }
+
+    #[test]
+    fn create_dialog_to_server_info_with_username() {
+        let mut dialog = CreateBsimServerInfoDialog::new()
+            .with_url("localhost:5432")
+            .with_database("bsim");
+        dialog.username = "admin".to_string();
+        let info = dialog.to_server_info();
+        assert_eq!(info.username, Some("admin".to_string()));
+    }
+
+    // --- SelectedFunctionsTableDialog tests ---
+
+    #[test]
+    fn selected_functions_dialog() {
+        let mut dialog = SelectedFunctionsTableDialog::new("Select Functions");
+        assert_eq!(dialog.title, "Select Functions");
+        assert_eq!(dialog.function_count(), 0);
+
+        dialog.add_function("main");
+        dialog.add_function("foo");
+        assert_eq!(dialog.function_count(), 2);
+    }
+
+    #[test]
+    fn selected_functions_dialog_remove() {
+        let mut dialog = SelectedFunctionsTableDialog::new("test");
+        dialog.add_function("main");
+        dialog.add_function("foo");
+        dialog.remove_function("main");
+        assert_eq!(dialog.function_count(), 1);
+        assert!(!dialog.remove_function("nonexistent"));
+    }
+
+    #[test]
+    fn selected_functions_dialog_confirm() {
+        let mut dialog = SelectedFunctionsTableDialog::new("test");
+        assert!(!dialog.confirmed);
+        dialog.confirm();
+        assert!(dialog.confirmed);
+    }
+
+    #[test]
+    fn selected_functions_dialog_clear() {
+        let mut dialog = SelectedFunctionsTableDialog::new("test");
+        dialog.add_function("f1");
+        dialog.add_function("f2");
+        dialog.clear();
+        assert!(dialog.functions().is_empty());
+    }
+
+    #[test]
+    fn selected_functions_dialog_functions() {
+        let mut dialog = SelectedFunctionsTableDialog::new("test");
+        dialog.add_function("main");
+        dialog.add_function("foo");
+        let funcs = dialog.functions();
+        assert_eq!(funcs.len(), 2);
+        assert_eq!(funcs[0], "main");
+        assert_eq!(funcs[1], "foo");
     }
 }

@@ -11,6 +11,11 @@
 //! - [`ResourceType`] -- Types of resources managed by the plugin
 //! - [`ResourceInfo`] -- Metadata about a resource
 
+/// Icon definitions for the Ghidra UI.
+///
+/// Ported from `ghidra.app.plugin.core.resources` icon classes.
+pub mod icons;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

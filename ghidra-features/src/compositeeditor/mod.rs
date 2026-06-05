@@ -25,6 +25,21 @@ pub mod actions;
 /// Ported from `ghidra.app.plugin.core.compositeeditor.IDMapDB`.
 pub mod idmap;
 
+/// Editor model for struct/union editing with undo/redo.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeEditorModel`.
+pub mod model;
+
+/// Editor action contexts for composite editor operations.
+///
+/// Ported from context classes in `ghidra.app.plugin.core.compositeeditor`.
+pub mod context;
+
+/// Listener interfaces for composite editor change events.
+///
+/// Ported from `CompositeChangeListener` and `CompositeEditorLockListener`.
+pub mod listener;
+
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of components allowed in a composite type.

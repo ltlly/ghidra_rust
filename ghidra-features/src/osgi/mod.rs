@@ -14,6 +14,11 @@
 //! - [`BundleMap`] -- Container for all registered bundles
 //! - [`BundleStatusEntry`] -- Status information for a bundle
 
+/// OSGi bundle manager for plugin lifecycle management.
+///
+/// Ported from `ghidra.app.plugin.core.osgi` bundle manager classes.
+pub mod bundle_manager;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

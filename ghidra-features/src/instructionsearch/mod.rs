@@ -22,7 +22,9 @@
 pub mod model;
 pub mod api;
 pub mod utils;
+pub mod search_data;
 
 pub use model::{InstructionMetadata, MaskContainer, MaskSettings, OperandMetadata};
 pub use api::InstructionSearchApi;
 pub use utils::InstructionSearchUtils;
+pub use search_data::{InstructionSearchData, SearchState};

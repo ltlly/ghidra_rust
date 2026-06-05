@@ -122,6 +122,13 @@ pub enum TraceReferenceKind {
     Stack,
 }
 
+impl TraceReferenceKind {
+    /// Whether this reference kind represents a flow (call/jump) reference.
+    pub fn is_flow(&self) -> bool {
+        matches!(self, Self::Memory)
+    }
+}
+
 /// A reference in the trace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceReference {

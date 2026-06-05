@@ -7,12 +7,15 @@
 
 pub mod address_snap;
 pub mod bookmark;
+pub mod bookmark_ops;
 pub mod breakpoint;
 pub mod changeset;
+pub mod code_ops;
 pub mod context;
 pub mod data_type;
 pub mod domain_object_listener;
 pub mod duplicate_key;
+pub mod equate_ops;
 pub mod execution_state;
 pub mod guest;
 pub mod lifespan;
@@ -23,14 +26,18 @@ pub mod memory;
 pub mod memory_ext;
 pub mod memory_flag;
 pub mod module;
+pub mod module_ops;
 pub mod options;
 pub mod program;
 pub mod property;
+pub mod reference_ext;
+pub mod reference_ops;
 pub mod register;
 pub mod register_context;
-pub mod reference_ext;
+pub mod register_context_ops;
 pub mod stack;
 pub mod symbol;
+pub mod symbol_types;
 pub mod symbol_views;
 pub mod target_iface;
 pub mod target_info;
@@ -105,3 +112,17 @@ pub use trace_method::{
     ArgValue, MethodArguments, MethodParameter, MethodResult, MethodValue, TraceMethodDescriptor,
 };
 pub use trace_span::TraceSpan;
+
+pub use bookmark_ops::{TraceBookmarkOperations, TraceBookmarkSpace, TraceBookmarkSpaceManager};
+pub use code_ops::{TraceCodeOperations, TraceCodeSpace, TraceCodeSpaceManager};
+pub use equate_ops::{EquateSpaceBuilder, TraceEquateOperations, TraceEquateSpace};
+pub use module_ops::{
+    ModuleSpaceBuilder, TraceConflictedMappingException, TraceModuleOperations, TraceModuleSpace,
+};
+pub use reference_ops::{ReferenceOrder, TraceReferenceOperations, TraceReferenceSpace};
+pub use register_context_ops::{
+    ContextMaskedRange, MaskedContextValue, TraceRegisterContextSpace, TraceRegisterContextSpaceOps,
+};
+pub use symbol_types::{
+    TraceClassSymbol, TraceLabelSymbol, TraceNamespaceSymbol, TraceSymbolWithLifespan,
+};

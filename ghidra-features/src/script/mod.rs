@@ -15,6 +15,11 @@
 //! - [`ScriptTableModel`] -- Table model for displaying scripts
 //! - [`ScriptRunState`] -- State of a running script
 
+/// Script manager for discovering and running Ghidra scripts.
+///
+/// Ported from `ghidra.app.plugin.core.script` manager classes.
+pub mod manager;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

@@ -23,6 +23,11 @@ pub mod nodes;
 /// Ported from Ghidra's `ghidra.app.plugin.core.symboltree.actions` package.
 pub mod actions;
 
+/// Symbol tree operations with undo/redo and clipboard support.
+///
+/// Ported from action classes in `ghidra.app.plugin.core.symboltree.actions`.
+pub mod operations;
+
 use std::collections::BTreeMap;
 
 /// Options category name.

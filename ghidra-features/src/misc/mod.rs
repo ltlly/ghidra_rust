@@ -4,6 +4,11 @@
 //!
 //! Provides shared utility types used by multiple plugins.
 
+/// Miscellaneous actions (memory map, program info, etc.).
+///
+/// Ported from `ghidra.app.plugin.core.misc` action classes.
+pub mod actions;
+
 /// The import type for binary files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportType {

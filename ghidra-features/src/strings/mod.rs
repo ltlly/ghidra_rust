@@ -26,6 +26,11 @@ pub mod view;
 /// and the string scanning logic in Ghidra's string viewing plugin.
 pub mod scanner;
 
+/// Defined strings table model with sorting and filtering.
+///
+/// Ported from `ghidra.app.plugin.core.strings.DefinedStringsTableModel`.
+pub mod table_model;
+
 use std::collections::HashMap;
 
 /// Column header for string value.

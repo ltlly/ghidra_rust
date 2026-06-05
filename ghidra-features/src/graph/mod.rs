@@ -12,6 +12,11 @@
 //! - [`GraphDisplayListener`] -- Trait for graph display event listeners
 //! - [`GraphDisplayOptions`] -- Options for graph rendering
 
+/// Graph plugin for program visualization and display broker.
+///
+/// Ported from `ghidra.app.plugin.core.graph` graph plugin classes.
+pub mod plugin;
+
 use std::collections::HashMap;
 
 /// Option key for the active graph provider.

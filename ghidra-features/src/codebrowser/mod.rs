@@ -58,6 +58,7 @@ pub mod plugin;
 pub mod plugin_interface;
 pub mod provider;
 pub mod selection_plugin;
+pub mod listing_model;
 
 // Re-export key types at the module root for convenience.
 pub use action_context::{CodeViewerActionContext, OtherPanelContext};

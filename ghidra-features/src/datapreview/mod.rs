@@ -14,6 +14,11 @@
 //! - [`Preview`] -- Trait for preview implementations
 //! - [`PreviewModel`] -- Table model for preview rows
 
+/// Data preview model for interpreting bytes at an address.
+///
+/// Ported from `ghidra.app.plugin.core.datapreview` preview classes.
+pub mod preview_model;
+
 use std::cmp::Ordering;
 
 /// Maximum preview string length.

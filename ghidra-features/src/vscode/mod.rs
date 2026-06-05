@@ -12,6 +12,11 @@
 //! - [`VSCodeOptions`] -- Configuration for VS Code integration
 //! - [`VSCodeLauncherTask`] -- Background task to launch VS Code
 
+/// VS Code connector for Ghidra integration.
+///
+/// Ported from `ghidra.app.plugin.core.vscode` connector classes.
+pub mod connector;
+
 use std::path::PathBuf;
 
 /// Option key for VS Code executable path.

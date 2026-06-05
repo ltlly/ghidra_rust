@@ -28,6 +28,7 @@ pub mod rmi_types;
 pub mod static_mapping;
 pub mod target;
 pub mod trace_rmi_acceptor;
+pub mod trace_rmi_connection;
 pub mod tracemgr;
 pub mod tracermi;
 pub mod watch;
@@ -52,4 +53,8 @@ pub use modules::{
 pub use platform::{DebuggerConnection, PlatformDescription, ProcessDescriptor};
 pub use target::{ActionEntry, ActionResult, ObjectArgumentPolicy, Target};
 pub use tracemgr::DebuggerCoordinates;
+pub use trace_rmi_connection::{
+    RemoteMethod, RemoteMethodRegistry, RemoteParameter, TerminalSession, TraceRmiConnection,
+    TraceRmiError, TraceRmiLaunchOffer,
+};
 pub use watch::{ValStr, ValueFormat, WatchRow};
