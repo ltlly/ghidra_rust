@@ -926,4 +926,211 @@ mod tests {
         let cmd = SetExternalNameCmd::new("libc.so", "/usr/lib/libc.so");
         assert!(format!("{}", cmd).contains("libc.so"));
     }
+
+    #[test]
+    fn test_add_offset_mem_ref_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = AddOffsetMemRefCmd::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            false,
+            RefType::Data(DataRefType::Read),
+            SourceType::UserDefined,
+            0,
+            0x10,
+        );
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("0x10"));
+    }
+
+    #[test]
+    fn test_add_register_ref_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = AddRegisterRefCmd::new(
+            Address::new(0x1000),
+            0,
+            Address::new(0), // register space
+            RefType::Data(DataRefType::Write),
+            SourceType::UserDefined,
+        );
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("Register"));
+    }
+
+    #[test]
+    fn test_set_external_ref_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = SetExternalRefCmd::new(
+            Address::new(0x1000),
+            0,
+            "malloc",
+            "libc.so",
+            Some(Address::new(0x2000)),
+            RefType::Data(DataRefType::Data),
+            SourceType::UserDefined,
+        );
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("malloc"));
+    }
+
+    #[test]
+    fn test_edit_ref_type_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let r = Reference::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            RefType::Data(DataRefType::Data),
+            0,
+        );
+        mgr.add_reference(r).unwrap();
+        let existing = mgr
+            .get_references_from_op(Address::new(0x1000), 0)
+            .into_iter()
+            .next()
+            .unwrap()
+            .clone();
+        let cmd = EditRefTypeCmd::new(&existing, RefType::Data(DataRefType::Read));
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+    }
+
+    #[test]
+    fn test_edit_ref_type_cmd_nonexistent() {
+        let mut mgr = ReferenceManager::new();
+        let r = Reference::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            RefType::Data(DataRefType::Data),
+            0,
+        );
+        let cmd = EditRefTypeCmd::new(&r, RefType::Data(DataRefType::Read));
+        // Non-existent reference returns Ok(false)
+        assert!(!cmd.apply_to(&mut mgr).unwrap());
+    }
+
+    #[test]
+    fn test_set_primary_ref_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let r = Reference::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            RefType::Data(DataRefType::Data),
+            0,
+        );
+        mgr.add_reference(r).unwrap();
+        let existing = mgr
+            .get_references_from_op(Address::new(0x1000), 0)
+            .into_iter()
+            .next()
+            .unwrap()
+            .clone();
+        let cmd = SetPrimaryRefCmd::new(&existing, true);
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("primary=true"));
+    }
+
+    #[test]
+    fn test_set_primary_ref_cmd_nonexistent() {
+        let mut mgr = ReferenceManager::new();
+        let r = Reference::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            RefType::Data(DataRefType::Data),
+            0,
+        );
+        let cmd = SetPrimaryRefCmd::new(&r, true);
+        assert!(!cmd.apply_to(&mut mgr).unwrap());
+    }
+
+    #[test]
+    fn test_clear_external_path_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = ClearExternalPathCmd::new("libc.so");
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("Clear External Path"));
+    }
+
+    #[test]
+    fn test_add_external_name_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = AddExternalNameCmd::new("libpthread", SourceType::UserDefined);
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("libpthread"));
+    }
+
+    #[test]
+    fn test_remove_external_name_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = RemoveExternalNameCmd::new("libpthread");
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("libpthread"));
+    }
+
+    #[test]
+    fn test_update_external_name_cmd() {
+        let mut mgr = ReferenceManager::new();
+        let cmd = UpdateExternalNameCmd::new("libc.so", "libc.so.6", SourceType::UserDefined);
+        assert!(cmd.apply_to(&mut mgr).unwrap());
+        assert!(format!("{}", cmd).contains("libc.so"));
+        assert!(format!("{}", cmd).contains("libc.so.6"));
+    }
+
+    #[test]
+    fn test_stack_ref_cmd_display() {
+        let cmd = AddStackRefCmd::new(
+            Address::new(0x1000),
+            1,
+            -0x18,
+            RefType::Data(DataRefType::Read),
+            SourceType::UserDefined,
+        );
+        let display = format!("{}", cmd);
+        assert!(display.contains("Stack"));
+        // The display formats the absolute offset in hex (i32 -0x18 -> 0x18 in hex)
+        assert!(display.contains("stack["));
+    }
+
+    #[test]
+    fn test_register_ref_cmd_display() {
+        let cmd = AddRegisterRefCmd::new(
+            Address::new(0x1000),
+            0,
+            Address::new(0x10),
+            RefType::Data(DataRefType::Write),
+            SourceType::UserDefined,
+        );
+        let display = format!("{}", cmd);
+        assert!(display.contains("Register"));
+        assert!(display.contains("reg["));
+    }
+
+    #[test]
+    fn test_compound_command_empty() {
+        let compound = CompoundCommand::new("Empty");
+        assert_eq!(compound.size(), 0);
+        let mut mgr = ReferenceManager::new();
+        assert!(compound.apply_to(&mut mgr).unwrap());
+        assert_eq!(mgr.num_references(), 0);
+    }
+
+    #[test]
+    fn test_compound_command_display() {
+        let compound = CompoundCommand::new("My Compound");
+        assert_eq!(format!("{}", compound), "My Compound");
+    }
+
+    #[test]
+    fn test_status_msgs() {
+        let cmd = AddMemRefCmd::new(
+            Address::new(0x1000),
+            Address::new(0x2000),
+            RefType::Data(DataRefType::Data),
+            SourceType::UserDefined,
+            0,
+            true,
+        );
+        assert!(cmd.status_msg().is_none());
+
+        let cmd2 = SetExternalNameCmd::new("libc.so", "/usr/lib/libc.so");
+        assert!(cmd2.status_msg().is_none());
+    }
 }

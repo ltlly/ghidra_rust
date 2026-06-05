@@ -38,6 +38,7 @@ pub mod theme_options;
 pub mod property_editors;
 pub mod abstract_options;
 pub mod options_listener;
+pub mod custom_options_editor;
 
 pub use action_trigger::ActionTrigger;
 pub use editor_state::EditorState;

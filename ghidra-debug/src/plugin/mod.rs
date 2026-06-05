@@ -117,6 +117,10 @@ pub mod gui_pcode_ext;
 pub mod gui_memview_listener;
 pub mod gui_timeoverview_listener;
 
+// Platform mapper implementations
+pub mod platform_mapper_impls;
+pub mod mapped_memory_visitor;
+
 pub use abstract_plugin::{
     DebuggerPluginPackage, ExtensionPointId, PluginLifecycleEvent, PluginPhase,
 };

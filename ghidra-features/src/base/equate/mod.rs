@@ -352,4 +352,290 @@ mod tests {
         assert_eq!(sign_extend(0x80, 8), -128);
         assert_eq!(sign_extend(0xFF, 8), -1);
     }
+
+    #[test]
+    fn test_scalar_negate() {
+        let s = Scalar::signed(8, -42);
+        let neg = s.negate();
+        assert_eq!(neg.signed_value(), 42);
+    }
+
+    #[test]
+    fn test_scalar_with_opposite_sign() {
+        let s = Scalar::unsigned(8, 255);
+        let opp = s.with_opposite_sign();
+        assert!(opp.is_signed());
+    }
+
+    #[test]
+    fn test_scalar_is_negative() {
+        let s = Scalar::signed(8, -1);
+        assert!(s.signed_value() < 0);
+        let s2 = Scalar::unsigned(8, 255);
+        assert!(s2.signed_value() >= 0 || s2.is_signed() == false);
+    }
+
+    #[test]
+    fn test_equate_value_display_name_strips_tag() {
+        let mut eq = EquateValue::new(format!("{}MyEnum", EquateManager::DATATYPE_TAG), 10);
+        eq.is_enum_based = true;
+        assert_eq!(eq.display_name(), "MyEnum");
+    }
+
+    #[test]
+    fn test_equate_value_display() {
+        let eq = EquateValue::new("MY_CONST", 0xFF);
+        let display = format!("{}", eq);
+        assert!(display.contains("MY_CONST"));
+        assert!(display.contains("0xff"));
+    }
+
+    #[test]
+    fn test_equate_reference_equality() {
+        let r1 = EquateReference::new(Address::new(0x1000), 0);
+        let r2 = EquateReference::new(Address::new(0x1000), 0);
+        let r3 = EquateReference::new(Address::new(0x2000), 0);
+        assert_eq!(r1, r2);
+        assert_ne!(r1, r3);
+    }
+
+    #[test]
+    fn test_equate_value_is_valid_uuid_none() {
+        let eq = EquateValue::new("TEST", 42);
+        assert!(eq.is_valid_uuid());
+    }
+
+    #[test]
+    fn test_equate_value_is_valid_uuid_empty() {
+        let mut eq = EquateValue::new("TEST", 42);
+        eq.enum_uuid = Some(String::new());
+        assert!(!eq.is_valid_uuid());
+    }
+
+    #[test]
+    fn test_scalar_16_bit() {
+        let s = Scalar::unsigned(16, 0xABCD);
+        assert_eq!(s.unsigned_value(), 0xABCD);
+        assert_eq!(s.bit_length(), 16);
+    }
+
+    #[test]
+    fn test_scalar_64_bit() {
+        let s = Scalar::signed(64, -1);
+        assert_eq!(s.signed_value(), -1);
+        assert_eq!(s.unsigned_value(), u64::MAX);
+    }
+
+    // -------------------------------------------------------------------
+    // Integration tests: EquateManager + EquateTableModel + EquatePlugin
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn test_integration_create_add_ref_then_table() {
+        let mut table = EquateTable::new();
+        table.create_equate("FLAG_A", 1).unwrap();
+        table.create_equate("FLAG_B", 2).unwrap();
+        table.create_equate("FLAG_C", 4).unwrap();
+
+        table.add_reference("FLAG_A", Address::new(0x1000), 0);
+        table.add_reference("FLAG_A", Address::new(0x2000), 1);
+        table.add_reference("FLAG_B", Address::new(0x3000), 0);
+
+        // Verify table model integration
+        let mut model = table::EquateTableModel::new();
+        model.update(&table);
+        assert_eq!(model.row_count(), 3);
+
+        // Sort by ref count descending -- FLAG_A(2), FLAG_B(1), FLAG_C(0)
+        model.set_sort(table::equate_columns::REFS, table::SortOrder::Descending);
+        assert_eq!(model.cell_value(0, 0).unwrap(), "FLAG_A");
+        assert_eq!(model.cell_value(1, 0).unwrap(), "FLAG_B");
+        assert_eq!(model.cell_value(2, 0).unwrap(), "FLAG_C");
+    }
+
+    #[test]
+    fn test_integration_equate_plugin_get_equates_at() {
+        let plugin = EquatePlugin::new();
+        let mut table = EquateTable::new();
+
+        // Set equate
+        table.create_equate("MY_FLAG", 0x42).unwrap();
+        table.add_reference("MY_FLAG", Address::new(0x1000), 0);
+        assert_eq!(table.num_equates(), 1);
+
+        // Plugin resolves it
+        let info = plugin.get_equate_at(&table, &Address::new(0x1000), 0, 0x42);
+        assert!(info.is_some());
+        let info = info.unwrap();
+        assert_eq!(info.name, "MY_FLAG");
+        assert_eq!(info.value, 0x42);
+
+        // Remove
+        table.remove_equate("MY_FLAG");
+        assert_eq!(table.num_equates(), 0);
+    }
+
+    #[test]
+    fn test_integration_table_plugin_state_lifecycle() {
+        let mut table = EquateTable::new();
+        table.create_equate("X", 10).unwrap();
+        table.add_reference("X", Address::new(0x1000), 0);
+        table.add_reference("X", Address::new(0x2000), 1);
+
+        let mut state = plugin::EquateTablePluginState::new();
+        assert!(!state.is_visible());
+
+        state.set_visible(true);
+        state.select_equate(&table, Some("X"));
+        assert_eq!(state.selected_equate(), Some("X"));
+        assert_eq!(state.displayed_references().len(), 2);
+
+        // Delete equate
+        let removed = state.delete_equates(&["X"], &mut table);
+        assert_eq!(removed, vec!["X"]);
+        assert!(state.selected_equate().is_none());
+        assert_eq!(table.num_equates(), 0);
+    }
+
+    #[test]
+    fn test_integration_convert_format_roundtrip() {
+        // Verify all formats produce valid output for a known value
+        for fmt in convert_cmd::ScalarFormat::ALL {
+            let result = convert_cmd::convert_scalar(0xDEADBEEF, 4, fmt);
+            assert!(!result.formatted.is_empty(), "Empty output for {:?}", fmt);
+        }
+    }
+
+    #[test]
+    fn test_integration_rename_equates_in_table() {
+        let mut table = EquateTable::new();
+        table.create_equate("OLD_NAME", 42).unwrap();
+        table.add_reference("OLD_NAME", Address::new(0x1000), 0);
+
+        // Rename via manager
+        let result = table.rename_equate("OLD_NAME", "NEW_NAME");
+        assert!(result);
+
+        // Verify old name is gone, new name exists
+        assert!(table.get_equate("OLD_NAME").is_none());
+        let eq = table.get_equate("NEW_NAME");
+        assert!(eq.is_some());
+        assert_eq!(eq.unwrap().value, 42);
+        assert_eq!(eq.unwrap().reference_count(), 1);
+    }
+
+    #[test]
+    fn test_integration_reference_model_with_plugin_state() {
+        let mut table = EquateTable::new();
+        table.create_equate("VAL", 100).unwrap();
+        table.add_reference("VAL", Address::new(0x5000), 0);
+        table.add_reference("VAL", Address::new(0x6000), 1);
+        table.add_reference("VAL", Address::new(0x7000), 2);
+
+        let mut ref_model = table::EquateReferenceTableModel::new();
+        ref_model.set_equate(&table, Some("VAL"));
+        assert_eq!(ref_model.row_count(), 3);
+
+        // Get program location for second reference
+        let loc = ref_model.get_program_location(1);
+        assert!(loc.is_some());
+        let (addr, op) = loc.unwrap();
+        assert_eq!(addr, Address::new(0x6000));
+        assert_eq!(op, 1);
+
+        // Selection across multiple rows
+        let sel = ref_model.get_program_selection(&[0, 2]);
+        assert_eq!(sel.len(), 2);
+    }
+
+    #[test]
+    fn test_integration_format_choice_ids() {
+        // Verify all format choices have valid format IDs
+        let hex = format::FormatChoice::Hex;
+        let id = hex.format_id();
+        assert!(id >= 0);
+
+        let dec = format::FormatChoice::UnsignedDecimal;
+        assert!(!dec.requires_negative());
+
+        let shex = format::FormatChoice::SignedHex;
+        assert!(shex.requires_negative());
+
+        // Char is supported on data
+        let ch = format::FormatChoice::Char;
+        assert!(ch.is_supported_on_data());
+    }
+
+    #[test]
+    fn test_integration_format_scalar_hex() {
+        let scalar = Scalar::unsigned(32, 0xFF);
+        let result = format::format_scalar(&scalar, format::FormatChoice::Hex, false);
+        assert!(result.is_some());
+        let text = result.unwrap();
+        assert!(text.contains("FF") || text.contains("ff") || text.contains("0x"));
+    }
+
+    #[test]
+    fn test_integration_format_scalar_signed_dec() {
+        let scalar = Scalar::signed(8, -42);
+        let result = format::format_scalar(&scalar, format::FormatChoice::SignedDecimal, false);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("-42"));
+    }
+
+    #[test]
+    fn test_integration_plugin_get_all_equates() {
+        let plugin = EquatePlugin::new();
+        let mut table = EquateTable::new();
+        table.create_equate("A", 1).unwrap();
+        table.create_equate("B", 2).unwrap();
+        table.create_equate("C", 3).unwrap();
+
+        let all = plugin.get_all_equates(&table);
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_integration_rename_duplicate_name_rejected() {
+        let mut table = EquateTable::new();
+        table.create_equate("A", 1).unwrap();
+        table.create_equate("B", 2).unwrap();
+        // Rename to existing name should fail
+        assert!(!table.rename_equate("A", "B"));
+        // Original should still exist
+        assert!(table.get_equate("A").is_some());
+    }
+
+    #[test]
+    fn test_integration_rename_same_name_noop() {
+        let mut table = EquateTable::new();
+        table.create_equate("X", 10).unwrap();
+        assert!(table.rename_equate("X", "X"));
+        assert!(table.get_equate("X").is_some());
+    }
+
+    #[test]
+    fn test_integration_rename_nonexistent_fails() {
+        let mut table = EquateTable::new();
+        assert!(!table.rename_equate("NOPE", "NEW"));
+    }
+
+    #[test]
+    fn test_integration_create_duplicate_equate() {
+        let mut table = EquateTable::new();
+        assert!(table.create_equate("A", 1).is_ok());
+        // Creating with same name should fail
+        assert!(table.create_equate("A", 2).is_err());
+    }
+
+    #[test]
+    fn test_integration_get_or_create_equate() {
+        let mut table = EquateTable::new();
+        let eq1 = table.get_or_create_equate("X", 42);
+        assert_eq!(eq1.value, 42);
+        // Second call returns same equate
+        let eq2 = table.get_or_create_equate("X", 42);
+        assert_eq!(eq2.name, "X");
+        assert_eq!(eq2.value, 42);
+    }
 }

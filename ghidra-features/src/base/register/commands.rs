@@ -128,6 +128,23 @@ impl RegisterCommand for SetRegisterValueCmd {
     }
 }
 
+impl std::fmt::Display for SetRegisterValueCmd {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.value {
+            Some(v) => write!(
+                f,
+                "Set {} = 0x{:x} [0x{:x}..0x{:x}]",
+                self.register_name, v, self.start.offset, self.end.offset
+            ),
+            None => write!(
+                f,
+                "Clear {} [0x{:x}..0x{:x}]",
+                self.register_name, self.start.offset, self.end.offset
+            ),
+        }
+    }
+}
+
 // ============================================================================
 // CompoundRegisterCmd
 // ============================================================================

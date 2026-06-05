@@ -16,6 +16,13 @@ pub mod concrete_managers;
 pub mod font_change_listener;
 pub mod nimbus;
 
+// New LAF mapper modules ported from Ghidra's generic.theme.laf package
+pub mod custom_nimbus_laf;
+pub mod flat_dark_ui_defaults_mapper;
+pub mod flat_ui_defaults_mapper;
+pub mod motif_ui_defaults_mapper;
+pub mod nimbus_ui_defaults_mapper;
+
 pub use laf_manager::LookAndFeelManager;
 pub use component_font_registry::ComponentFontRegistry;
 pub use font_non_ui_resource::FontNonUiResource;

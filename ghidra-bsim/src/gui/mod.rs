@@ -3,6 +3,7 @@
 //! Ports `ghidra.features.bsim.gui` from Ghidra's Java source.
 
 pub mod filters;
+pub mod filter_types;
 pub mod overview;
 pub mod results;
 pub mod search;

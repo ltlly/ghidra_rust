@@ -40,6 +40,7 @@ pub mod watches_impl;
 pub mod program_indexer;
 pub mod breakpoint_extras;
 pub mod trace_data_viewport_impl;
+pub mod sync_service;
 
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,

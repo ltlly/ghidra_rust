@@ -272,6 +272,7 @@ pub mod trace_db_addr_snap_map;
 pub mod trace_db_static_mapping;
 pub mod trace_db_content_handler_impl;
 pub mod trace_db_module_impl;
+pub mod trace_db_abstract_views;
 
 pub use trace_db_field_codec::{
     DBTraceFieldCodec, EncodedField, FieldDataType, FieldValue, TraceObjectFieldCodecSet,
