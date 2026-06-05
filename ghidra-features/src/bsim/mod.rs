@@ -48,6 +48,7 @@ pub mod file;
 pub mod function_database;
 pub mod gui;
 pub mod ingest;
+pub mod server_config;
 pub mod parallel_decompile;
 pub mod postgresql;
 pub mod protocol;

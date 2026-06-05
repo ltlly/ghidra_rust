@@ -148,6 +148,14 @@ pub use trace_method::{
 };
 pub mod defaults;
 pub mod operations_ext;
+pub mod trace_address_snap_range;
+pub mod trace_data_type;
+pub mod trace_memory_manager;
+pub mod trace_module_manager;
+pub mod trace_overlay;
+pub mod trace_register;
+pub mod trace_stack_manager;
+pub mod trace_thread_manager;
 
 pub use trace_data_viewport::TraceDataViewport;
 pub use trace_span::TraceSpan;
@@ -182,3 +190,18 @@ pub use map_proposal::{
 pub use experiment::{
     DebugExperiment, DiagnosticBoundingBox, RStarTreeDiagnostics, TracePerformanceMetrics,
 };
+
+pub use trace_data_type::{DataTypeKind, TraceDataType as TraceDataTypeExt};
+pub use trace_data_type::TraceDataTypeManager as TraceDataTypeMgrExt;
+pub use trace_memory_manager::TraceMemoryRegionFull;
+pub use trace_memory_manager::TraceMemoryManager as TraceMemoryManagerExt;
+pub use trace_memory_manager::TraceMemorySpace as TraceMemorySpaceExt;
+pub use trace_module_manager::TraceModuleManager as TraceModuleManagerExt;
+pub use trace_overlay::{TraceOverlayManager, TraceOverlaySpace};
+pub use trace_register::TraceRegister as TraceRegisterDef;
+pub use trace_register::TraceRegisterContainer as TraceRegisterContainerExt;
+pub use trace_register::TraceRegisterGroup as TraceRegisterGroupExt;
+pub use trace_stack_manager::TraceStack as TraceCallStack;
+pub use trace_stack_manager::TraceStackFrame as TraceCallStackFrame;
+pub use trace_stack_manager::TraceStackManager as TraceStackManagerExt;
+pub use trace_thread_manager::TraceThreadManager as TraceThreadManagerExt;

@@ -86,8 +86,13 @@ pub mod trace_db_ref_impl;
 pub mod trace_db_symbol_impl;
 pub mod trace_db_value_spatial;
 pub mod trace_db_visitors;
+pub mod trace_db_database;
 
 pub use trace_db::TraceDatabase;
+pub use trace_db_database::{
+    DBTrace, DBTraceChangeSet as TraceDatabaseChangeSet, TraceDatabaseConfig,
+    TraceDirectChangeListener as TraceDatabaseDirectListener,
+};
 pub use trace_db_data_settings::{DataSettingsAdapter, DataSettingsOperations, SettingsValue};
 pub use trace_db_data_type_mgr::{DataTypeConflictHandler, DataTypeEntry, TraceDataTypeManager};
 pub use trace_db_address::{

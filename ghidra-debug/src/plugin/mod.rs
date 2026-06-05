@@ -98,6 +98,7 @@ pub mod program_emulation;
 pub mod stack;
 pub mod taint;
 pub mod trace_exporters;
+pub mod trace_plugin_events;
 pub mod utils;
 
 pub use abstract_plugin::{

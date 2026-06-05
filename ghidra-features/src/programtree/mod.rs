@@ -24,6 +24,10 @@ pub mod action_manager;
 pub mod paste_manager;
 pub mod reorder_manager;
 pub mod group_path;
+pub mod dnd_move_manager;
+pub mod transferable;
+pub mod view_panel;
+pub mod listeners;
 
 pub use group_path::GroupPath;
 pub use node::ProgramNode;
@@ -33,3 +37,7 @@ pub use view_provider::TreeViewProvider;
 pub use action_manager::ProgramTreeActionManager;
 pub use paste_manager::PasteManager;
 pub use reorder_manager::ReorderManager;
+pub use dnd_move_manager::{DnDMoveManager, DropAction, DropResult, DropError};
+pub use transferable::{GroupTransferable, ProgramTreeTransferable, TransferData};
+pub use view_panel::ViewPanel;
+pub use listeners::{TreeEvent, TreeListener, ViewChangeListener, CallbackTreeListener};

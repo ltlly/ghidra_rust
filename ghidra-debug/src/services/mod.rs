@@ -28,6 +28,7 @@ pub mod service_interfaces;
 pub mod target_impl;
 pub mod tracemgr_impl;
 pub mod url_impl;
+pub mod debugger_service_impls;
 
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,

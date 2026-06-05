@@ -5,7 +5,9 @@
 //! Handles the logic of moving nodes within a module (reordering) and
 //! moving nodes between modules, including validation of the operation.
 
+use super::dnd_move_manager::DropAction;
 use super::node::ProgramNode;
+use super::tree::ProgramTree;
 
 /// Errors that can occur during reordering.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +122,51 @@ impl ReorderManager {
         self.in_progress = true;
         target_parent.insert_child(target_index, child);
         self.in_progress = false;
+        Ok(())
+    }
+
+    /// Check whether a drop site is ok for a reorder operation.
+    ///
+    /// This is used by the DnDMoveManager to validate reorders.
+    pub fn is_drop_site_ok(
+        &self,
+        destination: &ProgramNode,
+        drop_node: &ProgramNode,
+        _drop_action: DropAction,
+        relative_mouse_position: i32,
+    ) -> bool {
+        if relative_mouse_position == 0 {
+            return true; // Not a reorder.
+        }
+        // Can only reorder into modules, not fragments.
+        if !destination.is_module() {
+            return false;
+        }
+        // Can't drop onto the same parent at the same position.
+        drop_node.name() != destination.name()
+    }
+
+    /// Execute a reorder add operation (delegate to the DnDMoveManager tree).
+    pub fn add(
+        &self,
+        tree: &mut ProgramTree,
+        dest_node: &ProgramNode,
+        drop_nodes: &[ProgramNode],
+        drop_action: DropAction,
+        relative_mouse_pos: i32,
+    ) -> Result<(), super::dnd_move_manager::DropError> {
+        // This is a reorder operation -- move nodes within the tree.
+        for drop_node in drop_nodes {
+            if relative_mouse_pos < 0 {
+                // Insert before the destination.
+                tree.add_group_before(dest_node.group_name(), drop_node.group_name())
+                    .map_err(|e| super::dnd_move_manager::DropError::General(e))?;
+            } else {
+                // Insert after the destination.
+                tree.add_group_after(dest_node.group_name(), drop_node.group_name())
+                    .map_err(|e| super::dnd_move_manager::DropError::General(e))?;
+            }
+        }
         Ok(())
     }
 

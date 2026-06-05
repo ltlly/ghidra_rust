@@ -35,6 +35,8 @@ pub mod trace_rmi_connection;
 pub mod tracemgr;
 pub mod tracermi;
 pub mod watch;
+pub mod target_listener;
+pub mod trace_address_snap_range;
 
 pub use action::{
     ActionSource, AutoMapSpec, AutoMapSpecRegistry, AutoReadMemorySpec, AutoReadMemorySpecRegistry,

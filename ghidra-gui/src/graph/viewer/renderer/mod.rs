@@ -221,6 +221,56 @@ impl GraphRenderer {
                     color: fill,
                 });
             }
+            VertexShape::TriangleUp => {
+                let center = rect.center();
+                let hw = rect.width / 2.0;
+                let hh = rect.height / 2.0;
+                commands.push(RenderCommand::FillPolygon {
+                    points: vec![
+                        (center.x - hw, center.y + hh),
+                        (center.x + hw, center.y + hh),
+                        (center.x, center.y - hh),
+                    ],
+                    color: fill,
+                });
+            }
+            VertexShape::TriangleDown => {
+                let center = rect.center();
+                let hw = rect.width / 2.0;
+                let hh = rect.height / 2.0;
+                commands.push(RenderCommand::FillPolygon {
+                    points: vec![
+                        (center.x - hw, center.y - hh),
+                        (center.x + hw, center.y - hh),
+                        (center.x, center.y + hh),
+                    ],
+                    color: fill,
+                });
+            }
+            VertexShape::Star => {
+                let center = rect.center();
+                let r = rect.width.min(rect.height) / 2.0;
+                let points = polygon_points(center.x, center.y, r, 7, 0.5, std::f64::consts::PI * 1.5);
+                commands.push(RenderCommand::FillPolygon { points, color: fill });
+            }
+            VertexShape::Pentagon => {
+                let center = rect.center();
+                let r = rect.width.min(rect.height) / 2.0;
+                let points = polygon_points(center.x, center.y, r, 5, 1.0, std::f64::consts::PI + std::f64::consts::PI / 10.0);
+                commands.push(RenderCommand::FillPolygon { points, color: fill });
+            }
+            VertexShape::Hexagon => {
+                let center = rect.center();
+                let r = rect.width.min(rect.height) / 2.0;
+                let points = polygon_points(center.x, center.y, r, 6, 1.0, 0.0);
+                commands.push(RenderCommand::FillPolygon { points, color: fill });
+            }
+            VertexShape::Octagon => {
+                let center = rect.center();
+                let r = rect.width.min(rect.height) / 2.0;
+                let points = polygon_points(center.x, center.y, r, 8, 1.0, 0.0);
+                commands.push(RenderCommand::FillPolygon { points, color: fill });
+            }
         }
 
         // Label
@@ -286,6 +336,49 @@ impl GraphRenderer {
         }
 
         commands
+    }
+}
+
+/// Generate polygon points for a shape centered at (cx, cy).
+///
+/// `num_points` is the number of vertices. For stars, `inner_ratio` is the
+/// ratio of inner radius to outer radius. `start_angle` is the initial angle
+/// in radians.
+fn polygon_points(
+    cx: f64,
+    cy: f64,
+    radius: f64,
+    num_points: usize,
+    inner_ratio: f64,
+    start_angle: f64,
+) -> Vec<(f64, f64)> {
+    if inner_ratio < 1.0 {
+        // Star pattern: alternate between outer and inner radii
+        let outer_r = radius;
+        let inner_r = radius * inner_ratio;
+        let delta = std::f64::consts::PI / num_points as f64;
+        let mut angle = start_angle;
+        let mut pts = Vec::with_capacity(num_points * 2 + 1);
+        // First outer point
+        pts.push((cx + outer_r * angle.cos(), cy + outer_r * angle.sin()));
+        for _ in 0..num_points {
+            angle += delta;
+            pts.push((cx + inner_r * angle.cos(), cy + inner_r * angle.sin()));
+            angle += delta;
+            pts.push((cx + outer_r * angle.cos(), cy + outer_r * angle.sin()));
+        }
+        pts
+    } else {
+        // Regular polygon
+        let delta = std::f64::consts::TAU / num_points as f64;
+        let mut angle = start_angle;
+        (0..num_points)
+            .map(|_| {
+                let pt = (cx + radius * angle.cos(), cy + radius * angle.sin());
+                angle += delta;
+                pt
+            })
+            .collect()
     }
 }
 

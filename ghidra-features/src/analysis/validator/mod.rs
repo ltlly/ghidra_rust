@@ -17,6 +17,11 @@
 //! - `Skipped` -- validator could not run
 //! - `Cancelled` -- validator was cancelled
 
+/// Program validation framework with severity levels and message filtering.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.validator`.
+pub mod program_validator;
+
 use crate::base::analyzer::{Address, AddressSet, Program, TaskMonitor, CancelledError};
 
 // ---------------------------------------------------------------------------

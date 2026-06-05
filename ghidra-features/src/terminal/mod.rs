@@ -19,6 +19,18 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.terminal.vt` package.
 pub mod vt;
 
+/// Terminal listener interfaces and provider types.
+///
+/// Ported from Ghidra's `TerminalListener`, `DefaultTerminal`,
+/// `TerminalProvider`, and `ThreadedTerminal`.
+pub mod terminal_listener;
+
+/// Terminal text search functionality.
+///
+/// Ported from Ghidra's `TerminalFinder`, `TerminalLayout`, and
+/// `TerminalLayoutModel`.
+pub mod terminal_finder;
+
 use std::collections::VecDeque;
 
 /// Default terminal width in columns.

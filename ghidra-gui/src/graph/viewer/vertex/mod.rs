@@ -81,6 +81,23 @@ impl VertexShapeGeometry {
                 let dy = (point.y - center.y).abs() / ry;
                 dx + dy <= 1.0
             }
+            // For new polygon shapes, approximate hit testing with ellipse
+            VertexShape::TriangleUp
+            | VertexShape::TriangleDown
+            | VertexShape::Star
+            | VertexShape::Pentagon
+            | VertexShape::Hexagon
+            | VertexShape::Octagon => {
+                let center = self.bounds.center();
+                let rx = self.bounds.width / 2.0;
+                let ry = self.bounds.height / 2.0;
+                if rx == 0.0 || ry == 0.0 {
+                    return false;
+                }
+                let dx = (point.x - center.x) / rx;
+                let dy = (point.y - center.y) / ry;
+                dx * dx + dy * dy <= 1.0
+            }
         }
     }
 }
@@ -216,7 +233,7 @@ mod tests {
     fn shape_transformer() {
         let v = VisualVertex::new("v1", "Vertex 1");
         let geom = VertexShapeTransformer::transform(&v);
-        assert_eq!(geom.shape, VertexShape::RoundedRectangle);
+        assert_eq!(geom.shape, VertexShape::Rectangle);
     }
 
     #[test]

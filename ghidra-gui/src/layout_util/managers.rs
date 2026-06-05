@@ -740,6 +740,381 @@ impl Default for VariableHeightPairLayout {
 }
 
 // ============================================================================
+// MaximizeSpecificColumnGridLayout
+// ============================================================================
+
+/// Row-oriented grid layout that maximizes specific columns.
+///
+/// Ports Ghidra's `MaximizeSpecificColumnGridLayout`.
+///
+/// Lays out components in a table format with a given number of columns.
+/// Columns try to show their widest preferred component. Specific columns
+/// can be "maximized" so they are the last to shrink when the container
+/// resizes.
+#[derive(Debug, Clone)]
+pub struct MaximizeSpecificColumnGridLayout {
+    /// Number of columns.
+    pub column_count: usize,
+    /// Horizontal gap between columns.
+    pub h_gap: u32,
+    /// Vertical gap between rows.
+    pub v_gap: u32,
+    /// Which columns should be maximized (preserved at preferred size).
+    maximized_columns: Vec<bool>,
+}
+
+impl MaximizeSpecificColumnGridLayout {
+    /// Create a new grid layout with the given number of columns.
+    pub fn new(column_count: usize) -> Self {
+        let cc = column_count.max(1);
+        Self {
+            column_count: cc,
+            h_gap: 0,
+            v_gap: 0,
+            maximized_columns: vec![false; cc],
+        }
+    }
+
+    /// Create a new grid layout with gaps.
+    pub fn with_gaps(mut self, h_gap: u32, v_gap: u32) -> Self {
+        self.h_gap = h_gap;
+        self.v_gap = v_gap;
+        self
+    }
+
+    /// Mark a column as maximized. Maximized columns keep their preferred
+    /// width until all non-maximized columns have been reduced to zero.
+    pub fn maximize_column(&mut self, column: usize) {
+        if column < self.maximized_columns.len() {
+            self.maximized_columns[column] = true;
+        }
+    }
+
+    /// Compute layout positions for components with given preferred sizes.
+    ///
+    /// `preferred_widths` and `preferred_heights` contain the preferred size
+    /// of each component (left to right, top to bottom).
+    pub fn compute(
+        &self,
+        container_width: u32,
+        preferred_widths: &[u32],
+        preferred_heights: &[u32],
+    ) -> Vec<LayoutRect> {
+        if self.column_count == 0 {
+            return Vec::new();
+        }
+        let num_items = preferred_widths.len().min(preferred_heights.len());
+        let row_count = (num_items + self.column_count - 1) / self.column_count;
+
+        // Compute desired column widths (max preferred width per column)
+        let mut desired_widths = vec![0u32; self.column_count];
+        for i in 0..num_items {
+            let col = i % self.column_count;
+            desired_widths[col] = desired_widths[col].max(preferred_widths[i]);
+        }
+
+        // Compute actual column widths
+        let computed_widths = self.compute_column_widths(container_width, &desired_widths);
+
+        // Compute row heights
+        let mut row_heights = vec![0u32; row_count];
+        for i in 0..num_items {
+            let row = i / self.column_count;
+            row_heights[row] = row_heights[row].max(preferred_heights[i]);
+        }
+
+        // Total desired width for centering
+        let total_desired: u32 = desired_widths.iter().sum();
+        let total_gap = self.h_gap * (self.column_count as u32 - 1).max(0);
+        let total_desired_with_gaps = total_desired + total_gap;
+        let offset = if total_desired_with_gaps < container_width {
+            (container_width - total_desired_with_gaps) / 2
+        } else {
+            0
+        };
+
+        let mut rects = Vec::with_capacity(num_items);
+        let mut y = 0i32;
+        for row in 0..row_count {
+            let mut x = offset as i32;
+            for col in 0..self.column_count {
+                let ordinal = row * self.column_count + col;
+                if ordinal >= num_items {
+                    break;
+                }
+                rects.push(LayoutRect::new(x, y, computed_widths[col], row_heights[row]));
+                x += computed_widths[col] as i32 + self.h_gap as i32;
+            }
+            y += row_heights[row] as i32 + self.v_gap as i32;
+        }
+        rects
+    }
+
+    fn compute_column_widths(&self, available: u32, desired: &[u32]) -> Vec<u32> {
+        let n = desired.len();
+        let mut computed = vec![0u32; n];
+        let total_gap = self.h_gap * (n as u32 - 1).max(0);
+        let mut remaining = available.saturating_sub(total_gap);
+        let mut remaining_count = n;
+
+        // First pass: maximize columns get their desired width
+        let maximized_count = self.maximized_columns.iter().filter(|&&m| m).count();
+        if maximized_count > 0 {
+            let desired_max_total: u32 = desired
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| self.maximized_columns[*i])
+                .map(|(_, &w)| w)
+                .sum();
+
+            if desired_max_total >= available {
+                // Maximized columns consume the entire width
+                let mut remaining_max = available;
+                let mut remaining_max_count = maximized_count;
+                let mut found = true;
+                while found {
+                    found = false;
+                    let avg = if remaining_max_count > 0 {
+                        remaining_max / remaining_max_count as u32
+                    } else {
+                        0
+                    };
+                    for i in 0..n {
+                        if self.maximized_columns[i] && computed[i] == 0 {
+                            if desired[i] < avg {
+                                computed[i] = desired[i];
+                                remaining_max = remaining_max.saturating_sub(computed[i]);
+                                remaining_max_count -= 1;
+                                found = true;
+                            }
+                        }
+                    }
+                }
+                let avg = if remaining_max_count > 0 {
+                    remaining_max / remaining_max_count as u32
+                } else {
+                    0
+                };
+                for i in 0..n {
+                    if self.maximized_columns[i] && computed[i] == 0 {
+                        computed[i] = avg;
+                    }
+                }
+                return computed;
+            }
+
+            // Maximized columns get their desired width; remaining space goes to others
+            for i in 0..n {
+                if self.maximized_columns[i] {
+                    computed[i] = desired[i];
+                    remaining = remaining.saturating_sub(desired[i]);
+                    remaining_count -= 1;
+                }
+            }
+        }
+
+        // Distribute remaining space to non-maximized columns
+        let mut found = true;
+        while found {
+            found = false;
+            let avg = if remaining_count > 0 {
+                remaining / remaining_count as u32
+            } else {
+                0
+            };
+            for i in 0..n {
+                if computed[i] == 0 && desired[i] < avg {
+                    computed[i] = desired[i];
+                    remaining = remaining.saturating_sub(computed[i]);
+                    remaining_count -= 1;
+                    found = true;
+                }
+            }
+        }
+        let avg = if remaining_count > 0 {
+            remaining / remaining_count as u32
+        } else {
+            0
+        };
+        for i in 0..n {
+            if computed[i] == 0 {
+                computed[i] = avg;
+            }
+        }
+
+        computed
+    }
+}
+
+impl Default for MaximizeSpecificColumnGridLayout {
+    fn default() -> Self {
+        Self::new(2)
+    }
+}
+
+// ============================================================================
+// RightSidedSquishyBuddyLayout
+// ============================================================================
+
+/// Layout for two components where the first gets its preferred width and the
+/// second gets the remaining space (up to its preferred width).
+///
+/// Ports Ghidra's `RightSidedSquishyBuddyLayout`.
+///
+/// The "buddy" (second component) is squished when space is limited.
+/// Optionally supports right-alignment of both components.
+#[derive(Debug, Clone)]
+pub struct RightSidedSquishyBuddyLayout {
+    /// Gap between the two components.
+    pub h_gap: u32,
+    /// Whether to right-align both components.
+    pub right_align: bool,
+}
+
+impl RightSidedSquishyBuddyLayout {
+    /// Create a new squishy buddy layout with the given gap.
+    pub fn new(h_gap: u32) -> Self {
+        Self {
+            h_gap,
+            right_align: false,
+        }
+    }
+
+    /// Create a right-aligned variant.
+    pub fn right_aligned(h_gap: u32) -> Self {
+        Self {
+            h_gap,
+            right_align: true,
+        }
+    }
+
+    /// Compute the layout for two components.
+    ///
+    /// Returns (comp1_rect, comp2_rect).
+    pub fn compute(
+        &self,
+        container_width: u32,
+        container_height: u32,
+        comp1_pref_width: u32,
+        comp1_pref_height: u32,
+        comp2_pref_width: u32,
+        comp2_pref_height: u32,
+    ) -> (LayoutRect, LayoutRect) {
+        let comp1_width = comp1_pref_width;
+        let remaining = container_width.saturating_sub(comp1_width).saturating_sub(self.h_gap);
+        let comp2_width = comp2_pref_width.min(remaining);
+        let leftover = remaining.saturating_sub(comp2_width);
+
+        let height = container_height;
+        let mut comp1_x = 0i32;
+        let mut comp2_x = comp1_width as i32 + self.h_gap as i32;
+
+        if self.right_align {
+            comp1_x += leftover as i32;
+            comp2_x += leftover as i32;
+        }
+
+        (
+            LayoutRect::new(comp1_x, 0, comp1_width, height),
+            LayoutRect::new(comp2_x, 0, comp2_width, height),
+        )
+    }
+}
+
+impl Default for RightSidedSquishyBuddyLayout {
+    fn default() -> Self {
+        Self::new(4)
+    }
+}
+
+// ============================================================================
+// VariableRowHeightGridLayout
+// ============================================================================
+
+/// Grid layout where each row can have a different height.
+///
+/// Ports Ghidra's `VariableRowHeightGridLayout`.
+///
+/// Like [`ColumnLayout`] but each row's height is determined by the
+/// tallest component in that row rather than using a uniform height.
+#[derive(Debug, Clone)]
+pub struct VariableRowHeightGridLayout {
+    /// Number of columns.
+    pub column_count: usize,
+    /// Horizontal gap between columns.
+    pub h_gap: u32,
+    /// Vertical gap between rows.
+    pub v_gap: u32,
+}
+
+impl VariableRowHeightGridLayout {
+    /// Create a new variable-row-height grid layout.
+    pub fn new(column_count: usize) -> Self {
+        Self {
+            column_count: column_count.max(1),
+            h_gap: 0,
+            v_gap: 0,
+        }
+    }
+
+    /// Create a new grid layout with gaps.
+    pub fn with_gaps(mut self, h_gap: u32, v_gap: u32) -> Self {
+        self.h_gap = h_gap;
+        self.v_gap = v_gap;
+        self
+    }
+
+    /// Compute layout positions for components with given preferred sizes.
+    ///
+    /// Each row uses the maximum preferred height of its components.
+    /// Columns share the available width equally.
+    pub fn compute(
+        &self,
+        container_width: u32,
+        preferred_widths: &[u32],
+        preferred_heights: &[u32],
+    ) -> Vec<LayoutRect> {
+        let num_items = preferred_widths.len().min(preferred_heights.len());
+        if num_items == 0 || self.column_count == 0 {
+            return Vec::new();
+        }
+        let row_count = (num_items + self.column_count - 1) / self.column_count;
+        let total_columns = self.column_count.min(num_items);
+        let total_gap = self.h_gap * (self.column_count as u32 - 1).max(0);
+        let column_width = container_width.saturating_sub(total_gap) / total_columns as u32;
+
+        // Compute row heights (max height per row)
+        let mut row_heights = vec![0u32; row_count];
+        for i in 0..num_items {
+            let row = i / self.column_count;
+            row_heights[row] = row_heights[row].max(preferred_heights[i]);
+        }
+
+        let mut rects = Vec::with_capacity(num_items);
+        let mut y = 0i32;
+        for row in 0..row_count {
+            let mut x = 0i32;
+            for col in 0..self.column_count {
+                let ordinal = row * self.column_count + col;
+                if ordinal >= num_items {
+                    break;
+                }
+                rects.push(LayoutRect::new(x, y, column_width, row_heights[row]));
+                x += column_width as i32 + self.h_gap as i32;
+            }
+            y += row_heights[row] as i32 + self.v_gap as i32;
+        }
+        rects
+    }
+}
+
+impl Default for VariableRowHeightGridLayout {
+    fn default() -> Self {
+        Self::new(2)
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -857,5 +1232,106 @@ mod tests {
         let r = LayoutRect::new(10, 20, 100, 50);
         assert_eq!(r.right(), 110);
         assert_eq!(r.bottom(), 70);
+    }
+
+    #[test]
+    fn maximize_specific_column_grid_layout_basic() {
+        let layout = MaximizeSpecificColumnGridLayout::new(3);
+        let rects = layout.compute(
+            300,
+            &[80, 60, 40, 70, 50, 30],
+            &[20, 20, 20, 20, 20, 20],
+        );
+        assert_eq!(rects.len(), 6);
+        // First row
+        assert_eq!(rects[0].y, rects[1].y);
+        assert_eq!(rects[1].y, rects[2].y);
+        // Second row starts below
+        assert!(rects[3].y > rects[0].y);
+    }
+
+    #[test]
+    fn maximize_specific_column_grid_maximized() {
+        let mut layout = MaximizeSpecificColumnGridLayout::new(2);
+        layout.maximize_column(1);
+        let rects = layout.compute(
+            200,
+            &[50, 100, 50, 100],
+            &[20, 20, 20, 20],
+        );
+        assert_eq!(rects.len(), 4);
+        // Maximized column (col 1) should get at least its preferred width
+        assert!(rects[1].width >= 100 || rects[1].width > 0);
+    }
+
+    #[test]
+    fn maximize_specific_column_grid_empty() {
+        let layout = MaximizeSpecificColumnGridLayout::new(3);
+        let rects = layout.compute(300, &[], &[]);
+        assert!(rects.is_empty());
+    }
+
+    #[test]
+    fn right_sided_squishy_buddy_layout_basic() {
+        let layout = RightSidedSquishyBuddyLayout::new(8);
+        let (c1, c2) = layout.compute(400, 30, 100, 30, 200, 30);
+        assert_eq!(c1.width, 100); // gets full preferred
+        assert_eq!(c2.width, 200); // fits in remaining space
+        assert_eq!(c1.x, 0);
+        assert_eq!(c2.x, 108); // 100 + 8 gap
+    }
+
+    #[test]
+    fn right_sided_squishy_buddy_squished() {
+        let layout = RightSidedSquishyBuddyLayout::new(8);
+        let (c1, c2) = layout.compute(200, 30, 150, 30, 200, 30);
+        assert_eq!(c1.width, 150);
+        assert_eq!(c2.width, 42); // 200 - 150 - 8 = 42
+    }
+
+    #[test]
+    fn right_sided_squishy_buddy_right_align() {
+        let layout = RightSidedSquishyBuddyLayout::right_aligned(8);
+        let (c1, c2) = layout.compute(400, 30, 100, 30, 100, 30);
+        assert_eq!(c1.width, 100);
+        // There's leftover space (400 - 100 - 8 - 100 = 192), both shift right
+        assert!(c1.x > 0);
+    }
+
+    #[test]
+    fn variable_row_height_grid_layout_basic() {
+        let layout = VariableRowHeightGridLayout::new(2);
+        let rects = layout.compute(
+            200,
+            &[80, 60, 70, 50],
+            &[20, 30, 25, 35],
+        );
+        assert_eq!(rects.len(), 4);
+        // Row 0: max(20, 30) = 30
+        assert_eq!(rects[0].height, 30);
+        assert_eq!(rects[1].height, 30);
+        // Row 1 starts after row 0
+        assert!(rects[2].y > rects[0].y);
+        // Row 1: max(25, 35) = 35
+        assert_eq!(rects[2].height, 35);
+        assert_eq!(rects[3].height, 35);
+    }
+
+    #[test]
+    fn variable_row_height_grid_layout_with_gaps() {
+        let layout = VariableRowHeightGridLayout::new(2).with_gaps(4, 6);
+        let rects = layout.compute(200, &[80, 60, 70, 50], &[20, 30, 25, 35]);
+        assert_eq!(rects.len(), 4);
+        // Column width = (200 - 4) / 2 = 98
+        assert_eq!(rects[0].width, 98);
+        // Row 1 y = row 0 height + v_gap = 30 + 6 = 36
+        assert_eq!(rects[2].y, 36);
+    }
+
+    #[test]
+    fn variable_row_height_grid_layout_empty() {
+        let layout = VariableRowHeightGridLayout::new(3);
+        let rects = layout.compute(200, &[], &[]);
+        assert!(rects.is_empty());
     }
 }

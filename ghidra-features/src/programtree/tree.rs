@@ -277,6 +277,198 @@ impl ProgramTree {
     pub fn node_count(&self) -> usize {
         self.root.total_count()
     }
+
+    // ------------------------------------------------------------------
+    // Group manipulation (for DnDMoveManager / ReorderManager)
+    // ------------------------------------------------------------------
+
+    /// Merge the source group into the destination fragment.
+    ///
+    /// Moves all children of the source into the destination.
+    pub fn merge_group(
+        &mut self,
+        source_name: &str,
+        dest_name: &str,
+    ) -> Result<(), String> {
+        // Find source and destination nodes.
+        let source_path = self
+            .name_index
+            .get(source_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Source group '{}' not found", source_name))?;
+
+        // Remove source from its parent and merge into dest.
+        if let Some(source_node) = self.root.find_by_path(&source_path) {
+            let children: Vec<_> = source_node.children().to_vec();
+            let dest_path = self
+                .name_index
+                .get(dest_name)
+                .and_then(|paths| paths.first().cloned())
+                .ok_or_else(|| format!("Destination group '{}' not found", dest_name))?;
+
+            if let Some(dest_node) = self.root.find_by_path_mut(&dest_path) {
+                for child in children {
+                    dest_node.add_child(child);
+                }
+            }
+            // Remove source from parent.
+            self.remove_group_by_path(&source_path);
+            self.rebuild_name_index();
+            Ok(())
+        } else {
+            Err(format!("Source group '{}' not found", source_name))
+        }
+    }
+
+    /// Reparent a group: move it from its current parent to a new parent.
+    pub fn reparent_group(
+        &mut self,
+        group_name: &str,
+        new_parent_name: &str,
+    ) -> Result<(), String> {
+        let group_path = self
+            .name_index
+            .get(group_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Group '{}' not found", group_name))?;
+
+        // Extract the node.
+        let node = self.remove_group_by_path(&group_path)
+            .ok_or_else(|| format!("Could not remove group '{}'", group_name))?;
+
+        // Find the new parent.
+        let parent_path = self
+            .name_index
+            .get(new_parent_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("New parent '{}' not found", new_parent_name))?;
+
+        if let Some(parent) = self.root.find_by_path_mut(&parent_path) {
+            parent.add_child(node);
+            self.rebuild_name_index();
+            Ok(())
+        } else {
+            Err(format!("Could not find parent '{}'", new_parent_name))
+        }
+    }
+
+    /// Add a group to a destination module (copy operation).
+    pub fn add_group_to(
+        &mut self,
+        dest_name: &str,
+        source_name: &str,
+    ) -> Result<(), String> {
+        let source_path = self
+            .name_index
+            .get(source_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Source '{}' not found", source_name))?;
+
+        let source_node = self.root.find_by_path(&source_path)
+            .ok_or_else(|| format!("Source '{}' not found at path", source_name))?
+            .clone();
+
+        let dest_path = self
+            .name_index
+            .get(dest_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Destination '{}' not found", dest_name))?;
+
+        if let Some(dest) = self.root.find_by_path_mut(&dest_path) {
+            dest.add_child(source_node);
+            self.rebuild_name_index();
+            Ok(())
+        } else {
+            Err(format!("Destination '{}' not found at path", dest_name))
+        }
+    }
+
+    /// Add a group before the reference group (reorder).
+    pub fn add_group_before(
+        &mut self,
+        ref_name: &str,
+        group_name: &str,
+    ) -> Result<(), String> {
+        let group_path = self
+            .name_index
+            .get(group_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Group '{}' not found", group_name))?;
+
+        let node = self.remove_group_by_path(&group_path)
+            .ok_or_else(|| format!("Could not remove group '{}'", group_name))?;
+
+        // Find the parent of the reference group.
+        let ref_path = self
+            .name_index
+            .get(ref_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Reference '{}' not found", ref_name))?;
+
+        if let Some(parent_path) = ref_path.parent() {
+            if let Some(parent) = self.root.find_by_path_mut(&parent_path) {
+                if let Some(idx) = parent.children().iter().position(|c| c.name() == ref_name) {
+                    parent.insert_child(idx, node);
+                } else {
+                    parent.add_child(node);
+                }
+                self.rebuild_name_index();
+                return Ok(());
+            }
+        }
+        Err(format!("Could not find parent for '{}'", ref_name))
+    }
+
+    /// Add a group after the reference group (reorder).
+    pub fn add_group_after(
+        &mut self,
+        ref_name: &str,
+        group_name: &str,
+    ) -> Result<(), String> {
+        let group_path = self
+            .name_index
+            .get(group_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Group '{}' not found", group_name))?;
+
+        let node = self.remove_group_by_path(&group_path)
+            .ok_or_else(|| format!("Could not remove group '{}'", group_name))?;
+
+        let ref_path = self
+            .name_index
+            .get(ref_name)
+            .and_then(|paths| paths.first().cloned())
+            .ok_or_else(|| format!("Reference '{}' not found", ref_name))?;
+
+        if let Some(parent_path) = ref_path.parent() {
+            if let Some(parent) = self.root.find_by_path_mut(&parent_path) {
+                if let Some(idx) = parent.children().iter().position(|c| c.name() == ref_name) {
+                    parent.insert_child(idx + 1, node);
+                } else {
+                    parent.add_child(node);
+                }
+                self.rebuild_name_index();
+                return Ok(());
+            }
+        }
+        Err(format!("Could not find parent for '{}'", ref_name))
+    }
+
+    /// Remove a group by its path, returning the removed node.
+    fn remove_group_by_path(&mut self, path: &GroupPath) -> Option<ProgramNode> {
+        let names = path.names();
+        if names.len() < 2 {
+            return None;
+        }
+        let child_name = names.last()?;
+        let parent_path = GroupPath::new(names[..names.len() - 1].to_vec());
+
+        if let Some(parent) = self.root.find_by_path_mut(&parent_path) {
+            parent.remove_child_by_name(child_name)
+        } else {
+            None
+        }
+    }
 }
 
 impl std::fmt::Display for ProgramTree {

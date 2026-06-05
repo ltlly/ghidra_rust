@@ -46,6 +46,23 @@ impl VisualGraphShapePickSupport {
                 let dy = (point.y - center.y).abs() / ry;
                 dx + dy <= 1.0
             }
+            // For new polygon shapes, approximate with ellipse hit testing
+            VertexShape::TriangleUp
+            | VertexShape::TriangleDown
+            | VertexShape::Star
+            | VertexShape::Pentagon
+            | VertexShape::Hexagon
+            | VertexShape::Octagon => {
+                let center = bounds.center();
+                let rx = bounds.width / 2.0;
+                let ry = bounds.height / 2.0;
+                if rx == 0.0 || ry == 0.0 {
+                    return false;
+                }
+                let dx = (point.x - center.x) / rx;
+                let dy = (point.y - center.y) / ry;
+                dx * dx + dy * dy <= 1.0
+            }
         }
     }
 }

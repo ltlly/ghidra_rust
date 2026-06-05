@@ -15,6 +15,7 @@
 pub mod function_utils;
 pub mod locationreferences;
 pub mod location_service;
+pub mod next_prev_plugins;
 pub mod reference_utils;
 pub mod starting_location;
 pub mod table_model;

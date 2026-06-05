@@ -208,6 +208,27 @@ impl VisualGraphRenderer {
                     color: fill,
                 });
             }
+            VertexShape::TriangleUp | VertexShape::TriangleDown => {
+                let center = rect.center();
+                let hw = rect.width / 2.0;
+                let hh = rect.height / 2.0;
+                let points = if vertex.shape == VertexShape::TriangleUp {
+                    vec![(center.x - hw, center.y + hh), (center.x + hw, center.y + hh), (center.x, center.y - hh)]
+                } else {
+                    vec![(center.x - hw, center.y - hh), (center.x + hw, center.y - hh), (center.x, center.y + hh)]
+                };
+                commands.push(RenderCommand::FillPolygon { points, color: fill });
+            }
+            VertexShape::Star | VertexShape::Pentagon | VertexShape::Hexagon | VertexShape::Octagon => {
+                let center = rect.center();
+                commands.push(RenderCommand::FillEllipse {
+                    cx: center.x,
+                    cy: center.y,
+                    rx: rect.width / 2.0,
+                    ry: rect.height / 2.0,
+                    color: fill,
+                });
+            }
         }
 
         if self.show_vertex_labels {

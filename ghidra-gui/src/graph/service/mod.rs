@@ -245,22 +245,197 @@ impl Default for GraphDisplayOptions {
 }
 
 /// Vertex shape for rendering.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Ports Ghidra's `ghidra.service.graph.VertexShape` with all 9 shape types.
+/// Each shape has geometry properties that control how vertices are drawn:
+/// - `label_position` controls where the label sits relative to the shape
+/// - `shape_to_label_ratio` scales the shape relative to its label
+/// - `max_width_to_height_ratio` limits aspect ratio distortion
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum VertexShape {
-    /// Rectangle.
+    /// Rectangle -- the default shape.
     Rectangle,
     /// Rounded rectangle.
     RoundedRectangle,
     /// Ellipse.
     Ellipse,
-    /// Diamond.
+    /// Diamond (rotated square).
     Diamond,
+    /// Triangle pointing up.
+    TriangleUp,
+    /// Triangle pointing down.
+    TriangleDown,
+    /// Five-pointed star.
+    Star,
+    /// Five-sided pentagon.
+    Pentagon,
+    /// Six-sided hexagon.
+    Hexagon,
+    /// Eight-sided octagon.
+    Octagon,
 }
 
 impl Default for VertexShape {
     fn default() -> Self {
-        Self::RoundedRectangle
+        Self::Rectangle
     }
+}
+
+impl VertexShape {
+    /// All available shape variants in display order.
+    pub const ALL: &[VertexShape] = &[
+        VertexShape::Rectangle,
+        VertexShape::RoundedRectangle,
+        VertexShape::Ellipse,
+        VertexShape::Diamond,
+        VertexShape::TriangleUp,
+        VertexShape::TriangleDown,
+        VertexShape::Star,
+        VertexShape::Pentagon,
+        VertexShape::Hexagon,
+        VertexShape::Octagon,
+    ];
+
+    /// Human-readable name for the shape.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Rectangle => "Rectangle",
+            Self::RoundedRectangle => "Rounded Rectangle",
+            Self::Ellipse => "Ellipse",
+            Self::Diamond => "Diamond",
+            Self::TriangleUp => "Triangle Up",
+            Self::TriangleDown => "Triangle Down",
+            Self::Star => "Star",
+            Self::Pentagon => "Pentagon",
+            Self::Hexagon => "Hexagon",
+            Self::Octagon => "Octagon",
+        }
+    }
+
+    /// Look up a shape by name (case-insensitive).
+    pub fn from_name(name: &str) -> Option<Self> {
+        let lower = name.to_lowercase();
+        Self::ALL.iter().copied().find(|s| s.name().to_lowercase() == lower)
+    }
+
+    /// Sorted list of all shape names.
+    pub fn shape_names() -> Vec<&'static str> {
+        let mut names: Vec<&str> = Self::ALL.iter().map(|s| s.name()).collect();
+        names.sort();
+        names
+    }
+
+    /// Relative label position within the shape (0.0 = top, 1.0 = bottom).
+    ///
+    /// Shapes like triangles need labels pushed toward the wide end so text
+    /// does not overflow the narrow part of the shape.
+    pub fn label_position(&self) -> f64 {
+        match self {
+            Self::Rectangle | Self::RoundedRectangle => 0.5,
+            Self::Ellipse => 0.5,
+            Self::Diamond => 0.5,
+            Self::TriangleUp => 0.90,
+            Self::TriangleDown => 0.10,
+            Self::Star => 0.5,
+            Self::Pentagon | Self::Hexagon | Self::Octagon => 0.5,
+        }
+    }
+
+    /// Scale factor for the shape relative to its label.
+    ///
+    /// Shapes with narrow tips (triangles, stars) need to be larger than
+    /// rectangles so the label text fits inside.
+    pub fn shape_to_label_ratio(&self) -> f64 {
+        match self {
+            Self::Rectangle | Self::RoundedRectangle => 1.0,
+            Self::Ellipse => 1.4,
+            Self::Diamond => 1.6,
+            Self::TriangleUp | Self::TriangleDown => 1.6,
+            Self::Star => 2.0,
+            Self::Pentagon | Self::Hexagon | Self::Octagon => 1.4,
+        }
+    }
+
+    /// Maximum width-to-height ratio before the shape becomes too distorted.
+    pub fn max_width_to_height_ratio(&self) -> u32 {
+        match self {
+            Self::Rectangle | Self::RoundedRectangle => 10,
+            Self::Ellipse => 10,
+            Self::Diamond => 10,
+            Self::TriangleUp | Self::TriangleDown => 10,
+            Self::Star => 10,
+            Self::Pentagon | Self::Hexagon | Self::Octagon => 2,
+        }
+    }
+
+    /// Generate polygon points for this shape (normalized to a unit circle).
+    ///
+    /// Returns a list of (x, y) vertices forming the shape boundary.
+    /// The shape is centered at (0, 0) with radius 1.0.
+    pub fn polygon_points(&self) -> Vec<(f64, f64)> {
+        match self {
+            Self::Rectangle | Self::RoundedRectangle => {
+                vec![(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)]
+            }
+            Self::Ellipse => {
+                // Approximate ellipse with 32 segments
+                (0..32)
+                    .map(|i| {
+                        let angle = std::f64::consts::TAU * i as f64 / 32.0;
+                        (angle.cos(), angle.sin())
+                    })
+                    .collect()
+            }
+            Self::Diamond => {
+                vec![(0.0, -1.0), (-1.0, 0.0), (0.0, 1.0), (1.0, 0.0)]
+            }
+            Self::TriangleUp => {
+                vec![(-1.0, 1.0), (1.0, 1.0), (0.0, -1.0)]
+            }
+            Self::TriangleDown => {
+                vec![(-1.0, -1.0), (1.0, -1.0), (0.0, 1.0)]
+            }
+            Self::Star => {
+                let num_points = 7;
+                let outer_radius = 2.0;
+                let inner_radius = 1.0;
+                let delta_angle = std::f64::consts::PI / num_points as f64;
+                let mut angle = 3.0 * std::f64::consts::PI / 2.0;
+                let mut points = Vec::new();
+                points.push((outer_radius * angle.cos(), outer_radius * angle.sin()));
+                for _ in 0..num_points {
+                    angle += delta_angle;
+                    points.push((inner_radius * angle.cos(), inner_radius * angle.sin()));
+                    angle += delta_angle;
+                    points.push((outer_radius * angle.cos(), outer_radius * angle.sin()));
+                }
+                points
+            }
+            Self::Pentagon => equilateral_polygon(5, std::f64::consts::PI + std::f64::consts::PI / 10.0),
+            Self::Hexagon => equilateral_polygon(6, 0.0),
+            Self::Octagon => equilateral_polygon(8, 0.0),
+        }
+    }
+}
+
+impl std::fmt::Display for VertexShape {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+/// Generate points for an equilateral polygon with `num_sides` sides,
+/// starting at `start_angle` radians.
+fn equilateral_polygon(num_sides: usize, start_angle: f64) -> Vec<(f64, f64)> {
+    let delta_angle = std::f64::consts::TAU / num_sides as f64;
+    let mut angle = start_angle;
+    (0..num_sides)
+        .map(|_| {
+            let pt = (angle.cos(), angle.sin());
+            angle += delta_angle;
+            pt
+        })
+        .collect()
 }
 
 /// A named graph type with a set of vertex types.
@@ -539,7 +714,72 @@ mod tests {
 
     #[test]
     fn vertex_shape_default() {
-        assert_eq!(VertexShape::default(), VertexShape::RoundedRectangle);
+        assert_eq!(VertexShape::default(), VertexShape::Rectangle);
+    }
+
+    #[test]
+    fn vertex_shape_name() {
+        assert_eq!(VertexShape::Rectangle.name(), "Rectangle");
+        assert_eq!(VertexShape::TriangleUp.name(), "Triangle Up");
+        assert_eq!(VertexShape::Star.name(), "Star");
+    }
+
+    #[test]
+    fn vertex_shape_from_name() {
+        assert_eq!(VertexShape::from_name("Ellipse"), Some(VertexShape::Ellipse));
+        assert_eq!(VertexShape::from_name("ellipse"), Some(VertexShape::Ellipse));
+        assert_eq!(VertexShape::from_name("STAR"), Some(VertexShape::Star));
+        assert_eq!(VertexShape::from_name("Nonexistent"), None);
+    }
+
+    #[test]
+    fn vertex_shape_all_count() {
+        assert_eq!(VertexShape::ALL.len(), 10);
+    }
+
+    #[test]
+    fn vertex_shape_names() {
+        let names = VertexShape::shape_names();
+        assert!(names.contains(&"Rectangle"));
+        assert!(names.contains(&"Hexagon"));
+    }
+
+    #[test]
+    fn vertex_shape_label_position() {
+        assert!((VertexShape::TriangleUp.label_position() - 0.90).abs() < 1e-6);
+        assert!((VertexShape::TriangleDown.label_position() - 0.10).abs() < 1e-6);
+        assert!((VertexShape::Rectangle.label_position() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn vertex_shape_ratio() {
+        assert!((VertexShape::Rectangle.shape_to_label_ratio() - 1.0).abs() < 1e-6);
+        assert!((VertexShape::Star.shape_to_label_ratio() - 2.0).abs() < 1e-6);
+        assert!((VertexShape::Ellipse.shape_to_label_ratio() - 1.4).abs() < 1e-6);
+    }
+
+    #[test]
+    fn vertex_shape_polygon_points() {
+        let rect = VertexShape::Rectangle.polygon_points();
+        assert_eq!(rect.len(), 4);
+        let tri = VertexShape::TriangleUp.polygon_points();
+        assert_eq!(tri.len(), 3);
+        let pent = VertexShape::Pentagon.polygon_points();
+        assert_eq!(pent.len(), 5);
+        let hex = VertexShape::Hexagon.polygon_points();
+        assert_eq!(hex.len(), 6);
+        let oct = VertexShape::Octagon.polygon_points();
+        assert_eq!(oct.len(), 8);
+        let star = VertexShape::Star.polygon_points();
+        assert!(star.len() > 10); // 7 points * 2 + 1
+        let ellipse = VertexShape::Ellipse.polygon_points();
+        assert_eq!(ellipse.len(), 32);
+    }
+
+    #[test]
+    fn vertex_shape_display() {
+        assert_eq!(format!("{}", VertexShape::Diamond), "Diamond");
+        assert_eq!(format!("{}", VertexShape::Hexagon), "Hexagon");
     }
 
     // --- GraphType tests ---

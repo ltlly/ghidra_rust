@@ -39,6 +39,13 @@ pub mod options_updater;
 pub mod project_path;
 pub mod validator;
 
+/// Auto-analysis manager, scheduler, task queue, and worker framework.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.AutoAnalysisManager`,
+/// `AnalysisScheduler`, `AnalysisTask`, `AnalysisTaskList`, `AnalysisWorker`,
+/// `AnalysisBackgroundCommand`, and `OneShotAnalysisCommand`.
+pub mod auto_analysis;
+
 // Re-export module-level items (these are re-exports from base::analyzer
 // plus new types unique to this module)
 pub use plugin::AutoAnalysisPlugin;
