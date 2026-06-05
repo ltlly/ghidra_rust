@@ -46,6 +46,32 @@ pub mod validator;
 /// `AnalysisBackgroundCommand`, and `OneShotAnalysisCommand`.
 pub mod auto_analysis;
 
+/// Reference analyzers: data operand, operand, scalar, and external symbol resolver.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.DataOperandReferenceAnalyzer`,
+/// `OperandReferenceAnalyzer`, `ScalarOperandAnalyzer`, and
+/// `ExternalSymbolResolverAnalyzer`.
+pub mod reference_analyzers;
+
+/// Symbol and function analyzers: no-return detection, Go symbols,
+/// ARM-specific analysis, DWARF debug info, and register context.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.NoReturnFunctionAnalyzer`,
+/// `GolangStringAnalyzer`, `GolangSymbolAnalyzer`, `ArmSymbolAnalyzer`,
+/// `DWARFAnalyzer`, and `RegisterContextBuilder`.
+pub mod symbol_analyzers;
+
+/// Platform-specific analyzers: data archives, MinGW relocations, CLI
+/// metadata tokens, embedded media, segmented calling conventions, and
+/// source language detection.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.ApplyDataArchiveAnalyzer`,
+/// `MingwRelocationAnalyzer`, `CliMetadataTokenAnalyzer`,
+/// `EmbeddedMediaAnalyzer`, `SegmentedCallingConventionAnalyzer`,
+/// `SourceLanguageAnalyzer`, `AnalyzeAllOpenProgramsTask`, and
+/// `AnalyzeProgramStrategy`.
+pub mod platform_analyzers;
+
 // Re-export module-level items (these are re-exports from base::analyzer
 // plus new types unique to this module)
 pub use plugin::AutoAnalysisPlugin;

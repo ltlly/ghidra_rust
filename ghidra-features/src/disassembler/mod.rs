@@ -25,6 +25,15 @@ pub mod processor_actions;
 /// `ghidra.app.plugin.core.disassembler`.
 pub mod disassembly_options;
 
+/// Flow override actions, dialogs, and context modification.
+///
+/// Ported from `ghidra.app.plugin.core.disassembler.SetFlowOverrideAction`,
+/// `SetFlowOverrideDialog`, `SetLengthOverrideAction`, `ContextAction`,
+/// `StaticDisassembleAction`, `RestrictedDisassembleAction`,
+/// `DisassembledViewPlugin`, `ProcessorStateDialog`, and
+/// `AddressTableDialog`.
+pub mod flow_override;
+
 use ghidra_core::Address;
 use std::collections::{BTreeMap, HashSet};
 

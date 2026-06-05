@@ -75,6 +75,13 @@ pub mod tree_ops;
 /// Ported from `ghidra.app.plugin.core.datamgr.actions.associate`.
 pub mod associate;
 
+/// Data type sync table model, derivative info, duplicate ID exceptions,
+/// and archive utilities.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.DataTypeSyncTableModel`,
+/// `DerivativeDataTypeInfo`, `DuplicateIdException`, and `ArchiveUtils`.
+pub mod sync_table;
+
 // Re-export the most-used public types at the datamgr level.
 pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArchive,
                    ProjectArchive, InvalidFileArchive, ArchiveManagerListener};

@@ -213,6 +213,113 @@ impl ClangTokenGroupData {
     pub fn num_children(&self) -> usize { self.children.len() }
 }
 
+// ===========================================================================
+// Additional decompiler enum types ported from Ghidra's Java source
+// ===========================================================================
+
+/// Comment style in decompiled output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommentStyle {
+    /// Single-line comment (//).
+    Line,
+    /// Block comment (/* ... */).
+    Block,
+    /// End-of-line comment.
+    EndOfLine,
+    /// Preprocessor comment.
+    Preprocessor,
+}
+
+/// Strategy for namespace display in decompiler output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NamespaceDisplayStrategy {
+    /// Always show full namespace paths.
+    Always,
+    /// Show namespace only when ambiguous.
+    WhenAmbiguous,
+    /// Never show namespaces.
+    Never,
+    /// Show namespace based on current scope.
+    CurrentScope,
+}
+
+/// Integer display format in decompiler output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum IntegerDisplayFormat {
+    /// Hexadecimal (0x prefix).
+    Hexadecimal,
+    /// Decimal (no prefix).
+    Decimal,
+    /// Octal (0 prefix).
+    Octal,
+    /// Binary (0b prefix).
+    Binary,
+    /// Auto-detect based on value.
+    Auto,
+}
+
+/// How to treat NaN values in floating-point comparisons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NanComparisonMode {
+    /// Treat NaN as equal to NaN.
+    NanEqualsNan,
+    /// Treat NaN as not equal to anything.
+    NanNotEqual,
+}
+
+/// P-code graph sub-type for visualization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PcodeGraphSubType {
+    /// Standard control-flow graph.
+    ControlFlow,
+    /// Data-flow graph.
+    DataFlow,
+    /// Combined CFG + DFG.
+    Combined,
+    /// Call graph.
+    CallGraph,
+}
+
+/// Block alias type for variable analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AliasBlockType {
+    /// No aliasing between variables.
+    NoAlias,
+    /// May alias (conservative).
+    MayAlias,
+    /// Must alias (definite overlap).
+    MustAlias,
+    /// Partial overlap.
+    PartialAlias,
+}
+
+/// Offset + p-code operation pair for line mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OffsetPcodeOpPair {
+    /// Byte offset in the function.
+    pub offset: u32,
+    /// P-code operation sequence number.
+    pub op_seq: u32,
+}
+
+impl OffsetPcodeOpPair {
+    /// Create a new offset/pcode-op pair.
+    pub fn new(offset: u32, op_seq: u32) -> Self {
+        Self { offset, op_seq }
+    }
+}
+
+/// Strategy for renaming struct union fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UnionFieldRenameStrategy {
+    /// Rename only the selected field.
+    SelectedOnly,
+    /// Rename all fields at the same offset.
+    SameOffset,
+    /// Prompt for each field.
+    PromptEach,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

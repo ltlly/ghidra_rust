@@ -50,6 +50,10 @@ pub mod map_background_commands;
 pub mod progress_monitor_impl;
 pub mod breakpoint_lifecycle_impl;
 
+// Emulation data access and integration
+pub mod emulation_data_access;
+pub mod emulation_integration_ext;
+
 pub use service_interfaces::{
     ActivationCause as ServiceActivationCause, ConsoleEntry, ConsoleLevel,
     DebuggerAutoMappingService as AutoMappingServiceExt,

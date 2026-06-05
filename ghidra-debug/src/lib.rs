@@ -43,6 +43,7 @@ mod debug_port_new_modules_test;
 mod debug_remaining_modules_test;
 mod debug_remaining_port_test;
 mod debug_schedule_integration_test;
+mod debug_final_port_tests;
 pub mod framework;
 pub mod isf;
 pub mod jdi;

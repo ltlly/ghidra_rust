@@ -28,6 +28,14 @@ pub mod expand_block;
 /// Ported from `ghidra.app.plugin.core.memory.MoveBlockModel`.
 pub mod move_block;
 
+/// Block operation dialogs and commands -- move, expand, split, and
+/// uninitialized block creation.
+///
+/// Ported from `ghidra.app.plugin.core.memory.MoveBlockDialog`,
+/// `ExpandBlockDialog`, `SplitBlockDialog`, `UninitializedBlockCmd`,
+/// and `ImageBaseDialog`.
+pub mod block_ops;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

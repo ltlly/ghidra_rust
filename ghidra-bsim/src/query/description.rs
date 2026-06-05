@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 /// Metadata about a binary executable registered with BSim.
 ///
 /// Ports `ghidra.features.bsim.query.description.ExecutableRecord`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BSimExecutableInfo {
     /// Unique identifier for this executable.
     pub executable_id: String,

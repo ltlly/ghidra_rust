@@ -39,6 +39,25 @@ pub mod panel;
 /// Ported from `ghidra.app.plugin.core.instructionsearch.api.InstructionSearchApi_Yara`.
 pub mod yara;
 
+/// Control panel and UI widgets for instruction search.
+///
+/// Ported from `ghidra.app.plugin.core.instructionsearch.ui` widget classes:
+/// ControlPanel, EndianFlipWidget, InsertBytesWidget, SearchDirectionWidget,
+/// SelectionModeWidget, SelectionScopeWidget, HintTextArea, MessagePanel.
+pub mod control_panel;
+
+/// Instruction table model, renderer, and preview table.
+///
+/// Ported from `ghidra.app.plugin.core.instructionsearch.ui` table classes:
+/// InstructionTable, InstructionTableModel, PreviewTable, PreviewTablePanel.
+pub mod instruction_table;
+
+/// Byte pattern search task and instruction search dialog/plugin model.
+///
+/// Ported from `ghidra.app.plugin.core.instructionsearch.ui.SearchAllInstructionsTask`,
+/// `InstructionSearchDialog`, and `InstructionSearchPlugin`.
+pub mod search_all_task;
+
 pub use model::{InstructionMetadata, MaskContainer, MaskSettings, OperandMetadata};
 pub use api::InstructionSearchApi;
 pub use utils::InstructionSearchUtils;
@@ -72,6 +91,25 @@ pub enum SearchFormat {
 impl Default for SearchFormat {
     fn default() -> Self {
         SearchFormat::Hex
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SearchDirection
+// ---------------------------------------------------------------------------
+
+/// Direction for byte pattern search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SearchDirection {
+    /// Search forward (from low to high address).
+    Forward,
+    /// Search backward (from high to low address).
+    Backward,
+}
+
+impl Default for SearchDirection {
+    fn default() -> Self {
+        SearchDirection::Forward
     }
 }
 

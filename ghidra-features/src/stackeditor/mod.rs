@@ -17,6 +17,12 @@
 pub mod frame_datatype;
 pub mod manager;
 
+/// Stack editor display option manager and stack frame data type.
+///
+/// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorOptionManager`
+/// and `ghidra.app.plugin.core.stackeditor.StackFrameDataType`.
+pub mod option_manager;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

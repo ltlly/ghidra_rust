@@ -29,6 +29,15 @@ pub mod bundle_map;
 /// Ported from `ghidra.app.plugin.core.osgi.OSGiUtils`.
 pub mod utils;
 
+/// Bundle host, GhidraBundle variants, BundleMap, BundleStatus,
+/// BundleStatusTableModel, OSGiException, and OSGiUtils.
+///
+/// Ported from `ghidra.app.plugin.core.osgi.BundleHost`, `GhidraBundle`,
+/// `GhidraJarBundle`, `GhidraSourceBundle`, `GhidraPlaceholderBundle`,
+/// `BundleMap`, `BundleStatus`, `BundleStatusTableModel`, `OSGiException`,
+/// and `OSGiUtils`.
+pub mod bundle_host;
+
 /// Build error types for bundle operations.
 ///
 /// Ported from `ghidra.app.plugin.core.osgi.BuildError`.

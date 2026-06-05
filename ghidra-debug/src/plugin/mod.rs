@@ -280,3 +280,6 @@ pub mod stack_analysis_ext;
 pub mod debugger_utils_ext;
 pub mod platform_override_ext;
 pub mod gui_model_ext;
+
+// Dynamic-static synchronization
+pub mod dynamic_static_sync;

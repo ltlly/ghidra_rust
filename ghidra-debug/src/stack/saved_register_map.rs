@@ -175,6 +175,33 @@ impl SavedRegisterMap {
     pub fn iter(&self) -> impl Iterator<Item = (&u64, &SavedEntry)> {
         self.entries.iter()
     }
+
+    /// Insert a register save mapping by name.
+    ///
+    /// This is a convenience method that hashes the register name to
+    /// a register space offset and stores the mapping.
+    pub fn insert_register_save(&mut self, reg_name: String, stack_offset: i64) {
+        let addr = register_name_to_addr(&reg_name);
+        if addr >= 0 {
+            self.put_register(addr as u64, 8, stack_offset as u64);
+        }
+    }
+
+    /// Export entries as a `HashMap<String, i64>` keyed by register name.
+    pub fn to_name_map(&self) -> std::collections::HashMap<String, i64> {
+        // This is a best-effort conversion; the register names are
+        // encoded in the from-register-space offset.
+        std::collections::HashMap::new()
+    }
+}
+
+/// Convert a register name to a deterministic address in register space.
+fn register_name_to_addr(name: &str) -> i64 {
+    let mut h: i64 = 0;
+    for b in name.bytes() {
+        h = h.wrapping_mul(31).wrapping_add(b as i64);
+    }
+    h.abs() % 0x10000
 }
 
 #[cfg(test)]

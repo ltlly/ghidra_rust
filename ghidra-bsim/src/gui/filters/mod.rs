@@ -2,6 +2,9 @@
 //!
 //! Ports `ghidra.features.bsim.gui.filters` from Ghidra's Java source.
 
+pub mod date_filters;
+pub mod executable_filters;
+
 /// A BSim filter that can be applied to search results.
 #[derive(Debug, Clone)]
 pub struct BSimFilterType {

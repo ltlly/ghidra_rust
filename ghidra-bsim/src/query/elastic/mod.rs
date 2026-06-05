@@ -2,6 +2,8 @@
 //!
 //! Ports `ghidra.features.bsim.query.elastic` from Ghidra's Java source.
 
+pub mod elastic_utilities;
+
 use super::description::{BSimExecutableInfo, BSimFunctionDescription, BSimResultSet, SimilarityMetric};
 use super::function_database::{FunctionDatabase, StubFunctionDatabase};
 use super::server_config::ServerConfig;
