@@ -314,6 +314,21 @@ impl GoToInput {
     }
 }
 
+/// Listener for changes to location tracking specifications.
+///
+/// Ported from Ghidra's `LocationTrackingSpecChangeListener`.
+/// Notified when the set of active location tracking specs changes.
+pub trait LocationTrackingSpecChangeListener {
+    /// Called when a tracking spec is added.
+    fn spec_added(&self, spec: &LocationTrackingSpec);
+
+    /// Called when a tracking spec is removed.
+    fn spec_removed(&self, spec: &LocationTrackingSpec);
+
+    /// Called when a tracking spec is changed (e.g., enabled/disabled).
+    fn spec_changed(&self, old: &LocationTrackingSpec, new: &LocationTrackingSpec);
+}
+
 impl std::fmt::Display for GoToInput {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -503,5 +518,42 @@ mod tests {
         let json = serde_json::to_string(&input).unwrap();
         let back: GoToInput = serde_json::from_str(&json).unwrap();
         assert_eq!(back.as_address(), Some(0x401000));
+    }
+
+    /// A test listener for LocationTrackingSpecChangeListener.
+    struct TestTrackingListener {
+        added: std::cell::RefCell<Vec<String>>,
+        removed: std::cell::RefCell<Vec<String>>,
+    }
+
+    impl TestTrackingListener {
+        fn new() -> Self {
+            Self {
+                added: std::cell::RefCell::new(Vec::new()),
+                removed: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+    }
+
+    impl LocationTrackingSpecChangeListener for TestTrackingListener {
+        fn spec_added(&self, spec: &LocationTrackingSpec) {
+            self.added.borrow_mut().push(spec.name.clone());
+        }
+        fn spec_removed(&self, spec: &LocationTrackingSpec) {
+            self.removed.borrow_mut().push(spec.name.clone());
+        }
+        fn spec_changed(&self, _old: &LocationTrackingSpec, _new: &LocationTrackingSpec) {}
+    }
+
+    #[test]
+    fn test_tracking_listener() {
+        let listener = TestTrackingListener::new();
+        let spec = LocationTrackingSpec::new("PC", "RIP", "PC");
+        listener.spec_added(&spec);
+        assert_eq!(listener.added.borrow().len(), 1);
+        assert_eq!(listener.added.borrow()[0], "PC");
+
+        listener.spec_removed(&spec);
+        assert_eq!(listener.removed.borrow().len(), 1);
     }
 }

@@ -48,6 +48,12 @@ pub mod cached_tables;
 pub mod vector_store;
 pub mod sf_results_update_listener;
 
+// Newly expanded modules (ported from Ghidra's BSim query/client packages)
+pub mod cancelled_sql_exception;
+pub mod row_key_sql;
+pub mod query_database_exception;
+pub mod b_sim_client_factory;
+
 use std::fmt;
 
 /// Error type for BSim query operations.

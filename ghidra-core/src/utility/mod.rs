@@ -1,7 +1,56 @@
 //! Miscellaneous utility types and helpers used throughout ghidra-core.
 //!
 //! Includes endianness, versioning, bit manipulation, file locking,
-//! MD5 hashing, and class/file scanning.
+//! MD5 hashing, class/file scanning, and ports of Ghidra's Framework/Utility
+//! Java packages.
+//!
+//! # Submodules
+//!
+//! - [`task_monitor`] -- TaskMonitor trait, StubTaskMonitor, CancelledException,
+//!   CancellableIterator (port of `ghidra.util.task`).
+//! - [`msg`] -- Logging facade with Msg, ErrorLogger, ErrorDisplay, Issue
+//!   (port of `ghidra.util.Msg`).
+//! - [`exceptions`] -- Exception types: UsrException, AssertException,
+//!   CancelledException, TimeoutException (port of `ghidra.util.exception`).
+//! - [`xml_parser`] -- XmlPullParser, XmlElement, XmlException
+//!   (port of `ghidra.xml`).
+//! - [`operating_system`] -- OperatingSystem enum (port of
+//!   `ghidra.framework.OperatingSystem`).
+//! - [`application`] -- ApplicationLayout, ApplicationProperties, GModule,
+//!   ApplicationVersion, ApplicationIdentifier, XdgUtils
+//!   (port of `utility.application` and `ghidra.framework`).
+//! - [`functional`] -- Callback, ExceptionalFunction, ExceptionalSupplier
+//!   (port of `utility.function`).
+//! - [`resource`] -- Resource, ResourceFile, GClassLoader, JarEntryNode
+//!   (port of `generic.jar`).
+//! - [`service_provider`] -- ServiceProvider, PluggableServiceRegistry
+//!   (port of `ghidra.framework.plugintool`).
+//! - [`concurrent`] -- GThreadPool, NamedDaemonThreadFactory
+//!   (port of `generic.concurrent`).
+//! - [`data_structures`] -- Duo, Range, Location, Fixup
+//!   (port of `ghidra.util.datastruct` and `ghidra.util`).
+//! - [`stream_utils`] -- BoundedInputStream, HashingOutputStream,
+//!   MonitoredOutputStream, NullOutputStream
+//!   (port of `ghidra.util` stream types).
+//! - [`system_utilities`] -- SystemUtilities, FileUtilities,
+//!   ReflectionUtilities (port of `ghidra.util` and `utilities.util`).
+//! - [`module_utils`] -- ModuleUtilities, ModuleManifestFile,
+//!   ClasspathFilter (port of `utility.module`).
+
+pub mod application;
+pub mod concurrent;
+pub mod data_structures;
+pub mod exceptions;
+pub mod functional;
+pub mod module_utils;
+pub mod msg;
+pub mod operating_system;
+pub mod resource;
+pub mod service_provider;
+pub mod stream_utils;
+pub mod system_utilities;
+pub mod task_monitor;
+pub mod xml_parser;
 
 use std::fmt;
 

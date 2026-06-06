@@ -288,3 +288,15 @@ pub mod trace_options_ext;
 pub use trace_options_ext::{TraceOptionValue, TraceOptionsStore, TraceUserPreferences};
 pub mod default_address_snap;
 pub mod default_trace_span;
+
+// Manager traits ported from Ghidra Debug API
+pub mod trace_register_context_manager;
+pub mod trace_equate_manager;
+pub mod trace_property_map_manager;
+pub mod trace_static_map_manager;
+
+pub use trace_register_context_manager::{TraceRegisterContextManagerOps, TraceRegisterContextManagerImpl};
+pub use trace_equate_manager::{TraceEquateManager, TraceEquateManagerImpl, validate_equate_name};
+pub use trace_property_map_manager::{PropertyMapValue, TracePropertyMapManager};
+pub use trace_static_map_manager::{TraceStaticMapManager, StaticMappingEntry, TraceStaticMappingChangeListener};
+pub use location_tracking::LocationTrackingSpecChangeListener;
