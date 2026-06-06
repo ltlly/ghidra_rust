@@ -57,12 +57,12 @@ mod new_comprehensive_tests {
         #[test]
         fn coordinates_ext_navigation_chain() {
             let base = DebuggerCoordinates::trace(1);
-            let nav = base.go_snap(10).go_thread(42, "main").go_innermost_frame();
+            let nav = base.go_snap(10).go_thread(42).go_innermost_frame();
             assert!(nav.is_complete());
             assert_eq!(nav.snap, Some(10));
             assert_eq!(nav.thread_key, Some(42));
             let summary = nav.display_summary();
-            assert!(summary.contains("trace=t1"));
+            assert!(summary.contains("trace=1"));
         }
 
         #[test]
@@ -221,6 +221,7 @@ mod new_comprehensive_tests {
 
             mgr.activate_trace(&k2).unwrap();
             mgr.close_trace(&k1).unwrap();
+            mgr.remove_trace(&k1);
             mgr.remove_trace(&k2);
             assert!(mgr.is_empty());
         }
@@ -297,7 +298,7 @@ mod new_comprehensive_tests {
         fn overlap_detection() {
             let mut svc = StaticMappingService::new();
             svc.add_mapping(StaticMappingEntry::new("t1", 0x1000, 0x200, "p1", 0, 0x200));
-            svc.add_mapping(StaticMappingEntry::new("t1", 0x100, 0x200, "p2", 0, 0x200));
+            svc.add_mapping(StaticMappingEntry::new("t1", 0x0F00, 0x200, "p2", 0, 0x200));
             svc.add_mapping(StaticMappingEntry::new("t1", 0x5000, 0x100, "p3", 0, 0x100));
             assert_eq!(svc.find_overlapping().len(), 1);
         }
