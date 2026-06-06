@@ -976,9 +976,11 @@ mod rmi_connection_comprehensive_tests {
 mod platform_opinion_comprehensive_tests {
     use crate::plugin::platform_opinion::{
         PlatformOpinion, PlatformOpinionRegistry, OpinionContext,
-        GdbPlatformOpinion, LldbPlatformOpinion, FridaPlatformOpinion,
         create_default_registry,
     };
+    use crate::plugin::platform_gdb::GdbPlatformOpinion;
+    use crate::plugin::platform_lldb::LldbPlatformOpinion;
+    use crate::plugin::platform_frida::FridaPlatformOpinion;
 
     #[test]
     fn test_platform_opinion_creation() {

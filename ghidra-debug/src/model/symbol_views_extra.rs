@@ -358,6 +358,8 @@ impl Default for TraceEquateView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::TraceSymbolKind;
+    use crate::model::Lifespan;
 
     fn make_symbol(name: &str, kind: TraceSymbolKind) -> TraceSymbol {
         TraceSymbol {

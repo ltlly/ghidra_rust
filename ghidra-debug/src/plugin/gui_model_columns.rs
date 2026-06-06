@@ -386,6 +386,7 @@ impl ColumnRenderConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugin::gui_model::AttributeValue;
     use crate::model::Lifespan;
     use crate::target::key_path::KeyPath;
 

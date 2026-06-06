@@ -288,6 +288,7 @@ impl DbTracePlatformManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     #[test]
     fn test_guest_language_creation() {

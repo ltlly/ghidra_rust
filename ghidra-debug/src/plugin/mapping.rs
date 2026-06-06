@@ -203,6 +203,7 @@ impl MappingManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     #[test]
     fn test_mapping_sync_config() {

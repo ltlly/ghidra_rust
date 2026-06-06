@@ -223,6 +223,7 @@ impl ModulesServiceImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     #[test]
     fn test_loaded_module_info() {

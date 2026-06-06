@@ -279,6 +279,7 @@ fn register_name_to_offset(name: &str) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stack::unwind_info::ReturnLocation;
 
     #[test]
     fn test_unwound_frame_basic() {
@@ -309,7 +310,7 @@ mod tests {
             Some("main".into()),
             Some(32),
             Some(40),
-            UnwindReturnLocation::Stack { offset: -8, size: 8 },
+            ReturnLocation::Stack { offset: -8, size: 8 },
             u64::MAX,
             saved,
             UnwindWarningSet::new(),
@@ -401,7 +402,7 @@ mod tests {
                 Some("func".into()),
                 Some(16),
                 Some(24),
-                UnwindReturnLocation::Stack { offset: 0, size: 8 },
+                ReturnLocation::Stack { offset: 0, size: 8 },
                 u64::MAX,
                 HashMap::new(),
                 UnwindWarningSet::new(),

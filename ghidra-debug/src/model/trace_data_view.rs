@@ -253,6 +253,7 @@ impl TraceUndefinedDataView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     fn make_units() -> Vec<TraceCodeUnit> {
         vec![

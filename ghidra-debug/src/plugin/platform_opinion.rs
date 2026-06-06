@@ -218,7 +218,7 @@ mod tests {
         let registry = create_default_registry();
         let ctx = OpinionContext::new()
             .with_debugger_type("gdb")
-            .with_architecture("x86-64")
+            .with_architecture("x86_64")
             .with_pointer_size(8);
         let best = registry.best_opinion(&ctx);
         assert!(best.is_some());
@@ -254,7 +254,7 @@ mod tests {
         let registry = create_default_registry();
         let ctx = OpinionContext::new()
             .with_debugger_type("lldb")
-            .with_architecture("x86-64")
+            .with_architecture("x86_64")
             .with_pointer_size(8);
         let opinions = registry.get_opinions(&ctx);
         assert!(!opinions.is_empty());

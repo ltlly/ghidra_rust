@@ -46,6 +46,7 @@ impl TraceRmiLauncherRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::trace_rmi_service::LaunchParameter;
 
     #[test]
     fn test_launcher_registry() {

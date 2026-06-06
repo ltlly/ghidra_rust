@@ -201,6 +201,7 @@ pub fn build_unwind_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stack::sym::Sym;
 
     #[test]
     fn test_unwind_command_creation() {

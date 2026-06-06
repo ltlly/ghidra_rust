@@ -350,6 +350,7 @@ impl MockTraceRmiConnection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::tracermi::AsyncStatus;
 
     #[test]
     fn test_target_key() {

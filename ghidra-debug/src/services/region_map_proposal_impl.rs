@@ -153,6 +153,7 @@ pub fn region_name_matches_block(region_name: &str, block_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::mapping_proposals_impl::RegionMapProposal;
 
     #[test]
     fn test_region_map_proposal_re_export() {

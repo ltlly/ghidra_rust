@@ -158,6 +158,7 @@ impl ModuleMapProposalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::mapping_proposals_impl::ModuleMapProposal;
 
     #[test]
     fn test_module_map_proposal_re_export() {

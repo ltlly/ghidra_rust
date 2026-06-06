@@ -365,6 +365,7 @@ impl<'a> TraceReferenceView<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     fn make_label(key: i64, name: &str, addr: u64) -> TraceSymbol {
         TraceSymbol::label(key, name, addr, "ram", Lifespan::now_on(0))

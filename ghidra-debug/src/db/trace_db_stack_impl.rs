@@ -163,6 +163,7 @@ pub fn split_at_mut_pair<'a, T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     fn make_stack(depth: usize) -> DBTraceStack {
         let mut stack = TraceStack::new(1, Lifespan::at_least(0));

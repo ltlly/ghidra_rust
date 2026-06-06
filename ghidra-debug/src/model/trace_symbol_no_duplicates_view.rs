@@ -88,6 +88,7 @@ impl Default for TraceSymbolNoDuplicatesView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     #[test]
     fn test_no_duplicates_prefers_primary() {

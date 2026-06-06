@@ -144,6 +144,7 @@ impl Default for TraceSymbolView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     #[test]
     fn test_all_symbols_view() {

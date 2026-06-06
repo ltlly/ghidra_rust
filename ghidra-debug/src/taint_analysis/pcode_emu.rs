@@ -388,6 +388,7 @@ impl TaintPcodeEmulator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::taint_analysis::model::TaintMark;
 
     // -- Arithmetic --
 

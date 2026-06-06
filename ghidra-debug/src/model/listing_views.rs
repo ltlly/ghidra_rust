@@ -342,6 +342,7 @@ impl Default for TraceDefinedUnitsView {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::Lifespan;
 
     fn make_instruction(addr: u64, len: u32, snap_start: i64, snap_end: i64) -> TraceCodeUnit {
         TraceCodeUnit::instruction(

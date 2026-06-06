@@ -153,6 +153,7 @@ impl SectionMapProposalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::mapping_proposals_impl::SectionMapProposal;
 
     #[test]
     fn test_section_map_proposal_re_export() {
