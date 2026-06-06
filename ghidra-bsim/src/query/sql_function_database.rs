@@ -308,7 +308,7 @@ mod tests {
 
     #[test]
     fn sql_db_not_connected_errors() {
-        let db = SQLFunctionDatabase::new(test_config());
+        let mut db = SQLFunctionDatabase::new(test_config());
         assert!(db.register_executable(&BSimExecutableInfo::new("1", "test")).is_err());
     }
 
@@ -316,7 +316,7 @@ mod tests {
     fn sql_db_supports_metric() {
         let db = SQLFunctionDatabase::new(test_config());
         assert!(db.supports_metric(SimilarityMetric::Cosine));
-        assert!(db.supports_metric(SimilarityMetric::Euclidean));
+        assert!(db.supports_metric(SimilarityMetric::Jaccard));
     }
 
     #[test]

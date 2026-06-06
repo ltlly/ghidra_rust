@@ -65,3 +65,26 @@ pub use gui::results::{
 pub use query::error_info::{
     BSimHTMLGenerator, BSimServerInformation, BSimSettings, ErrorCode, ErrorInfo,
 };
+// Additional protocol types
+pub use query::additional_protocol::{
+    InstallCategoryRequest, InstallMetadataRequest, InstallTagRequest,
+    PrewarmRequest, QueryExeCount, QueryExeInfo, QueryNearestVector,
+    QueryOptionalExist, QueryOptionalValues, QueryUpdate, QueryVectorId,
+    QueryVectorMatch, ResponseAdjustIndex, ResponseChildren, ResponseCluster,
+    ResponseDelete, ResponseDropDatabase, ResponseError, ResponseExe,
+    ResponseInfo, ResponseInsert, ResponseName, ResponseNearestVector,
+    ResponseOptionalExist, ResponseOptionalValues, ResponsePassword,
+    ResponsePrewarm, ResponseUpdate, ResponseVectorId, ResponseVectorMatch,
+    SimilarityResult, SimilarityVectorResult, ExecutableResultWithDeDuping,
+    FunctionStaging,
+};
+// File backend types
+pub use query::file::{
+    FileFunctionDatabase, H2FileDBConnectionManager, H2VectorTable,
+    VectorStore, VectorStoreEntry, VectorStoreManager,
+};
+// Elastic backend types
+pub use query::elastic::{
+    Base64VectorFactory, ElasticConnection, ElasticEffects,
+    ElasticFunctionDatabase, ElasticIdResolution, RowKeyElastic,
+};

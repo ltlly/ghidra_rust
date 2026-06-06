@@ -113,6 +113,260 @@ impl FunctionDatabase for FileFunctionDatabase {
     }
 }
 
+// ============================================================================
+// VectorStore / VectorStoreEntry -- Ports `ghidra.features.bsim.query.file`
+// ============================================================================
+
+/// A record containing a vector and a count of how many functions share it.
+///
+/// Ports `ghidra.features.bsim.query.file.VectorStoreEntry`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VectorStoreEntry {
+    /// Vector id in the database.
+    pub id: i64,
+    /// The LSH vector data.
+    pub vector: Vec<f64>,
+    /// Number of functions sharing this vector.
+    pub count: i32,
+    /// Self-significance of the vector (using database settings).
+    pub self_sig: f64,
+}
+
+impl VectorStoreEntry {
+    /// Create a new VectorStoreEntry.
+    pub fn new(id: i64, vector: Vec<f64>, count: i32, self_sig: f64) -> Self {
+        Self { id, vector, count, self_sig }
+    }
+}
+
+/// A store of vectors for a BSim database.
+///
+/// Ports `ghidra.features.bsim.query.file.VectorStore`.
+/// Provides lazy-loading and caching of LSH vectors from a file-backed database.
+#[derive(Debug)]
+pub struct VectorStore {
+    /// Server info for this store.
+    pub server_info: ServerConfig,
+    /// Loaded vectors (keyed by id).
+    vectors: Option<std::collections::HashMap<i64, VectorStoreEntry>>,
+}
+
+impl VectorStore {
+    /// Create a new VectorStore for the given server info.
+    pub fn new(server_info: ServerConfig) -> Self {
+        Self {
+            server_info,
+            vectors: None,
+        }
+    }
+
+    /// Get a vector by id, loading from database if needed.
+    pub fn get_vector_by_id(&mut self, id: i64) -> Option<&VectorStoreEntry> {
+        self.ensure_loaded();
+        self.vectors.as_ref()?.get(&id)
+    }
+
+    /// Get an iterator over all vector entries.
+    pub fn iter(&mut self) -> Box<dyn Iterator<Item = &VectorStoreEntry> + '_> {
+        self.ensure_loaded();
+        match &self.vectors {
+            Some(v) => Box::new(v.values()),
+            None => Box::new(std::iter::empty()),
+        }
+    }
+
+    /// Get the number of loaded vectors.
+    pub fn len(&mut self) -> usize {
+        self.ensure_loaded();
+        self.vectors.as_ref().map_or(0, |v| v.len())
+    }
+
+    /// Whether the store is empty.
+    pub fn is_empty(&mut self) -> bool {
+        self.len() == 0
+    }
+
+    /// Invalidate the cache (forces reload on next access).
+    pub fn invalidate(&mut self) {
+        self.vectors = None;
+    }
+
+    /// Whether the vectors have been loaded.
+    pub fn is_loaded(&self) -> bool {
+        self.vectors.is_some()
+    }
+
+    fn ensure_loaded(&mut self) {
+        if self.vectors.is_some() {
+            return;
+        }
+        let mut map = std::collections::HashMap::new();
+        // In a real implementation, this would load from H2FileFunctionDatabase.
+        // For now, we initialize an empty map.
+        self.vectors = Some(map);
+    }
+}
+
+/// Manages multiple VectorStores for different BSim databases.
+///
+/// Ports `ghidra.features.bsim.query.file.BSimVectorStoreManager`.
+#[derive(Debug, Default)]
+pub struct VectorStoreManager {
+    stores: std::collections::HashMap<String, VectorStore>,
+}
+
+impl VectorStoreManager {
+    /// Create a new empty VectorStoreManager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get or create a VectorStore for the given database name.
+    pub fn get_or_create(&mut self, name: &str, config: ServerConfig) -> &mut VectorStore {
+        self.stores
+            .entry(name.to_string())
+            .or_insert_with(|| VectorStore::new(config))
+    }
+
+    /// Invalidate a specific store.
+    pub fn invalidate(&mut self, name: &str) {
+        if let Some(store) = self.stores.get_mut(name) {
+            store.invalidate();
+        }
+    }
+
+    /// Invalidate all stores.
+    pub fn invalidate_all(&mut self) {
+        for store in self.stores.values_mut() {
+            store.invalidate();
+        }
+    }
+
+    /// Remove a store.
+    pub fn remove(&mut self, name: &str) -> Option<VectorStore> {
+        self.stores.remove(name)
+    }
+
+    /// Get the number of stores.
+    pub fn store_count(&self) -> usize {
+        self.stores.len()
+    }
+}
+
+/// H2 vector table for reading/writing vectors in the file-based H2 database.
+///
+/// Ports `ghidra.features.bsim.query.file.H2VectorTable`.
+#[derive(Debug, Clone)]
+pub struct H2VectorTable {
+    /// Table name.
+    pub table_name: String,
+}
+
+impl H2VectorTable {
+    /// Create a new H2VectorTable.
+    pub fn new() -> Self {
+        Self {
+            table_name: "vectortable".to_string(),
+        }
+    }
+
+    /// Get the CREATE TABLE SQL.
+    pub fn create_sql(&self) -> String {
+        format!(
+            "CREATE TABLE IF NOT EXISTS {} (id BIGINT PRIMARY KEY, vector BLOB, count INTEGER, selfsig DOUBLE)",
+            self.table_name
+        )
+    }
+
+    /// Get the INSERT SQL.
+    pub fn insert_sql(&self) -> String {
+        format!(
+            "INSERT INTO {} (id, vector, count, selfsig) VALUES (?, ?, ?, ?)",
+            self.table_name
+        )
+    }
+
+    /// Get the SELECT ALL SQL.
+    pub fn select_all_sql(&self) -> String {
+        format!("SELECT id, vector, count, selfsig FROM {}", self.table_name)
+    }
+
+    /// Get the SELECT BY ID SQL.
+    pub fn select_by_id_sql(&self) -> String {
+        format!(
+            "SELECT id, vector, count, selfsig FROM {} WHERE id = ?",
+            self.table_name
+        )
+    }
+}
+
+impl Default for H2VectorTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Connection manager for H2 file-based BSim databases.
+///
+/// Ports `ghidra.features.bsim.query.file.BSimH2FileDBConnectionManager`.
+#[derive(Debug)]
+pub struct H2FileDBConnectionManager {
+    /// Active connections by database path.
+    connections: std::collections::HashMap<String, bool>,
+}
+
+impl H2FileDBConnectionManager {
+    /// Create a new connection manager.
+    pub fn new() -> Self {
+        Self {
+            connections: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Register a database path.
+    pub fn register(&mut self, path: &str) {
+        self.connections.insert(path.to_string(), false);
+    }
+
+    /// Connect to a database.
+    pub fn connect(&mut self, path: &str) -> BSimResult<()> {
+        if self.connections.contains_key(path) {
+            self.connections.insert(path.to_string(), true);
+            Ok(())
+        } else {
+            Err(BSimError::NotFound(format!("Database not registered: {}", path)))
+        }
+    }
+
+    /// Disconnect from a database.
+    pub fn disconnect(&mut self, path: &str) {
+        if let Some(connected) = self.connections.get_mut(path) {
+            *connected = false;
+        }
+    }
+
+    /// Check if a database is connected.
+    pub fn is_connected(&self, path: &str) -> bool {
+        self.connections.get(path).copied().unwrap_or(false)
+    }
+
+    /// Remove a database registration.
+    pub fn remove(&mut self, path: &str) -> Option<bool> {
+        self.connections.remove(path)
+    }
+
+    /// Get the number of registered databases.
+    pub fn registered_count(&self) -> usize {
+        self.connections.len()
+    }
+}
+
+impl Default for H2FileDBConnectionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,5 +423,81 @@ mod tests {
         assert!(db.supports_metric(SimilarityMetric::Cosine));
         assert!(db.supports_metric(SimilarityMetric::EditDistance));
         assert!(db.supports_metric(SimilarityMetric::LshApproximate));
+    }
+
+    // VectorStore tests
+
+    #[test]
+    fn test_vector_store_entry() {
+        let entry = VectorStoreEntry::new(42, vec![1.0, 2.0, 3.0], 5, 0.95);
+        assert_eq!(entry.id, 42);
+        assert_eq!(entry.vector.len(), 3);
+        assert_eq!(entry.count, 5);
+        assert!((entry.self_sig - 0.95).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_vector_store_new() {
+        let config = ServerConfig::file("/tmp/test.db");
+        let store = VectorStore::new(config);
+        assert!(!store.is_loaded());
+    }
+
+    #[test]
+    fn test_vector_store_invalidate() {
+        let config = ServerConfig::file("/tmp/test.db");
+        let mut store = VectorStore::new(config);
+        store.invalidate();
+        assert!(!store.is_loaded());
+    }
+
+    #[test]
+    fn test_vector_store_manager() {
+        let mut mgr = VectorStoreManager::new();
+        assert_eq!(mgr.store_count(), 0);
+
+        let config = ServerConfig::file("/tmp/test.db");
+        mgr.get_or_create("test", config);
+        assert_eq!(mgr.store_count(), 1);
+
+        mgr.invalidate_all();
+        mgr.remove("test");
+        assert_eq!(mgr.store_count(), 0);
+    }
+
+    #[test]
+    fn test_h2_vector_table() {
+        let table = H2VectorTable::new();
+        assert_eq!(table.table_name, "vectortable");
+        assert!(table.create_sql().contains("CREATE TABLE"));
+        assert!(table.insert_sql().contains("INSERT INTO"));
+        assert!(table.select_all_sql().contains("SELECT"));
+        assert!(table.select_by_id_sql().contains("WHERE id = ?"));
+    }
+
+    #[test]
+    fn test_h2_file_db_connection_manager() {
+        let mut mgr = H2FileDBConnectionManager::new();
+        assert_eq!(mgr.registered_count(), 0);
+
+        mgr.register("/tmp/test.db");
+        assert_eq!(mgr.registered_count(), 1);
+        assert!(!mgr.is_connected("/tmp/test.db"));
+
+        mgr.connect("/tmp/test.db").unwrap();
+        assert!(mgr.is_connected("/tmp/test.db"));
+
+        mgr.disconnect("/tmp/test.db");
+        assert!(!mgr.is_connected("/tmp/test.db"));
+
+        mgr.remove("/tmp/test.db");
+        assert_eq!(mgr.registered_count(), 0);
+    }
+
+    #[test]
+    fn test_h2_connection_manager_unknown_db() {
+        let mut mgr = H2FileDBConnectionManager::new();
+        let result = mgr.connect("/tmp/unknown.db");
+        assert!(result.is_err());
     }
 }

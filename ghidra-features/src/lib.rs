@@ -168,6 +168,18 @@ pub mod base_project;
 // -- Analysis plugin layer ported from Ghidra's analysis package --
 pub mod analysis;
 
+// -- Memory search plugin ported from ghidra.features.base.memsearch --
+/// Memory search plugin: searching bytes in program memory with multiple
+/// formats (hex, binary, decimal, string, regex, float), combinable result
+/// sets, scan-based filtering, and mnemonic-based instruction patterns.
+pub mod memsearch;
+
+/// Listing viewer framework: field factories, format models, listing panel,
+/// multi-listing, display options, proxy objects, and text utilities.
+///
+/// Ported from `ghidra.app.util.viewer`.
+pub mod viewer;
+
 // -- Additional modules ported from Ghidra's Features/Base (app/util and util packages) --
 // Ported from `ghidra.app.util.opinion` -- loader service, loader map, additional loaders,
 // LoadException, AddressSetPartitioner, and library resolution.

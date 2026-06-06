@@ -34,6 +34,7 @@
 
 pub mod api;
 pub mod db;
+mod debug_remaining_comprehensive_test;
 mod debug_final_port_test;
 mod debug_integration_test;
 mod debug_new_modules_test;
