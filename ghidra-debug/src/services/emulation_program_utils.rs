@@ -98,6 +98,6 @@ mod tests {
         // Address in heap but not in stack
         assert_eq!(classify_region(0x7000_1000, &regions), Some("heap"));
         // Address beyond all regions
-        assert_eq!(classify_region(0x8000_0000, &regions), None);
+        assert_eq!(classify_region(0x9000_0000, &regions), None);
     }
 }
