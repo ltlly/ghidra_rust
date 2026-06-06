@@ -283,6 +283,40 @@ pub mod program_model_listing;
 /// TestTool, TestLogger, ProjectTestUtils.
 pub mod test_framework;
 
+// -- New modules ported from remaining Features/Base packages --
+
+/// Charset picker UI framework.
+/// Ported from `ghidra.util.charset.picker` -- CharsetPickerDialog,
+/// CharsetPickerPanel, CharsetTableModel, CharsetInfoPanel.
+pub mod charset_picker;
+
+/// Program-based table column definitions.
+/// Ported from `ghidra.util.table.field` -- 61 column types for displaying
+/// program data: addresses, function names, bytes, references, labels,
+/// namespaces, code units, and settings definitions.
+pub mod table_field;
+
+/// Table row mappers for converting between table row types.
+/// Ported from `ghidra.util.table.mapper` -- 15 mapper types enabling
+/// navigation between related table views (Address->Function, Symbol->Address,
+/// ReferenceEndpoint->ProgramLocation, etc.).
+pub mod table_mapper;
+
+/// Extended framework types: commands, tool state, application configuration.
+/// Ported from `ghidra.framework.cmd`, `ghidra.framework.data`,
+/// `ghidra.framework.plugintool`, and `ghidra.framework`.
+pub mod framework_extended;
+
+/// Base graph vertex types and expansion listeners.
+/// Ported from `ghidra.base.graph` -- CircleWithLabelVertex,
+/// VertexShapeProvider, VertexExpansionListener.
+pub mod base_graph;
+
+/// Program column constraint providers and type mappers for table filtering.
+/// Ported from `ghidra.base.widgets.table.constraint.provider` --
+/// ProgramColumnConstraintProvider, address/string constraints, and mappers.
+pub mod base_widgets;
+
 // -- Top-level re-exports of base plugin modules --
 // These modules live under `base::` (ported from `ghidra.app.plugin.core.*`)
 // but are re-exported here for direct access via `ghidra_features::<module>`.

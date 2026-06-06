@@ -456,3 +456,237 @@ mod symtable_renderer_tests {
         assert_eq!(loc.program_name, "libc.so.6");
     }
 }
+
+// ===========================================================================
+// Newly ported Features/Base modules: charset_picker, table_field,
+// table_mapper, framework_extended, base_graph, base_widgets
+// ===========================================================================
+
+mod new_port_tests {
+    use ghidra_features::charset_picker::*;
+    use ghidra_features::table_field::*;
+    use ghidra_features::table_mapper::*;
+    use ghidra_features::framework_extended::*;
+    use ghidra_features::base_graph::*;
+    use ghidra_features::base_widgets::*;
+
+    #[test]
+    fn test_charset_picker_full_workflow() {
+        let charsets = vec![
+            CharsetDisplayInfo::new("UTF-8", "Unicode 8-bit", false, 1, 6, 1),
+            CharsetDisplayInfo::new("US-ASCII", "ASCII", true, 1, 1, 1),
+            CharsetDisplayInfo::new("UTF-16BE", "Unicode 16-bit Big Endian", false, 2, 4, 2),
+        ];
+
+        let mut picker = CharsetPickerState::new(charsets);
+        assert!(picker.selected().is_none());
+        assert_eq!(picker.model.row_count(), 3);
+
+        picker.set_selected("UTF-8");
+        assert_eq!(picker.selected(), Some("UTF-8"));
+
+        let info = picker.selected_info().unwrap();
+        assert_eq!(info.name, "UTF-8");
+        assert!(!info.fixed_length);
+        assert_eq!(picker.min_max_display(info), "1 / 6");
+
+        picker.model.set_filter("utf");
+        assert_eq!(picker.model.row_count(), 2);
+        picker.model.set_filter("");
+        assert_eq!(picker.model.row_count(), 3);
+    }
+
+    #[test]
+    fn test_table_field_column_registry() {
+        let columns: Vec<Box<dyn ProgramBasedDynamicTableColumn>> = vec![
+            Box::new(AddressTableColumn::new()),
+            Box::new(FunctionNameTableColumn::new()),
+            Box::new(BytesTableColumn::new()),
+            Box::new(CodeUnitTableColumn::new()),
+            Box::new(LabelTableColumn::new()),
+            Box::new(NamespaceTableColumn::new()),
+            Box::new(EolCommentTableColumn::new()),
+        ];
+
+        for col in &columns {
+            assert!(!col.column_name().is_empty());
+        }
+        assert_eq!(columns[0].column_name(), "Location");
+        assert_eq!(columns[0].preferred_width(), 200);
+    }
+
+    #[test]
+    fn test_table_field_settings_interaction() {
+        let bc = ByteCountSettingsDefinition::new();
+        let mut settings = Settings::new();
+        assert_eq!(bc.get_choice(&settings), 0);
+
+        bc.set_choice(&mut settings, 4);
+        assert_eq!(bc.get_choice(&settings), 4);
+
+        let bytes_col = BytesTableColumn::new();
+        let display_name = bytes_col.column_display_name(&settings);
+        assert!(display_name.contains("[4]"));
+    }
+
+    #[test]
+    fn test_address_based_location_types() {
+        let null = AddressBasedLocation::null();
+        assert_eq!(null.to_string(), "<NULL>");
+
+        let mem = AddressBasedLocation::from_address("ram:00401000");
+        assert!(mem.is_memory_location());
+        assert!(!mem.is_reference_destination());
+
+        let ext = AddressBasedLocation::external("printf");
+        assert!(ext.to_string().contains("External"));
+
+        let stack = AddressBasedLocation::stack(-8);
+        assert!(stack.to_string().contains("Stack"));
+
+        let reg = AddressBasedLocation::register("RAX");
+        assert!(reg.to_string().contains("Register"));
+
+        let off = AddressBasedLocation::offset_ref("ram:00401000", 8);
+        assert!(off.is_offset_address());
+
+        let shift = AddressBasedLocation::shifted_ref("ram:00401000", 0xABCD, 4);
+        assert!(shift.is_shifted_address());
+
+        assert!(null < mem);
+    }
+
+    #[test]
+    fn test_table_mapper_chain() {
+        let mapper1 = AddressToProgramLocationRowMapper;
+        let mapper2 = ProgramLocationToAddressRowMapper;
+
+        let addr = "0x401000".to_string();
+        let loc = mapper1.map(&addr).unwrap();
+        let back = mapper2.map(&loc).unwrap();
+        assert_eq!(back, addr);
+    }
+
+    #[test]
+    fn test_reference_address_pair() {
+        let pair = ReferenceAddressPair::new("0x401000", "0x402000");
+        assert_eq!(pair.from_address, "0x401000");
+        assert_eq!(pair.to_address, "0x402000");
+    }
+
+    #[test]
+    fn test_framework_undo_redo_workflow() {
+        let mut state = GhidraToolState::new("CodeBrowser");
+        state.set_before_memento(LocationMemento::new("prog", "0x401000"));
+        state.set_after_memento(LocationMemento::new("prog", "0x402000"));
+
+        assert_eq!(
+            state.before_memento().unwrap().address(),
+            Some("0x401000")
+        );
+        assert_eq!(
+            state.after_memento().unwrap().address(),
+            Some("0x402000")
+        );
+
+        state.navigatable_removed();
+        assert!(!state.is_navigatable_valid());
+        assert!(state.before_memento().is_none());
+    }
+
+    #[test]
+    fn test_save_state_roundtrip() {
+        let mut state = SaveState::new();
+        state.put_bool("flag", true);
+        state.put_long("count", 42);
+        state.put_string("name", "test");
+
+        assert!(state.get_bool("flag", false));
+        assert_eq!(state.get_long("count", 0), 42);
+        assert_eq!(state.get_string("name", ""), "test");
+    }
+
+    #[test]
+    fn test_message_log() {
+        let mut log = MessageLog::new();
+        log.info("info");
+        log.warning("warn");
+        log.error("err");
+
+        assert_eq!(log.len(), 3);
+        assert!(log.has_errors());
+        assert_eq!(log.errors().len(), 1);
+        assert_eq!(log.warnings().len(), 1);
+    }
+
+    #[test]
+    fn test_navigatable_provider() {
+        let mut provider = NavigatableComponentProvider::new("Decompile", "Plugin");
+        assert!(!provider.is_connected());
+        provider.set_connected(true);
+        assert!(provider.supports_markers());
+        provider.dispose();
+        assert!(provider.is_disposed());
+    }
+
+    #[test]
+    fn test_graph_vertex_shapes() {
+        let v = CircleWithLabelVertex::new("main");
+        let compact = v.compact_shape();
+        let full = v.full_shape();
+        assert!(full.width() >= compact.width());
+
+        let v25 = CircleWithLabelVertex::new("f").with_radius(25.0);
+        assert_eq!(v25.compact_shape().width(), 50.0);
+    }
+
+    #[test]
+    fn test_constraint_provider() {
+        let provider = ProgramColumnConstraintProvider::new();
+        let addr_cs = provider.address_constraints();
+        assert_eq!(addr_cs.len(), 4);
+
+        let str_cs = provider.string_constraints();
+        assert_eq!(str_cs.len(), 3);
+
+        let at_most = AtMostConstraint { max: 0x500000u64 };
+        assert!(at_most.accepts(&0x401000));
+        assert!(!at_most.accepts(&0x500001));
+    }
+
+    #[test]
+    fn test_address_mapper_roundtrip() {
+        let mapper = AddressToUnsignedLongMapper;
+        for addr in &["0x0", "0xFF", "0x401000"] {
+            let value = mapper.convert(&addr.to_string());
+            assert_eq!(format!("0x{:X}", value).to_lowercase(), addr.to_lowercase());
+        }
+    }
+
+    #[test]
+    fn test_binary_analysis_command_trait() {
+        #[derive(Debug)]
+        struct TestCmd;
+        impl BinaryAnalysisCommand for TestCmd {
+            fn name(&self) -> &str { "TestBinaryAnalysisCommand" }
+            fn can_apply(&self, _: &str) -> bool { true }
+            fn apply(&mut self, _: &str) -> Result<bool, String> { Ok(true) }
+            fn messages(&self) -> Option<&str> { None }
+        }
+
+        let mut cmd = TestCmd;
+        assert_eq!(cmd.name(), "TestBinaryAnalysisCommand");
+        assert!(cmd.can_apply("test"));
+        assert!(cmd.apply("test").unwrap());
+    }
+
+    #[test]
+    fn test_cross_module_table_and_mapper() {
+        let col = AddressTableColumn::new();
+        let mapper = AddressToProgramLocationRowMapper;
+        let addr = "0x401000".to_string();
+        let mapped = mapper.map(&addr).unwrap();
+        assert_eq!(col.column_name(), "Location");
+        assert_eq!(mapped, addr);
+    }
+}

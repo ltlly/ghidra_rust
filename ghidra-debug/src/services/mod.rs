@@ -579,3 +579,4 @@ pub mod trace_lifecycle;
 pub mod emulation_lifecycle;
 pub mod static_mapping_service;
 pub mod control_service;
+pub mod emulation_pcode_access;

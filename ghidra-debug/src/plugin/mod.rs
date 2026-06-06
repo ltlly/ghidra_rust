@@ -364,6 +364,8 @@ pub use gui_action_contexts_ext::DebuggerObjectPathActionContext;
 pub mod platform_impl;
 pub mod platform_opinion_framework;
 pub mod mapping_context;
+pub mod platform_connectors;
+pub mod debugger_utils;
 
 // New modules ported from remaining Debugger source files
 pub mod target_actions;
