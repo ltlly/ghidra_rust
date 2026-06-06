@@ -413,12 +413,12 @@ fn test_modrm_from_u8() {
 
 #[test]
 fn test_sib_fields() {
-    // scale=10 (4x), index=100 (none), base=101 (EBP)
+    // 0x95 = 10010101b: scale=10(4x), index=010(ESP), base=101(EBP)
     let s = SIB::new(0x95);
     assert_eq!(s.scale(), 2);
     assert_eq!(s.scale_multiplier(), 4);
-    assert_eq!(s.index(), 4);
-    assert!(s.no_index());
+    assert_eq!(s.index(), 2);
+    assert!(!s.no_index());
     assert_eq!(s.base(), 5);
 }
 
