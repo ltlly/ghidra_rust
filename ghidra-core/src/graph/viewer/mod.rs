@@ -4,9 +4,20 @@
 //! satellite view parameters, and shape routing.
 
 pub mod abstract_visual_graph_layout;
+pub mod actions;
+pub mod edge;
+pub mod graph_component;
 pub mod graph_perspective;
 pub mod graph_viewer_utils;
 pub mod layout_provider;
+pub mod mouse;
+pub mod options;
+pub mod picking;
+pub mod popup;
+pub mod renderer;
+pub mod satellite;
+pub mod shape;
+pub mod vertex;
 pub mod visual_types;
 
 pub use layout_provider::{
