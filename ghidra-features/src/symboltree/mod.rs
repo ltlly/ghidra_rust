@@ -56,6 +56,20 @@ pub mod symbol_ops;
 /// `ghidra.app.plugin.core.symboltree.actions`.
 pub mod symbol_tree_actions;
 
+/// Extended symbol tree actions (CreateNamespaceAction, CreateClassAction,
+/// CreateLibraryAction, CreateExternalLocationAction, ConvertToClassAction,
+/// PinSymbolAction, etc.).
+///
+/// Ported from individual action classes in
+/// `ghidra.app.plugin.core.symboltree`.
+pub mod actions_ext;
+
+/// Extended symbol node types, search results, and tree state.
+///
+/// Ported from symbol node and search classes in
+/// `ghidra.app.plugin.core.symboltree`.
+pub mod symbol_nodes;
+
 use std::collections::BTreeMap;
 
 /// Options category name.

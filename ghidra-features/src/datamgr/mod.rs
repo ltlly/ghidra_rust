@@ -82,6 +82,13 @@ pub mod associate;
 /// `DerivativeDataTypeInfo`, `DuplicateIdException`, and `ArchiveUtils`.
 pub mod sync_table;
 
+/// Archive lifecycle operations: open, close, save, lock, unlock, merge,
+/// undo/redo, and detailed sync information for individual data types.
+///
+/// Ported from archive action classes and DataTypeSyncInfo in
+/// `ghidra.app.plugin.core.datamgr`.
+pub mod archive_ops;
+
 // Re-export the most-used public types at the datamgr level.
 pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArchive,
                    ProjectArchive, InvalidFileArchive, ArchiveManagerListener};

@@ -34,6 +34,18 @@ pub mod function_data_view;
 pub mod storage_editor;
 pub mod extra_actions;
 
+/// Function creation, deletion, and editing actions (CreateFunctionAction,
+/// DeleteFunctionAction, EditFunctionAction, etc.).
+///
+/// Ported from `ghidra.app.plugin.core.function` individual action classes.
+pub mod action_creators;
+
+/// Extended function analyzers (CreateThunkAnalyzer, SharedReturnAnalyzer,
+/// StackVariableAnalyzer, X86FunctionPurgeAnalyzer, ExternalEntryFunctionAnalyzer).
+///
+/// Ported from `ghidra.app.plugin.core.function` analyzer classes.
+pub mod analyzers_ext;
+
 pub use plugin::*;
 pub use actions::*;
 pub use tags::*;

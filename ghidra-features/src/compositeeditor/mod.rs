@@ -85,6 +85,12 @@ pub mod actions_impl;
 pub mod bitfield_dialog;
 pub mod undo_actions;
 
+/// Read-only composite viewer model for previewing data type structures.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeViewerModel`
+/// and related viewer types.
+pub mod viewer_model;
+
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of components allowed in a composite type.

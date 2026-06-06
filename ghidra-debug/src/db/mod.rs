@@ -153,7 +153,11 @@ pub use trace_db_direct_listener::{
 };
 pub use trace_db_time_viewport::{SingleSnapViewport, TraceTimeViewport};
 pub use trace_db_user_data::{DbTraceUserData, UserDataEntry};
-pub use trace_db_utils::{TraceDatabaseInfo, TraceDbUtils};
+pub use trace_db_utils::{
+    EncodedRefType, OffsetSnap, OffsetThenSnapKey, SnapThenOffsetKey, TraceDatabaseInfo,
+    TraceDbUtils, compute_diffs_ranges, decode_string, encode_compiler_spec_id,
+    encode_language_id, encode_string, encode_url, hash_bytes, table_name,
+};
 pub use trace_db_addr_property::{
     AddressPropertyEntry, DBTraceAddressPropertyApiView, DBTraceAddressPropertyManager,
 };

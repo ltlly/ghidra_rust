@@ -21,6 +21,8 @@ pub mod errors;
 pub mod debug_info;
 pub mod registers;
 pub mod globals;
+pub mod pdb_applicator;
+pub mod symbol_server;
 
 use std::collections::HashMap;
 use std::fmt;
