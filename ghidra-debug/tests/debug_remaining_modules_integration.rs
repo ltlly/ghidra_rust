@@ -553,3 +553,331 @@ fn test_full_trace_data_pipeline() {
     assert_eq!(entries.len(), 3);
     assert!(entries.iter().all(|e| !e.is_scratch()));
 }
+
+// ===========================================================================
+// Query Cache Tests (ported from DBTraceCacheForContainingQueries / SequenceQueries)
+// ===========================================================================
+#[cfg(test)]
+mod query_cache_tests {
+    use ghidra_debug::db::trace_db_query_cache::*;
+    use ghidra_debug::model::Lifespan;
+
+    #[test]
+    fn test_containing_cache_add_and_query() {
+        let mut cache = ContainingQueryCache::<String>::new(10, 0x1000, 100);
+        assert!(cache.is_empty());
+
+        cache.add_entry(CachedRangeEntry {
+            min_offset: 0x1000,
+            max_offset: 0x2000,
+            lifespan: Lifespan::span(0, 100),
+            value: "region_a".to_string(),
+        });
+        cache.add_entry(CachedRangeEntry {
+            min_offset: 0x3000,
+            max_offset: 0x4000,
+            lifespan: Lifespan::span(0, 100),
+            value: "region_b".to_string(),
+        });
+        assert_eq!(cache.len(), 2);
+
+        let results = cache.get_all_containing(&CachePointKey::new(50, 0x1500));
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0], "region_a");
+
+        let results = cache.get_all_containing(&CachePointKey::new(50, 0x3500));
+        assert_eq!(results.len(), 1);
+        assert_eq!(*results[0], "region_b");
+
+        let results = cache.get_all_containing(&CachePointKey::new(50, 0x2500));
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_containing_cache_snap_out_of_range() {
+        let mut cache = ContainingQueryCache::<i32>::new(10, 0x1000, 100);
+        cache.add_entry(CachedRangeEntry {
+            min_offset: 0x1000,
+            max_offset: 0x2000,
+            lifespan: Lifespan::span(0, 100),
+            value: 42,
+        });
+
+        assert_eq!(cache.get_first_containing(&CachePointKey::new(50, 0x1500)), Some(&42));
+        assert_eq!(cache.get_first_containing(&CachePointKey::new(200, 0x1500)), None);
+    }
+
+    #[test]
+    fn test_containing_cache_invalidation() {
+        let mut cache = ContainingQueryCache::<String>::new(10, 0x1000, 100);
+        cache.add_entry(CachedRangeEntry {
+            min_offset: 0x1000,
+            max_offset: 0x2000,
+            lifespan: Lifespan::span(0, 100),
+            value: "test".to_string(),
+        });
+        cache.notify_entry_removed();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_containing_cache_compute_ranges() {
+        let cache = ContainingQueryCache::<i32>::new(10, 0x1000, 100);
+        let (smin, smax) = cache.compute_snap_range(50);
+        assert_eq!(smin, 40);
+        assert_eq!(smax, 60);
+        let (amin, amax) = cache.compute_addr_range(0x5000);
+        assert_eq!(amin, 0x4000);
+        assert_eq!(amax, 0x6000);
+    }
+
+    #[test]
+    fn test_sequence_cache_basic() {
+        let mut cache = SequenceQueryCache::<String>::new(5, 0x1000);
+        {
+            let region = cache.ensure_in_cache(0, 0x1004);
+            region.load(vec![
+                (0x1000, "nop".to_string()),
+                (0x1004, "mov".to_string()),
+                (0x1008, "add".to_string()),
+            ]);
+        }
+
+        assert_eq!(cache.get_floor(0, 0x1005).map(|s| s.as_str()), Some("mov"));
+        assert_eq!(cache.get_ceiling(0, 0x1005).map(|s| s.as_str()), Some("add"));
+    }
+
+    #[test]
+    fn test_sequence_cache_lru_eviction() {
+        let mut cache = SequenceQueryCache::<i32>::new(2, 0x100);
+
+        { let r = cache.ensure_in_cache(0, 0x100); r.load(vec![(0x100, 1)]); }
+        { let r = cache.ensure_in_cache(0, 0x200); r.load(vec![(0x200, 2)]); }
+        assert_eq!(cache.region_count(), 2);
+
+        { let r = cache.ensure_in_cache(0, 0x300); r.load(vec![(0x300, 3)]); }
+        assert_eq!(cache.region_count(), 2); // evicted one
+    }
+
+    #[test]
+    fn test_sequence_cache_invalidation() {
+        let mut cache = SequenceQueryCache::<i32>::new(3, 0x100);
+        { let r = cache.ensure_in_cache(0, 0x100); r.load(vec![(0x100, 1)]); }
+        assert_eq!(cache.region_count(), 1);
+        cache.invalidate();
+        assert_eq!(cache.region_count(), 0);
+    }
+
+    #[test]
+    fn test_cached_range_entry_contains() {
+        let entry = CachedRangeEntry {
+            min_offset: 0x1000,
+            max_offset: 0x2000,
+            lifespan: Lifespan::span(5, 15),
+            value: "test",
+        };
+        assert!(entry.contains(&CachePointKey::new(10, 0x1500)));
+        assert!(!entry.contains(&CachePointKey::new(20, 0x1500)));
+        assert!(!entry.contains(&CachePointKey::new(10, 0x3000)));
+    }
+
+    #[test]
+    fn test_point_key_hash_and_eq() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(CachePointKey::new(1, 100));
+        set.insert(CachePointKey::new(1, 100));
+        set.insert(CachePointKey::new(2, 100));
+        assert_eq!(set.len(), 2);
+    }
+}
+
+// ===========================================================================
+// Trace Utility Tests (ported from ghidra.trace.util)
+// ===========================================================================
+#[cfg(test)]
+mod trace_util_tests {
+    use ghidra_debug::util::trace_util_extras::*;
+    use ghidra_debug::model::Lifespan;
+
+    #[test]
+    fn test_overlapping_object_iterator() {
+        let items = vec![1, 2, 3, 4, 5];
+        let collected: Vec<_> = OverlappingObjectIterator::new(items).collect();
+        assert_eq!(collected, vec![1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn test_viewport_span_iterator_partial() {
+        let lifespans = vec![Lifespan::span(0, 10), Lifespan::span(20, 30)];
+        let spans: Vec<_> = ViewportSpanIterator::new(5, 25, lifespans).collect();
+        assert_eq!(spans.len(), 2);
+        assert_eq!(spans[0], Lifespan::span(5, 10));
+        assert_eq!(spans[1], Lifespan::span(20, 25));
+    }
+
+    #[test]
+    fn test_viewport_span_iterator_no_intersection() {
+        let lifespans = vec![Lifespan::span(0, 5), Lifespan::span(10, 15)];
+        let spans: Vec<_> = ViewportSpanIterator::new(6, 9, lifespans).collect();
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn test_byte_array_utils() {
+        assert!(ByteArrayUtils::equals(&[1, 2, 3], &[1, 2, 3]));
+        assert!(!ByteArrayUtils::equals(&[1, 2], &[1, 2, 3]));
+
+        let mut dest = [0u8; 4];
+        ByteArrayUtils::xor(&[0xFF, 0x00, 0xAA, 0x55], &[0xFF, 0xFF, 0xFF, 0xFF], &mut dest);
+        assert_eq!(dest, [0x00, 0xFF, 0x55, 0xAA]);
+
+        assert_ne!(ByteArrayUtils::hash(&[1, 2, 3]), 0);
+    }
+
+    #[test]
+    fn test_method_protector() {
+        let mut protector = MethodProtector::new();
+        assert!(!protector.is_active());
+        assert!(protector.enter());
+        assert!(protector.is_active());
+        assert!(!protector.enter()); // reentrant guard
+        protector.leave();
+        assert!(!protector.is_active());
+        assert!(protector.enter());
+    }
+
+    #[test]
+    fn test_copy_on_write_lifecycle() {
+        let mut cow = CopyOnWrite::new(vec![10, 20, 30]);
+        assert!(!cow.is_dirty());
+        cow.get_mut().push(40);
+        assert!(cow.is_dirty());
+        assert_eq!(cow.get().len(), 4);
+        cow.mark_clean();
+        assert_eq!(cow.into_inner(), vec![10, 20, 30, 40]);
+    }
+}
+
+// ===========================================================================
+// Platform Connector Tests
+// ===========================================================================
+#[cfg(test)]
+mod platform_connector_tests {
+    use ghidra_debug::plugin::platform_connectors::*;
+    use ghidra_debug::services::platform_impl::Endian;
+
+    #[test]
+    fn test_builtin_providers_count() {
+        let providers = builtin_opinion_providers();
+        assert!(providers.len() >= 5); // GDB, LLDB, Frida, DbgEng, JDI, Host, Override
+    }
+
+    #[test]
+    fn test_gdb_x86_64_linux() {
+        let offers = query_opinions(Some("gdb"), "x86_64", "Linux", Some(Endian::Little), false);
+        assert!(!offers.is_empty());
+        for i in 1..offers.len() {
+            assert!(offers[i - 1].confidence >= offers[i].confidence);
+        }
+    }
+
+    #[test]
+    fn test_lldb_aarch64_darwin() {
+        let offers = query_opinions(Some("lldb"), "aarch64", "Darwin", Some(Endian::Little), false);
+        assert!(!offers.is_empty());
+    }
+
+    #[test]
+    fn test_host_fallback() {
+        let offers = query_opinions(None, "x86_64", "Linux", None, false);
+        assert!(!offers.is_empty());
+    }
+}
+
+// ===========================================================================
+// API Types Tests
+// ===========================================================================
+#[cfg(test)]
+mod api_type_tests {
+    use ghidra_debug::api::action_name::ActionName;
+    use ghidra_debug::api::breakpoint::LogicalBreakpoint;
+    use ghidra_debug::api::control_mode::ControlMode;
+
+    #[test]
+    fn test_action_name_variants() {
+        let _ = ActionName::Continue;
+        let _ = ActionName::StepInto;
+        let _ = ActionName::StepOver;
+        let _ = ActionName::StepOut;
+        let _ = ActionName::Kill;
+        let _ = ActionName::Detach;
+    }
+
+    #[test]
+    fn test_logical_breakpoint_lifecycle() {
+        let bp = LogicalBreakpoint::new(0x401000, "main");
+        assert_eq!(bp.offset, 0x401000);
+        assert!(bp.is_enabled());
+    }
+
+    #[test]
+    fn test_control_mode_variants() {
+        let _ = ControlMode::RoTarget;
+        let _ = ControlMode::RwTarget;
+    }
+}
+
+// ===========================================================================
+// Pcode Trace Emulation Tests
+// ===========================================================================
+#[cfg(test)]
+mod pcode_trace_tests {
+    use ghidra_debug::pcode::trace_emu::unknown_state_exception::UnknownStatePcodeExecutionException;
+
+    #[test]
+    fn test_unknown_state_exception() {
+        let exc = UnknownStatePcodeExecutionException::new(
+            0x1000,
+            "Read of uninitialized memory at 0x1000",
+        );
+        assert_eq!(exc.address, 0x1000);
+        assert!(exc.message.contains("0x1000"));
+    }
+
+    #[test]
+    fn test_unknown_state_exception_display() {
+        let exc = UnknownStatePcodeExecutionException::new(0x2000, "test error");
+        let display = format!("{}", exc);
+        assert!(display.contains("test error"));
+    }
+}
+
+// ===========================================================================
+// Emulation Integration Tests
+// ===========================================================================
+#[cfg(test)]
+mod emulation_integration_tests {
+    use ghidra_debug::services::emulation_integration_ext::*;
+
+    #[test]
+    fn test_write_modes() {
+        assert!(TargetWriteMode::Rw.can_write());
+        assert!(!TargetWriteMode::Ro.can_write());
+    }
+
+    #[test]
+    fn test_writer_configs() {
+        let delayed = EmulationWriterConfig::delayed_write_trace();
+        assert!(!delayed.mode.can_write());
+        assert!(delayed.log_writes);
+
+        let immediate = EmulationWriterConfig::immediate_write_target();
+        assert!(immediate.mode.can_write());
+        assert!(immediate.immediate_write_target);
+
+        let trace_only = EmulationWriterConfig::trace_only();
+        assert!(!trace_only.mode.can_write());
+        assert!(!trace_only.redirect_reads_to_target);
+    }
+}

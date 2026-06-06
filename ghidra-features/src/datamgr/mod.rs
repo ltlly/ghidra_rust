@@ -89,6 +89,32 @@ pub mod sync_table;
 /// `ghidra.app.plugin.core.datamgr`.
 pub mod archive_ops;
 
+/// Additional tree node types (BuiltInArchiveNode, ProgramArchiveNode,
+/// ProjectArchiveNode, InvalidArchiveNode, etc.).
+///
+/// Ported from individual tree node classes in
+/// `ghidra.app.plugin.core.datamgr.tree`.
+pub mod tree_nodes;
+
+/// Archive management actions: create, delete, save-as, open, close,
+/// lock, unlock, expand/collapse, merge dialogs, and undo/redo.
+///
+/// Ported from action classes in `ghidra.app.plugin.core.datamgr.actions`.
+pub mod actions_archive;
+
+/// Data type-specific actions: apply enums as labels, capture function
+/// data types, create enums from selection, find enums by value.
+///
+/// Ported from action classes in `ghidra.app.plugin.core.datamgr.actions`.
+pub mod actions_datatype;
+
+/// Concrete association action implementations: commit, revert, update,
+/// disassociate, sync refresh.
+///
+/// Ported from action classes in
+/// `ghidra.app.plugin.core.datamgr.actions.associate`.
+pub mod actions_associate_impl;
+
 // Re-export the most-used public types at the datamgr level.
 pub use archive::{Archive, ArchiveKind, BuiltInArchive, FileArchive, ProgramArchive,
                    ProjectArchive, InvalidFileArchive, ArchiveManagerListener};

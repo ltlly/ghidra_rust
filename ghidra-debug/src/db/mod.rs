@@ -400,3 +400,10 @@ pub use trace_db_object_write_cache::{
 pub use trace_db_symbol_multi_views::{
     MultiTypeFilter, MultiTypeSymbolEntry, MultiTypeSymbolViewBuilder,
 };
+
+// Query cache implementations ported from Framework-TraceModeling
+pub mod trace_db_query_cache;
+pub use trace_db_query_cache::{
+    CachePointKey, CachedRangeEntry, CachedSequenceRegion,
+    ContainingQueryCache, SequenceQueryCache,
+};

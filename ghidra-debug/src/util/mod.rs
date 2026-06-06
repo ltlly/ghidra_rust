@@ -40,3 +40,10 @@ pub use trace_register_utils::{
 pub mod trace_coordinate_helper;
 
 pub mod trace_event_dispatch;
+
+// Additional trace utilities ported from Framework-TraceModeling
+pub mod trace_util_extras;
+pub use trace_util_extras::{
+    ByteArrayUtils, CopyOnWrite as CowWrapper, MethodProtector as TraceMethodProtector,
+    OverlappingObjectIterator as OverlappingIter, SuppressableCallback, ViewportSpanIterator,
+};
