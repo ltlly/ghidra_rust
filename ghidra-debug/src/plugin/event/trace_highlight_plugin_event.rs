@@ -1,0 +1,42 @@
+//! Trace highlight event.
+
+/// Trace highlight event.
+#[derive(Debug, Clone)]
+pub struct TraceHighlightPluginEvent {
+    /// coordinates_json
+    pub coordinates_json: String,
+}
+
+impl TraceHighlightPluginEvent {
+    /// Create a new TraceHighlightPluginEvent.
+    pub fn new(coordinates_json: String) -> Self {
+        Self { coordinates_json }
+    }
+
+    /// coordinates_json
+    pub fn coordinates_json(&self) -> &String {
+        &self.coordinates_json
+    }
+}
+
+impl Default for TraceHighlightPluginEvent {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_creation() {
+        let obj = TraceHighlightPluginEvent::new("test".to_string());
+        assert!(true);
+    }
+
+    #[test]
+    fn test_default() {
+        let _obj = TraceHighlightPluginEvent::default();
+    }
+}

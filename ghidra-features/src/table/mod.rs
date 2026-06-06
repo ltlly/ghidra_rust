@@ -26,6 +26,10 @@
 //!   navigation support.
 //! - [`plugin`] -- [`TableServicePlugin`] managing providers and
 //!   dialogs per program.
+//! - [`field`] -- Program-location-based table column definitions
+//!   (ported from `ghidra.util.table.field`).
+//! - [`models`] -- Program-aware table model implementations.
+//! - [`render`] -- Cell renderers for table display.
 
 pub mod adapter;
 pub mod dialog;
@@ -35,6 +39,15 @@ pub mod model;
 pub mod plugin;
 pub mod provider;
 pub mod traits;
+
+/// Program-location-based table column definitions (61 Java files ported).
+pub mod field;
+
+/// Program-aware table model implementations.
+pub mod models;
+
+/// Cell renderers for table display.
+pub mod render;
 
 // Re-export key types at the module root for convenience.
 pub use adapter::{ColumnDisplayDynamicTableColumnAdapter, DynamicTableColumn};
@@ -48,3 +61,14 @@ pub use model::{SimpleRowObject, SortColumn, TableChooserTableModel, TableSortSt
 pub use plugin::{PluginState, TableServicePlugin};
 pub use provider::{ComponentProviderState, MarkerSet, TableComponentProvider};
 pub use traits::{AddressableRowObject, ColumnDisplay, TableChooserExecutor, TableService};
+
+// Re-export key types from the new sub-modules.
+pub use field::core::{AddressBasedLocation, ReferenceEndpoint, IncomingReferenceEndpoint,
+    OutgoingReferenceEndpoint, ReferenceAddressPair};
+pub use field::traits::{ProgramBasedDynamicTableColumn, ProgramLocationTableColumn,
+    Settings, ServiceProvider, ProgramInfo, RefType, SymbolType, SourceType};
+pub use field::function_columns::FunctionInfo;
+pub use models::{ProgramTableModel, GhidraProgramTableModel, AddressBasedTableModel,
+    AddressSetTableModel, IncomingReferencesTableModel, ReferencesFromTableModel};
+pub use render::{GhidraTableCellRenderer, CodeUnitTableCellRenderer,
+    CompositeGhidraTableCellRenderer, PreviewDataTableCellRenderer, RenderStyle};

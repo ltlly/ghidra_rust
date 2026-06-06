@@ -286,3 +286,5 @@ pub mod trace_unique_object;
 // Extended trace options and user preferences
 pub mod trace_options_ext;
 pub use trace_options_ext::{TraceOptionValue, TraceOptionsStore, TraceUserPreferences};
+pub mod default_address_snap;
+pub mod default_trace_span;

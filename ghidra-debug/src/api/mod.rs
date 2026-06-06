@@ -38,6 +38,7 @@ pub mod tracermi_listener;
 pub mod tracemgr;
 pub mod tracermi;
 pub mod watch;
+pub mod model;
 pub mod target_listener;
 pub mod trace_address_snap_range;
 

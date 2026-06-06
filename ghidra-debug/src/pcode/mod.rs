@@ -53,3 +53,4 @@ pub use abstract_trace_access::{
     PropertyEntry as AbstractPropertyEntry, SnapAndThread, ThreadAccessContext,
     TraceDataReadCache, TracePropertyAccess as AbstractTracePropertyAccess,
 };
+pub mod trace;
