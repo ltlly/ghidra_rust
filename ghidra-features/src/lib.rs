@@ -332,25 +332,25 @@ pub use base::equate;
 /// ExternalReferencesProvider, OffsetTablePlugin, and edit dialog model.
 ///
 /// Ported from `ghidra.app.plugin.core.references`.
-pub use base::references;
+pub mod references;
 
 /// Register value management: register tree navigation, value range display,
 /// set/clear register value commands, and the RegisterManager UI model.
 ///
 /// Ported from `ghidra.app.plugin.core.register`.
-pub use base::register;
+pub mod register;
 
 /// Function plugin: actions for creating, editing, deleting, and managing
 /// functions and their variables, tags, thunk detection, and stack analysis.
 ///
 /// Ported from `ghidra.app.plugin.core.function`.
-pub use base::function;
+pub mod function;
 
 /// Console plugin: scripting console service, message display, code
 /// completion, and console word-at-cursor navigation.
 ///
 /// Ported from `ghidra.app.plugin.core.console`.
-pub use base::console;
+pub mod console;
 
 /// Plugin events for program lifecycle, location, selection, and highlighting.
 ///

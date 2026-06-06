@@ -9,7 +9,6 @@ use std::sync::Mutex;
 /// A buffered runner that batches runnable executions.
 ///
 /// Ports `ghidra.util.task.BufferedSwingRunner`.
-#[derive(Debug)]
 pub struct BufferedSwingRunner {
     /// Queue of pending closures.
     queue: Mutex<VecDeque<Box<dyn Fn() + Send + Sync>>>,
@@ -19,6 +18,15 @@ pub struct BufferedSwingRunner {
     submitted: std::sync::atomic::AtomicU64,
     /// Total executed count.
     executed: std::sync::atomic::AtomicU64,
+}
+
+impl std::fmt::Debug for BufferedSwingRunner {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferedSwingRunner")
+            .field("batch_size", &self.batch_size)
+            .field("pending", &self.pending_count())
+            .finish()
+    }
 }
 
 impl BufferedSwingRunner {
@@ -106,7 +114,7 @@ impl Default for BufferedSwingRunner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
     #[test]

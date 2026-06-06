@@ -296,6 +296,49 @@ impl Default for RegisterPluginModel {
 }
 
 // ---------------------------------------------------------------------------
+// RegisterManagerContext -- action context for the register manager provider
+// ---------------------------------------------------------------------------
+
+/// Action context for the register manager provider.
+///
+/// Ported from `RegisterManagerContext` inner class in
+/// `RegisterManagerProvider.java`.
+#[derive(Debug, Clone)]
+pub struct RegisterManagerContext {
+    /// The currently selected register (if any).
+    pub selected_register: Option<String>,
+    /// Whether any value range rows are selected in the values panel.
+    pub has_selected_rows: bool,
+    /// The current program context.
+    pub program_context: Option<String>,
+}
+
+impl RegisterManagerContext {
+    /// Create a new register manager context.
+    pub fn new(
+        selected_register: Option<String>,
+        has_selected_rows: bool,
+        program_context: Option<String>,
+    ) -> Self {
+        Self {
+            selected_register,
+            has_selected_rows,
+            program_context,
+        }
+    }
+
+    /// Returns `true` if a register is selected.
+    pub fn has_selected_register(&self) -> bool {
+        self.selected_register.is_some()
+    }
+
+    /// Returns `true` if value range rows are selected.
+    pub fn has_selected_register_value_ranges(&self) -> bool {
+        self.has_selected_rows
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -463,5 +506,38 @@ mod tests {
         assert!(model.delete_range_action.enabled);
         assert!(model.delete_at_function_action.enabled);
         assert!(model.clear_register_action.enabled);
+    }
+
+    // -- RegisterManagerContext --
+
+    #[test]
+    fn test_register_manager_context_new() {
+        let ctx = RegisterManagerContext::new(
+            Some("EAX".to_string()),
+            true,
+            Some("test_program".to_string()),
+        );
+        assert!(ctx.has_selected_register());
+        assert!(ctx.has_selected_register_value_ranges());
+        assert_eq!(ctx.selected_register.as_deref(), Some("EAX"));
+    }
+
+    #[test]
+    fn test_register_manager_context_no_register() {
+        let ctx = RegisterManagerContext::new(None, false, None);
+        assert!(!ctx.has_selected_register());
+        assert!(!ctx.has_selected_register_value_ranges());
+    }
+
+    #[test]
+    fn test_register_manager_context_clone() {
+        let ctx = RegisterManagerContext::new(
+            Some("RAX".to_string()),
+            true,
+            None,
+        );
+        let cloned = ctx.clone();
+        assert_eq!(cloned.selected_register, ctx.selected_register);
+        assert_eq!(cloned.has_selected_rows, ctx.has_selected_rows);
     }
 }

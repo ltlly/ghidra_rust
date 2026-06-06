@@ -16,6 +16,12 @@ pub mod tracked_task;
 
 // New modules ported from Ghidra's task framework
 pub mod compound_task;
+pub mod task;
+pub mod task_listener;
+pub mod swing_runnable;
+pub mod abstract_swing_update_manager;
+pub mod unknown_progress_wrapping_task_monitor;
+pub mod buffered_swing_runner;
 
 pub use script_task_listener::ScriptTaskListener;
 pub use task_dialog::TaskDialog;

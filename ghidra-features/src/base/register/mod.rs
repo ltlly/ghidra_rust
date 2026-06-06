@@ -22,7 +22,8 @@ pub use commands::{RegisterCommand, SetRegisterValueCmd};
 pub use dialog::{RegisterDialogError, RegisterDialogMode, RegisterValueDialogModel};
 pub use manager::RegisterManager;
 pub use plugin::{
-    RegisterActionType, RegisterPluginAction, RegisterPluginModel, RegisterTransitionInfo,
+    RegisterActionType, RegisterManagerContext, RegisterPluginAction, RegisterPluginModel,
+    RegisterTransitionInfo,
 };
 pub use tree::{RegisterGroupNode, RegisterNode, RegisterTree};
 pub use value_range::RegisterValueRange;

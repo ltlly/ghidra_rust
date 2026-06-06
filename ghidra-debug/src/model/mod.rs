@@ -214,6 +214,24 @@ pub use trace_memory_ops::{
     find_first_non_matching, is_state_entirely as memory_is_state_entirely,
 };
 
+// New content handler and data view modules ported from Framework-TraceModeling
+pub mod trace_db_content;
+pub mod trace_data_views;
+pub use trace_db_content::{
+    DirectModelContentHandler, LinkModelContentHandler, ModelContentError, ModelContentHandler,
+    ModelContentMetadata, ModelContentType,
+};
+pub use trace_data_views::{
+    ModelCodeUnitsView, ViewCodeUnitType, ViewDataConfig, ViewDataEntry,
+    ViewReferenceInfo, ViewReferenceType,
+};
+
+// Address factory types ported from Framework-TraceModeling
+pub mod trace_address_factory;
+pub use trace_address_factory::{
+    ModelAddressSpaceDesc, ModelAddressSpaceType, ModelTraceAddressFactory,
+};
+
 pub use experiment::{
     DebugExperiment, DiagnosticBoundingBox, RStarTreeDiagnostics, TracePerformanceMetrics,
 };

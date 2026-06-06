@@ -5,6 +5,7 @@
 //! wrapping legacy or external APIs that don't report progress.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Mutex;
 
 /// Wraps an unknown-progress task to display an indeterminate progress indicator.
 ///
@@ -14,9 +15,9 @@ pub struct UnknownProgressWrappingTaskMonitor {
     /// Whether the task has been cancelled.
     cancelled: AtomicBool,
     /// Current message.
-    message: parking_lot::Mutex<String>,
+    message: Mutex<String>,
     /// Sub-task progress (0.0 to 1.0) if available.
-    sub_progress: parking_lot::Mutex<Option<f64>>,
+    sub_progress: Mutex<Option<f64>>,
     /// Step count for pulsing animation.
     step: AtomicU64,
 }
@@ -26,8 +27,8 @@ impl UnknownProgressWrappingTaskMonitor {
     pub fn new() -> Self {
         Self {
             cancelled: AtomicBool::new(false),
-            message: parking_lot::Mutex::new(String::new()),
-            sub_progress: parking_lot::Mutex::new(None),
+            message: Mutex::new(String::new()),
+            sub_progress: Mutex::new(None),
             step: AtomicU64::new(0),
         }
     }
@@ -44,22 +45,26 @@ impl UnknownProgressWrappingTaskMonitor {
 
     /// Set the current message.
     pub fn set_message(&self, msg: &str) {
-        *self.message.lock() = msg.to_string();
+        if let Ok(mut m) = self.message.lock() {
+            *m = msg.to_string();
+        }
     }
 
     /// Get the current message.
     pub fn message(&self) -> String {
-        self.message.lock().clone()
+        self.message.lock().map(|m| m.clone()).unwrap_or_default()
     }
 
     /// Set a sub-task progress value.
     pub fn set_sub_progress(&self, progress: Option<f64>) {
-        *self.sub_progress.lock() = progress;
+        if let Ok(mut sp) = self.sub_progress.lock() {
+            *sp = progress;
+        }
     }
 
     /// Get the sub-task progress.
     pub fn sub_progress(&self) -> Option<f64> {
-        *self.sub_progress.lock()
+        self.sub_progress.lock().ok()?.clone()
     }
 
     /// Advance the pulse step (for indeterminate animation).
@@ -75,8 +80,12 @@ impl UnknownProgressWrappingTaskMonitor {
     /// Reset the monitor.
     pub fn reset(&self) {
         self.cancelled.store(false, Ordering::SeqCst);
-        *self.message.lock() = String::new();
-        *self.sub_progress.lock() = None;
+        if let Ok(mut m) = self.message.lock() {
+            *m = String::new();
+        }
+        if let Ok(mut sp) = self.sub_progress.lock() {
+            *sp = None;
+        }
         self.step.store(0, Ordering::Relaxed);
     }
 }

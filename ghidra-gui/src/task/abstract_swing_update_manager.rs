@@ -85,8 +85,14 @@ impl AbstractSwingUpdateManager {
             return false;
         }
 
-        let last = self.last_request.lock().ok()?;
-        let request_time = last?;
+        let guard = match self.last_request.lock() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+        let request_time = match *guard {
+            Some(t) => t,
+            None => return false,
+        };
         let elapsed = request_time.elapsed();
 
         if elapsed >= self.max_delay {
