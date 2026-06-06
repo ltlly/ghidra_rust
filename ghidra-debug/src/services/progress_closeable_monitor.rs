@@ -26,6 +26,7 @@ pub struct CloseableTaskMonitor {
     /// Whether the monitor is indeterminate (no progress tracking).
     indeterminate: bool,
     /// The number of progress listeners.
+    #[allow(dead_code)]
     listener_count: usize,
 }
 

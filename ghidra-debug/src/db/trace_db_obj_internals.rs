@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
-use crate::target::{KeyPath, ObjectValue};
+use crate::target::ObjectValue;
 
 /// A box holding a single value for a trace object entry.
 ///

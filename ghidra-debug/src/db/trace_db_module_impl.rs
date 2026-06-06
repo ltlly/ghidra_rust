@@ -11,7 +11,6 @@
 //! The static mapping manager handles the correspondence between
 //! program addresses and trace addresses for each module.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

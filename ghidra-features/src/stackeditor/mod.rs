@@ -30,6 +30,16 @@ pub mod option_manager;
 /// `ghidra.app.plugin.core.stackeditor.EditStackAction`.
 pub mod panel;
 
+/// Stack editor manager plugin -- popup edit sessions for function stack frames.
+///
+/// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorManagerPlugin`.
+pub mod plugin;
+
+/// Stack editor provider -- editor for a function's stack frame.
+///
+/// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorProvider`.
+pub mod provider;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

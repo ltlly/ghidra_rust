@@ -72,7 +72,7 @@ pub trait DisassemblyInject: std::fmt::Debug + Send + Sync {
     }
 
     /// Modify the disassembly result.
-    fn modify_result(&self, result: &mut DisassemblyResult) {
+    fn modify_result(&self, _result: &mut DisassemblyResult) {
         // Default: no modification
     }
 }

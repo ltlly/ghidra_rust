@@ -6,7 +6,7 @@
 
 use crate::model::Lifespan;
 use crate::model::map_proposal::{
-    MapProposal, ModuleMapProposal, RegionMapProposal, SectionMapProposal, SectionMapping,
+    ModuleMapProposal, RegionMapProposal, SectionMapProposal, SectionMapping,
 };
 
 /// Utility functions for static mapping operations.
@@ -113,8 +113,8 @@ impl StaticMappingUtils {
 
     /// Check if two mapping ranges are compatible for merging.
     pub fn are_compatible(
-        prog_min1: u64, trace_min1: u64, len1: u64,
-        prog_min2: u64, trace_min2: u64, len2: u64,
+        prog_min1: u64, trace_min1: u64, _len1: u64,
+        prog_min2: u64, trace_min2: u64, _len2: u64,
     ) -> bool {
         // Check that the relative offsets are consistent
         let offset1 = trace_min1.wrapping_sub(prog_min1);

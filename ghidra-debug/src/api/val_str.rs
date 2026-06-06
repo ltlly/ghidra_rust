@@ -6,7 +6,6 @@
 //! and watch expressions.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fmt;
 
 /// A value paired with its string representation.

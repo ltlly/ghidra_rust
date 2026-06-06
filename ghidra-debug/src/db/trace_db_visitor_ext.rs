@@ -8,10 +8,9 @@
 //! Submodule: `TreeTraversal` - Core tree traversal framework with
 //! visitor pattern.
 
-use std::collections::BTreeSet;
 
 use crate::model::Lifespan;
-use crate::target::{KeyPath, PathFilter, PathMatcher, PathPattern, VisitResult};
+use crate::target::{KeyPath, PathMatcher, PathPattern, VisitResult};
 
 /// The composed result of walking a path through the tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -185,7 +184,7 @@ impl TreeTraversal {
             VisitResult::IncludePrune => vec![composed_path],
             VisitResult::ExcludePrune => Vec::new(),
             VisitResult::IncludeDescend => {
-                let mut result = vec![composed_path.clone()];
+                let result = vec![composed_path.clone()];
                 // Would continue into child objects
                 result
             }

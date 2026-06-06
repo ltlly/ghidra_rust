@@ -3,7 +3,6 @@
 //! Ported from Ghidra's `ghidra.trace.database.bookmark.DBTraceBookmarkType`.
 //! Represents a bookmark category with visual properties (color, priority, icon).
 
-use crate::model::bookmark::TraceBookmark;
 
 /// A bookmark type in the database-backed trace.
 ///

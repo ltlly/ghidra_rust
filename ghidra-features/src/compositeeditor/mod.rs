@@ -91,6 +91,17 @@ pub mod undo_actions;
 /// and related viewer types.
 pub mod viewer_model;
 
+/// Composite editor action manager -- manages favorites, cycle groups, and
+/// custom editor actions for the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompositeEditorActionManager`.
+pub mod action_manager;
+
+/// Data type helper utilities for the composite editor.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.DataTypeHelper`.
+pub mod data_type_helper;
+
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of components allowed in a composite type.

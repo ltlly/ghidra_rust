@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// Supported export formats for trace data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

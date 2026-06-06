@@ -3,7 +3,6 @@
 //! Ported from Ghidra's `ghidra.trace.model.listing.TraceDataView`
 //! and `ghidra.trace.model.listing.TraceInstructionsView`.
 
-use super::Lifespan;
 use super::listing::{CodeUnitType, TraceCodeUnit};
 use serde::{Deserialize, Serialize};
 

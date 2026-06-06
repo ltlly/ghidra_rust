@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::api::breakpoint::{
-    BreakpointConsistency, BreakpointMode, BreakpointState, LogicalBreakpoint,
+    BreakpointState, LogicalBreakpoint,
 };
 use crate::model::breakpoint::TraceBreakpointKind;
 

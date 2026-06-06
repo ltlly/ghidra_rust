@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::model::target_schema::SchemaName;
 
 /// Metadata describing a trace object interface.
 ///

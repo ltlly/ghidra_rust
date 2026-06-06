@@ -9,7 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::ops::RangeInclusive;
 
 use crate::model::Lifespan;
 
@@ -171,6 +170,7 @@ pub enum OcclusionDirection {
 #[derive(Debug)]
 pub struct OcclusionIterator<'a, V: Clone + std::fmt::Debug> {
     entries: Vec<&'a PropertyMapEntry<V>>,
+    #[allow(dead_code)]
     direction: OcclusionDirection,
     index: usize,
     /// Already-covered ranges for occlusion.

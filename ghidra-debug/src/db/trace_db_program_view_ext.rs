@@ -7,7 +7,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::lifespan::Lifespan;
 
 /// Register value at a specific address and snap.
 #[derive(Debug, Clone, PartialEq, Eq)]

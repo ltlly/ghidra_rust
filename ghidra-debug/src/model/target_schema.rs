@@ -8,7 +8,6 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::target::key_path::KeyPath;
 
 /// A name identifying a schema within a schema context.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

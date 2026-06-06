@@ -9,7 +9,6 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 // ---------------------------------------------------------------------------
 // RegisterRow -- a row in the register table

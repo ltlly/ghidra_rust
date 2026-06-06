@@ -14,7 +14,6 @@
 //! - A trace address range
 //! - A lifespan (when the mapping is valid in trace time)
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

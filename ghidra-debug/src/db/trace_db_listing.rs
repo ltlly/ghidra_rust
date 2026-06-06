@@ -7,7 +7,7 @@
 use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-use crate::model::listing::{CodeUnitType, TraceCodeUnit};
+use crate::model::listing::CodeUnitType;
 use crate::model::lifespan::Lifespan;
 
 /// A code listing entry stored in the database.

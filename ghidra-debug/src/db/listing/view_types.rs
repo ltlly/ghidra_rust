@@ -8,10 +8,7 @@
 //! - `DBTraceDefinedDataView`, `DBTraceDefinedDataMemoryView`
 //! - `DBTraceUndefinedDataView`, `DBTraceUndefinedDataMemoryView`
 
-use crate::db::listing::code_unit::{CodeUnitKind, CodeUnitRef};
 use crate::db::listing::code_space::DbTraceCodeSpace;
-use crate::db::listing::data_types::TraceCodeDataType;
-use crate::model::Lifespan;
 
 /// A view over all code units in a space at a given snap.
 ///
@@ -139,6 +136,7 @@ impl<'a> DefinedUnitsView<'a> {
 }
 
 /// A view over defined units with memory byte access.
+#[allow(dead_code)]
 pub struct DefinedUnitsMemoryView<'a> {
     inner: DefinedUnitsView<'a>,
     memory_bytes: Option<&'a [u8]>,
@@ -190,6 +188,7 @@ impl<'a> InstructionsView<'a> {
 }
 
 /// A view over instructions with memory byte access.
+#[allow(dead_code)]
 pub struct InstructionsMemoryView<'a> {
     inner: InstructionsView<'a>,
     memory_bytes: Option<&'a [u8]>,
@@ -241,6 +240,7 @@ impl<'a> DefinedDataView<'a> {
 }
 
 /// A view over defined data with memory byte access.
+#[allow(dead_code)]
 pub struct DefinedDataMemoryView<'a> {
     inner: DefinedDataView<'a>,
     memory_bytes: Option<&'a [u8]>,
@@ -292,6 +292,7 @@ impl<'a> UndefinedDataView<'a> {
 }
 
 /// A view over undefined data with memory byte access.
+#[allow(dead_code)]
 pub struct UndefinedDataMemoryView<'a> {
     inner: UndefinedDataView<'a>,
     memory_bytes: Option<&'a [u8]>,

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::model::{guest::TraceGuestPlatformMappedRange, Lifespan};
+use crate::model::guest::TraceGuestPlatformMappedRange;
 
 /// A guest language entry in the trace database.
 ///

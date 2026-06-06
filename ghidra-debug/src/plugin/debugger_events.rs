@@ -15,7 +15,6 @@
 //! Ghidra plugin framework. These events carry trace-related state
 //! changes to interested listeners.
 
-use serde::{Deserialize, Serialize};
 
 use crate::api::tracemgr::DebuggerCoordinates;
 

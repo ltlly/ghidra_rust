@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
-use crate::target::KeyPath;
 
 /// A write-behind cached object value.
 ///

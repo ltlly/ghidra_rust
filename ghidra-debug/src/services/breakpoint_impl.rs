@@ -3,11 +3,11 @@
 //! Ported from Ghidra's `ghidra.app.plugin.core.debug.service.breakpoint` package.
 //! Provides types for managing logical breakpoints across programs, traces, and emulators.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::breakpoint::{BreakpointMode, BreakpointState, LogicalBreakpoint};
+use crate::api::breakpoint::LogicalBreakpoint;
 use crate::model::Lifespan;
 
 // ── Action Items ──────────────────────────────────────────────────────────

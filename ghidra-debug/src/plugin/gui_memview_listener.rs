@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::model::Lifespan;
 use crate::plugin::gui_memview::{MemviewBoxType, MemoryBox};
 
 /// A trace event that can update the memory view.

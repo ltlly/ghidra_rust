@@ -2,7 +2,7 @@
 //!
 //! Codec for encoding/decoding Address values in the trace database.
 
-use std::io::{self, Read, Write};
+use std::io::{self};
 
 /// Encode an address (space_id, offset) into bytes.
 pub fn encode_address(space_id: u16, offset: u64) -> Vec<u8> {

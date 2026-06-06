@@ -2,7 +2,6 @@
 //!
 //! Ported from Ghidra's `ghidra.trace.model.listing.TraceCodeOperations`.
 
-use super::Lifespan;
 use super::listing::TraceCodeUnit;
 
 /// The set of operations available on the code listing.

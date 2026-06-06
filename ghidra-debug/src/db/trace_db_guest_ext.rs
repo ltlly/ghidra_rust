@@ -6,7 +6,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::lifespan::Lifespan;
 
 /// A memory mapping for a guest platform in the trace.
 ///

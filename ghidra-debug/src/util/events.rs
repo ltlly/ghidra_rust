@@ -6,11 +6,9 @@
 //! symbol, and target object events.
 
 use serde::{Deserialize, Serialize};
-use std::any::Any;
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::model::Lifespan;
 
 /// A type-safe event identifier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

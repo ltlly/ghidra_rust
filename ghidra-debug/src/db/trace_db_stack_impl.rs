@@ -10,7 +10,6 @@
 //! `TraceStack` and `TraceStackFrame` types with additional database
 //! operations.
 
-use crate::model::Lifespan;
 use crate::model::stack::{TraceStack, TraceStackFrame};
 use std::fmt;
 

@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
-use std::collections::HashSet;
 
 use super::compare_result::CompareResult;
 use super::sequence::Sequence;

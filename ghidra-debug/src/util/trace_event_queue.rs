@@ -226,6 +226,7 @@ impl TraceChangeManager {
 ///
 /// Ported from Ghidra's `WrappingInstructionIterator`.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct WrappingInstructionIterator<I> {
     inner: I,
     offset: i64,

@@ -4,7 +4,6 @@
 //! Provides the data model for the memory view panel, which displays a
 //! visualization of memory access patterns from a debug trace.
 
-use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 

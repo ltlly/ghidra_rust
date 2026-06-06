@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::thread::{TraceProcess, TraceThread};
-use super::Lifespan;
 
 /// Manages threads and processes within a trace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

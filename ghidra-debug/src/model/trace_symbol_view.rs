@@ -2,7 +2,6 @@
 //!
 //! Ported from Ghidra's `ghidra.trace.model.symbol.TraceSymbolView`.
 
-use super::Lifespan;
 use super::symbol::{TraceSymbol, TraceSymbolKind};
 
 /// Sort order for symbol queries.

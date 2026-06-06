@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::breakpoint::{BreakpointMode, BreakpointState, LogicalBreakpoint};
+use crate::api::breakpoint::{BreakpointMode, LogicalBreakpoint};
 use crate::model::breakpoint::TraceBreakpointKind;
 
 // ---------------------------------------------------------------------------

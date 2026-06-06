@@ -5,7 +5,6 @@
 //! This module manages the mapping between dynamic trace addresses and
 //! static program addresses, including proposals, entries, and listeners.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

@@ -4,11 +4,8 @@
 //! Provides multi-type views, no-duplicates views, and location-scoped views
 //! that aggregate results across multiple single-type symbol views.
 
-use std::collections::BTreeSet;
 
-use crate::model::symbol::{TraceSymbol, TraceSymbolKind};
 
-use super::trace_db_reference_space::DbTraceReferenceSpace;
 
 /// Aggregated view of symbols across multiple symbol types.
 ///

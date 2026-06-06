@@ -190,7 +190,7 @@ impl TraceOptionsStore {
     }
 
     /// Get a string option value, or a default.
-    pub fn get_string<'a>(&'a self, name: &str, default: &'a str) -> &str {
+    pub fn get_string<'a>(&'a self, name: &str, default: &'a str) -> &'a str {
         self.options
             .get(name)
             .and_then(|v| v.as_string())

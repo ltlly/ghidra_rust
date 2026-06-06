@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::api::modules::{MapEntry, MappingChangeEvent, MappingChangeKind};
-use crate::model::Lifespan;
 
 /// Information about a loaded module in a trace.
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::saved_register_map::SavedRegisterMap;
 use super::sym_arithmetic::SymArithmetic;
-use super::unwind_info::{ReturnLocation as UnwindReturnLocation, UnwindInfo};
+use super::unwind_info::UnwindInfo;
 use super::unwind_warning::{UnwindWarning, UnwindWarningKind, UnwindWarningSet};
 
 /// A frame recovered by the stack unwinder.
@@ -135,7 +135,7 @@ impl StackUnwinder {
     /// unwind (-1 for unlimited).
     pub fn unwind_from(
         &mut self,
-        coords: &UnwindCoordinates,
+        _coords: &UnwindCoordinates,
         start_pc: u64,
         start_sp: u64,
         max_depth: i32,

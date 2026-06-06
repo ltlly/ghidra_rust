@@ -4,9 +4,7 @@
 //! Provides SQLite-backed management of program views for traces.
 
 use rusqlite::{Connection, Result as SqlResult};
-use serde::{Deserialize, Serialize};
 
-use crate::model::program::TraceProgramView;
 
 /// Database-backed program manager.
 #[derive(Debug)]

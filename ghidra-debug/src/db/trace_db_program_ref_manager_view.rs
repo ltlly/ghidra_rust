@@ -177,7 +177,7 @@ impl ProgramViewReferenceManager {
     /// Remove a reference by key.
     pub fn remove_reference(&mut self, key: i64) -> bool {
         if let Some(idx) = self.references.iter().position(|r| r.key == key) {
-            let r#ref = self.references.remove(idx);
+            let _ref = self.references.remove(idx);
             // Rebuild indices (simplistic approach)
             self.rebuild_indices();
             true

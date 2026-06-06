@@ -112,7 +112,7 @@ impl AutoMapServiceImpl {
         let mut candidates = Vec::new();
 
         for (section_name, sec_min, sec_max) in &program.sections {
-            for (region_name, reg_min, reg_max) in &trace.regions {
+            for (_region_name, reg_min, reg_max) in &trace.regions {
                 let sec_size = sec_max - sec_min;
                 let reg_size = reg_max - reg_min;
 
@@ -159,7 +159,7 @@ impl AutoMappingService for AutoMapServiceImpl {
         &mut self,
         program_url: &str,
         trace_key: i64,
-        lifespan: Lifespan,
+        _lifespan: Lifespan,
     ) -> Result<(), String> {
         if !self.enabled {
             return Err("Auto-mapping is disabled".into());

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::model::{
-    Lifespan, TraceBookmarkManager, TraceCodeManager,
+    TraceBookmarkManager, TraceCodeManager,
     TracePlatformManager, TraceRegisterContextManager,
     TraceStackManager, TraceSymbolManager, TraceTimeManager,
     TraceUserData,

@@ -2,7 +2,6 @@
 //!
 //! Ported from Ghidra's `ghidra.trace.model.listing.TraceCodeSpace`.
 
-use serde::{Deserialize, Serialize};
 
 use super::Lifespan;
 use super::listing::{CodeUnitType, TraceCodeUnit};

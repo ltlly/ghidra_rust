@@ -2,7 +2,6 @@
 //!
 //! Ported from Ghidra's `ghidra.trace.model.symbol.TraceLabelSymbolView`.
 
-use serde::{Deserialize, Serialize};
 
 use super::Lifespan;
 use super::symbol::{TraceSymbol, TraceSymbolKind};
@@ -121,7 +120,7 @@ impl TraceLabelSymbolView {
         TraceSymbol::label(key, name, address, space, lifespan)
     }
 
-    fn matches_thread(&self, symbol: &TraceSymbol, thread_key: Option<i64>) -> bool {
+    fn matches_thread(&self, _symbol: &TraceSymbol, thread_key: Option<i64>) -> bool {
         if let Some(_tk) = thread_key {
             // Thread filtering would be checked via the symbol's space
             true

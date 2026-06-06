@@ -8,7 +8,6 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// A packed symbol ID encoding type and key.
 ///

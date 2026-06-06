@@ -92,6 +92,7 @@ pub struct CloseableTaskMonitor {
     /// Sub-task monitors.
     sub_monitors: Vec<Arc<Mutex<CloseableTaskMonitor>>>,
     /// Progress listeners.
+    #[allow(dead_code)]
     listener_count: usize,
 }
 

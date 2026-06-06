@@ -177,6 +177,7 @@ pub struct WrappingCodeUnitIterator<I> {
     inner: I,
     listing: Box<dyn ListingQuery>,
     snap: i64,
+    #[allow(dead_code)]
     space: String,
 }
 
@@ -212,6 +213,7 @@ pub struct WrappingFunctionIterator<I> {
     inner: I,
     listing: Box<dyn ListingQuery>,
     snap: i64,
+    #[allow(dead_code)]
     space: String,
 }
 
@@ -249,6 +251,7 @@ pub struct WrappingInstructionIterator<I> {
     inner: I,
     listing: Box<dyn ListingQuery>,
     snap: i64,
+    #[allow(dead_code)]
     space: String,
 }
 

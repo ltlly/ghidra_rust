@@ -8,8 +8,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
-use crate::services::mapping_proposals_impl::SectionMapProposal;
 
 /// A section mapping entry that pairs a trace section with a static memory block.
 ///

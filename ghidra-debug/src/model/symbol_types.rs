@@ -11,7 +11,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::listing::TraceCodeUnit;
 use super::symbol::{TraceSymbol, TraceSymbolKind};
 use super::Lifespan;
 

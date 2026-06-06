@@ -10,7 +10,6 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
-use crate::target::key_path::KeyPath;
 
 /// A debug experiment: a named collection of traces and associated data.
 ///

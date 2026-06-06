@@ -9,7 +9,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use super::memory::TraceMemoryState;
 use super::memory_flag::TraceMemoryFlag;
 use super::lifespan::Lifespan;
 

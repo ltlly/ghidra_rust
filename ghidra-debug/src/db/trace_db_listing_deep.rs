@@ -4,7 +4,7 @@
 //! `TraceCodeUnit`, `TraceCodeOperations`, `TraceCodeSpace`, and
 //! the various listing views for instructions, data, and comments.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

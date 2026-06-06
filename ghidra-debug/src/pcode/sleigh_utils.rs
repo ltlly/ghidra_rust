@@ -93,10 +93,10 @@ impl TraceSleighUtils {
     /// Returns `None` if the expression language does not match the trace's
     /// language, or if the evaluation cannot proceed.
     pub fn evaluate_bytes(
-        expression: &str,
-        is_big_endian: bool,
+        _expression: &str,
+        _is_big_endian: bool,
         memory: &dyn super::data_access::PcodeTraceMemoryAccess,
-        registers: &dyn super::data_access::PcodeTraceRegistersAccess,
+        _registers: &dyn super::data_access::PcodeTraceRegistersAccess,
         space: &str,
         offset: u64,
         size: u32,
@@ -155,8 +155,8 @@ impl TraceSleighUtils {
     pub fn build_paired_executor_config(
         trace_id: &str,
         snap: i64,
-        thread_key: i64,
-        frame: i32,
+        _thread_key: i64,
+        _frame: i32,
     ) -> (super::data::PcodeTraceDataAccess, super::memory_state::TraceMemoryStatePiece) {
         let data = super::data::PcodeTraceDataAccess::new(trace_id, snap);
         let state_piece = super::memory_state::TraceMemoryStatePiece::new(trace_id);

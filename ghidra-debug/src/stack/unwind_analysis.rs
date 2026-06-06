@@ -193,7 +193,7 @@ impl BlockGraph {
         from: &BlockVertex,
         targets: &[BlockVertex],
     ) -> Vec<Vec<BlockVertex>> {
-        let target_set: HashSet<_> = targets.iter().collect();
+        let _target_set: HashSet<_> = targets.iter().collect();
         let mut results = Vec::new();
 
         for target in targets {

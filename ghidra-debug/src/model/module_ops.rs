@@ -6,7 +6,6 @@
 //! Provides the interface for querying and operating on loaded modules
 //! and their sections within a trace.
 
-use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 

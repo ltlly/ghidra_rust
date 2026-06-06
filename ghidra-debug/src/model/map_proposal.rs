@@ -11,7 +11,6 @@
 //! static-to-dynamic address mappings based on module, section, and region metadata.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 use super::Lifespan;
 

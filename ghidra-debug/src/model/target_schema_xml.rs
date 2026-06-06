@@ -522,7 +522,7 @@ impl XmlSchemaParser {
             return Err(format!("Invalid tag name: '{}'", tag));
         }
         let open_prefix = format!("<{} ", tag);
-        let open_prefix_exact = format!("<{}", tag);
+        let _open_prefix_exact = format!("<{}", tag);
         let close_tag = format!("</{}>", tag);
 
         let mut depth = 1;

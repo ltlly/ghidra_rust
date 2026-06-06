@@ -4,19 +4,18 @@
 //! implementations. Provides the server-side RMI infrastructure for
 //! managing connections from debug backends.
 
-use std::collections::{BTreeMap, HashMap};
-use std::net::SocketAddr;
-use std::sync::{Arc, Mutex, RwLock};
+use std::collections::HashMap;
+use std::sync::{Mutex, RwLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::api::tracermi::{
-    ConnectMode, ConnectionState, RemoteMethodDescriptor, RemoteMethodRegistry,
+    ConnectMode, ConnectionState, RemoteMethodRegistry,
     TraceRmiAcceptor, TraceRmiError, TraceRmiResult,
     TraceRmiServiceListener, TraceRmiServiceListenerSet,
 };
-use crate::api::launch_result::{LaunchConfigurator, LaunchResult, PromptMode};
+use crate::api::launch_result::LaunchConfigurator;
 
 /// The state of the TraceRmi service.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

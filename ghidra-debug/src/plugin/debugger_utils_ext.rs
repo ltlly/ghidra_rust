@@ -3,7 +3,6 @@
 //! Ported from the Debugger module's `utils` package. Provides
 //! miscellaneous utilities for the debugger plugin framework.
 
-use std::collections::HashMap;
 
 /// Compute the alignment-adjusted address for a given alignment.
 ///

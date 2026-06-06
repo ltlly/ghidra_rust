@@ -4,7 +4,6 @@
 //! Provides the data model for copying values between trace locations,
 //! supporting memory-to-memory, register-to-register, and mixed transfers.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

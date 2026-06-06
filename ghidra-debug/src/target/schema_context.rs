@@ -5,10 +5,9 @@
 //! of the schema system used to define the structure of the trace target tree.
 
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
 
-use crate::model::target_schema::{AttributeSchema, SchemaBuilder, SchemaName};
+use crate::model::target_schema::{AttributeSchema, SchemaName};
 
 /// A primitive schema that accepts any attributes and elements.
 ///

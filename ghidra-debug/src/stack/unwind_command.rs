@@ -9,12 +9,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::saved_register_map::SavedRegisterMap;
-use super::sym::Sym;
 use super::sym_pcode_executor::{PcodeOpSymbolic, SymPcodeExecutor};
 use super::unwind_info::{ReturnLocation, UnwindInfo};
 use super::unwind_warning::UnwindWarningSet;
-use super::unwound_frame::{StackUnwindResult, UnwoundFrame, UnwindAnalysis, UnwindWarning, WarningSeverity};
+use super::unwound_frame::{UnwoundFrame, UnwindAnalysis, UnwindWarning};
 
 /// Command to unwind the call stack from the current debug coordinates.
 ///

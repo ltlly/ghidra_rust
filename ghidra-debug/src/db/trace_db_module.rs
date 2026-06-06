@@ -7,7 +7,6 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
 use crate::model::lifespan::Lifespan;
-use crate::model::module::{TraceModule, TraceSection};
 
 /// A module entry stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize)]

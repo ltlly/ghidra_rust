@@ -3,7 +3,7 @@
 //! Ported from Ghidra's `AbstractDBTraceCodeUnit`, `DBTraceData`,
 //! `DBTraceDataArrayElementComponent`, and `DBTraceDataCompositeFieldComponent`.
 
-use crate::model::{CodeUnitType, Lifespan};
+use crate::model::CodeUnitType;
 
 /// The kind of code unit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

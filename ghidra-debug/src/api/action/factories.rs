@@ -7,7 +7,7 @@
 //! specifications for automatic memory reading and location tracking.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
 

@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::trace::Trace;
 
 /// Strategy for resolving conflicts when adding data types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

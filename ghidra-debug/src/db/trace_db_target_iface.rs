@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::execution_state::TraceExecutionState;
-use crate::model::lifespan::Lifespan;
 
 // ---------------------------------------------------------------------------
 // DB Object Activatable

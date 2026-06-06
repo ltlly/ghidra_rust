@@ -5,15 +5,13 @@
 //! the emulation service for running p-code emulators within a debug session.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
 use crate::api::emulation::{
-    EmulationConfig, EmulationState, EmulationWriter, EmulatorFactoryDescriptor,
+    EmulationState, EmulationWriter, EmulatorFactoryDescriptor,
     EmulatorFactoryRegistry, PcodeDebuggerAccessConfig,
 };
-use crate::model::Lifespan;
 
 /// The emulation mode for p-code execution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

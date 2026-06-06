@@ -10,10 +10,8 @@ use std::pin::Pin;
 
 use crate::api::breakpoint::LogicalBreakpoint;
 use crate::api::control_mode::ControlMode;
-use crate::api::modules::{MapEntry, MapProposal, ModuleMapProposal, RegionMapProposal, SectionMapProposal};
 use crate::api::tracermi::TraceRmiServiceListener;
 use crate::api::watch::WatchRow;
-use crate::model::Lifespan;
 
 // ---------------------------------------------------------------------------
 // ActivationCause — why coordinates were activated

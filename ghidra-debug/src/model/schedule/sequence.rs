@@ -45,26 +45,26 @@ impl StepEnum {
     pub fn tick_count(&self) -> u64 {
         match self {
             Self::Tick(s) => s.tick_count(),
-            Self::Skip(s) => 0,
-            Self::Patch(s) => 0,
+            Self::Skip(_s) => 0,
+            Self::Patch(_s) => 0,
         }
     }
 
     /// Get the skip count.
     pub fn skip_count(&self) -> u64 {
         match self {
-            Self::Tick(s) => 0,
+            Self::Tick(_s) => 0,
             Self::Skip(s) => s.skip_count(),
-            Self::Patch(s) => 0,
+            Self::Patch(_s) => 0,
         }
     }
 
     /// Get the patch count.
     pub fn patch_count(&self) -> u64 {
         match self {
-            Self::Tick(s) => 0,
-            Self::Skip(s) => 0,
-            Self::Patch(s) => 1,
+            Self::Tick(_s) => 0,
+            Self::Skip(_s) => 0,
+            Self::Patch(_s) => 1,
         }
     }
 

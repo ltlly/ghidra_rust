@@ -14,7 +14,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 // ---------------------------------------------------------------------------
 // Abstract base types

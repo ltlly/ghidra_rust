@@ -12,7 +12,6 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use thiserror::Error;
 
 use crate::model::Lifespan;
 

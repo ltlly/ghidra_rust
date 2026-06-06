@@ -152,8 +152,8 @@ impl DBTraceLinkContentHandler {
 
     /// Resolve a link to its target path, following the chain up to max_depth.
     pub fn resolve_link(&self, index: usize) -> LinkContentResult<&ContentLink> {
-        let mut current = index;
-        let mut depth = 0;
+        let current = index;
+        let depth = 0;
         loop {
             if depth >= self.max_depth {
                 return Err(LinkContentError::CircularLink(

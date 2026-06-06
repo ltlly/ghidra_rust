@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use super::module::{TraceModule, TraceSection, TraceStaticMapping};
-use super::Lifespan;
 
 /// Manages modules, sections, and static mappings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

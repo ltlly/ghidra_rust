@@ -3,7 +3,6 @@
 //! Ported from Ghidra's `GdbDebuggerPlatformOpinion`. Maps GDB architecture
 //! and OS information to Ghidra language and compiler specifications.
 
-use std::collections::HashMap;
 
 use super::platform_opinion::{OpinionContext, PlatformOpinion, PlatformOpinionProvider};
 

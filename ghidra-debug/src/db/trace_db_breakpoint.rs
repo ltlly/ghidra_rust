@@ -6,7 +6,7 @@
 //! SQLite storage.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::model::{
     breakpoint::TraceBreakpointKind, BreakpointKindSet, Lifespan,

@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use super::model::{ShiftMode, TaintMark, TaintSet, TaintVec};
+use super::model::{TaintSet, TaintVec};
 
 // ---------------------------------------------------------------------------
 // TaintPcodeArithmetic

@@ -134,7 +134,7 @@ impl DomainObjectAdapterDB {
     }
 
     /// Begin a transaction. Returns a transaction ID.
-    pub fn start_transaction(&mut self, description: &str) -> u64 {
+    pub fn start_transaction(&mut self, _description: &str) -> u64 {
         self.set_changed(true);
         // Simple sequential transaction ID
         1

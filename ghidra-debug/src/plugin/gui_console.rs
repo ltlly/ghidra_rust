@@ -8,7 +8,6 @@ use std::collections::VecDeque;
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 // ---------------------------------------------------------------------------
 // Log level

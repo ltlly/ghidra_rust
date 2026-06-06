@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::model::{Lifespan, TraceMemoryState};
+use crate::model::TraceMemoryState;
 
 // ---------------------------------------------------------------------------
 // PcodeTraceAccess — base trait for trace data access

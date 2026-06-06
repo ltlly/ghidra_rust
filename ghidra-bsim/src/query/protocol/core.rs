@@ -1843,6 +1843,249 @@ impl FunctionStagingManager {
 }
 
 // ============================================================================
+// ExecutableResultWithDeDuping -- Deduplicated executable match result
+// ============================================================================
+
+/// A result tracking deduplicated matches into a specific executable.
+///
+/// Ports `ghidra.features.bsim.query.protocol.ExecutableResultWithDeDuping`.
+/// When aggregating similarity results across multiple queried functions,
+/// this struct deduplicates matches that point to the same executable,
+/// keeping only the highest significance match per executable.
+#[derive(Debug, Clone)]
+pub struct ExecutableResultWithDeDuping {
+    /// The executable record identifier.
+    pub exe_id: String,
+    /// The executable name.
+    pub exe_name: String,
+    /// Number of functions matching into this executable.
+    pub function_count: usize,
+    /// Sum of all matching function significance scores.
+    pub significance_sum: f64,
+}
+
+impl ExecutableResultWithDeDuping {
+    /// Create a new result for the given executable.
+    pub fn new(exe_id: impl Into<String>, exe_name: impl Into<String>) -> Self {
+        Self {
+            exe_id: exe_id.into(),
+            exe_name: exe_name.into(),
+            function_count: 0,
+            significance_sum: 0.0,
+        }
+    }
+
+    /// Add a function match with the given significance.
+    pub fn add_function(&mut self, significance: f64) {
+        self.function_count += 1;
+        self.significance_sum += significance;
+    }
+
+    /// Get the number of functions with matches into this executable.
+    pub fn get_function_count(&self) -> usize {
+        self.function_count
+    }
+
+    /// Get the sum of significance scores for all matching functions.
+    pub fn get_significance_sum(&self) -> f64 {
+        self.significance_sum
+    }
+
+    /// Generate deduplicated results from an iterator of similarity notes.
+    ///
+    /// For each queried function, matches are grouped by executable.
+    /// Only the highest-significance match per executable is kept.
+    /// Results are then accumulated across all queried functions.
+    pub fn generate_from_notes<I>(notes: I) -> Vec<ExecutableResultWithDeDuping>
+    where
+        I: IntoIterator<Item = SimilarityNoteData>,
+    {
+        use std::collections::BTreeMap;
+
+        let mut exe_map: BTreeMap<String, ExecutableResultWithDeDuping> = BTreeMap::new();
+        for note in notes {
+            let entry = exe_map
+                .entry(note.exe_name.clone())
+                .or_insert_with(|| ExecutableResultWithDeDuping::new(&note.exe_name, &note.exe_name));
+            // Keep the maximum significance per executable
+            if note.significance > entry.significance_sum || entry.function_count == 0 {
+                entry.significance_sum = note.significance;
+                entry.function_count = 1;
+            }
+        }
+        exe_map.into_values().collect()
+    }
+}
+
+impl PartialEq for ExecutableResultWithDeDuping {
+    fn eq(&self, other: &Self) -> bool {
+        self.exe_id == other.exe_id
+    }
+}
+
+impl Eq for ExecutableResultWithDeDuping {}
+
+impl PartialOrd for ExecutableResultWithDeDuping {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for ExecutableResultWithDeDuping {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.significance_sum
+            .partial_cmp(&other.significance_sum)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }
+}
+
+// ============================================================================
+// IDSQLResolution -- Filter element resolution for SQL queries
+// ============================================================================
+
+/// Manages filter elements that need to be resolved to database IDs before
+/// they can be converted to SQL clauses.
+///
+/// Ports `ghidra.features.bsim.query.client.IDSQLResolution`.
+/// In the Java codebase, this is an abstract class with concrete subclasses
+/// for Architecture, Compiler, ExeCategory, and ExternalFunction resolution.
+/// In Rust, we model this as an enum.
+#[derive(Debug, Clone)]
+pub enum IdSqlResolution {
+    /// Resolve an architecture name to its database ID.
+    Architecture {
+        /// The architecture name string.
+        arch_name: String,
+        /// The resolved ID (0 if unresolved).
+        resolved_id: i64,
+    },
+    /// Resolve a compiler name to its database ID.
+    Compiler {
+        /// The compiler name string.
+        compiler_name: String,
+        /// The resolved ID (0 if unresolved).
+        resolved_id: i64,
+    },
+    /// Resolve an executable category to its database IDs.
+    ExeCategory {
+        /// The category name.
+        category: String,
+        /// The category value.
+        value: String,
+        /// The resolved category ID (0 if unresolved).
+        category_id: i64,
+        /// The resolved value ID (0 if unresolved).
+        value_id: i64,
+    },
+    /// Resolve an external function reference to its database ID.
+    ExternalFunction {
+        /// Name of the executable containing the external function.
+        exe_name: String,
+        /// Name of the external function.
+        func_name: String,
+        /// The resolved ID (0 if unresolved).
+        resolved_id: i64,
+    },
+}
+
+impl IdSqlResolution {
+    /// Create an Architecture resolution.
+    pub fn architecture(arch_name: impl Into<String>) -> Self {
+        Self::Architecture {
+            arch_name: arch_name.into(),
+            resolved_id: 0,
+        }
+    }
+
+    /// Create a Compiler resolution.
+    pub fn compiler(compiler_name: impl Into<String>) -> Self {
+        Self::Compiler {
+            compiler_name: compiler_name.into(),
+            resolved_id: 0,
+        }
+    }
+
+    /// Create an ExeCategory resolution.
+    pub fn exe_category(category: impl Into<String>, value: impl Into<String>) -> Self {
+        Self::ExeCategory {
+            category: category.into(),
+            value: value.into(),
+            category_id: 0,
+            value_id: 0,
+        }
+    }
+
+    /// Create an ExternalFunction resolution.
+    pub fn external_function(
+        exe_name: impl Into<String>,
+        func_name: impl Into<String>,
+    ) -> Self {
+        Self::ExternalFunction {
+            exe_name: exe_name.into(),
+            func_name: func_name.into(),
+            resolved_id: 0,
+        }
+    }
+
+    /// Whether this resolution has been resolved (all IDs are non-zero).
+    pub fn is_resolved(&self) -> bool {
+        match self {
+            Self::Architecture { resolved_id, .. } => *resolved_id != 0,
+            Self::Compiler { resolved_id, .. } => *resolved_id != 0,
+            Self::ExeCategory {
+                category_id,
+                value_id,
+                ..
+            } => *category_id != 0 && *value_id != 0,
+            Self::ExternalFunction { resolved_id, .. } => *resolved_id != 0,
+        }
+    }
+
+    /// Mark an Architecture or Compiler resolution with the given ID.
+    pub fn set_resolved_id(&mut self, id: i64) {
+        match self {
+            Self::Architecture { resolved_id, .. } => *resolved_id = id,
+            Self::Compiler { resolved_id, .. } => *resolved_id = id,
+            Self::ExternalFunction { resolved_id, .. } => *resolved_id = id,
+            Self::ExeCategory { .. } => {
+                // For categories, use set_resolved_ids instead
+            }
+        }
+    }
+
+    /// Mark an ExeCategory resolution with both category and value IDs.
+    pub fn set_resolved_ids(&mut self, cat_id: i64, val_id: i64) {
+        if let Self::ExeCategory {
+            category_id,
+            value_id,
+            ..
+        } = self
+        {
+            *category_id = cat_id;
+            *value_id = val_id;
+        }
+    }
+
+    /// Get the first resolved ID.
+    pub fn id1(&self) -> i64 {
+        match self {
+            Self::Architecture { resolved_id, .. } => *resolved_id,
+            Self::Compiler { resolved_id, .. } => *resolved_id,
+            Self::ExeCategory { category_id, .. } => *category_id,
+            Self::ExternalFunction { resolved_id, .. } => *resolved_id,
+        }
+    }
+
+    /// Get the second resolved ID (only meaningful for ExeCategory).
+    pub fn id2(&self) -> i64 {
+        match self {
+            Self::ExeCategory { value_id, .. } => *value_id,
+            _ => 0,
+        }
+    }
+}
+
+// ============================================================================
 // XML Serialization Utilities
 // Ports Ghidra's SpecXmlUtils and XML save/restore methods
 // ============================================================================
@@ -2394,6 +2637,51 @@ pub mod xml_serde {
                 "<funcstaging stagesize=\"{}\" total=\"{}\" made=\"{}\"/>\n",
                 self.stage_size, self.total, self.made
             ));
+        }
+    }
+
+    impl ExecutableResultWithDeDuping {
+        /// Serialize to XML (port of `ExecutableResultWithDeDuping` implicit XML representation).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<exeresult id=\"{}\" name=\"{}\" funccount=\"{}\" sumsignif=\"{}\"/>\n",
+                xml_escape(&self.exe_id),
+                xml_escape(&self.exe_name),
+                self.function_count,
+                encode_double(self.significance_sum),
+            ));
+        }
+    }
+
+    impl IdSqlResolution {
+        /// Serialize to XML.
+        pub fn save_xml(&self, writer: &mut String) {
+            match self {
+                Self::Architecture { arch_name, resolved_id } => {
+                    writer.push_str(&format!(
+                        "<idsql type=\"arch\" name=\"{}\" id=\"{}\"/>\n",
+                        xml_escape(arch_name), resolved_id
+                    ));
+                }
+                Self::Compiler { compiler_name, resolved_id } => {
+                    writer.push_str(&format!(
+                        "<idsql type=\"compiler\" name=\"{}\" id=\"{}\"/>\n",
+                        xml_escape(compiler_name), resolved_id
+                    ));
+                }
+                Self::ExeCategory { category, value, category_id, value_id } => {
+                    writer.push_str(&format!(
+                        "<idsql type=\"category\" cat=\"{}\" val=\"{}\" catid=\"{}\" valid=\"{}\"/>\n",
+                        xml_escape(category), xml_escape(value), category_id, value_id
+                    ));
+                }
+                Self::ExternalFunction { exe_name, func_name, resolved_id } => {
+                    writer.push_str(&format!(
+                        "<idsql type=\"extfunc\" exe=\"{}\" func=\"{}\" id=\"{}\"/>\n",
+                        xml_escape(exe_name), xml_escape(func_name), resolved_id
+                    ));
+                }
+            }
         }
     }
 }
@@ -3871,5 +4159,151 @@ mod tests {
         assert_eq!(fs.stage_end(), 50);
         assert!(!fs.next_stage());
         assert!(fs.is_complete());
+    }
+
+    // ---- ExecutableResultWithDeDuping tests ----
+
+    #[test]
+    fn exe_result_dedup_new() {
+        let er = ExecutableResultWithDeDuping::new("id1", "test.exe");
+        assert_eq!(er.exe_id, "id1");
+        assert_eq!(er.exe_name, "test.exe");
+        assert_eq!(er.get_function_count(), 0);
+        assert!((er.get_significance_sum() - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn exe_result_dedup_add_function() {
+        let mut er = ExecutableResultWithDeDuping::new("id1", "exe");
+        er.add_function(5.0);
+        er.add_function(3.0);
+        assert_eq!(er.get_function_count(), 2);
+        assert!((er.get_significance_sum() - 8.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn exe_result_dedup_ordering() {
+        let mut a = ExecutableResultWithDeDuping::new("a", "exe_a");
+        a.add_function(10.0);
+        let mut b = ExecutableResultWithDeDuping::new("b", "exe_b");
+        b.add_function(5.0);
+        assert!(b < a); // higher significance sorts later in BTreeSet
+    }
+
+    #[test]
+    fn exe_result_dedup_eq() {
+        let a = ExecutableResultWithDeDuping::new("same_id", "exe_a");
+        let b = ExecutableResultWithDeDuping::new("same_id", "exe_b");
+        assert_eq!(a, b); // equality is by exe_id
+    }
+
+    #[test]
+    fn exe_result_dedup_generate() {
+        let notes = vec![
+            SimilarityNoteData::new("exe1", "func1", 0x100, 0.9, 10.0),
+            SimilarityNoteData::new("exe1", "func2", 0x200, 0.8, 8.0),
+            SimilarityNoteData::new("exe2", "func3", 0x300, 0.95, 12.0),
+        ];
+        let results = ExecutableResultWithDeDuping::generate_from_notes(notes);
+        assert_eq!(results.len(), 2);
+        // exe1 should have significance_sum = max(10.0, 8.0) = 10.0
+        let exe1 = results.iter().find(|r| r.exe_name == "exe1").unwrap();
+        assert!((exe1.significance_sum - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn exe_result_dedup_save_xml() {
+        let mut er = ExecutableResultWithDeDuping::new("id1", "test.exe");
+        er.add_function(5.0);
+        let mut xml = String::new();
+        er.save_xml(&mut xml);
+        assert!(xml.contains("exeresult"));
+        assert!(xml.contains("test.exe"));
+        assert!(xml.contains("1"));
+    }
+
+    #[test]
+    fn exe_result_dedup_clone() {
+        let er = ExecutableResultWithDeDuping::new("id1", "exe");
+        let cloned = er.clone();
+        assert_eq!(cloned, er);
+    }
+
+    // ---- IdSqlResolution tests ----
+
+    #[test]
+    fn id_sql_resolution_architecture() {
+        let mut res = IdSqlResolution::architecture("x86");
+        assert!(!res.is_resolved());
+        assert_eq!(res.id1(), 0);
+        res.set_resolved_id(42);
+        assert!(res.is_resolved());
+        assert_eq!(res.id1(), 42);
+    }
+
+    #[test]
+    fn id_sql_resolution_compiler() {
+        let mut res = IdSqlResolution::compiler("gcc");
+        assert!(!res.is_resolved());
+        res.set_resolved_id(7);
+        assert!(res.is_resolved());
+        assert_eq!(res.id1(), 7);
+    }
+
+    #[test]
+    fn id_sql_resolution_exe_category() {
+        let mut res = IdSqlResolution::exe_category("os", "linux");
+        assert!(!res.is_resolved());
+        assert_eq!(res.id1(), 0);
+        assert_eq!(res.id2(), 0);
+        res.set_resolved_ids(1, 2);
+        assert!(res.is_resolved());
+        assert_eq!(res.id1(), 1);
+        assert_eq!(res.id2(), 2);
+    }
+
+    #[test]
+    fn id_sql_resolution_external_function() {
+        let mut res = IdSqlResolution::external_function("lib.so", "malloc");
+        assert!(!res.is_resolved());
+        res.set_resolved_id(99);
+        assert!(res.is_resolved());
+        assert_eq!(res.id1(), 99);
+    }
+
+    #[test]
+    fn id_sql_resolution_arch_save_xml() {
+        let mut res = IdSqlResolution::architecture("arm");
+        res.set_resolved_id(5);
+        let mut xml = String::new();
+        res.save_xml(&mut xml);
+        assert!(xml.contains("idsql"));
+        assert!(xml.contains("arch"));
+        assert!(xml.contains("arm"));
+    }
+
+    #[test]
+    fn id_sql_resolution_category_save_xml() {
+        let mut res = IdSqlResolution::exe_category("os", "windows");
+        res.set_resolved_ids(3, 4);
+        let mut xml = String::new();
+        res.save_xml(&mut xml);
+        assert!(xml.contains("category"));
+        assert!(xml.contains("os"));
+        assert!(xml.contains("windows"));
+    }
+
+    #[test]
+    fn id_sql_resolution_clone() {
+        let res = IdSqlResolution::compiler("clang");
+        let cloned = res.clone();
+        assert_eq!(cloned.id1(), 0); // unresolved
+    }
+
+    #[test]
+    fn id_sql_resolution_partial_eq_not_meaningful() {
+        // IdSqlResolution doesn't impl PartialEq, but clone works
+        let res = IdSqlResolution::architecture("x86");
+        let _ = format!("{:?}", res);
     }
 }

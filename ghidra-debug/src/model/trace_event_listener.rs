@@ -6,7 +6,6 @@
 //! bookmarks, and other trace entities.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// The kind of trace event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

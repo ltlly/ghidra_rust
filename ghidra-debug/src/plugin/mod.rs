@@ -262,7 +262,6 @@ pub use service_plugin_impls::{
 };
 
 pub use gui_calltree_ext::*;
-pub use gui_memview_ext::*;
 pub use gui_pcode_ext::*;
 
 // Re-exports from listener modules

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export the base types used by all specs.
 use crate::api::action::{
-    AutoMapSpec, AutoReadMemorySpec, GoToInput, LocationTracker, LocationTrackingSpec,
+    AutoMapSpec, AutoReadMemorySpec, LocationTracker, LocationTrackingSpec,
     TrackingEvent,
 };
 

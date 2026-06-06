@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// A memory block visible through a program view.
 ///

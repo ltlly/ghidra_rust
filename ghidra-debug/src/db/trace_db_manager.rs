@@ -4,8 +4,6 @@
 //! (bookmark, breakpoint, memory, thread, etc.) implements this trait
 //! for cache invalidation and error handling.
 
-use crate::model::Lifespan;
-use crate::target::key_path::KeyPath;
 
 /// Trait for database-backed trace managers.
 ///

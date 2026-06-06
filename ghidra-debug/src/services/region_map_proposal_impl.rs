@@ -8,8 +8,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
-use crate::services::mapping_proposals_impl::RegionMapProposal;
 
 /// A region mapping entry that pairs a trace memory region with a static memory block.
 ///

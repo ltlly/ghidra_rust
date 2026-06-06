@@ -90,7 +90,7 @@ impl RegisterValueConverter {
                 if cleaned.is_empty() {
                     return Ok(vec![0]);
                 }
-                let byte_count = (cleaned.len() + 1) / 2;
+                let _byte_count = (cleaned.len() + 1) / 2;
                 let padded = if cleaned.len() % 2 != 0 {
                     format!("0{}", cleaned)
                 } else {

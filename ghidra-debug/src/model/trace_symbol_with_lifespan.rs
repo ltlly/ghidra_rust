@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::Lifespan;
-use super::symbol::{TraceSymbol, TraceSymbolKind};
+use super::symbol::TraceSymbol;
 
 /// Extension trait for symbols that carry an explicit lifespan.
 ///

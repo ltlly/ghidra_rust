@@ -7,9 +7,7 @@
 use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-use crate::model::context::{
-    ContextAddressRange, ContextRegisterValue, LanguageId, RegisterId, TraceRegisterContextOperations,
-};
+use crate::model::context::ContextAddressRange;
 use crate::model::lifespan::Lifespan;
 
 /// A single register context entry stored in the database.

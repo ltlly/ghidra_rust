@@ -77,7 +77,7 @@ impl TargetServiceImpl {
     }
 
     /// Attach to a process.
-    pub fn attach(&mut self, target_type: &str, pid: i64) -> Result<i64, String> {
+    pub fn attach(&mut self, target_type: &str, _pid: i64) -> Result<i64, String> {
         let _target = self
             .targets
             .iter()

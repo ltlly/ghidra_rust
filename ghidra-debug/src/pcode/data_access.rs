@@ -15,7 +15,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::model::Lifespan;
 
 /// A varnode descriptor (space, offset, size).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -146,6 +145,7 @@ pub struct DefaultPcodeTraceMemoryAccess {
     /// Memory storage indexed by (space_name, offset).
     storage: BTreeMap<(String, u64), u8>,
     /// The snap context.
+    #[allow(dead_code)]
     snap: i64,
 }
 
@@ -211,6 +211,7 @@ pub struct DefaultPcodeTraceRegistersAccess {
     /// Register values indexed by name.
     registers: BTreeMap<String, Vec<u8>>,
     /// The snap context.
+    #[allow(dead_code)]
     snap: i64,
 }
 

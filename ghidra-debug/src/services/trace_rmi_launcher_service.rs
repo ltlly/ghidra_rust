@@ -2,7 +2,7 @@
 //!
 //! Ported from Ghidra's `ghidra.app.services.TraceRmiLauncherService`.
 
-use super::trace_rmi_service::{TraceRmiLaunchOffer, LaunchParameter};
+use super::trace_rmi_service::TraceRmiLaunchOffer;
 
 /// Registry of available Trace RMI launchers.
 #[derive(Debug, Clone, Default)]

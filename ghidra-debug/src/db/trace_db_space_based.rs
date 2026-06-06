@@ -12,11 +12,9 @@
 //! infrastructure for that pattern.
 
 use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 // ---------------------------------------------------------------------------
 // Address space representation (simplified for trace-internal use)

@@ -5,7 +5,6 @@
 //! program views. Provides name/value queries, reference management, and
 //! enum-based equate detection.
 
-use crate::model::Lifespan;
 
 /// Equate view adapter for a trace program view.
 ///

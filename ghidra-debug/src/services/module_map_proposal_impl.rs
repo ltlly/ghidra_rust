@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
-use crate::services::mapping_proposals_impl::ModuleMapProposal;
 
 /// Quantization block bits for aligning address ranges.
 ///
@@ -80,7 +79,7 @@ impl ModuleMapEntry {
     /// Ported from Ghidra's `DefaultModuleMapEntry.computeImageSize()`.
     pub fn compute_image_size(base: u64, blocks: &[(u64, u64)]) -> u64 {
         let mut max_addr = base;
-        for &(block_start, block_end) in blocks {
+        for &(_block_start, block_end) in blocks {
             if block_end > max_addr {
                 max_addr = block_end;
             }
@@ -93,7 +92,7 @@ impl ModuleMapEntry {
     /// Ported from Ghidra's `DefaultModuleMapEntry.includeBlock()`.
     pub fn should_include_block(
         block_start: u64,
-        block_end: u64,
+        _block_end: u64,
         image_base: u64,
         is_loaded: bool,
         is_mapped: bool,

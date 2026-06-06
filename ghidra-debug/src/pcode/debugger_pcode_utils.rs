@@ -37,7 +37,7 @@ impl DebuggerPcodeUtils {
     /// Compute the byte offset for a register within its container.
     pub fn register_byte_offset(register_offset: u64, register_size: usize) -> (u64, usize) {
         let byte_offset = register_offset / 8;
-        let bit_offset = register_offset % 8;
+        let _bit_offset = register_offset % 8;
         let byte_size = ((register_size as u64 + 7) / 8) as usize;
         (byte_offset, byte_size)
     }

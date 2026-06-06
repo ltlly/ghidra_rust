@@ -19,8 +19,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::target_iface::{
-    ExecutionState, TraceActivatable, TraceAggregate, TraceEnvironment, TraceEventScope,
-    TraceExecutionStateful, TraceFocusScope, TraceMethod, TraceObjectInterface, TraceTogglable,
+    ExecutionState, TraceActivatable, TraceAggregate, TraceEnvironment,
+    TraceExecutionStateful, TraceFocusScope, TraceMethod, TraceTogglable,
 };
 use crate::target::key_path::KeyPath;
 

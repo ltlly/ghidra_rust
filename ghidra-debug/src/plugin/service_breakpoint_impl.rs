@@ -4,7 +4,7 @@
 //! Provides the logical breakpoint service plugin data model including
 //! breakpoint action items, tracked breakpoints, and program breakpoints.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use crate::api::breakpoint::LogicalBreakpoint;
 

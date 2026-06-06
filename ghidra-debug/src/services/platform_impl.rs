@@ -334,7 +334,7 @@ pub fn gdb_aarch64_mapper() -> PlatformMapper {
 }
 
 /// Helper to resolve architecture strings from GDB to Ghidra language IDs.
-pub fn arch_to_languages(arch: &str, os: &str, endian: Endian) -> Vec<LanguageCompilerSpecId> {
+pub fn arch_to_languages(arch: &str, _os: &str, endian: Endian) -> Vec<LanguageCompilerSpecId> {
     match (arch, endian) {
         ("i386" | "i686" | "x86", Endian::Little) => {
             vec![LanguageCompilerSpecId::new("x86:LE:32:default", "default")]

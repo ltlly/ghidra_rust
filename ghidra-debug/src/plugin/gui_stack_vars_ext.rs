@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::lifespan::Lifespan;
 
 // ---------------------------------------------------------------------------
 // VariableValueRow - row in the variable value table

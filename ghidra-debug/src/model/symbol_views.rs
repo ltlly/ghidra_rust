@@ -5,7 +5,6 @@
 //! classes, equates, references) with address, name, and lifespan queries.
 
 use super::symbol::{TraceEquate, TraceEquateReference, TraceReference, TraceSymbol, TraceSymbolKind};
-use super::Lifespan;
 
 /// A view over symbols of a specific kind.
 #[derive(Debug, Clone)]

@@ -5,7 +5,6 @@
 //! public and private event queues with configurable delivery delays.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
 use serde::{Deserialize, Serialize};
 

@@ -11,7 +11,6 @@
 //! the target's actual memory, and writes may be sent back.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -235,7 +234,7 @@ impl PcodeDebuggerRegistersAccess {
     /// Read from target registers (async-like operation).
     ///
     /// Returns true if the read was successful.
-    pub fn read_from_target(&mut self, registers: &[String]) -> bool {
+    pub fn read_from_target(&mut self, _registers: &[String]) -> bool {
         if !self.is_live() {
             return false;
         }

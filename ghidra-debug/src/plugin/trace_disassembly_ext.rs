@@ -5,8 +5,6 @@
 //! operations, including platform-aware disassembly, patching, and
 //! injection.
 
-use crate::model::address_snap::TraceAddressSnapRange;
-use crate::model::Lifespan;
 
 /// The result of a disassembly operation on a trace.
 #[derive(Debug, Clone)]

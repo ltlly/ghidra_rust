@@ -7,7 +7,7 @@
 //! synchronization between program breakpoints and trace breakpoints, and
 //! notifies listeners of changes.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 

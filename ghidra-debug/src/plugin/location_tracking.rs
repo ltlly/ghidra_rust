@@ -27,7 +27,7 @@ pub struct RegisterTrackingSpec {
 impl RegisterTrackingSpec {
     /// Create a new register tracking specification.
     pub fn new(
-        config_name: impl Into<String>,
+        _config_name: impl Into<String>,
         menu_name: impl Into<String>,
         register_name: impl Into<String>,
         should_disassemble: bool,

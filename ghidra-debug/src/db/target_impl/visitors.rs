@@ -140,6 +140,7 @@ impl AncestorsRootVisitor {
 ///
 /// Canonical successors are the "primary" children along the canonical
 /// path through the object hierarchy.
+#[allow(dead_code)]
 pub struct CanonicalSuccessorsRelativeVisitor {
     successors: Vec<ObjectPath>,
     base_path: ObjectPath,

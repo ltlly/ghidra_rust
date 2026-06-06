@@ -8,7 +8,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::target_iface::ExecutionState;
 
 /// Database-backed implementation of the aggregate interface.
 ///

@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::plugin::experiments::{ExperimentManager, TraceExperiment};
+use crate::plugin::experiments::ExperimentManager;
 
 /// A URL for a trace within a project.
 ///

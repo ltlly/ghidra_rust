@@ -8,7 +8,6 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::tracemgr::DebuggerCoordinates;
 use crate::util::DebugCoordinates;
 
 // ---------------------------------------------------------------------------

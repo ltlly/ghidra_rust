@@ -7,8 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::Lifespan;
-use super::symbol::{TraceSymbol, TraceSymbolKind};
+use super::symbol::TraceSymbol;
 
 /// A view of symbols within a specific address range.
 ///

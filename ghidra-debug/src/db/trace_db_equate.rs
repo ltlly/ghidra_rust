@@ -198,7 +198,7 @@ impl TraceEquateSpace {
 
     /// Delete an equate and all its references.
     pub fn delete_equate(&mut self, id: EquateId) -> bool {
-        if let Some(eq) = self.equates.remove(&id) {
+        if let Some(_eq) = self.equates.remove(&id) {
             // Remove all references
             if let Some(refs) = self.references_by_equate.remove(&id) {
                 for r in refs {

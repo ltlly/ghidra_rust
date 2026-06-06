@@ -41,6 +41,7 @@ pub struct ContainingQueryCache<T: Clone + std::fmt::Debug> {
     /// Breadth in addresses for the range cache.
     address_breadth: u64,
     /// Maximum number of point cache entries.
+    #[allow(dead_code)]
     max_points: usize,
     /// Point cache: exact (snap, offset) -> result.
     point_cache: HashMap<ContainingCacheKey, Option<T>>,

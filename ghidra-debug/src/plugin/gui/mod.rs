@@ -6,8 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::api::breakpoint::LogicalBreakpoint;
-use crate::model::Lifespan;
 
 /// A row in the breakpoints provider table.
 ///

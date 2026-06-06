@@ -118,7 +118,7 @@ impl DbTraceUserData {
 
     /// Get all entries in a namespace.
     pub fn entries_in_namespace(&self, namespace: &str) -> Vec<&UserDataEntry> {
-        let prefix = format!("{}::", namespace);
+        let _prefix = format!("{}::", namespace);
         self.entries
             .values()
             .filter(|e| e.namespace.as_deref() == Some(namespace))

@@ -260,6 +260,7 @@ pub struct ProgressReporter {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ProgressReporterInner {
     task_name: String,
     progress: f64,

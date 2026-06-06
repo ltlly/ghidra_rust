@@ -110,6 +110,7 @@ impl DataAdapterFromDataType {
 /// An adapter for reading data with display settings.
 #[derive(Debug, Clone)]
 pub struct DataAdapterFromSettings {
+    #[allow(dead_code)]
     minimal: DataAdapterMinimal,
     /// Display format settings.
     pub settings: DataDisplaySettings,
@@ -162,7 +163,7 @@ impl InstructionAdapterFromPrototype {
         mnemonic: impl Into<String>,
         bytes: Vec<u8>,
     ) -> Self {
-        let len = bytes.len() as u32;
+        let _len = bytes.len() as u32;
         Self {
             address,
             mnemonic: mnemonic.into(),

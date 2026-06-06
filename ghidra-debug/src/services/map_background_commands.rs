@@ -5,10 +5,8 @@
 //! the execution primitives for applying mapping proposals in the background.
 
 use crate::model::Lifespan;
-use crate::model::map_proposal::{
-    MapProposal, ModuleMapProposal, ProposedMapping, RegionMapProposal, SectionMapProposal,
-};
-use super::module_region_matcher::{LoadedModule, ModuleRegionMatch, ProgramRegion};
+use crate::model::map_proposal::ProposedMapping;
+use super::module_region_matcher::{LoadedModule, ProgramRegion};
 
 /// The result of a background mapping operation.
 #[derive(Debug, Clone)]

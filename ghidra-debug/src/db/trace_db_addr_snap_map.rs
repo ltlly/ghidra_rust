@@ -10,7 +10,6 @@
 //! - "What properties are set in address range [A, B] at snap S?"
 //! - "What properties exist for snap range [S1, S2]?"
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

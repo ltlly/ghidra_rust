@@ -146,7 +146,7 @@ impl Sym {
     }
 
     /// Bitwise AND.
-    pub fn and(&self, sp_name: &str, rhs: &Sym) -> Sym {
+    pub fn and(&self, _sp_name: &str, rhs: &Sym) -> Sym {
         match (self, rhs) {
             (Sym::Opaque(_), _) | (_, Sym::Opaque(_)) => Sym::opaque(),
             (Sym::Const(a), Sym::Const(b)) => Sym::Const(ConstSym {

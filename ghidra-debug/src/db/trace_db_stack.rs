@@ -7,7 +7,6 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
 use crate::model::lifespan::Lifespan;
-use crate::model::stack::{TraceStack, TraceStackFrame};
 
 /// A stack frame entry stored in the database.
 #[derive(Debug, Clone, Serialize, Deserialize)]

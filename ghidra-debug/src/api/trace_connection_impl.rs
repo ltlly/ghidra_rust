@@ -12,10 +12,8 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::tracermi::{
-    ConnectionState, RemoteAsyncResult, RemoteMethodDescriptor, RemoteMethodRegistry,
-    AsyncStatus, TraceRmiAcceptor, TraceRmiError, TraceRmiResult, SchemaName,
+    ConnectionState, RemoteAsyncResult, RemoteMethodDescriptor, RemoteMethodRegistry, TraceRmiError, TraceRmiResult, SchemaName,
 };
-use super::launch_result::{LaunchResult, LaunchConfigurator};
 
 /// A unique identifier for a trace target.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

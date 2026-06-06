@@ -166,172 +166,15 @@ impl PlatformOpinionRegistry {
     }
 }
 
-/// Built-in GDB platform opinion provider.
-#[derive(Debug)]
-pub struct GdbPlatformOpinion;
-
-impl PlatformOpinionProvider for GdbPlatformOpinion {
-    fn name(&self) -> &str {
-        "GDB Platform Opinion"
-    }
-
-    fn debugger_types(&self) -> &[&str] {
-        &["gdb"]
-    }
-
-    fn get_opinions(&self, context: &OpinionContext) -> Vec<PlatformOpinion> {
-        let mut opinions = Vec::new();
-
-        match context.architecture.as_str() {
-            arch if arch.contains("x86-64") || arch.contains("amd64") => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "x86:LE:64:default",
-                    "default",
-                    "x86-64",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("x86") || arch.contains("i386") || arch.contains("i686") => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "x86:LE:32:default",
-                    "default",
-                    "x86",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("aarch64") || arch.contains("arm64") => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "AARCH64:LE:64:v8A",
-                    "default",
-                    "aarch64",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("arm") => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "ARM:LE:32:v8",
-                    "default",
-                    "arm",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("mips") && context.big_endian => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "MIPS:BE:32:default",
-                    "default",
-                    "mips",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("mips") => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "MIPS:LE:32:default",
-                    "default",
-                    "mips",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("riscv") && context.pointer_size == 8 => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "RISCV:LE:64:default",
-                    "default",
-                    "riscv64",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("riscv") => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "RISCV:LE:32:default",
-                    "default",
-                    "riscv32",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("powerpc") && context.big_endian => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "PowerPC:BE:32:default",
-                    "default",
-                    "powerpc",
-                    0.9,
-                ));
-            }
-            arch if arch.contains("sparc") && context.big_endian => {
-                opinions.push(PlatformOpinion::new(
-                    "gdb",
-                    "SPARC:BE:32:default",
-                    "default",
-                    "sparc",
-                    0.9,
-                ));
-            }
-            _ => {
-                // Default fallback for unknown architectures
-                if context.pointer_size == 8 {
-                    opinions.push(PlatformOpinion::new(
-                        "gdb",
-                        "x86:LE:64:default",
-                        "default",
-                        "unknown",
-                        0.3,
-                    ));
-                }
-            }
-        }
-
-        opinions
-    }
-}
-
-/// Built-in LLDB platform opinion provider.
-#[derive(Debug)]
-pub struct LldbPlatformOpinion;
-
-impl PlatformOpinionProvider for LldbPlatformOpinion {
-    fn name(&self) -> &str {
-        "LLDB Platform Opinion"
-    }
-
-    fn debugger_types(&self) -> &[&str] {
-        &["lldb"]
-    }
-
-    fn get_opinions(&self, context: &OpinionContext) -> Vec<PlatformOpinion> {
-        // LLDB shares the same architecture mappings as GDB
-        let gdb = GdbPlatformOpinion;
-        gdb.get_opinions(context)
-    }
-}
-
-/// Built-in Frida platform opinion provider.
-#[derive(Debug)]
-pub struct FridaPlatformOpinion;
-
-impl PlatformOpinionProvider for FridaPlatformOpinion {
-    fn name(&self) -> &str {
-        "Frida Platform Opinion"
-    }
-
-    fn debugger_types(&self) -> &[&str] {
-        &["frida"]
-    }
-
-    fn get_opinions(&self, context: &OpinionContext) -> Vec<PlatformOpinion> {
-        let gdb = GdbPlatformOpinion;
-        gdb.get_opinions(context)
-    }
-}
-
-/// Create a registry with all built-in providers.
+/// Create a registry with all built-in providers from the individual platform modules.
+///
+/// This function imports the platform-specific opinion providers from their
+/// respective modules to avoid ambiguous glob re-exports.
 pub fn create_default_registry() -> PlatformOpinionRegistry {
+    use super::platform_frida::FridaPlatformOpinion;
+    use super::platform_gdb::GdbPlatformOpinion;
+    use super::platform_lldb::LldbPlatformOpinion;
+
     let mut registry = PlatformOpinionRegistry::new();
     registry.register(Box::new(GdbPlatformOpinion));
     registry.register(Box::new(LldbPlatformOpinion));
@@ -342,48 +185,32 @@ pub fn create_default_registry() -> PlatformOpinionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::platform_gdb::GdbPlatformOpinion;
+    use super::super::platform_lldb::LldbPlatformOpinion;
 
     #[test]
-    fn test_gdb_x86_64() {
-        let ctx = OpinionContext::new()
-            .with_debugger_type("gdb")
-            .with_architecture("x86-64")
-            .with_pointer_size(8);
-        let opinions = GdbPlatformOpinion.get_opinions(&ctx);
-        assert!(!opinions.is_empty());
-        assert_eq!(opinions[0].language_id, "x86:LE:64:default");
+    fn test_platform_opinion_creation() {
+        let opinion = PlatformOpinion::new("gdb", "x86:LE:64:default", "gcc", "x86-64", 0.9);
+        assert_eq!(opinion.debugger_type, "gdb");
+        assert_eq!(opinion.language_id, "x86:LE:64:default");
+        assert_eq!(opinion.compiler_spec_id, "gcc");
+        assert_eq!(opinion.architecture, "x86-64");
+        assert_eq!(opinion.confidence, 0.9);
     }
 
     #[test]
-    fn test_gdb_arm() {
+    fn test_opinion_context_builder() {
         let ctx = OpinionContext::new()
             .with_debugger_type("gdb")
-            .with_architecture("arm")
-            .with_pointer_size(4);
-        let opinions = GdbPlatformOpinion.get_opinions(&ctx);
-        assert!(!opinions.is_empty());
-        assert_eq!(opinions[0].language_id, "ARM:LE:32:v8");
-    }
-
-    #[test]
-    fn test_gdb_aarch64() {
-        let ctx = OpinionContext::new()
-            .with_debugger_type("gdb")
-            .with_architecture("aarch64")
-            .with_pointer_size(8);
-        let opinions = GdbPlatformOpinion.get_opinions(&ctx);
-        assert!(!opinions.is_empty());
-        assert_eq!(opinions[0].language_id, "AARCH64:LE:64:v8A");
-    }
-
-    #[test]
-    fn test_lldb_uses_gdb_mappings() {
-        let ctx = OpinionContext::new()
-            .with_debugger_type("lldb")
-            .with_architecture("x86-64")
-            .with_pointer_size(8);
-        let opinions = LldbPlatformOpinion.get_opinions(&ctx);
-        assert!(!opinions.is_empty());
+            .with_architecture("mips")
+            .with_os("linux")
+            .with_pointer_size(4)
+            .with_big_endian(true);
+        assert_eq!(ctx.debugger_type, "gdb");
+        assert_eq!(ctx.architecture, "mips");
+        assert_eq!(ctx.os, "linux");
+        assert!(ctx.big_endian);
+        assert_eq!(ctx.pointer_size, 4);
     }
 
     #[test]
@@ -409,16 +236,44 @@ mod tests {
     }
 
     #[test]
-    fn test_opinion_context_builder() {
+    fn test_registry_len() {
+        let registry = create_default_registry();
+        assert_eq!(registry.len(), 3);
+        assert!(!registry.is_empty());
+    }
+
+    #[test]
+    fn test_empty_registry() {
+        let registry = PlatformOpinionRegistry::new();
+        assert!(registry.is_empty());
+        assert_eq!(registry.len(), 0);
+    }
+
+    #[test]
+    fn test_registry_lldb() {
+        let registry = create_default_registry();
         let ctx = OpinionContext::new()
-            .with_debugger_type("gdb")
-            .with_architecture("mips")
-            .with_os("linux")
-            .with_pointer_size(4)
-            .with_big_endian(true);
-        assert_eq!(ctx.debugger_type, "gdb");
-        assert_eq!(ctx.architecture, "mips");
-        assert!(ctx.big_endian);
-        assert_eq!(ctx.pointer_size, 4);
+            .with_debugger_type("lldb")
+            .with_architecture("x86-64")
+            .with_pointer_size(8);
+        let opinions = registry.get_opinions(&ctx);
+        assert!(!opinions.is_empty());
+    }
+
+    #[test]
+    fn test_registry_frida() {
+        let registry = create_default_registry();
+        let ctx = OpinionContext::new()
+            .with_debugger_type("frida")
+            .with_architecture("arm64")
+            .with_pointer_size(8);
+        let opinions = registry.get_opinions(&ctx);
+        assert!(!opinions.is_empty());
+    }
+
+    #[test]
+    fn test_provider_name() {
+        let provider = GdbPlatformOpinion;
+        assert_eq!(provider.name(), "GDB");
     }
 }

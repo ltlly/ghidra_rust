@@ -7,7 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// A listing entry visible through a program view.
 ///

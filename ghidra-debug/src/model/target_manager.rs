@@ -9,10 +9,9 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::target_object::{ConflictResolution, TraceObject};
+use super::target_object::TraceObject;
 use super::target_schema::{SchemaContext, SchemaName};
-use super::target_value::{TraceObjectValPath, TraceObjectValue};
-use super::Lifespan;
+use super::target_value::TraceObjectValPath;
 use crate::target::key_path::KeyPath;
 
 /// Errors from the target object manager.

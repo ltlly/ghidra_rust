@@ -12,7 +12,6 @@ use super::action_name::ActionName;
 use super::breakpoint::LogicalBreakpoint;
 use crate::model::breakpoint::TraceBreakpointKind;
 use crate::model::time::TraceSchedule;
-use crate::model::Lifespan;
 
 /// The default timeout for waiting on async operations.
 pub const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(60);

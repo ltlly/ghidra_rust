@@ -7,7 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// A raw data element in the trace listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]

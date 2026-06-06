@@ -9,7 +9,6 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::api::tracemgr::DebuggerCoordinates;
-use crate::model::Trace;
 
 /// Metadata about a managed trace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,6 +73,7 @@ pub struct TraceManagerServiceImpl {
     /// Global coordinates.
     coordinates: Option<DebuggerCoordinates>,
     /// Listeners notified on changes.
+    #[allow(dead_code)]
     change_listeners: Vec<String>, // Placeholder for listener IDs
 }
 

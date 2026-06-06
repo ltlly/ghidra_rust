@@ -8,7 +8,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::model::Lifespan;
 use crate::plugin::gui_timeoverview::{TimeOverviewColorEntry, TimeType};
 
 /// An entry in the time overview map.

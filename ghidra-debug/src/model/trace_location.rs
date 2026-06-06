@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use super::Lifespan;
 
 /// A location in a trace (snap + address + optional thread).
 ///

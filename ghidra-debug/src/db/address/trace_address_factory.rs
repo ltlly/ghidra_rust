@@ -79,7 +79,7 @@ impl TraceAddressFactory {
     }
 
     /// Add an overlay space.
-    pub fn add_overlay_space(&mut self, key: u64, name: &str, base_name: &str) -> Result<u16, String> {
+    pub fn add_overlay_space(&mut self, _key: u64, name: &str, base_name: &str) -> Result<u16, String> {
         if self.by_name.contains_key(name) {
             return Err(format!("Address space {} already exists.", name));
         }

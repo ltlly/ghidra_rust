@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 
-use crate::model::Lifespan;
 
 /// A mapped logical breakpoint that maps between a program bookmark and
 /// trace breakpoint locations.
@@ -90,7 +89,7 @@ impl MappedLogicalBreakpoint {
         bps.retain(|&id| id != bp_id);
         let removed = bps.len() < before;
         let empty = bps.is_empty();
-        drop(bps);
+        let _ = bps;
         if empty {
             self.trace_breakpoints.remove(&key);
         }

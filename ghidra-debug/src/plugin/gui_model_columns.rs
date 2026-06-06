@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::gui_model::{AttributeValue, ObjectModelRow};
+use super::gui_model::ObjectModelRow;
 
 // ---------------------------------------------------------------------------
 // Column types

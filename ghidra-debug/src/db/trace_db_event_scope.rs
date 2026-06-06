@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::lifespan::Lifespan;
 
 /// Database implementation of the EventScope interface.
 ///

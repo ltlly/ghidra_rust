@@ -219,7 +219,7 @@ impl TraceDomainObjectListener {
         use std::sync::{Arc, Mutex};
 
         let states = Arc::new(Mutex::new(Vec::new()));
-        let states_clone = states.clone();
+        let _states_clone = states.clone();
 
         let mut listener = Self::new();
         listener.add_handler(

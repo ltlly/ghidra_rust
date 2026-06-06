@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::api::action::AutoMapSpec;
-use crate::api::modules::{MapEntry, MapProposal, ModuleMapProposal, SectionMapProposal};
 use crate::model::Lifespan;
 
 /// A built-in auto-map specification.

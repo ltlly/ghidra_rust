@@ -7,7 +7,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
-use crate::target::KeyPath;
 
 /// A change event for target object values.
 ///
@@ -154,12 +153,12 @@ pub trait TraceObjectChangeListener {
     fn value_deleted(&mut self, event: &ValueChangeEvent);
 
     /// Called when an object is created.
-    fn object_created(&mut self, object_key: i64) {
+    fn object_created(&mut self, _object_key: i64) {
         // Default: no-op
     }
 
     /// Called when an object is deleted.
-    fn object_deleted(&mut self, object_key: i64) {
+    fn object_deleted(&mut self, _object_key: i64) {
         // Default: no-op
     }
 }

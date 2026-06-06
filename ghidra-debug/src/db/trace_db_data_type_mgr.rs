@@ -4,12 +4,10 @@
 //! Manages data type definitions and categories for a trace, with per-platform
 //! support (host vs guest prefix).
 
-use std::collections::HashMap;
 
 use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// The conflict resolution strategy when adding a data type with an existing path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

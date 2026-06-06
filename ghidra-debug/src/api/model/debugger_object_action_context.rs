@@ -1,7 +1,6 @@
 //! Action context carrying trace object values.
 
 use crate::model::target_value::TraceObjectValue;
-use crate::api::tracemgr::DebuggerCoordinates;
 
 /// Action context for debugger object operations.
 #[derive(Debug, Clone)]

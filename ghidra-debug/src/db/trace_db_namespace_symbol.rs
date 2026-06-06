@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::model::Lifespan;
 
 /// A namespace symbol entry in the trace database.
 ///

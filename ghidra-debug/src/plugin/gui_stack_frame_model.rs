@@ -253,7 +253,7 @@ impl StackAnalyzer {
     }
 
     /// Analyze a block of stack memory for potential return addresses.
-    pub fn find_return_addresses(&self, stack_data: &[u8], base_addr: u64) -> Vec<u64> {
+    pub fn find_return_addresses(&self, stack_data: &[u8], _base_addr: u64) -> Vec<u64> {
         let mut results = Vec::new();
         let step = self.word_size;
         for i in (0..stack_data.len()).step_by(step) {

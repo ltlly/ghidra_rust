@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 
-use crate::api::tracermi::TraceRmiAcceptor;
 
 // ---------------------------------------------------------------------------
 // ConnectMode

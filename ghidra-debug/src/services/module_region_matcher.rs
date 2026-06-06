@@ -53,6 +53,7 @@ pub struct ModuleRegionMatcher {
     /// Minimum name similarity score to consider a match.
     min_name_similarity: f64,
     /// Indexed modules from the program.
+    #[allow(dead_code)]
     modules: Vec<super::program_indexer::IndexedModule>,
 }
 

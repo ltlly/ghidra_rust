@@ -4,7 +4,7 @@
 //! listener registration, event flushing, and change notification delivery.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Mutex, RwLock};
 
 /// Unique identifier for a registered event listener.
 pub type ListenerId = u64;

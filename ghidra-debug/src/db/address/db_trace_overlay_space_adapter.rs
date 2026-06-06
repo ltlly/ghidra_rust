@@ -3,7 +3,7 @@
 //! Manages overlay address spaces persisted in the database.
 
 use std::collections::HashMap;
-use super::trace_address_factory::{AddressSpaceDesc, TraceAddressFactory};
+use super::trace_address_factory::TraceAddressFactory;
 
 /// An entry representing a persisted overlay space.
 #[derive(Debug, Clone)]

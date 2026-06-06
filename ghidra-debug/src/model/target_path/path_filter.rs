@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use super::{KeyPath, PathMatcher, PathPattern};
+use super::{KeyPath, PathPattern};
 
 /// Alignment for wildcard substitution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -5,7 +5,7 @@
 //! Manages the lifecycle of open traces: opening, closing, activating,
 //! and coordinating trace state across the debugger framework.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 

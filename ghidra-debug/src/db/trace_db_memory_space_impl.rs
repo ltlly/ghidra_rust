@@ -4,7 +4,7 @@
 //! `ghidra.trace.database.memory`. Implements copy-on-write memory
 //! storage with block-level granularity and state tracking.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::db::listing::code_unit::{AbstractCodeUnit, CodeUnitKind, DbTraceData};
+use crate::db::listing::code_unit::DbTraceData;
 use crate::db::listing::instruction::DbTraceInstruction;
 use crate::db::listing::undefined::UndefinedDbTraceData;
 use crate::model::Lifespan;

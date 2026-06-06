@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
 use crate::target::key_path::KeyPath;
-use crate::target::path_matcher::{NoneFilter, PathFilter, PathMatcher};
+use crate::target::path_matcher::{PathFilter, PathMatcher};
 use crate::target::path_pattern::PathPattern;
 
 // ---------------------------------------------------------------------------

@@ -9,7 +9,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::trace_rmi_connection::TraceRmiConnection;
-use super::trace_rmi_acceptor::TraceRmiAcceptor;
 
 /// The mechanism by which a Trace RMI connection was established.
 ///

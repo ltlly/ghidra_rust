@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::Lifespan;
 use super::listing::{CodeUnitType, TraceCodeUnit};
 
 /// An iterator-style view over code units in the trace listing.

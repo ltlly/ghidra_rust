@@ -8,7 +8,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::trace::Trace;
-use super::Lifespan;
 
 /// Memory view within a TraceProgramView, restricting reads to a single snap.
 #[derive(Debug, Clone, Serialize, Deserialize)]

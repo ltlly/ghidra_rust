@@ -2,7 +2,6 @@
 //!
 //! Ported from Ghidra's `ghidra.trace.model.symbol.TraceSymbolNoDuplicatesView`.
 
-use super::Lifespan;
 use super::symbol::{TraceSymbol, TraceSymbolKind};
 use std::collections::HashMap;
 

@@ -9,7 +9,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::target::KeyPath;
 
 /// The data type of a trace object field in the database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

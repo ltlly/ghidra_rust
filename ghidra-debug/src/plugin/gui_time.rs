@@ -5,7 +5,6 @@
 //! for the time navigation panel.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use crate::model::TraceSnapshot;
 

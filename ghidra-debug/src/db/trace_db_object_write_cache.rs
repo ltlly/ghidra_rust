@@ -15,7 +15,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
-use crate::target::KeyPath;
 
 use super::trace_db_object_value_behind::{BehindValue, DbTraceObjectValueBehind};
 

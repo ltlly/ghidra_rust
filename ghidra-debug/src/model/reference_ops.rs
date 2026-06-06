@@ -215,7 +215,7 @@ impl TraceReferenceOperations for TraceReferenceSpace {
         lifespan: Lifespan,
         from_address: u64,
         to_min: u64,
-        to_max: u64,
+        _to_max: u64,
         ref_type: TraceReferenceKind,
         is_primary: bool,
         _operand_index: i32,
@@ -279,8 +279,8 @@ impl TraceReferenceOperations for TraceReferenceSpace {
         lifespan: Lifespan,
         from_address: u64,
         to_stack_offset: i32,
-        ref_type: TraceReferenceKind,
-        is_primary: bool,
+        _ref_type: TraceReferenceKind,
+        _is_primary: bool,
         _operand_index: i32,
     ) -> i64 {
         let key = self.next_key();

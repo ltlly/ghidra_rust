@@ -124,10 +124,10 @@ impl TraceEquateOperations for InMemoryEquateOps {
                     && r.address == address
                     && r.operand_index == operand_index
             })
-            .and_then(|r| {
+            .and_then(|_r| {
                 self.equates
                     .iter()
-                    .find(|(name, v)| {
+                    .find(|(_name, v)| {
                         // Key-based matching: equate_key in real impl, name here
                         *v == value
                     })
@@ -139,7 +139,7 @@ impl TraceEquateOperations for InMemoryEquateOps {
         self.references
             .iter()
             .filter(|r| r.lifespan.contains(snap) && r.address == address)
-            .filter_map(|r| {
+            .filter_map(|_r| {
                 self.equates
                     .iter()
                     .find(|(_, _)| true) // Simplified: in real impl would use equate_key
@@ -161,7 +161,7 @@ impl TraceEquateOperations for InMemoryEquateOps {
                     && r.address == address
                     && r.operand_index == operand_index
             })
-            .filter_map(|r| {
+            .filter_map(|_r| {
                 self.equates
                     .iter()
                     .find(|(_, _)| true)

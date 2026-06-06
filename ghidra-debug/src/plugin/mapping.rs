@@ -4,12 +4,10 @@
 //! Provides the mapping manager and helpers for the debugger's static
 //! mapping service plugin.
 
-use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::api::modules::MapEntry;
-use crate::model::Lifespan;
 
 /// The direction of a mapping synchronization.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
