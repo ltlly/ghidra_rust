@@ -107,6 +107,9 @@ pub mod pretty_printer;
 pub mod signature;
 pub mod token_iterator;
 pub mod util;
+
+// New module: missing decompiler types (ClangToken, slice actions, hover plugins, etc.)
+pub mod clang_missing;
 pub mod validator;
 pub mod decompiler_initializer;
 pub mod empty_decompile_data;

@@ -21,6 +21,12 @@
 /// `CParserTask`, `IncludeFileFinder`, and `ParseDialog`.
 pub mod plugin;
 
+/// Include file finder and preprocessor argument builder.
+///
+/// Ported from `ghidra.app.plugin.core.cparser.IncludeFileFinder`
+/// and preprocessor invocation logic.
+pub mod task;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

@@ -60,6 +60,9 @@ pub mod grouping_visual_graph;
 pub mod graph_type_service_ext;
 pub mod viewer_utils;
 
+// New module: missing graph types (animator jobs, mouse plugins, Jung adapters, etc.)
+pub mod graph_missing;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::hash::Hash;

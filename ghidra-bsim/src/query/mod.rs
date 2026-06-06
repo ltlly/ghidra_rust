@@ -28,6 +28,9 @@ pub mod server_config;
 pub mod sf_query_service;
 pub mod tables;
 pub mod child_match_record;
+
+// New module: missing BSim types (description, client, protocol, elastic, etc.)
+pub mod bsim_missing_types;
 pub mod lsh_exception;
 pub mod bsim_data_source;
 pub mod bsim_db_connect_task_manager;

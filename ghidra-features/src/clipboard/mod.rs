@@ -7,12 +7,24 @@
 //! providers, and a program transferable model for structured clipboard
 //! data exchange.
 //!
+//! # Submodules
+//!
+//! - [`service`] -- clipboard service interfaces and clipboard type definitions
+//!
 //! # Key Types
 //!
 //! - [`ClipboardFormat`] -- the format of data on the clipboard
 //! - [`ClipboardEntry`] -- a single clipboard entry with format and data
 //! - [`ProgramTransferable`] -- structured clipboard data with metadata
 //! - [`ClipboardManager`] -- manages clipboard history and content
+
+/// Clipboard service interfaces, types, and plugin model.
+///
+/// Ported from `ghidra.app.services.ClipboardService`,
+/// `ghidra.app.services.ClipboardContentProviderService`,
+/// `ghidra.app.util.ClipboardType`, and
+/// `ghidra.app.plugin.core.clipboard.ClipboardPlugin`.
+pub mod service;
 
 use ghidra_core::Address;
 
@@ -281,6 +293,16 @@ impl ClipboardManager {
             self.entries.remove(0);
         }
         self.entries.push(entry);
+    }
+
+    /// Copy an existing entry into the clipboard history.
+    pub fn copy_entry(&mut self, entry: ClipboardEntry) {
+        self.push_entry(entry);
+    }
+
+    /// Get all entries as a slice.
+    pub fn entries(&self) -> &[ClipboardEntry] {
+        &self.entries
     }
 }
 

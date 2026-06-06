@@ -13,6 +13,7 @@
 //! - [`frame_datatype`] -- stack frame data type with component management
 //!   and offset translation.
 //! - [`manager`] -- stack editor manager for session lifecycle management.
+//! - [`panel`] -- stack editor panel model (table display, selection, field editing).
 
 pub mod frame_datatype;
 pub mod manager;
@@ -22,6 +23,12 @@ pub mod manager;
 /// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorOptionManager`
 /// and `ghidra.app.plugin.core.stackeditor.StackFrameDataType`.
 pub mod option_manager;
+
+/// Stack editor panel model -- table columns, rows, selection, and edit actions.
+///
+/// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorPanel` and
+/// `ghidra.app.plugin.core.stackeditor.EditStackAction`.
+pub mod panel;
 
 use ghidra_core::Address;
 use std::collections::BTreeMap;

@@ -6,12 +6,29 @@
 //! including the five standard comment types (EOL, Pre, Post, Plate, Repeatable),
 //! comment history tracking, batch operations, and service-level interfaces.
 //!
+//! # Submodules
+//!
+//! - [`dialog`] -- comment edit dialog and action factory
+//! - [`history`] -- comment history tracking and display
+//!
 //! # Key Types
 //!
 //! - [`CommentType`] -- the five standard Ghidra comment types
 //! - [`CommentScope`] -- scope for comment operations
 //! - [`CommentOperation`] -- a single set/clear comment operation
 //! - [`CommentsModel`] -- model for managing comment operations and storage
+
+/// Comment edit dialogs and action definitions.
+///
+/// Ported from `ghidra.app.plugin.core.comments.CommentsDialog` and
+/// `ghidra.app.plugin.core.comments.CommentsActionFactory`.
+pub mod dialog;
+
+/// Comment history tracking and display.
+///
+/// Ported from `ghidra.app.plugin.core.comments.CommentHistoryDialog` and
+/// `ghidra.app.plugin.core.comments.CommentHistoryPanel`.
+pub mod history;
 
 use ghidra_core::Address;
 use std::collections::BTreeMap;

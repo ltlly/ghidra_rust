@@ -15,6 +15,7 @@
 
 pub mod actions;
 pub mod conflict;
+pub mod edit_field;
 pub mod settings;
 
 use ghidra_core::Address;

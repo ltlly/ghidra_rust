@@ -67,6 +67,10 @@ pub mod trace_method;
 pub mod trace_object_value;
 pub mod trace_span;
 
+// Extended modules ported from remaining Java packages
+pub mod target_info_ext;
+pub mod target_schema_xml;
+
 pub mod address_translator;
 pub mod experiment;
 pub mod location_tracking;
