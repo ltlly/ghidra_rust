@@ -15,4 +15,9 @@ pub mod model;
 pub mod pcode_emu;
 pub mod sarif_writer;
 pub mod taint_space;
+pub mod taint_engines;
 pub use taint_space::{TaintSet as TaintSpaceSet, TaintSpace};
+pub use taint_engines::{
+    AngrTaintState, EmulatorTaintState, ExtKeyValue as TaintExtKeyValue, SarifKeyValueWriter,
+    SarifLogicalLocation, TaintEngine, TaintLabel, TaintQuery,
+};

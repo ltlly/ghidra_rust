@@ -365,3 +365,33 @@ pub use gui_action_contexts_ext::DebuggerObjectPathActionContext;
 pub mod platform_impl;
 pub mod platform_opinion_framework;
 pub mod mapping_context;
+
+// New modules ported from remaining Debugger source files
+pub mod target_actions;
+pub mod trace_call_tree_types;
+pub mod register_types;
+pub mod memview_types;
+
+pub use target_actions::{
+    ActionEntry as TargetActionEntry, ActionTaskState, ControlExecutionState,
+    ControlModeAction, ControlModeActionState, SnapshotNavState,
+    TargetActionKind, TargetActionTask,
+    disconnect_action_entry, interrupt_action_entry, kill_action_entry, resume_action_entry,
+    snap_backward_action_entry, snap_forward_action_entry, step_into_action_entry,
+    step_out_action_entry, step_over_action_entry,
+};
+pub use trace_call_tree_types::{
+    CallTreeNodeData, TraceCallTreeCallNode as CallTreeNode, TraceCallTreeExternalNode as ExternalTreeNode,
+    TraceCallTreeLogContext as CallTreeLogContext, TraceCallTreeModel as CallTreeModel,
+    TraceCallTreeReturnNode as ReturnTreeNode,
+    TraceCallTreeTailCallNode as TailCallTreeNode,
+};
+pub use register_types::{
+    RegisterActionContext, RegisterDisplayFormat, RegisterTableModel as RegisterPanelModel,
+    RegisterRow as RegisterPanelRow, AvailableRegisterRow as AvailableRegister,
+};
+pub use memview_types::{
+    MemviewAddressFormat, MemviewColorScheme, MemviewMap as MemviewPanelMap,
+    MemviewModel as MemviewPanelModel, MemviewServiceImpl as MemviewPanelService,
+    MemviewPanelZoomAction, MemoryBox as MemviewMemoryBox, MemviewBoxType as MemviewBoxKind,
+};

@@ -1,10 +1,83 @@
 //! BSim JDBC-like data source abstraction.
 //!
 //! Ports `ghidra.features.bsim.query.BSimJDBCDataSource`.
+//!
+//! Provides both a trait abstraction for data source connections and a
+//! concrete configuration struct for building data source instances.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+
+use super::bsim_server_info::BSimServerInfo;
+
+// ============================================================================
+// BSimJDBCDataSource trait
+// ============================================================================
+
+/// Connection type for BSim databases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectionType {
+    /// PostgreSQL connection.
+    PostgreSQL,
+    /// Elasticsearch connection.
+    Elasticsearch,
+    /// H2 embedded file database.
+    H2File,
+    /// In-memory database (for testing).
+    InMemory,
+}
+
+/// Status of a database connection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DataSourceStatus {
+    /// Not connected.
+    Unconnected,
+    /// Connected and ready.
+    Ready,
+    /// Connection error.
+    Error,
+    /// Disposed.
+    Disposed,
+}
+
+/// Trait abstracting a JDBC-like data source for BSim databases.
+///
+/// Port of `ghidra.features.bsim.query.BSimJDBCDataSource` (Java interface).
+///
+/// Implementations provide connection pooling, authentication, and
+/// connection lifecycle management for SQL-backed BSim databases.
+pub trait BSimJDBCDataSource: Send + Sync {
+    /// Get the current status of this data source.
+    fn status(&self) -> DataSourceStatus;
+
+    /// Get the connection type (PostgreSQL, Elasticsearch, etc.).
+    fn connection_type(&self) -> ConnectionType;
+
+    /// Get the server info that corresponds to this data source.
+    ///
+    /// The returned instance is normalized for caching and may not match
+    /// the original server info used to obtain this data source.
+    fn server_info(&self) -> &BSimServerInfo;
+
+    /// Get the number of active connections in the pool.
+    fn active_connections(&self) -> usize;
+
+    /// Get the number of idle connections in the pool.
+    fn idle_connections(&self) -> usize;
+
+    /// Total connections (active + idle).
+    fn total_connections(&self) -> usize {
+        self.active_connections() + self.idle_connections()
+    }
+
+    /// Dispose the data source and release all pooled connections.
+    fn dispose(&mut self);
+}
+
+// ============================================================================
+// BSimDataSource (concrete configuration)
+// ============================================================================
 
 /// A data source configuration for connecting to a BSim database.
 ///
@@ -237,5 +310,17 @@ mod tests {
         assert_eq!(deserialized.database_name, ds.database_name);
         // Password should not be serialized
         assert!(deserialized.password.is_none());
+    }
+
+    #[test]
+    fn test_connection_type_variants() {
+        assert_ne!(ConnectionType::PostgreSQL, ConnectionType::Elasticsearch);
+        assert_ne!(ConnectionType::H2File, ConnectionType::InMemory);
+    }
+
+    #[test]
+    fn test_datasource_status_variants() {
+        assert_ne!(DataSourceStatus::Unconnected, DataSourceStatus::Ready);
+        assert_ne!(DataSourceStatus::Error, DataSourceStatus::Disposed);
     }
 }

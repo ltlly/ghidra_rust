@@ -399,6 +399,94 @@ impl ScalarRowObjectToProgramLocationMapper {
     }
 }
 
+// ============================================================================
+// Signedness -- whether a scalar is signed or unsigned
+// ============================================================================
+
+/// Whether a scalar value is interpreted as signed or unsigned.
+///
+/// Ported from `ScalarSearchModel.Signedness`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Signedness {
+    /// Signed interpretation.
+    Signed,
+    /// Unsigned interpretation.
+    Unsigned,
+}
+
+impl std::fmt::Display for Signedness {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Signed => write!(f, "Signed"),
+            Self::Unsigned => write!(f, "Unsigned"),
+        }
+    }
+}
+
+// ============================================================================
+// ScalarFunctionNameColumn -- function name at scalar address
+// ============================================================================
+
+/// Information about the function containing a scalar value.
+///
+/// Ported from `ScalarSearchModel.ScalarFunctionNameTableColumn`.
+#[derive(Debug, Clone)]
+pub struct ScalarFunctionInfo {
+    /// The function name.
+    pub function_name: String,
+    /// The function entry address.
+    pub function_entry: Address,
+    /// Whether the scalar is in the function prologue.
+    pub in_prologue: bool,
+    /// Whether the scalar is in the function epilogue.
+    pub in_epilogue: bool,
+}
+
+impl ScalarFunctionInfo {
+    /// Create a new function info.
+    pub fn new(function_name: impl Into<String>, function_entry: Address) -> Self {
+        Self {
+            function_name: function_name.into(),
+            function_entry,
+            in_prologue: false,
+            in_epilogue: false,
+        }
+    }
+}
+
+// ============================================================================
+// ScalarPreviewColumn -- preview of instruction context
+// ============================================================================
+
+/// A preview of the instruction context around a scalar.
+///
+/// Ported from `ScalarSearchModel.PreviewTableColumn`.
+#[derive(Debug, Clone)]
+pub struct ScalarPreview {
+    /// The instruction mnemonic.
+    pub mnemonic: String,
+    /// The operand representation containing the scalar.
+    pub operand_repr: String,
+    /// The full instruction representation.
+    pub full_repr: String,
+    /// The byte length of the instruction.
+    pub instruction_length: usize,
+}
+
+impl ScalarPreview {
+    /// Create a new preview.
+    pub fn new(mnemonic: impl Into<String>, operand_repr: impl Into<String>) -> Self {
+        let m = mnemonic.into();
+        let o = operand_repr.into();
+        Self {
+            full_repr: format!("{} {}", m, o),
+            mnemonic: m,
+            operand_repr: o,
+            instruction_length: 0,
+        }
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================

@@ -707,6 +707,364 @@ impl ChecksumResult {
 }
 
 // ============================================================================
+// MemoryInputStream -- streaming data from program memory
+// ============================================================================
+
+/// A simple byte-stream adapter over an owned byte vector.
+///
+/// Ported from `ghidra.app.plugin.core.checksums.MemoryInputStream`.
+/// In the Java version this wraps `Memory` + `AddressSetView` and
+/// provides `InputStream` semantics.  In Rust we use a simple owned
+/// buffer that supports sequential reads.
+#[derive(Debug)]
+pub struct MemoryInputStream {
+    data: Vec<u8>,
+    position: usize,
+}
+
+impl MemoryInputStream {
+    /// Create a new stream over the given data.
+    pub fn new(data: Vec<u8>) -> Self {
+        Self { data, position: 0 }
+    }
+
+    /// The total number of bytes available.
+    pub fn available(&self) -> usize {
+        self.data.len().saturating_sub(self.position)
+    }
+
+    /// Read the next byte, returning `None` at end of stream.
+    pub fn read_byte(&mut self) -> Option<u8> {
+        if self.position < self.data.len() {
+            let b = self.data[self.position];
+            self.position += 1;
+            Some(b)
+        } else {
+            None
+        }
+    }
+
+    /// Read up to `buf.len()` bytes into `buf`.  Returns the number
+    /// of bytes actually read.
+    pub fn read(&mut self, buf: &mut [u8]) -> usize {
+        let remaining = &self.data[self.position..];
+        let n = buf.len().min(remaining.len());
+        buf[..n].copy_from_slice(&remaining[..n]);
+        self.position += n;
+        n
+    }
+
+    /// Read all remaining bytes.
+    pub fn read_all(&mut self) -> Vec<u8> {
+        let remaining = self.data[self.position..].to_vec();
+        self.position = self.data.len();
+        remaining
+    }
+
+    /// Reset the stream position to the beginning.
+    pub fn reset(&mut self) {
+        self.position = 0;
+    }
+
+    /// The current position in the stream.
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
+    /// The total length of the underlying data.
+    pub fn len(&self) -> usize {
+        self.data.len()
+    }
+
+    /// Whether the stream is empty (no data).
+    pub fn is_empty(&self) -> bool {
+        self.data.is_empty()
+    }
+}
+
+impl From<Vec<u8>> for MemoryInputStream {
+    fn from(data: Vec<u8>) -> Self {
+        Self::new(data)
+    }
+}
+
+impl From<&[u8]> for MemoryInputStream {
+    fn from(data: &[u8]) -> Self {
+        Self::new(data.to_vec())
+    }
+}
+
+// ============================================================================
+// ChecksumTableModel -- table model for displaying results
+// ============================================================================
+
+/// A result row in the checksum table.
+#[derive(Debug, Clone)]
+pub struct ChecksumTableRow {
+    /// The algorithm name.
+    pub algorithm: String,
+    /// The computed checksum value.
+    pub checksum: Vec<u8>,
+    /// The formatted display string.
+    pub display: String,
+    /// Number of bytes processed.
+    pub byte_count: usize,
+    /// Whether the computation succeeded.
+    pub success: bool,
+    /// Error message (if computation failed).
+    pub error: Option<String>,
+}
+
+impl ChecksumTableRow {
+    /// Create a success row.
+    pub fn success(algorithm: impl Into<String>, checksum: Vec<u8>, display: impl Into<String>, byte_count: usize) -> Self {
+        Self {
+            algorithm: algorithm.into(),
+            checksum,
+            display: display.into(),
+            byte_count,
+            success: true,
+            error: None,
+        }
+    }
+
+    /// Create a failure row.
+    pub fn failure(algorithm: impl Into<String>, error: impl Into<String>, byte_count: usize) -> Self {
+        Self {
+            algorithm: algorithm.into(),
+            checksum: Vec::new(),
+            display: String::new(),
+            byte_count,
+            success: false,
+            error: Some(error.into()),
+        }
+    }
+}
+
+/// Column indices for the checksum results table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ChecksumTableColumns;
+
+impl ChecksumTableColumns {
+    /// Algorithm name column.
+    pub const ALGORITHM: usize = 0;
+    /// Checksum value column.
+    pub const VALUE: usize = 1;
+    /// Column headers.
+    pub const HEADERS: &'static [&'static str] = &["Algorithm", "Checksum"];
+    /// Column count.
+    pub const COUNT: usize = 2;
+}
+
+/// Table model for checksum computation results.
+///
+/// Ported from `ghidra.app.plugin.core.checksums.ChecksumTableModel`.
+#[derive(Debug, Default)]
+pub struct ChecksumTableModel {
+    /// The result rows.
+    rows: Vec<ChecksumTableRow>,
+    /// Whether to display values in hex.
+    show_hex: bool,
+}
+
+impl ChecksumTableModel {
+    /// Create a new empty table model.
+    pub fn new() -> Self {
+        Self {
+            rows: Vec::new(),
+            show_hex: true,
+        }
+    }
+
+    /// The number of rows.
+    pub fn row_count(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// The column count.
+    pub fn column_count(&self) -> usize {
+        ChecksumTableColumns::COUNT
+    }
+
+    /// Get a cell value.
+    pub fn cell_value(&self, row: usize, col: usize) -> Option<&str> {
+        let r = self.rows.get(row)?;
+        Some(match col {
+            ChecksumTableColumns::ALGORITHM => &r.algorithm,
+            ChecksumTableColumns::VALUE => {
+                if r.success { &r.display } else { r.error.as_deref().unwrap_or("ERROR") }
+            }
+            _ => return None,
+        })
+    }
+
+    /// Get a row reference.
+    pub fn row(&self, index: usize) -> Option<&ChecksumTableRow> {
+        self.rows.get(index)
+    }
+
+    /// Get all rows.
+    pub fn rows(&self) -> &[ChecksumTableRow] {
+        &self.rows
+    }
+
+    /// Add a result row.
+    pub fn add_row(&mut self, row: ChecksumTableRow) {
+        self.rows.push(row);
+    }
+
+    /// Clear all rows.
+    pub fn clear(&mut self) {
+        self.rows.clear();
+    }
+
+    /// Whether values are displayed in hex.
+    pub fn show_hex(&self) -> bool {
+        self.show_hex
+    }
+
+    /// Set hex display mode.
+    pub fn set_show_hex(&mut self, hex: bool) {
+        self.show_hex = hex;
+    }
+}
+
+// ============================================================================
+// ComputeChecksumsProvider -- UI provider for the checksum plugin
+// ============================================================================
+
+/// Configuration for a checksum computation session.
+///
+/// Ported from `ghidra.app.plugin.core.checksums.ComputeChecksumsProvider`.
+///
+/// In Ghidra this is a `ComponentProviderAdapter` that creates a panel
+/// with a table, selection toggle, hex toggle, xor/carry/ones/twos
+/// complement toggles, and a "Compute" action.  In Rust we model the
+/// state and options headlessly.
+#[derive(Debug)]
+pub struct ComputeChecksumsProvider {
+    /// Whether to compute over the current selection only.
+    selection_only: bool,
+    /// Whether to display results in hex.
+    show_hex: bool,
+    /// Whether to XOR the input data.
+    xor: bool,
+    /// Whether to apply carry (add carry bit back in).
+    carry: bool,
+    /// Whether to apply ones-complement.
+    ones_complement: bool,
+    /// Whether to apply twos-complement.
+    twos_complement: bool,
+    /// Whether any results have been computed.
+    has_results: bool,
+    /// The table model holding results.
+    model: ChecksumTableModel,
+}
+
+impl ComputeChecksumsProvider {
+    /// Create a new provider with default settings.
+    pub fn new() -> Self {
+        Self {
+            selection_only: false,
+            show_hex: true,
+            xor: false,
+            carry: false,
+            ones_complement: false,
+            twos_complement: false,
+            has_results: false,
+            model: ChecksumTableModel::new(),
+        }
+    }
+
+    /// Whether to compute over selection only.
+    pub fn selection_only(&self) -> bool { self.selection_only }
+    /// Set selection-only mode.
+    pub fn set_selection_only(&mut self, v: bool) { self.selection_only = v; }
+
+    /// Whether to display in hex.
+    pub fn show_hex(&self) -> bool { self.show_hex }
+    /// Set hex display.
+    pub fn set_show_hex(&mut self, v: bool) { self.show_hex = v; }
+
+    /// Whether XOR is enabled.
+    pub fn xor(&self) -> bool { self.xor }
+    /// Toggle XOR.
+    pub fn set_xor(&mut self, v: bool) { self.xor = v; }
+
+    /// Whether carry is enabled.
+    pub fn carry(&self) -> bool { self.carry }
+    /// Toggle carry.
+    pub fn set_carry(&mut self, v: bool) { self.carry = v; }
+
+    /// Whether ones-complement is enabled.
+    pub fn ones_complement(&self) -> bool { self.ones_complement }
+    /// Toggle ones-complement.
+    pub fn set_ones_complement(&mut self, v: bool) { self.ones_complement = v; }
+
+    /// Whether twos-complement is enabled.
+    pub fn twos_complement(&self) -> bool { self.twos_complement }
+    /// Toggle twos-complement.
+    pub fn set_twos_complement(&mut self, v: bool) { self.twos_complement = v; }
+
+    /// Whether results exist.
+    pub fn has_results(&self) -> bool { self.has_results }
+
+    /// Get a reference to the table model.
+    pub fn model(&self) -> &ChecksumTableModel { &self.model }
+
+    /// Get a mutable reference to the table model.
+    pub fn model_mut(&mut self) -> &mut ChecksumTableModel { &mut self.model }
+
+    /// Run all registered algorithms from the registry over `data`.
+    ///
+    /// Applies complement transforms before computing if enabled.
+    pub fn compute(&mut self, registry: &ChecksumRegistry, data: &[u8]) {
+        let mut transformed = data.to_vec();
+
+        if self.xor {
+            for b in &mut transformed {
+                *b ^= 0xFF;
+            }
+        }
+        if self.ones_complement {
+            for b in &mut transformed {
+                *b = !*b;
+            }
+        }
+        if self.twos_complement {
+            // Two's complement: negate all bytes as a big-endian integer
+            let mut carry = 1u8;
+            for b in transformed.iter_mut().rev() {
+                let (result, c) = (!*b).overflowing_add(carry);
+                *b = result;
+                carry = if c { 1 } else { 0 };
+            }
+        }
+
+        self.model.clear();
+        for name in registry.names() {
+            if let Some(algo) = registry.find(name) {
+                let checksum = algo.compute(&transformed);
+                let display = format_checksum(&checksum, self.show_hex, algo.supports_decimal());
+                self.model.add_row(ChecksumTableRow::success(
+                    name,
+                    checksum,
+                    display,
+                    data.len(),
+                ));
+            }
+        }
+        self.has_results = true;
+    }
+}
+
+impl Default for ComputeChecksumsProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -933,5 +1291,240 @@ mod tests {
     fn test_crc32_supports_decimal() {
         assert!(Crc32Algorithm::new().supports_decimal());
         assert!(!DigestAlgorithm::md5().supports_decimal());
+    }
+
+    // -- MemoryInputStream tests --
+
+    #[test]
+    fn test_memory_input_stream_basic() {
+        let mut stream = MemoryInputStream::new(vec![1, 2, 3, 4, 5]);
+        assert_eq!(stream.available(), 5);
+        assert_eq!(stream.read_byte(), Some(1));
+        assert_eq!(stream.available(), 4);
+        assert_eq!(stream.read_byte(), Some(2));
+        assert_eq!(stream.position(), 2);
+    }
+
+    #[test]
+    fn test_memory_input_stream_read() {
+        let mut stream = MemoryInputStream::new(vec![10, 20, 30, 40, 50]);
+        let mut buf = [0u8; 3];
+        let n = stream.read(&mut buf);
+        assert_eq!(n, 3);
+        assert_eq!(buf, [10, 20, 30]);
+        assert_eq!(stream.available(), 2);
+    }
+
+    #[test]
+    fn test_memory_input_stream_read_all() {
+        let mut stream = MemoryInputStream::new(vec![1, 2, 3]);
+        let all = stream.read_all();
+        assert_eq!(all, vec![1, 2, 3]);
+        assert_eq!(stream.available(), 0);
+    }
+
+    #[test]
+    fn test_memory_input_stream_exhausted() {
+        let mut stream = MemoryInputStream::new(vec![1]);
+        assert_eq!(stream.read_byte(), Some(1));
+        assert_eq!(stream.read_byte(), None);
+        assert_eq!(stream.available(), 0);
+    }
+
+    #[test]
+    fn test_memory_input_stream_reset() {
+        let mut stream = MemoryInputStream::new(vec![1, 2, 3]);
+        stream.read_byte();
+        stream.read_byte();
+        assert_eq!(stream.position(), 2);
+        stream.reset();
+        assert_eq!(stream.position(), 0);
+        assert_eq!(stream.read_byte(), Some(1));
+    }
+
+    #[test]
+    fn test_memory_input_stream_empty() {
+        let stream = MemoryInputStream::new(vec![]);
+        assert!(stream.is_empty());
+        assert_eq!(stream.len(), 0);
+    }
+
+    #[test]
+    fn test_memory_input_stream_from_slice() {
+        let mut stream = MemoryInputStream::from(&[1u8, 2, 3][..]);
+        assert_eq!(stream.read_byte(), Some(1));
+    }
+
+    #[test]
+    fn test_memory_input_stream_from_vec() {
+        let stream = MemoryInputStream::from(vec![1, 2]);
+        assert_eq!(stream.len(), 2);
+    }
+
+    // -- ChecksumTableRow tests --
+
+    #[test]
+    fn test_checksum_table_row_success() {
+        let row = ChecksumTableRow::success("CRC-32", vec![0xDE, 0xAD], "DEAD", 100);
+        assert!(row.success);
+        assert_eq!(row.algorithm, "CRC-32");
+        assert_eq!(row.display, "DEAD");
+        assert_eq!(row.byte_count, 100);
+        assert!(row.error.is_none());
+    }
+
+    #[test]
+    fn test_checksum_table_row_failure() {
+        let row = ChecksumTableRow::failure("BAD", "not found", 0);
+        assert!(!row.success);
+        assert_eq!(row.error, Some("not found".to_string()));
+    }
+
+    // -- ChecksumTableModel tests --
+
+    #[test]
+    fn test_checksum_table_model_new() {
+        let m = ChecksumTableModel::new();
+        assert_eq!(m.row_count(), 0);
+        assert_eq!(m.column_count(), 2);
+        assert!(m.show_hex());
+    }
+
+    #[test]
+    fn test_checksum_table_model_add_rows() {
+        let mut m = ChecksumTableModel::new();
+        m.add_row(ChecksumTableRow::success("CRC-32", vec![1, 2, 3, 4], "01020304", 10));
+        m.add_row(ChecksumTableRow::success("MD5", vec![5; 16], "05050505...", 10));
+        assert_eq!(m.row_count(), 2);
+    }
+
+    #[test]
+    fn test_checksum_table_model_cell_value() {
+        let mut m = ChecksumTableModel::new();
+        m.add_row(ChecksumTableRow::success("CRC-32", vec![0xDE], "DE", 5));
+        assert_eq!(m.cell_value(0, 0), Some("CRC-32"));
+        assert_eq!(m.cell_value(0, 1), Some("DE"));
+        assert!(m.cell_value(1, 0).is_none());
+    }
+
+    #[test]
+    fn test_checksum_table_model_cell_value_error() {
+        let mut m = ChecksumTableModel::new();
+        m.add_row(ChecksumTableRow::failure("BAD", "Algorithm not found", 0));
+        assert_eq!(m.cell_value(0, 1), Some("Algorithm not found"));
+    }
+
+    #[test]
+    fn test_checksum_table_model_clear() {
+        let mut m = ChecksumTableModel::new();
+        m.add_row(ChecksumTableRow::success("X", vec![], "", 0));
+        m.clear();
+        assert_eq!(m.row_count(), 0);
+    }
+
+    #[test]
+    fn test_checksum_table_model_hex_toggle() {
+        let mut m = ChecksumTableModel::new();
+        assert!(m.show_hex());
+        m.set_show_hex(false);
+        assert!(!m.show_hex());
+    }
+
+    // -- ChecksumTableColumns tests --
+
+    #[test]
+    fn test_checksum_table_columns() {
+        assert_eq!(ChecksumTableColumns::ALGORITHM, 0);
+        assert_eq!(ChecksumTableColumns::VALUE, 1);
+        assert_eq!(ChecksumTableColumns::COUNT, 2);
+    }
+
+    // -- ComputeChecksumsProvider tests --
+
+    #[test]
+    fn test_provider_defaults() {
+        let p = ComputeChecksumsProvider::new();
+        assert!(!p.selection_only());
+        assert!(p.show_hex());
+        assert!(!p.xor());
+        assert!(!p.carry());
+        assert!(!p.ones_complement());
+        assert!(!p.twos_complement());
+        assert!(!p.has_results());
+    }
+
+    #[test]
+    fn test_provider_setters() {
+        let mut p = ComputeChecksumsProvider::new();
+        p.set_selection_only(true);
+        assert!(p.selection_only());
+        p.set_show_hex(false);
+        assert!(!p.show_hex());
+        p.set_xor(true);
+        assert!(p.xor());
+        p.set_carry(true);
+        assert!(p.carry());
+        p.set_ones_complement(true);
+        assert!(p.ones_complement());
+        p.set_twos_complement(true);
+        assert!(p.twos_complement());
+    }
+
+    #[test]
+    fn test_provider_compute() {
+        let mut p = ComputeChecksumsProvider::new();
+        let registry = ChecksumRegistry::with_defaults();
+        p.compute(&registry, b"hello");
+        assert!(p.has_results());
+        assert!(p.model().row_count() >= 13);
+        // Check that all algorithms produced results
+        for i in 0..p.model().row_count() {
+            let name = p.model().cell_value(i, 0).unwrap();
+            let value = p.model().cell_value(i, 1).unwrap();
+            assert!(!name.is_empty());
+            assert!(!value.is_empty(), "Algorithm {} produced empty value", name);
+        }
+    }
+
+    #[test]
+    fn test_provider_compute_empty() {
+        let mut p = ComputeChecksumsProvider::new();
+        let registry = ChecksumRegistry::with_defaults();
+        p.compute(&registry, b"");
+        assert!(p.has_results());
+        assert!(p.model().row_count() >= 13);
+    }
+
+    #[test]
+    fn test_provider_compute_xor() {
+        let mut p = ComputeChecksumsProvider::new();
+        p.set_xor(true);
+        let registry = ChecksumRegistry::with_defaults();
+        p.compute(&registry, b"hello");
+        assert!(p.has_results());
+    }
+
+    #[test]
+    fn test_provider_compute_ones_complement() {
+        let mut p = ComputeChecksumsProvider::new();
+        p.set_ones_complement(true);
+        let registry = ChecksumRegistry::with_defaults();
+        p.compute(&registry, b"hello");
+        assert!(p.has_results());
+    }
+
+    #[test]
+    fn test_provider_compute_twos_complement() {
+        let mut p = ComputeChecksumsProvider::new();
+        p.set_twos_complement(true);
+        let registry = ChecksumRegistry::with_defaults();
+        p.compute(&registry, b"hello");
+        assert!(p.has_results());
+    }
+
+    #[test]
+    fn test_provider_default_trait() {
+        let p = ComputeChecksumsProvider::default();
+        assert!(!p.has_results());
     }
 }

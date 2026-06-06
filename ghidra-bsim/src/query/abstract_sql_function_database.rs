@@ -242,6 +242,11 @@ impl TemporaryScoreCache {
 /// Abstract base for SQL-backed function databases.
 ///
 /// Port of `ghidra.features.bsim.query.client.AbstractSQLFunctionDatabase`.
+///
+/// This struct manages the lifecycle of SQL-backed BSim databases including
+/// connection management, table creation/deletion, transaction handling,
+/// and the CRUD operations for executables, functions, signatures, and
+/// callgraph data.
 #[derive(Debug)]
 pub struct AbstractSqlFunctionDatabase {
     /// Connection URL / description.
@@ -252,9 +257,43 @@ pub struct AbstractSqlFunctionDatabase {
     pub effects: SqlEffects,
     /// Whether connected.
     pub connected: bool,
+    /// Whether the database is initialized.
+    initialized: bool,
+    /// Whether a transaction is currently active.
+    in_transaction: bool,
+    /// Whether callgraph tracking is enabled.
+    track_callgraph: bool,
+    /// String table for architecture names.
+    arch_table: HashMap<String, i64>,
+    /// String table for compiler names.
+    compiler_table: HashMap<String, i64>,
+    /// String table for repository names.
+    repository_table: HashMap<String, i64>,
+    /// String table for path names.
+    path_table: HashMap<String, i64>,
+    /// String table for category names.
+    category_table: HashMap<String, i64>,
+    /// Key-value storage for database metadata.
+    key_value_table: HashMap<String, String>,
 }
 
 impl AbstractSqlFunctionDatabase {
+    /// SQL time format used in BSim databases.
+    pub const SQL_TIME_FORMAT: &'static str = "YYYY-MM-DD HH24:MI:SS.MSz";
+    /// Java time format used in BSim databases.
+    pub const JAVA_TIME_FORMAT: &'static str = "yyyy-MM-dd HH:mm:ss.SSSZ";
+
+    /// Architecture string table name.
+    const ARCH_TABLE_NAME: &'static str = "archtable";
+    /// Compiler string table name.
+    const COMPILER_TABLE_NAME: &'static str = "comptable";
+    /// Repository string table name.
+    const REPOSITORY_TABLE_NAME: &'static str = "repotable";
+    /// Path string table name.
+    const PATH_TABLE_NAME: &'static str = "pathtable";
+    /// Category string table name.
+    const CAT_STRING_TABLE_NAME: &'static str = "catstringtable";
+
     /// Create a new abstract SQL function database.
     pub fn new(connection_url: impl Into<String>) -> Self {
         Self {
@@ -262,6 +301,15 @@ impl AbstractSqlFunctionDatabase {
             config: Configuration::default(),
             effects: SqlEffects::new(),
             connected: false,
+            initialized: false,
+            in_transaction: false,
+            track_callgraph: true,
+            arch_table: HashMap::new(),
+            compiler_table: HashMap::new(),
+            repository_table: HashMap::new(),
+            path_table: HashMap::new(),
+            category_table: HashMap::new(),
+            key_value_table: HashMap::new(),
         }
     }
 
@@ -271,21 +319,253 @@ impl AbstractSqlFunctionDatabase {
         self
     }
 
-    /// Connect (placeholder).
+    /// Enable or disable callgraph tracking.
+    pub fn set_track_callgraph(&mut self, track: bool) {
+        self.track_callgraph = track;
+    }
+
+    /// Whether callgraph tracking is enabled.
+    pub fn is_tracking_callgraph(&self) -> bool {
+        self.track_callgraph
+    }
+
+    /// Connect (placeholder -- in production, establishes pooled connection).
     pub fn connect(&mut self) -> Result<(), String> {
         self.connected = true;
         Ok(())
     }
 
-    /// Disconnect (placeholder).
+    /// Disconnect (placeholder -- closes all connections).
     pub fn disconnect(&mut self) {
+        self.arch_table.clear();
+        self.compiler_table.clear();
+        self.repository_table.clear();
+        self.path_table.clear();
+        self.category_table.clear();
+        self.key_value_table.clear();
         self.connected = false;
+        self.initialized = false;
     }
 
     /// Whether the database is connected.
     pub fn is_connected(&self) -> bool {
         self.connected
     }
+
+    /// Whether the database has been initialized (tables created).
+    pub fn is_initialized(&self) -> bool {
+        self.initialized
+    }
+
+    /// Begin a database transaction.
+    ///
+    /// In a real SQL implementation, this disables auto-commit and optionally
+    /// acquires table locks for write operations.
+    pub fn begin_transaction(&mut self, lock_for_write: bool) -> Result<(), String> {
+        if !self.connected {
+            return Err("Not connected".to_string());
+        }
+        if self.in_transaction {
+            return Err("Transaction already in progress".to_string());
+        }
+        self.in_transaction = true;
+        let _ = lock_for_write; // In a real implementation, acquire write locks
+        Ok(())
+    }
+
+    /// End a transaction, committing or rolling back as specified.
+    pub fn end_transaction(&mut self, commit: bool) -> Result<(), String> {
+        if !self.in_transaction {
+            return Err("No transaction in progress".to_string());
+        }
+        if commit {
+            self.effects.record_insert(0); // Record transaction commit
+        }
+        self.in_transaction = false;
+        Ok(())
+    }
+
+    /// Whether a transaction is currently active.
+    pub fn is_in_transaction(&self) -> bool {
+        self.in_transaction
+    }
+
+    // ---- String table operations ----
+
+    /// Look up or insert an architecture string and return its ID.
+    pub fn get_or_insert_arch(&mut self, value: &str) -> i64 {
+        if let Some(&id) = self.arch_table.get(value) {
+            return id;
+        }
+        let id = self.arch_table.len() as i64 + 1;
+        self.arch_table.insert(value.to_string(), id);
+        self.effects.record_insert(1);
+        id
+    }
+
+    /// Look up or insert a compiler string and return its ID.
+    pub fn get_or_insert_compiler(&mut self, value: &str) -> i64 {
+        if let Some(&id) = self.compiler_table.get(value) {
+            return id;
+        }
+        let id = self.compiler_table.len() as i64 + 1;
+        self.compiler_table.insert(value.to_string(), id);
+        self.effects.record_insert(1);
+        id
+    }
+
+    /// Look up or insert a repository string and return its ID.
+    pub fn get_or_insert_repository(&mut self, value: &str) -> i64 {
+        if let Some(&id) = self.repository_table.get(value) {
+            return id;
+        }
+        let id = self.repository_table.len() as i64 + 1;
+        self.repository_table.insert(value.to_string(), id);
+        self.effects.record_insert(1);
+        id
+    }
+
+    /// Look up or insert a path string and return its ID.
+    pub fn get_or_insert_path(&mut self, value: &str) -> i64 {
+        if let Some(&id) = self.path_table.get(value) {
+            return id;
+        }
+        let id = self.path_table.len() as i64 + 1;
+        self.path_table.insert(value.to_string(), id);
+        self.effects.record_insert(1);
+        id
+    }
+
+    /// Look up or insert a category string and return its ID.
+    pub fn get_or_insert_category(&mut self, value: &str) -> i64 {
+        if let Some(&id) = self.category_table.get(value) {
+            return id;
+        }
+        let id = self.category_table.len() as i64 + 1;
+        self.category_table.insert(value.to_string(), id);
+        self.effects.record_insert(1);
+        id
+    }
+
+    /// Get an architecture string by ID.
+    pub fn get_arch_string(&self, id: i64) -> Option<&str> {
+        self.arch_table.iter()
+            .find(|(_, &v)| v == id)
+            .map(|(k, _)| k.as_str())
+    }
+
+    /// Get a compiler string by ID.
+    pub fn get_compiler_string(&self, id: i64) -> Option<&str> {
+        self.compiler_table.iter()
+            .find(|(_, &v)| v == id)
+            .map(|(k, _)| k.as_str())
+    }
+
+    // ---- Key-value operations ----
+
+    /// Store a key-value pair in the database metadata.
+    pub fn store_key_value(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.key_value_table.insert(key.into(), value.into());
+    }
+
+    /// Get a value by key from the database metadata.
+    pub fn get_key_value(&self, key: &str) -> Option<&str> {
+        self.key_value_table.get(key).map(|s| s.as_str())
+    }
+
+    /// Write basic database information to the key-value store.
+    pub fn write_basic_info(&mut self, db_name: &str, owner: &str, description: &str) {
+        self.store_key_value("name", db_name);
+        self.store_key_value("owner", owner);
+        self.store_key_value("description", description);
+        self.store_key_value("k", self.config.similarity_threshold.to_string());
+        self.store_key_value("L", self.config.signature_threshold.to_string());
+    }
+
+    /// Read database information from the key-value store.
+    pub fn read_database_info(&self) -> DatabaseInfo {
+        DatabaseInfo {
+            name: self.get_key_value("name").unwrap_or("").to_string(),
+            owner: self.get_key_value("owner").unwrap_or("").to_string(),
+            description: self.get_key_value("description").unwrap_or("").to_string(),
+            major: self.get_key_value("major")
+                .and_then(|v| v.parse::<i16>().ok())
+                .unwrap_or(0),
+            minor: self.get_key_value("minor")
+                .and_then(|v| v.parse::<i16>().ok())
+                .unwrap_or(0),
+            readonly: self.get_key_value("readonly")
+                .map(|v| v.starts_with('t'))
+                .unwrap_or(false),
+            track_callgraph: self.get_key_value("trackcallgraph")
+                .map(|v| v.starts_with('t'))
+                .unwrap_or(false),
+            layout_version: self.get_key_value("layout")
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(0),
+        }
+    }
+
+    /// Escape a string literal for use in SQL.
+    ///
+    /// Port of `AbstractSQLFunctionDatabase.appendEscapedLiteral`.
+    pub fn escape_sql_literal(input: &str) -> Result<String, String> {
+        let mut output = String::with_capacity(input.len() + 16);
+        for ch in input.chars() {
+            if ch == '\0' {
+                return Err("Zero byte in SQL string".to_string());
+            }
+            if ch == '\\' || ch == '\'' {
+                output.push(ch);
+            }
+            output.push(ch);
+        }
+        Ok(output)
+    }
+
+    /// Initialize the database tables (placeholder).
+    pub fn initialize_database(&mut self) -> Result<(), String> {
+        if !self.connected {
+            return Err("Not connected".to_string());
+        }
+        self.initialized = true;
+        Ok(())
+    }
+
+    /// Create a new database (placeholder).
+    pub fn create_database(&mut self) -> Result<(), String> {
+        if !self.connected {
+            return Err("Not connected".to_string());
+        }
+        self.begin_transaction(false)?;
+        // In a real implementation, create all SQL tables here.
+        self.end_transaction(true)?;
+        self.initialized = true;
+        Ok(())
+    }
+}
+
+/// Database information parsed from the key-value store.
+///
+/// Port of `ghidra.features.bsim.query.description.DatabaseInformation` (partial).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DatabaseInfo {
+    /// Database name.
+    pub name: String,
+    /// Owner of the database.
+    pub owner: String,
+    /// Description.
+    pub description: String,
+    /// Major version.
+    pub major: i16,
+    /// Minor version.
+    pub minor: i16,
+    /// Whether the database is read-only.
+    pub readonly: bool,
+    /// Whether callgraph tracking is enabled.
+    pub track_callgraph: bool,
+    /// Layout version.
+    pub layout_version: u32,
 }
 
 #[cfg(test)]
@@ -364,5 +644,110 @@ mod tests {
         assert!(db.is_connected());
         db.disconnect();
         assert!(!db.is_connected());
+    }
+
+    #[test]
+    fn test_string_table_arch() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        let id1 = db.get_or_insert_arch("x86");
+        let id2 = db.get_or_insert_arch("x86");
+        assert_eq!(id1, id2);
+        let id3 = db.get_or_insert_arch("arm");
+        assert_ne!(id1, id3);
+        assert_eq!(db.get_arch_string(id1), Some("x86"));
+    }
+
+    #[test]
+    fn test_string_table_compiler() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        let id1 = db.get_or_insert_compiler("gcc");
+        let id2 = db.get_or_insert_compiler("clang");
+        assert_ne!(id1, id2);
+        assert_eq!(db.get_compiler_string(id1), Some("gcc"));
+    }
+
+    #[test]
+    fn test_key_value_operations() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        db.store_key_value("name", "test_db");
+        db.store_key_value("owner", "admin");
+        assert_eq!(db.get_key_value("name"), Some("test_db"));
+        assert_eq!(db.get_key_value("owner"), Some("admin"));
+        assert_eq!(db.get_key_value("missing"), None);
+    }
+
+    #[test]
+    fn test_write_read_basic_info() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        db.write_basic_info("bsim_db", "user1", "BSim test database");
+        let info = db.read_database_info();
+        assert_eq!(info.name, "bsim_db");
+        assert_eq!(info.owner, "user1");
+        assert_eq!(info.description, "BSim test database");
+    }
+
+    #[test]
+    fn test_escape_sql_literal() {
+        let result = AbstractSqlFunctionDatabase::escape_sql_literal("hello world").unwrap();
+        assert_eq!(result, "hello world");
+
+        let result = AbstractSqlFunctionDatabase::escape_sql_literal("it's").unwrap();
+        assert_eq!(result, "it''s");
+
+        let result = AbstractSqlFunctionDatabase::escape_sql_literal("back\\slash").unwrap();
+        assert_eq!(result, "back\\\\slash");
+
+        let result = AbstractSqlFunctionDatabase::escape_sql_literal("null\x00byte");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_transaction_lifecycle() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        db.connect().unwrap();
+
+        assert!(!db.is_in_transaction());
+        db.begin_transaction(false).unwrap();
+        assert!(db.is_in_transaction());
+        db.end_transaction(true).unwrap();
+        assert!(!db.is_in_transaction());
+    }
+
+    #[test]
+    fn test_transaction_fails_when_not_connected() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        assert!(db.begin_transaction(false).is_err());
+    }
+
+    #[test]
+    fn test_transaction_no_nested() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        db.connect().unwrap();
+        db.begin_transaction(false).unwrap();
+        assert!(db.begin_transaction(false).is_err());
+    }
+
+    #[test]
+    fn test_create_database() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        db.connect().unwrap();
+        db.create_database().unwrap();
+        assert!(db.is_initialized());
+    }
+
+    #[test]
+    fn test_callgraph_tracking() {
+        let mut db = AbstractSqlFunctionDatabase::new("test");
+        assert!(db.is_tracking_callgraph());
+        db.set_track_callgraph(false);
+        assert!(!db.is_tracking_callgraph());
+    }
+
+    #[test]
+    fn test_database_info_defaults() {
+        let info = DatabaseInfo::default();
+        assert!(info.name.is_empty());
+        assert_eq!(info.major, 0);
+        assert!(!info.readonly);
     }
 }

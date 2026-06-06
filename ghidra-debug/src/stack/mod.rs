@@ -28,6 +28,7 @@ pub mod unwind_info;
 pub mod unwind_warning;
 pub mod unwind_command;
 pub mod unwound_frame;
+pub mod stack_frames;
 
 pub use saved_register_map::SavedRegisterMap;
 pub use stack_unwinder::StackUnwinder;

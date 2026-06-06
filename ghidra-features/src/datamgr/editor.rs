@@ -647,6 +647,317 @@ impl fmt::Display for DataTypeEditorManager {
 }
 
 // ---------------------------------------------------------------------------
+// EnumEntry -- a single row in the enum editor table
+// ---------------------------------------------------------------------------
+
+/// A single entry (name/value/comment) in the enum editor table.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.editor.EnumEntry`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumEntry {
+    /// The entry name (e.g. "RED").
+    name: String,
+    /// The entry's numeric value.
+    value: i64,
+    /// Optional comment for this entry.
+    comment: String,
+}
+
+impl EnumEntry {
+    /// Create a new enum entry.
+    pub fn new(name: impl Into<String>, value: i64, comment: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value,
+            comment: comment.into(),
+        }
+    }
+
+    /// The entry name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Set the entry name.
+    pub fn set_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+    }
+
+    /// The entry value.
+    pub fn value(&self) -> i64 {
+        self.value
+    }
+
+    /// Set the entry value.
+    pub fn set_value(&mut self, value: i64) {
+        self.value = value;
+    }
+
+    /// The entry comment.
+    pub fn comment(&self) -> &str {
+        &self.comment
+    }
+
+    /// Set the entry comment.
+    pub fn set_comment(&mut self, comment: impl Into<String>) {
+        self.comment = comment.into();
+    }
+
+    /// Format the value for display, optionally as hex.
+    pub fn display_value(&self, hex: bool) -> String {
+        if hex {
+            format!("0x{:X}", self.value as u64)
+        } else {
+            self.value.to_string()
+        }
+    }
+}
+
+impl fmt::Display for EnumEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} = 0x{:X}", self.name, self.value as u64)?;
+        if !self.comment.is_empty() {
+            write!(f, " // {}", self.comment)?;
+        }
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EnumTableModel -- table model for the enum editor
+// ---------------------------------------------------------------------------
+
+/// Column indices for the enum editor table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EnumColumns;
+
+impl EnumColumns {
+    /// Name column index.
+    pub const NAME: usize = 0;
+    /// Value column index.
+    pub const VALUE: usize = 1;
+    /// Comment column index.
+    pub const COMMENT: usize = 2;
+    /// Column headers.
+    pub const HEADERS: &'static [&'static str] = &["Name", "Value", "Comment"];
+    /// Default column widths in pixels.
+    pub const WIDTHS: &'static [usize] = &[150, 100, 200];
+    /// Total column count.
+    pub const COUNT: usize = 3;
+}
+
+/// Table model for the enum editor.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.editor.EnumTableModel`.
+///
+/// Manages the list of [`EnumEntry`] rows and tracks which column is
+/// the sort column.
+#[derive(Debug, Clone)]
+pub struct EnumTableModel {
+    /// The entries in the table.
+    entries: Vec<EnumEntry>,
+    /// Whether values should be displayed in hex.
+    show_hex: bool,
+    /// The sort column index (default: VALUE).
+    sort_column: usize,
+    /// Whether the model has been modified since last save.
+    is_changed: bool,
+}
+
+impl EnumTableModel {
+    /// Create a new empty enum table model.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            show_hex: true,
+            sort_column: EnumColumns::VALUE,
+            is_changed: false,
+        }
+    }
+
+    /// Create a model pre-populated with entries.
+    pub fn with_entries(entries: Vec<EnumEntry>) -> Self {
+        Self {
+            entries,
+            show_hex: true,
+            sort_column: EnumColumns::VALUE,
+            is_changed: false,
+        }
+    }
+
+    /// Returns the number of entries.
+    pub fn row_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns the column count.
+    pub fn column_count(&self) -> usize {
+        EnumColumns::COUNT
+    }
+
+    /// Returns the column header for the given index.
+    pub fn column_name(&self, col: usize) -> &str {
+        EnumColumns::HEADERS.get(col).unwrap_or(&"")
+    }
+
+    /// Returns the value for a specific cell.
+    pub fn cell_value(&self, row: usize, col: usize) -> Option<String> {
+        let entry = self.entries.get(row)?;
+        Some(match col {
+            EnumColumns::NAME => entry.name().to_string(),
+            EnumColumns::VALUE => entry.display_value(self.show_hex),
+            EnumColumns::COMMENT => entry.comment().to_string(),
+            _ => return None,
+        })
+    }
+
+    /// Get an entry by row index.
+    pub fn entry(&self, row: usize) -> Option<&EnumEntry> {
+        self.entries.get(row)
+    }
+
+    /// Get a mutable entry by row index.
+    pub fn entry_mut(&mut self, row: usize) -> Option<&mut EnumEntry> {
+        self.is_changed = true;
+        self.entries.get_mut(row)
+    }
+
+    /// Get all entries.
+    pub fn entries(&self) -> &[EnumEntry] {
+        &self.entries
+    }
+
+    /// Add a new entry.
+    pub fn add_entry(&mut self, entry: EnumEntry) {
+        self.entries.push(entry);
+        self.is_changed = true;
+    }
+
+    /// Remove an entry by row index.
+    pub fn remove_entry(&mut self, row: usize) -> Option<EnumEntry> {
+        if row < self.entries.len() {
+            self.is_changed = true;
+            Some(self.entries.remove(row))
+        } else {
+            None
+        }
+    }
+
+    /// Whether the model has been modified.
+    pub fn is_changed(&self) -> bool {
+        self.is_changed
+    }
+
+    /// Mark the model as clean (saved).
+    pub fn mark_clean(&mut self) {
+        self.is_changed = false;
+    }
+
+    /// Whether values are displayed in hex.
+    pub fn show_hex(&self) -> bool {
+        self.show_hex
+    }
+
+    /// Set whether values are displayed in hex.
+    pub fn set_show_hex(&mut self, hex: bool) {
+        self.show_hex = hex;
+    }
+
+    /// The current sort column.
+    pub fn sort_column(&self) -> usize {
+        self.sort_column
+    }
+
+    /// Set the sort column.
+    pub fn set_sort_column(&mut self, col: usize) {
+        self.sort_column = col;
+    }
+
+    /// Sort entries by the current sort column.
+    pub fn sort(&mut self) {
+        match self.sort_column {
+            EnumColumns::NAME => self.entries.sort_by(|a, b| a.name.cmp(&b.name)),
+            EnumColumns::VALUE => self.entries.sort_by(|a, b| a.value.cmp(&b.value)),
+            EnumColumns::COMMENT => self.entries.sort_by(|a, b| a.comment.cmp(&b.comment)),
+            _ => {}
+        }
+    }
+
+    /// Find the next unused value (max + 1).
+    pub fn next_value(&self) -> i64 {
+        self.entries.iter().map(|e| e.value).max().map_or(0, |v| v + 1)
+    }
+
+    /// Check if a name is already in use.
+    pub fn has_name(&self, name: &str) -> bool {
+        self.entries.iter().any(|e| e.name() == name)
+    }
+
+    /// Get the index of the entry with the given name, if any.
+    pub fn index_of_name(&self, name: &str) -> Option<usize> {
+        self.entries.iter().position(|e| e.name() == name)
+    }
+}
+
+impl Default for EnumTableModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EnumEditorPanel -- model for the enum editor panel
+// ---------------------------------------------------------------------------
+
+/// The current editing state of the enum editor panel.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.editor.EnumEditorPanel`.
+#[derive(Debug, Clone)]
+pub struct EnumEditorPanelState {
+    /// The name of the enum being edited.
+    pub enum_name: String,
+    /// The description of the enum.
+    pub description: String,
+    /// The category path.
+    pub category_path: String,
+    /// The size in bytes of the enum (1, 2, 4, 8).
+    pub size_bytes: u32,
+    /// Whether the name has been modified from the original.
+    pub name_changed: bool,
+    /// Whether the description has been modified.
+    pub description_changed: bool,
+    /// The table model with the entries.
+    pub table_model: EnumTableModel,
+}
+
+impl EnumEditorPanelState {
+    /// Create a new panel state for an enum editor.
+    pub fn new(enum_name: impl Into<String>, size_bytes: u32) -> Self {
+        Self {
+            enum_name: enum_name.into(),
+            description: String::new(),
+            category_path: "/".to_string(),
+            size_bytes,
+            name_changed: false,
+            description_changed: false,
+            table_model: EnumTableModel::new(),
+        }
+    }
+
+    /// Whether the panel has any unsaved changes.
+    pub fn is_dirty(&self) -> bool {
+        self.name_changed || self.description_changed || self.table_model.is_changed()
+    }
+
+    /// Mark all changes as saved.
+    pub fn mark_clean(&mut self) {
+        self.name_changed = false;
+        self.description_changed = false;
+        self.table_model.mark_clean();
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -964,5 +1275,227 @@ mod tests {
         assert_eq!(mgr.editor_count(), 2);
         mgr.dispose();
         assert_eq!(mgr.editor_count(), 0);
+    }
+
+    // -- EnumEntry tests --
+
+    #[test]
+    fn test_enum_entry_new() {
+        let e = EnumEntry::new("RED", 0, "The color red");
+        assert_eq!(e.name(), "RED");
+        assert_eq!(e.value(), 0);
+        assert_eq!(e.comment(), "The color red");
+    }
+
+    #[test]
+    fn test_enum_entry_setters() {
+        let mut e = EnumEntry::new("A", 1, "");
+        e.set_name("B");
+        e.set_value(42);
+        e.set_comment("updated");
+        assert_eq!(e.name(), "B");
+        assert_eq!(e.value(), 42);
+        assert_eq!(e.comment(), "updated");
+    }
+
+    #[test]
+    fn test_enum_entry_display_value_hex() {
+        let e = EnumEntry::new("X", 255, "");
+        assert_eq!(e.display_value(true), "0xFF");
+        assert_eq!(e.display_value(false), "255");
+    }
+
+    #[test]
+    fn test_enum_entry_display() {
+        let e = EnumEntry::new("RED", 0xFF, "red color");
+        let s = format!("{}", e);
+        assert!(s.contains("RED"));
+        assert!(s.contains("0xFF"));
+        assert!(s.contains("red color"));
+    }
+
+    #[test]
+    fn test_enum_entry_display_no_comment() {
+        let e = EnumEntry::new("X", 1, "");
+        let s = format!("{}", e);
+        assert!(s.contains("X"));
+        assert!(!s.contains("//"));
+    }
+
+    // -- EnumColumns tests --
+
+    #[test]
+    fn test_enum_columns() {
+        assert_eq!(EnumColumns::NAME, 0);
+        assert_eq!(EnumColumns::VALUE, 1);
+        assert_eq!(EnumColumns::COMMENT, 2);
+        assert_eq!(EnumColumns::COUNT, 3);
+        assert_eq!(EnumColumns::HEADERS, &["Name", "Value", "Comment"]);
+    }
+
+    // -- EnumTableModel tests --
+
+    #[test]
+    fn test_enum_table_model_new() {
+        let m = EnumTableModel::new();
+        assert_eq!(m.row_count(), 0);
+        assert_eq!(m.column_count(), 3);
+        assert!(m.show_hex());
+    }
+
+    #[test]
+    fn test_enum_table_model_with_entries() {
+        let entries = vec![
+            EnumEntry::new("A", 0, ""),
+            EnumEntry::new("B", 1, ""),
+            EnumEntry::new("C", 2, ""),
+        ];
+        let m = EnumTableModel::with_entries(entries);
+        assert_eq!(m.row_count(), 3);
+    }
+
+    #[test]
+    fn test_enum_table_model_cell_value() {
+        let entries = vec![EnumEntry::new("RED", 0xFF, "the color")];
+        let m = EnumTableModel::with_entries(entries);
+        assert_eq!(m.cell_value(0, EnumColumns::NAME), Some("RED".to_string()));
+        assert_eq!(m.cell_value(0, EnumColumns::VALUE), Some("0xFF".to_string()));
+        assert_eq!(m.cell_value(0, EnumColumns::COMMENT), Some("the color".to_string()));
+        assert!(m.cell_value(1, 0).is_none());
+    }
+
+    #[test]
+    fn test_enum_table_model_add_remove() {
+        let mut m = EnumTableModel::new();
+        m.add_entry(EnumEntry::new("A", 0, ""));
+        m.add_entry(EnumEntry::new("B", 1, ""));
+        assert_eq!(m.row_count(), 2);
+        assert!(m.is_changed());
+
+        m.mark_clean();
+        assert!(!m.is_changed());
+
+        let removed = m.remove_entry(0);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().name(), "A");
+        assert_eq!(m.row_count(), 1);
+        assert!(m.is_changed());
+    }
+
+    #[test]
+    fn test_enum_table_model_sort() {
+        let entries = vec![
+            EnumEntry::new("C", 2, ""),
+            EnumEntry::new("A", 0, ""),
+            EnumEntry::new("B", 1, ""),
+        ];
+        let mut m = EnumTableModel::with_entries(entries);
+        m.set_sort_column(EnumColumns::NAME);
+        m.sort();
+        assert_eq!(m.entry(0).unwrap().name(), "A");
+        assert_eq!(m.entry(1).unwrap().name(), "B");
+        assert_eq!(m.entry(2).unwrap().name(), "C");
+    }
+
+    #[test]
+    fn test_enum_table_model_sort_by_value() {
+        let entries = vec![
+            EnumEntry::new("C", 5, ""),
+            EnumEntry::new("A", 1, ""),
+            EnumEntry::new("B", 3, ""),
+        ];
+        let mut m = EnumTableModel::with_entries(entries);
+        m.set_sort_column(EnumColumns::VALUE);
+        m.sort();
+        assert_eq!(m.entry(0).unwrap().value(), 1);
+        assert_eq!(m.entry(1).unwrap().value(), 3);
+        assert_eq!(m.entry(2).unwrap().value(), 5);
+    }
+
+    #[test]
+    fn test_enum_table_model_next_value() {
+        let mut m = EnumTableModel::new();
+        assert_eq!(m.next_value(), 0);
+        m.add_entry(EnumEntry::new("A", 5, ""));
+        m.add_entry(EnumEntry::new("B", 10, ""));
+        assert_eq!(m.next_value(), 11);
+    }
+
+    #[test]
+    fn test_enum_table_model_has_name() {
+        let entries = vec![EnumEntry::new("RED", 0, "")];
+        let m = EnumTableModel::with_entries(entries);
+        assert!(m.has_name("RED"));
+        assert!(!m.has_name("BLUE"));
+    }
+
+    #[test]
+    fn test_enum_table_model_index_of_name() {
+        let entries = vec![
+            EnumEntry::new("A", 0, ""),
+            EnumEntry::new("B", 1, ""),
+        ];
+        let m = EnumTableModel::with_entries(entries);
+        assert_eq!(m.index_of_name("A"), Some(0));
+        assert_eq!(m.index_of_name("B"), Some(1));
+        assert_eq!(m.index_of_name("C"), None);
+    }
+
+    #[test]
+    fn test_enum_table_model_hex_toggle() {
+        let mut m = EnumTableModel::new();
+        assert!(m.show_hex());
+        m.set_show_hex(false);
+        assert!(!m.show_hex());
+
+        let entries = vec![EnumEntry::new("X", 42, "")];
+        let m = EnumTableModel::with_entries(entries);
+        let val_hex = m.cell_value(0, EnumColumns::VALUE).unwrap();
+        assert!(val_hex.starts_with("0x"));
+    }
+
+    #[test]
+    fn test_enum_table_model_column_name() {
+        let m = EnumTableModel::new();
+        assert_eq!(m.column_name(0), "Name");
+        assert_eq!(m.column_name(1), "Value");
+        assert_eq!(m.column_name(2), "Comment");
+        assert_eq!(m.column_name(99), "");
+    }
+
+    #[test]
+    fn test_enum_table_model_default() {
+        let m = EnumTableModel::default();
+        assert_eq!(m.row_count(), 0);
+    }
+
+    // -- EnumEditorPanelState tests --
+
+    #[test]
+    fn test_enum_editor_panel_state_new() {
+        let state = EnumEditorPanelState::new("Color", 4);
+        assert_eq!(state.enum_name, "Color");
+        assert_eq!(state.size_bytes, 4);
+        assert_eq!(state.description, "");
+        assert_eq!(state.category_path, "/");
+        assert!(!state.is_dirty());
+    }
+
+    #[test]
+    fn test_enum_editor_panel_state_dirty() {
+        let mut state = EnumEditorPanelState::new("Color", 4);
+        state.name_changed = true;
+        assert!(state.is_dirty());
+        state.mark_clean();
+        assert!(!state.is_dirty());
+    }
+
+    #[test]
+    fn test_enum_editor_panel_state_table_dirty() {
+        let mut state = EnumEditorPanelState::new("Color", 4);
+        state.table_model.add_entry(EnumEntry::new("RED", 0, ""));
+        assert!(state.is_dirty());
+        state.mark_clean();
+        assert!(!state.is_dirty());
     }
 }

@@ -46,6 +46,7 @@ pub mod elastic_client;
 pub mod facade_types;
 pub mod cached_tables;
 pub mod vector_store;
+pub mod sf_results_update_listener;
 
 use std::fmt;
 

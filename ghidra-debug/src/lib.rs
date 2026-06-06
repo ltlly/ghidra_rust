@@ -49,6 +49,7 @@ mod debug_schedule_integration_test;
 mod debug_final_port_tests;
 mod debug_new_calltree_panels_test;
 mod debug_new_comprehensive_tests;
+mod debug_remaining_modules_final_test;
 pub mod framework;
 pub mod isf;
 pub mod jdi;

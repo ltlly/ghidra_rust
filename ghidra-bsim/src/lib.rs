@@ -89,3 +89,14 @@ pub use query::elastic::{
     Base64VectorFactory, ElasticConnection, ElasticEffects,
     ElasticFunctionDatabase, ElasticIdResolution, RowKeyElastic,
 };
+// SQL abstract database types
+pub use query::abstract_sql_function_database::{
+    AbstractSqlFunctionDatabase, BSimSqlClause,
+    Configuration as SqlConfiguration, ExecutableScorerSingle, DatabaseInfo,
+};
+// Data source
+pub use query::bsim_data_source::BSimDataSource;
+// Results listener
+pub use query::sf_results_update_listener::{
+    CollectingResultsListener, NoOpResultsListener, SFResultsUpdateListener,
+};

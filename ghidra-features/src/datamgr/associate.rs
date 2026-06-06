@@ -425,6 +425,275 @@ fn current_time_millis() -> u64 {
         .as_millis() as u64
 }
 
+// ---------------------------------------------------------------------------
+// SyncAction -- abstract base for sync operations
+// ---------------------------------------------------------------------------
+
+/// The kind of synchronization operation.
+///
+/// Ported from the `SyncAction` abstract class and its concrete
+/// subclasses in `ghidra.app.plugin.core.datamgr.actions.associate`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SyncOperation {
+    /// Push local changes back to the source archive.
+    Commit,
+    /// Pull archive changes into the program.
+    Update,
+    /// Discard local changes and revert to the archive version.
+    Revert,
+    /// Sever the association link entirely.
+    Disassociate,
+}
+
+impl SyncOperation {
+    /// Human-readable label.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Commit => "Commit",
+            Self::Update => "Update",
+            Self::Revert => "Revert",
+            Self::Disassociate => "Disassociate",
+        }
+    }
+
+    /// The menu order for this operation (used for sorting in UI).
+    pub fn menu_order(&self) -> u32 {
+        match self {
+            Self::Commit => 1,
+            Self::Update => 2,
+            Self::Revert => 3,
+            Self::Disassociate => 4,
+        }
+    }
+
+    /// Check whether this operation is appropriate for the given state.
+    pub fn is_appropriate(&self, state: AssociationState) -> bool {
+        match self {
+            Self::Commit => state.can_commit(),
+            Self::Update => state.can_update(),
+            Self::Revert => state.can_revert(),
+            Self::Disassociate => state.can_disassociate(),
+        }
+    }
+
+    /// The confirmation message for this operation.
+    pub fn confirmation_message(&self, count: usize) -> String {
+        match self {
+            Self::Commit => format!("Commit {} data type(s) to archive?", count),
+            Self::Update => format!("Update {} data type(s) from archive?", count),
+            Self::Revert => format!("Revert {} data type(s) to archive version?", count),
+            Self::Disassociate => format!("Disassociate {} data type(s) from archive?", count),
+        }
+    }
+
+    /// The help topic for this operation.
+    pub fn help_topic(&self) -> &'static str {
+        match self {
+            Self::Commit => "Commit_Data_Types",
+            Self::Update => "Update_Data_Types",
+            Self::Revert => "Revert_Data_Types",
+            Self::Disassociate => "Disassociate_Data_Types",
+        }
+    }
+
+    /// Window title for the confirmation dialog.
+    pub fn title(&self, source_name: &str, client_name: &str) -> String {
+        match self {
+            Self::Commit => format!(
+                "Commit Datatype Changes In \"{}\" To Archive \"{}\"", client_name, source_name
+            ),
+            Self::Update => format!(
+                "Update Datatype Changes From Archive \"{}\" To \"{}\"", source_name, client_name
+            ),
+            Self::Revert => format!(
+                "Revert Datatype Changes In \"{}\" From Archive \"{}\"", client_name, source_name
+            ),
+            Self::Disassociate => format!(
+                "Disassociate Data Types From Archive \"{}\"", source_name
+            ),
+        }
+    }
+
+    /// Menu label including the source archive name.
+    pub fn menu_label(&self, source_name: &str) -> String {
+        match self {
+            Self::Commit => format!("Commit Data Types To/{}", source_name),
+            Self::Update => format!("Update Data Types From/{}", source_name),
+            Self::Revert => format!("Revert Data Types From/{}", source_name),
+            Self::Disassociate => format!("Disassociate From/{}", source_name),
+        }
+    }
+}
+
+impl std::fmt::Display for SyncOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SyncActionResult -- result of executing a sync action
+// ---------------------------------------------------------------------------
+
+/// Result of executing a sync action on one or more data types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncActionResult {
+    /// The operation that was performed.
+    pub operation: SyncOperation,
+    /// The archive name involved.
+    pub archive_name: String,
+    /// Names of data types that were processed.
+    pub processed_types: Vec<String>,
+    /// Any error messages encountered.
+    pub errors: Vec<String>,
+    /// Whether the operation succeeded for all types.
+    pub all_succeeded: bool,
+}
+
+impl SyncActionResult {
+    /// Create a successful result.
+    pub fn success(operation: SyncOperation, archive_name: impl Into<String>, types: Vec<String>) -> Self {
+        let count = types.len();
+        Self {
+            operation,
+            archive_name: archive_name.into(),
+            processed_types: types,
+            errors: Vec::new(),
+            all_succeeded: true,
+        }
+    }
+
+    /// Create a result with errors.
+    pub fn with_errors(
+        operation: SyncOperation,
+        archive_name: impl Into<String>,
+        types: Vec<String>,
+        errors: Vec<String>,
+    ) -> Self {
+        Self {
+            operation,
+            archive_name: archive_name.into(),
+            processed_types: types,
+            errors,
+            all_succeeded: false,
+        }
+    }
+
+    /// Summary message.
+    pub fn summary(&self) -> String {
+        if self.all_succeeded {
+            format!(
+                "{}: {} type(s) processed successfully",
+                self.operation.label(),
+                self.processed_types.len()
+            )
+        } else {
+            format!(
+                "{}: {} type(s) processed, {} error(s)",
+                self.operation.label(),
+                self.processed_types.len(),
+                self.errors.len()
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Batch sync operations
+// ---------------------------------------------------------------------------
+
+/// Execute a batch commit operation on associations in the given state.
+pub fn batch_commit(mgr: &mut AssociationManager, archive_name: &str) -> SyncActionResult {
+    let to_commit: Vec<String> = mgr
+        .associations_for_archive(archive_name)
+        .iter()
+        .filter(|a| a.state.can_commit())
+        .map(|a| a.type_name.clone())
+        .collect();
+
+    let mut errors = Vec::new();
+    for type_name in &to_commit {
+        if let Err(e) = mgr.commit(type_name, archive_name) {
+            errors.push(e);
+        }
+    }
+
+    if errors.is_empty() {
+        SyncActionResult::success(SyncOperation::Commit, archive_name, to_commit)
+    } else {
+        SyncActionResult::with_errors(SyncOperation::Commit, archive_name, to_commit, errors)
+    }
+}
+
+/// Execute a batch update operation.
+pub fn batch_update(mgr: &mut AssociationManager, archive_name: &str) -> SyncActionResult {
+    let to_update: Vec<String> = mgr
+        .associations_for_archive(archive_name)
+        .iter()
+        .filter(|a| a.state.can_update())
+        .map(|a| a.type_name.clone())
+        .collect();
+
+    let mut errors = Vec::new();
+    for type_name in &to_update {
+        if let Err(e) = mgr.update(type_name, archive_name) {
+            errors.push(e);
+        }
+    }
+
+    if errors.is_empty() {
+        SyncActionResult::success(SyncOperation::Update, archive_name, to_update)
+    } else {
+        SyncActionResult::with_errors(SyncOperation::Update, archive_name, to_update, errors)
+    }
+}
+
+/// Execute a batch revert operation.
+pub fn batch_revert(mgr: &mut AssociationManager, archive_name: &str) -> SyncActionResult {
+    let to_revert: Vec<String> = mgr
+        .associations_for_archive(archive_name)
+        .iter()
+        .filter(|a| a.state.can_revert())
+        .map(|a| a.type_name.clone())
+        .collect();
+
+    let mut errors = Vec::new();
+    for type_name in &to_revert {
+        if let Err(e) = mgr.revert(type_name, archive_name) {
+            errors.push(e);
+        }
+    }
+
+    if errors.is_empty() {
+        SyncActionResult::success(SyncOperation::Revert, archive_name, to_revert)
+    } else {
+        SyncActionResult::with_errors(SyncOperation::Revert, archive_name, to_revert, errors)
+    }
+}
+
+/// Execute a batch disassociate operation.
+pub fn batch_disassociate(mgr: &mut AssociationManager, archive_name: &str) -> SyncActionResult {
+    let to_dis: Vec<String> = mgr
+        .associations_for_archive(archive_name)
+        .iter()
+        .filter(|a| a.state.can_disassociate())
+        .map(|a| a.type_name.clone())
+        .collect();
+
+    let mut errors = Vec::new();
+    for type_name in &to_dis {
+        if let Err(e) = mgr.disassociate(type_name, archive_name) {
+            errors.push(e);
+        }
+    }
+
+    if errors.is_empty() {
+        SyncActionResult::success(SyncOperation::Disassociate, archive_name, to_dis)
+    } else {
+        SyncActionResult::with_errors(SyncOperation::Disassociate, archive_name, to_dis, errors)
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -664,5 +933,176 @@ mod tests {
 
         mgr.commit("my_type", "archive.gdt").unwrap();
         assert!(!mgr.events().is_empty());
+    }
+
+    // -- SyncOperation tests --
+
+    #[test]
+    fn test_sync_operation_labels() {
+        assert_eq!(SyncOperation::Commit.label(), "Commit");
+        assert_eq!(SyncOperation::Update.label(), "Update");
+        assert_eq!(SyncOperation::Revert.label(), "Revert");
+        assert_eq!(SyncOperation::Disassociate.label(), "Disassociate");
+    }
+
+    #[test]
+    fn test_sync_operation_menu_order() {
+        assert!(SyncOperation::Commit.menu_order() < SyncOperation::Update.menu_order());
+        assert!(SyncOperation::Update.menu_order() < SyncOperation::Revert.menu_order());
+    }
+
+    #[test]
+    fn test_sync_operation_is_appropriate() {
+        assert!(SyncOperation::Commit.is_appropriate(AssociationState::ModifiedLocally));
+        assert!(!SyncOperation::Commit.is_appropriate(AssociationState::Synchronized));
+
+        assert!(SyncOperation::Update.is_appropriate(AssociationState::ArchiveUpdated));
+        assert!(!SyncOperation::Update.is_appropriate(AssociationState::Synchronized));
+
+        assert!(SyncOperation::Revert.is_appropriate(AssociationState::Conflict));
+        assert!(!SyncOperation::Revert.is_appropriate(AssociationState::Synchronized));
+
+        assert!(SyncOperation::Disassociate.is_appropriate(AssociationState::Synchronized));
+        assert!(!SyncOperation::Disassociate.is_appropriate(AssociationState::Disassociated));
+    }
+
+    #[test]
+    fn test_sync_operation_confirmation_message() {
+        let msg = SyncOperation::Commit.confirmation_message(5);
+        assert!(msg.contains("5"));
+        assert!(msg.contains("Commit"));
+    }
+
+    #[test]
+    fn test_sync_operation_help_topic() {
+        assert_eq!(SyncOperation::Commit.help_topic(), "Commit_Data_Types");
+        assert_eq!(SyncOperation::Revert.help_topic(), "Revert_Data_Types");
+    }
+
+    #[test]
+    fn test_sync_operation_title() {
+        let title = SyncOperation::Commit.title("clib.gdt", "my_program");
+        assert!(title.contains("clib.gdt"));
+        assert!(title.contains("my_program"));
+    }
+
+    #[test]
+    fn test_sync_operation_menu_label() {
+        let label = SyncOperation::Update.menu_label("clib.gdt");
+        assert!(label.contains("clib.gdt"));
+        assert!(label.contains("Update"));
+    }
+
+    #[test]
+    fn test_sync_operation_display() {
+        assert_eq!(format!("{}", SyncOperation::Commit), "Commit");
+    }
+
+    // -- SyncActionResult tests --
+
+    #[test]
+    fn test_sync_action_result_success() {
+        let result = SyncActionResult::success(
+            SyncOperation::Commit,
+            "archive.gdt",
+            vec!["int".to_string(), "float".to_string()],
+        );
+        assert!(result.all_succeeded);
+        assert!(result.errors.is_empty());
+        assert_eq!(result.processed_types.len(), 2);
+    }
+
+    #[test]
+    fn test_sync_action_result_with_errors() {
+        let result = SyncActionResult::with_errors(
+            SyncOperation::Update,
+            "archive.gdt",
+            vec!["int".to_string()],
+            vec!["error 1".to_string()],
+        );
+        assert!(!result.all_succeeded);
+        assert_eq!(result.errors.len(), 1);
+    }
+
+    #[test]
+    fn test_sync_action_result_summary() {
+        let result = SyncActionResult::success(
+            SyncOperation::Commit,
+            "archive.gdt",
+            vec!["a".to_string(), "b".to_string()],
+        );
+        let summary = result.summary();
+        assert!(summary.contains("Commit"));
+        assert!(summary.contains("2"));
+    }
+
+    // -- Batch operation tests --
+
+    #[test]
+    fn test_batch_commit() {
+        let mut mgr = AssociationManager::new();
+        let mut a1 = DataTypeAssociation::new("int", "archive.gdt");
+        a1.state = AssociationState::ModifiedLocally;
+        mgr.add_association(a1);
+
+        let mut a2 = DataTypeAssociation::new("float", "archive.gdt");
+        a2.state = AssociationState::Synchronized;
+        mgr.add_association(a2);
+
+        let result = batch_commit(&mut mgr, "archive.gdt");
+        assert!(result.all_succeeded);
+        assert_eq!(result.processed_types.len(), 1);
+        assert_eq!(
+            mgr.get_association("int", "archive.gdt").unwrap().state,
+            AssociationState::Synchronized
+        );
+    }
+
+    #[test]
+    fn test_batch_update() {
+        let mut mgr = AssociationManager::new();
+        let mut a1 = DataTypeAssociation::new("int", "archive.gdt");
+        a1.state = AssociationState::ArchiveUpdated;
+        mgr.add_association(a1);
+
+        let result = batch_update(&mut mgr, "archive.gdt");
+        assert!(result.all_succeeded);
+        assert_eq!(result.processed_types.len(), 1);
+    }
+
+    #[test]
+    fn test_batch_revert() {
+        let mut mgr = AssociationManager::new();
+        let mut a1 = DataTypeAssociation::new("int", "archive.gdt");
+        a1.state = AssociationState::Conflict;
+        mgr.add_association(a1);
+
+        let result = batch_revert(&mut mgr, "archive.gdt");
+        assert!(result.all_succeeded);
+        assert_eq!(result.processed_types.len(), 1);
+    }
+
+    #[test]
+    fn test_batch_disassociate() {
+        let mut mgr = AssociationManager::new();
+        let mut a1 = DataTypeAssociation::new("int", "archive.gdt");
+        a1.state = AssociationState::Synchronized;
+        mgr.add_association(a1);
+
+        let result = batch_disassociate(&mut mgr, "archive.gdt");
+        assert!(result.all_succeeded);
+        assert_eq!(result.processed_types.len(), 1);
+        assert_eq!(
+            mgr.get_association("int", "archive.gdt").unwrap().state,
+            AssociationState::Disassociated
+        );
+    }
+
+    #[test]
+    fn test_batch_empty_archive() {
+        let mut mgr = AssociationManager::new();
+        let result = batch_commit(&mut mgr, "empty.gdt");
+        assert!(result.all_succeeded);
+        assert_eq!(result.processed_types.len(), 0);
     }
 }

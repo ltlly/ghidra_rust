@@ -13,7 +13,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::description::{BSimExecutableInfo, BSimFunctionDescription, SimilarityMetric};
+use super::super::description::{BSimExecutableInfo, BSimFunctionDescription, SimilarityMetric};
 
 // ============================================================================
 // Request / Response (high-level RPC messages)

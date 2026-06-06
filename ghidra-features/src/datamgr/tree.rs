@@ -615,6 +615,421 @@ impl fmt::Display for DataTypeNode {
 }
 
 // ---------------------------------------------------------------------------
+// DtTypeFilter -- per-type filter toggle
+// ---------------------------------------------------------------------------
+
+/// A class that holds enabled state for a type and related typedefs.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.tree.DtTypeFilter`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DtTypeFilter {
+    /// The category/type name this filter controls (e.g. "Arrays", "Enums").
+    name: String,
+    /// Whether the type itself is active (visible).
+    is_type_active: bool,
+    /// Whether typedefs of this type are active.
+    is_type_def_active: bool,
+}
+
+impl DtTypeFilter {
+    /// Create a new filter with both type and typedef active.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            is_type_active: true,
+            is_type_def_active: true,
+        }
+    }
+
+    /// Create a new filter with specified active states.
+    pub fn with_state(name: impl Into<String>, type_active: bool, typedef_active: bool) -> Self {
+        Self {
+            name: name.into(),
+            is_type_active: type_active,
+            is_type_def_active: typedef_active,
+        }
+    }
+
+    /// The filter name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Whether the type itself is active.
+    pub fn is_type_active(&self) -> bool {
+        self.is_type_active
+    }
+
+    /// Whether typedefs of this type are active.
+    pub fn is_type_def_active(&self) -> bool {
+        self.is_type_def_active
+    }
+
+    /// Set whether the type itself is active.
+    pub fn set_type_active(&mut self, active: bool) {
+        self.is_type_active = active;
+    }
+
+    /// Set whether typedefs of this type are active.
+    pub fn set_type_def_active(&mut self, active: bool) {
+        self.is_type_def_active = active;
+    }
+
+    /// Create a copy of this filter.
+    pub fn copy(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            is_type_active: self.is_type_active,
+            is_type_def_active: self.is_type_def_active,
+        }
+    }
+
+    /// Check whether a data type passes this filter.
+    ///
+    /// `is_typedef` should be `true` if the data type is a TypeDef.
+    pub fn passes(&self, is_typedef: bool) -> bool {
+        if is_typedef {
+            self.is_type_def_active
+        } else {
+            self.is_type_active
+        }
+    }
+}
+
+impl fmt::Display for DtTypeFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DtTypeFilter '{}' type={} typedef={}",
+            self.name, self.is_type_active, self.is_type_def_active
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DataTypeCategory -- enum for matching data types to filter categories
+// ---------------------------------------------------------------------------
+
+/// Broad category of a data type for filter matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DataTypeCategory {
+    /// Array type.
+    Array,
+    /// Enum type.
+    Enum,
+    /// Function definition.
+    Function,
+    /// Pointer type.
+    Pointer,
+    /// Structure type.
+    Structure,
+    /// Union type.
+    Union,
+    /// Other (built-in, dynamic, etc.).
+    Other,
+}
+
+// ---------------------------------------------------------------------------
+// DtFilterState -- collection of per-type filters
+// ---------------------------------------------------------------------------
+
+/// A simple object to store various filter settings for the data type provider.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.tree.DtFilterState`.
+///
+/// Contains one [`DtTypeFilter`] per broad data-type category (arrays,
+/// enums, functions, structures, pointers, unions, and other).  Arrays
+/// and pointers are **off** by default, since users typically are not
+/// working with them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DtFilterState {
+    arrays_filter: DtTypeFilter,
+    enums_filter: DtTypeFilter,
+    functions_filter: DtTypeFilter,
+    structures_filter: DtTypeFilter,
+    pointers_filter: DtTypeFilter,
+    unions_filter: DtTypeFilter,
+    other_filter: DtTypeFilter,
+}
+
+impl DtFilterState {
+    /// Create a new filter state with default settings.
+    ///
+    /// Arrays and pointers are off by default.
+    pub fn new() -> Self {
+        Self {
+            arrays_filter: DtTypeFilter::with_state("Arrays", false, true),
+            enums_filter: DtTypeFilter::new("Enums"),
+            functions_filter: DtTypeFilter::new("Functions"),
+            structures_filter: DtTypeFilter::new("Structures"),
+            pointers_filter: DtTypeFilter::with_state("Pointers", false, true),
+            unions_filter: DtTypeFilter::new("Unions"),
+            other_filter: DtTypeFilter::new("Other"),
+        }
+    }
+
+    /// Create a copy of this filter state.
+    pub fn copy(&self) -> Self {
+        Self {
+            arrays_filter: self.arrays_filter.copy(),
+            enums_filter: self.enums_filter.copy(),
+            functions_filter: self.functions_filter.copy(),
+            structures_filter: self.structures_filter.copy(),
+            pointers_filter: self.pointers_filter.copy(),
+            unions_filter: self.unions_filter.copy(),
+            other_filter: self.other_filter.copy(),
+        }
+    }
+
+    /// Get the filter for a specific category.
+    pub fn filter_for(&self, category: DataTypeCategory) -> &DtTypeFilter {
+        match category {
+            DataTypeCategory::Array => &self.arrays_filter,
+            DataTypeCategory::Enum => &self.enums_filter,
+            DataTypeCategory::Function => &self.functions_filter,
+            DataTypeCategory::Pointer => &self.pointers_filter,
+            DataTypeCategory::Structure => &self.structures_filter,
+            DataTypeCategory::Union => &self.unions_filter,
+            DataTypeCategory::Other => &self.other_filter,
+        }
+    }
+
+    /// Get a mutable filter for a specific category.
+    pub fn filter_for_mut(&mut self, category: DataTypeCategory) -> &mut DtTypeFilter {
+        match category {
+            DataTypeCategory::Array => &mut self.arrays_filter,
+            DataTypeCategory::Enum => &mut self.enums_filter,
+            DataTypeCategory::Function => &mut self.functions_filter,
+            DataTypeCategory::Pointer => &mut self.pointers_filter,
+            DataTypeCategory::Structure => &mut self.structures_filter,
+            DataTypeCategory::Union => &mut self.unions_filter,
+            DataTypeCategory::Other => &mut self.other_filter,
+        }
+    }
+
+    /// Check whether a data type passes the filter for its category.
+    ///
+    /// A bare pointer with no target passes unconditionally (mirrors
+    /// the Java `DtFilterState.passesDataType` special-case for the
+    /// built-in "pointer" type).
+    pub fn passes_data_type(&self, category: DataTypeCategory, is_typedef: bool, is_bare_pointer: bool) -> bool {
+        if is_bare_pointer {
+            return true;
+        }
+        self.filter_for(category).passes(is_typedef)
+    }
+
+    /// Get the arrays filter.
+    pub fn arrays_filter(&self) -> &DtTypeFilter { &self.arrays_filter }
+    /// Get the enums filter.
+    pub fn enums_filter(&self) -> &DtTypeFilter { &self.enums_filter }
+    /// Get the functions filter.
+    pub fn functions_filter(&self) -> &DtTypeFilter { &self.functions_filter }
+    /// Get the structures filter.
+    pub fn structures_filter(&self) -> &DtTypeFilter { &self.structures_filter }
+    /// Get the pointers filter.
+    pub fn pointers_filter(&self) -> &DtTypeFilter { &self.pointers_filter }
+    /// Get the unions filter.
+    pub fn unions_filter(&self) -> &DtTypeFilter { &self.unions_filter }
+    /// Get the other filter.
+    pub fn other_filter(&self) -> &DtTypeFilter { &self.other_filter }
+}
+
+impl Default for DtFilterState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for DtFilterState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DtFilterState [Arrays={} Enums={} Functions={} Structs={} Ptrs={} Unions={} Other={}]",
+            self.arrays_filter.is_type_active(),
+            self.enums_filter.is_type_active(),
+            self.functions_filter.is_type_active(),
+            self.structures_filter.is_type_active(),
+            self.pointers_filter.is_type_active(),
+            self.unions_filter.is_type_active(),
+            self.other_filter.is_type_active(),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DomainFileArchiveNode -- abstract base for file-backed archive nodes
+// ---------------------------------------------------------------------------
+
+/// State flags for a domain-file-backed archive node.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.tree.DomainFileArchiveNode`.
+#[derive(Debug, Clone, Default)]
+pub struct DomainFileState {
+    /// Whether the file has unsaved changes.
+    pub is_changed: bool,
+    /// Whether the file is read-only.
+    pub is_read_only: bool,
+    /// Whether the file has been hijacked (modified outside of checkout).
+    pub is_hijacked: bool,
+    /// Whether the file is checked out.
+    pub is_checked_out: bool,
+    /// Whether the file is checked out exclusively.
+    pub is_checked_out_exclusive: bool,
+    /// Whether the file is under version control.
+    pub is_versioned: bool,
+    /// The current version number.
+    pub version: i32,
+    /// The latest available version number.
+    pub latest_version: i32,
+}
+
+impl DomainFileState {
+    /// Returns `true` if the archive is not at the latest version.
+    pub fn is_not_latest(&self) -> bool {
+        self.is_versioned && self.version < self.latest_version
+    }
+
+    /// Build a display string summarizing the domain file state.
+    pub fn info_string(&self) -> String {
+        let mut parts = Vec::new();
+        if self.is_read_only { parts.push("Read-Only".to_string()); }
+        if self.is_checked_out { parts.push("Checked Out".to_string()); }
+        if self.is_hijacked { parts.push("Hijacked".to_string()); }
+        if self.is_versioned {
+            parts.push(format!("v{}/{}", self.version, self.latest_version));
+        }
+        if parts.is_empty() {
+            "OK".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DataTypeArchiveGTree -- the top-level tree widget model
+// ---------------------------------------------------------------------------
+
+/// The top-level tree widget that displays all open data type archives.
+///
+/// Ported from `ghidra.app.plugin.core.datamgr.tree.DataTypeArchiveGTree`.
+///
+/// Manages the [`ArchiveRootNode`], handles filter state, and provides
+/// search/find operations on the tree.
+#[derive(Debug)]
+pub struct DataTypeArchiveGTree {
+    /// The root node.
+    root: ArchiveRootNode,
+    /// The active filter state.
+    filter_state: DtFilterState,
+    /// Whether the tree is loaded (children populated).
+    loaded: bool,
+}
+
+impl DataTypeArchiveGTree {
+    /// Create a new empty tree.
+    pub fn new() -> Self {
+        Self {
+            root: ArchiveRootNode::new(),
+            filter_state: DtFilterState::new(),
+            loaded: false,
+        }
+    }
+
+    /// Create a tree with a specific filter state.
+    pub fn with_filter(filter_state: DtFilterState) -> Self {
+        Self {
+            root: ArchiveRootNode::new(),
+            filter_state,
+            loaded: false,
+        }
+    }
+
+    /// Get a reference to the root node.
+    pub fn root(&self) -> &ArchiveRootNode {
+        &self.root
+    }
+
+    /// Get a mutable reference to the root node.
+    pub fn root_mut(&mut self) -> &mut ArchiveRootNode {
+        &mut self.root
+    }
+
+    /// Get the current filter state.
+    pub fn filter_state(&self) -> &DtFilterState {
+        &self.filter_state
+    }
+
+    /// Get a mutable reference to the filter state.
+    pub fn filter_state_mut(&mut self) -> &mut DtFilterState {
+        &mut self.filter_state
+    }
+
+    /// Set the filter state.
+    pub fn set_filter_state(&mut self, state: DtFilterState) {
+        self.filter_state = state;
+    }
+
+    /// Returns `true` if the tree has been loaded.
+    pub fn is_loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// Mark the tree as loaded.
+    pub fn set_loaded(&mut self, loaded: bool) {
+        self.loaded = loaded;
+    }
+
+    /// Find a category node by path across all archives.
+    pub fn find_category_node(&self, category_path: &str) -> Option<&CategoryNode> {
+        for archive in self.root.archives() {
+            if let Some(node) = find_category_recursive(archive.categories(), category_path) {
+                return Some(node);
+            }
+        }
+        None
+    }
+
+    /// Find an archive node by name.
+    pub fn find_archive_by_name(&self, name: &str) -> Option<&ArchiveNode> {
+        self.root.archives().iter().find(|a| a.name() == name)
+    }
+
+    /// Refresh the tree after an archive has been opened or closed.
+    pub fn refresh(&mut self) {
+        self.root.increment_mod_count();
+    }
+}
+
+impl Default for DataTypeArchiveGTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Recursively search for a category node by path segments.
+fn find_category_recursive<'a>(
+    categories: &'a [CategoryNode],
+    path: &str,
+) -> Option<&'a CategoryNode> {
+    // Strip leading '/' if present
+    let path = path.strip_prefix('/').unwrap_or(path);
+    let mut segments = path.splitn(2, '/');
+    let first = segments.next()?;
+    let rest = segments.next();
+
+    for cat in categories {
+        if cat.name() == first {
+            if let Some(rest_path) = rest {
+                return find_category_recursive(cat.categories(), rest_path);
+            } else {
+                return Some(cat);
+            }
+        }
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -982,5 +1397,239 @@ mod tests {
         assert_eq!(format!("{}", DataTypeNodeKind::Array), "Array");
         assert_eq!(format!("{}", DataTypeNodeKind::FunctionDef), "FunctionDef");
         assert_eq!(format!("{}", DataTypeNodeKind::Dynamic), "Dynamic");
+    }
+
+    // -- DtTypeFilter tests --
+
+    #[test]
+    fn test_dt_type_filter_new() {
+        let f = DtTypeFilter::new("Enums");
+        assert_eq!(f.name(), "Enums");
+        assert!(f.is_type_active());
+        assert!(f.is_type_def_active());
+    }
+
+    #[test]
+    fn test_dt_type_filter_with_state() {
+        let f = DtTypeFilter::with_state("Arrays", false, true);
+        assert!(!f.is_type_active());
+        assert!(f.is_type_def_active());
+    }
+
+    #[test]
+    fn test_dt_type_filter_setters() {
+        let mut f = DtTypeFilter::new("Test");
+        f.set_type_active(false);
+        assert!(!f.is_type_active());
+        f.set_type_def_active(false);
+        assert!(!f.is_type_def_active());
+    }
+
+    #[test]
+    fn test_dt_type_filter_copy() {
+        let f = DtTypeFilter::with_state("Test", false, true);
+        let c = f.copy();
+        assert_eq!(f, c);
+    }
+
+    #[test]
+    fn test_dt_type_filter_passes() {
+        let f = DtTypeFilter::with_state("Arrays", false, true);
+        assert!(!f.passes(false)); // type not active
+        assert!(f.passes(true));   // typedef active
+    }
+
+    #[test]
+    fn test_dt_type_filter_display() {
+        let f = DtTypeFilter::new("Test");
+        let s = format!("{}", f);
+        assert!(s.contains("Test"));
+        assert!(s.contains("type=true"));
+    }
+
+    // -- DtFilterState tests --
+
+    #[test]
+    fn test_dt_filter_state_default_arrays_off() {
+        let fs = DtFilterState::new();
+        assert!(!fs.arrays_filter().is_type_active());
+        assert!(!fs.pointers_filter().is_type_active());
+        assert!(fs.enums_filter().is_type_active());
+        assert!(fs.structures_filter().is_type_active());
+    }
+
+    #[test]
+    fn test_dt_filter_state_copy() {
+        let fs = DtFilterState::new();
+        let copy = fs.copy();
+        assert_eq!(fs, copy);
+    }
+
+    #[test]
+    fn test_dt_filter_state_passes_data_type() {
+        let fs = DtFilterState::new();
+        // Enums active, not a typedef
+        assert!(fs.passes_data_type(DataTypeCategory::Enum, false, false));
+        // Arrays not active by default
+        assert!(!fs.passes_data_type(DataTypeCategory::Array, false, false));
+        // But arrays typedef is active
+        assert!(fs.passes_data_type(DataTypeCategory::Array, true, false));
+        // Bare pointer always passes
+        assert!(fs.passes_data_type(DataTypeCategory::Pointer, false, true));
+    }
+
+    #[test]
+    fn test_dt_filter_state_filter_for() {
+        let fs = DtFilterState::new();
+        assert_eq!(fs.filter_for(DataTypeCategory::Enum).name(), "Enums");
+        assert_eq!(fs.filter_for(DataTypeCategory::Structure).name(), "Structures");
+        assert_eq!(fs.filter_for(DataTypeCategory::Union).name(), "Unions");
+    }
+
+    #[test]
+    fn test_dt_filter_state_filter_for_mut() {
+        let mut fs = DtFilterState::new();
+        fs.filter_for_mut(DataTypeCategory::Array).set_type_active(true);
+        assert!(fs.arrays_filter().is_type_active());
+    }
+
+    #[test]
+    fn test_dt_filter_state_display() {
+        let fs = DtFilterState::new();
+        let s = format!("{}", fs);
+        assert!(s.contains("DtFilterState"));
+        assert!(s.contains("Arrays=false"));
+    }
+
+    // -- DtTypeFilter trait tests --
+
+    #[test]
+    fn test_data_type_category_enum() {
+        let cat = DataTypeCategory::Enum;
+        assert_eq!(cat, DataTypeCategory::Enum);
+        assert_ne!(cat, DataTypeCategory::Structure);
+    }
+
+    // -- DomainFileState tests --
+
+    #[test]
+    fn test_domain_file_state_default() {
+        let state = DomainFileState::default();
+        assert!(!state.is_changed);
+        assert!(!state.is_read_only);
+        assert!(!state.is_checked_out);
+        assert!(!state.is_not_latest());
+    }
+
+    #[test]
+    fn test_domain_file_state_not_latest() {
+        let state = DomainFileState {
+            is_versioned: true,
+            version: 3,
+            latest_version: 5,
+            ..Default::default()
+        };
+        assert!(state.is_not_latest());
+    }
+
+    #[test]
+    fn test_domain_file_state_info_string() {
+        let state = DomainFileState {
+            is_read_only: true,
+            is_versioned: true,
+            version: 2,
+            latest_version: 3,
+            ..Default::default()
+        };
+        let info = state.info_string();
+        assert!(info.contains("Read-Only"));
+        assert!(info.contains("v2/3"));
+    }
+
+    #[test]
+    fn test_domain_file_state_info_string_ok() {
+        let state = DomainFileState::default();
+        assert_eq!(state.info_string(), "OK");
+    }
+
+    // -- DataTypeArchiveGTree tests --
+
+    #[test]
+    fn test_gtree_new() {
+        let tree = DataTypeArchiveGTree::new();
+        assert!(!tree.is_loaded());
+        assert_eq!(tree.root().archive_count(), 0);
+    }
+
+    #[test]
+    fn test_gtree_with_filter() {
+        let mut fs = DtFilterState::new();
+        fs.filter_for_mut(DataTypeCategory::Array).set_type_active(true);
+        let tree = DataTypeArchiveGTree::with_filter(fs);
+        assert!(tree.filter_state().arrays_filter().is_type_active());
+    }
+
+    #[test]
+    fn test_gtree_add_archive_and_find() {
+        let mut tree = DataTypeArchiveGTree::new();
+        let archive = ArchiveNode::new(
+            "clib.gdt",
+            super::super::archive::ArchiveKind::File,
+            true,
+            Some(UniversalID::new(100)),
+        );
+        tree.root_mut().add_archive(archive);
+        assert!(tree.find_archive_by_name("clib.gdt").is_some());
+        assert!(tree.find_archive_by_name("other.gdt").is_none());
+    }
+
+    #[test]
+    fn test_gtree_find_category() {
+        let mut tree = DataTypeArchiveGTree::new();
+        let mut archive = ArchiveNode::new(
+            "lib",
+            super::super::archive::ArchiveKind::File,
+            true,
+            None,
+        );
+        let mut cat = CategoryNode::new("sys", CategoryPath::new("sys"), true);
+        cat.add_category(CategoryNode::new("types", CategoryPath::from_path_string("/sys/types"), true));
+        archive.add_category(cat);
+        tree.root_mut().add_archive(archive);
+
+        assert!(tree.find_category_node("/sys/types").is_some());
+        assert!(tree.find_category_node("/sys").is_some());
+        assert!(tree.find_category_node("/nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_gtree_refresh() {
+        let mut tree = DataTypeArchiveGTree::new();
+        assert_eq!(tree.root().modification_count(), 0);
+        tree.refresh();
+        assert_eq!(tree.root().modification_count(), 1);
+    }
+
+    #[test]
+    fn test_gtree_set_loaded() {
+        let mut tree = DataTypeArchiveGTree::new();
+        assert!(!tree.is_loaded());
+        tree.set_loaded(true);
+        assert!(tree.is_loaded());
+    }
+
+    #[test]
+    fn test_gtree_set_filter_state() {
+        let mut tree = DataTypeArchiveGTree::new();
+        let mut fs = DtFilterState::new();
+        fs.filter_for_mut(DataTypeCategory::Pointer).set_type_active(true);
+        tree.set_filter_state(fs);
+        assert!(tree.filter_state().pointers_filter().is_type_active());
+    }
+
+    #[test]
+    fn test_gtree_default() {
+        let tree = DataTypeArchiveGTree::default();
+        assert_eq!(tree.root().archive_count(), 0);
     }
 }
