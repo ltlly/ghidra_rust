@@ -5,6 +5,9 @@
 //! Provides a simplified interface to decompiler functionality,
 //! suitable for scripting and automated analysis.
 
+/// Decompiler interface API variant using [`DecompInterface`].
+pub mod flat_decompiler_api;
+
 use ghidra_core::addr::Address;
 
 use crate::DecompileEngine;

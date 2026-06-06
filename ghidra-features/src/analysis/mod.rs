@@ -106,6 +106,33 @@ pub use stored_times::StoredAnalyzerTimesPropertyEditor;
 pub use project_path::ProjectPathChooserEditor;
 pub use validator::{PostAnalysisValidator, OffcutReferencesValidator, PercentAnalyzedValidator, RedFlagsValidator, ConditionResult, ConditionStatus};
 
+// -- New detailed analyzer implementations ported from Ghidra's Features/Base --
+
+/// Detailed operand reference analyzer with full configuration model.
+/// Ported from `ghidra.app.plugin.core.analysis.OperandReferenceAnalyzer`.
+pub mod operand_reference_analyzer;
+
+/// Detailed scalar operand analyzer with relocation checking.
+/// Ported from `ghidra.app.plugin.core.analysis.ScalarOperandAnalyzer`.
+pub mod scalar_operand_analyzer;
+
+/// Golang symbol and string analyzers.
+/// Ported from `ghidra.app.plugin.core.analysis.GolangSymbolAnalyzer` and
+/// `ghidra.app.plugin.core.analysis.GolangStringAnalyzer`.
+pub mod golang_analyzers;
+
+/// MinGW relocation analyzer for PE binaries.
+/// Ported from `ghidra.app.plugin.core.analysis.MingwRelocationAnalyzer`.
+pub mod mingw_relocation_analyzer;
+
+/// Analysis panel model for the analyzer configuration UI.
+/// Ported from `ghidra.app.plugin.core.analysis.AnalysisPanel`.
+pub mod analysis_panel;
+
+/// No-return function analyzer with call graph propagation.
+/// Ported from `ghidra.app.plugin.core.analysis.NoReturnFunctionAnalyzer`.
+pub mod no_return_analyzer;
+
 // Re-export types from base::analyzer that are commonly needed
 pub use crate::base::analyzer::StoredAnalyzerTimes;
 pub use crate::base::analyzer::TransientProgramProperties;

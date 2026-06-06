@@ -134,7 +134,7 @@ pub use target_iface::{
 pub use target_info::{builtin as target_builtin, TraceObjectInfo, TraceObjectInterfaceFactory, TraceObjectInterfaceRegistry};
 pub use target_manager::{TargetObjectError, TraceObjectManager};
 pub use target_object::{ConflictResolution, TraceObject};
-pub use target_schema::{AttributeSchema, SchemaBuilder, SchemaContext, SchemaName, TraceObjectSchemaDef};
+pub use target_schema::{AttributeSchema, MinimalSchemaContext, PrimitiveTraceObjectSchema, SchemaBuilder, SchemaContext, SchemaName, TraceObjectSchemaDef};
 pub use target_value::{PrimitiveValue, TraceObjectValPath, TraceObjectValue, TruncateResult};
 pub use thread::{TraceProcess, TraceThread};
 pub use time::{TraceSchedule, TraceSnapshot, TraceTimeManager};

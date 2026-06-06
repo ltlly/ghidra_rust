@@ -357,6 +357,13 @@ pub mod gui_remaining;
 // Debugger plugin event types from Framework-TraceModeling/Debugger
 pub mod debugger_events;
 
+// Trace diff plugin for snapshot comparison
+pub mod trace_diff_plugin;
+pub use trace_diff_plugin::{
+    compare_bytes, DiffAddressSet, DiffRange, DiffSessionState,
+    SnapshotDiffResult, TraceDiffPluginConfig,
+};
+
 // Extended action context types from Debugger-api / Debugger
 pub mod gui_action_contexts_ext;
 pub use gui_action_contexts_ext::DebuggerObjectPathActionContext;
