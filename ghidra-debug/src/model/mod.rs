@@ -276,3 +276,7 @@ pub mod trace_time_viewport;
 pub mod trace_closed_exception;
 pub mod default_trace_location;
 pub mod trace_unique_object;
+
+// Extended trace options and user preferences
+pub mod trace_options_ext;
+pub use trace_options_ext::{TraceOptionValue, TraceOptionsStore, TraceUserPreferences};

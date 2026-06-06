@@ -58,6 +58,7 @@ pub mod visual_graph_component_provider;
 pub mod filtering_visual_graph;
 pub mod grouping_visual_graph;
 pub mod graph_type_service_ext;
+pub mod viewer_utils;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;

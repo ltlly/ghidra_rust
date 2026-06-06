@@ -14,6 +14,9 @@ pub mod task_types;
 pub mod task_utilities;
 pub mod tracked_task;
 
+// New modules ported from Ghidra's task framework
+pub mod compound_task;
+
 pub use script_task_listener::ScriptTaskListener;
 pub use task_dialog::TaskDialog;
 pub use task_types::{

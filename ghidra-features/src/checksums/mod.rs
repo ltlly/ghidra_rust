@@ -20,6 +20,13 @@
 /// `ghidra.app.plugin.core.checksums.ComputeAllChecksumsCommand`.
 pub mod commands;
 
+/// Checksum table model, plugin, provider, and task.
+///
+/// Ported from `ghidra.app.plugin.core.checksums.ChecksumTableModel`,
+/// `ComputeChecksumsPlugin`, `ComputeChecksumsProvider`, and
+/// `ComputeChecksumTask`.
+pub mod table;
+
 use std::fmt;
 
 // ============================================================================

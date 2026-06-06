@@ -4,6 +4,12 @@
 //!
 //! Provides model-level logic for preparing listing content for printing.
 
+/// Printing plugin, code unit printable, and print options dialog.
+///
+/// Ported from `ghidra.app.plugin.core.printing.PrintingPlugin`,
+/// `CodeUnitPrintable`, and `PrintOptionsDialog`.
+pub mod printable;
+
 use ghidra_core::Address;
 
 /// The page orientation for printing.

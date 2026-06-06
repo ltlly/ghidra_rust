@@ -32,6 +32,7 @@ pub mod visual_graph_view;
 pub mod graph_viewer;
 pub mod view_updater;
 pub mod calculate_layout_task;
+pub mod visual_vertex_edge;
 
 use std::collections::HashMap;
 

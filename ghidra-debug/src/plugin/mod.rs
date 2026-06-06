@@ -354,3 +354,7 @@ pub mod gui_remaining;
 
 // Debugger plugin event types from Framework-TraceModeling/Debugger
 pub mod debugger_events;
+
+// Extended action context types from Debugger-api / Debugger
+pub mod gui_action_contexts_ext;
+pub use gui_action_contexts_ext::DebuggerObjectPathActionContext;

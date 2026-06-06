@@ -16,6 +16,14 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.scalartable` Java package.
 pub mod model;
 
+/// Scalar search model, plugin, provider, dialog, and range filter.
+///
+/// Ported from `ghidra.app.plugin.core.scalartable.ScalarSearchPlugin`,
+/// `ScalarSearchProvider`, `ScalarSearchDialog`, `ScalarSearchModel`,
+/// `ScalarSearchContext`, `ScalarColumnConstraintProvider`,
+/// `RangeFilterTextField`, and mapper types.
+pub mod search;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

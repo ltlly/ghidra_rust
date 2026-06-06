@@ -112,6 +112,11 @@ pub mod decompiler_initializer;
 pub mod empty_decompile_data;
 pub mod token_highlight;
 
+// New modules ported from Ghidra's decompiler packages
+pub mod clang_token_types_ext;
+pub mod decompiler_provider;
+pub mod analysis_commands;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

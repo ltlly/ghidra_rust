@@ -14,6 +14,12 @@
 //! - [`RestoreTask`] -- Background task that restores from an archive
 //! - [`ArchiveState`] -- Tracks progress of archive/restore operations
 
+/// Archive plugin, task, dialog, and restore task/dialog.
+///
+/// Ported from `ghidra.app.plugin.core.archive.ArchivePlugin`,
+/// `ArchiveTask`, `ArchiveDialog`, `RestoreTask`, and `RestoreDialog`.
+pub mod restore;
+
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 

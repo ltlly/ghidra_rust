@@ -15,6 +15,13 @@
 //! - [`ColorizingService`] -- trait for programmatic color management
 //! - [`ColorizerModel`] -- the default in-memory colorizing service
 
+/// Colorizing plugin, service trait, service provider, and command actions.
+///
+/// Ported from `ghidra.app.plugin.core.colorizer.ColorizingPlugin`,
+/// `ColorizingService`, `ColorizingServiceProvider`,
+/// `SetColorCommand`, `ClearColorCommand`, and navigation actions.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::HashMap;
 

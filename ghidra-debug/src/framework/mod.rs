@@ -13,3 +13,7 @@ pub mod gspan_field;
 pub mod rstar_diagnostics;
 pub mod domain_object_adapter;
 pub mod change_tracker;
+pub mod event_dispatch_ext;
+pub use event_dispatch_ext::{
+    BatchDispatcher, DispatchQueue, EventPriority, EventSubscription, PendingEvent,
+};

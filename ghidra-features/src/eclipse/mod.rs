@@ -19,6 +19,13 @@
 /// Ported from `ghidra.app.plugin.core.eclipse` connector classes.
 pub mod connector;
 
+/// Eclipse integration plugin, connection, connector task, and options.
+///
+/// Ported from `ghidra.app.plugin.core.eclipse.EclipseIntegrationPlugin`,
+/// `EclipseConnection`, `EclipseConnectorTask`, and
+/// `EclipseIntegrationOptionsPlugin`.
+pub mod plugin;
+
 use std::path::PathBuf;
 
 /// Plugin options name for Eclipse integration.

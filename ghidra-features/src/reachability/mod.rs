@@ -16,6 +16,12 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.reachability` table classes.
 pub mod table;
 
+/// Function reachability graph model: vertices, edges, path finding.
+///
+/// Ported from `ghidra.app.plugin.core.reachability.FRVertex`,
+/// `FREdge`, `FRPathsModel`, and `FunctionReachabilityResult`.
+pub mod graph;
+
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 

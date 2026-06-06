@@ -10,6 +10,14 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.sourcefilestable` Java package.
 pub mod model;
 
+/// Source files table plugin, provider, row objects, and table models.
+///
+/// Ported from `ghidra.app.plugin.core.sourcefilestable.SourceFilesTablePlugin`,
+/// `SourceFilesTableProvider`, `SourceFileRowObject`, `SourceFilesTableModel`,
+/// `SourceMapEntryRowObject`, `SourceMapEntryTableModel`, and
+/// `TransformerTableModel`.
+pub mod plugin;
+
 use std::collections::HashMap;
 
 /// A source file entry from debug information.

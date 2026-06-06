@@ -44,3 +44,10 @@ pub mod trace_property_access;
 pub use trace_property_access::{
     InternalPcodeTraceDataAccess, PropertyEntry, PropertyValue, TracePropertyAccess,
 };
+
+pub mod abstract_trace_access;
+pub use abstract_trace_access::{
+    CacheEntry, DefaultPropertyAccess, DefaultThreadAccess, PcodeTraceThreadAware,
+    PropertyEntry as AbstractPropertyEntry, SnapAndThread, ThreadAccessContext,
+    TraceDataReadCache, TracePropertyAccess as AbstractTracePropertyAccess,
+};

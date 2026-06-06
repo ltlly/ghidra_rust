@@ -19,6 +19,12 @@
 /// Ported from `ghidra.app.plugin.core.datapreview` preview classes.
 pub mod preview_model;
 
+/// Data type preview plugin and component preview.
+///
+/// Ported from `ghidra.app.plugin.core.datapreview.DataTypePreviewPlugin`,
+/// `DataTypePreview`, `DataTypeComponentPreview`, and `Preview`.
+pub mod plugin;
+
 use std::cmp::Ordering;
 
 /// Maximum preview string length.

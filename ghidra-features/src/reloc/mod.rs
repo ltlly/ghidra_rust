@@ -18,6 +18,14 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.reloc` Java package.
 pub mod plugin;
 
+/// Relocation fixup handlers for ELF, PE32, PE64, and generic formats.
+///
+/// Ported from `ghidra.app.plugin.core.reloc.ElfRelocationFixupHandler`,
+/// `Pe32RelocationFixupHandler`, `Pe64RelocationFixupHandler`,
+/// `GenericReferenceBaseRelocationFixupHandler`, `InstructionStasher`,
+/// `RelocationFixupCommand`, and `RelocationTableModel`.
+pub mod handlers;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

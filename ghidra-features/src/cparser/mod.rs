@@ -15,6 +15,12 @@
 //! - [`ParseResult`] -- Results of a C parsing operation
 //! - [`ParsedType`] -- A data type parsed from C source
 
+/// C parser plugin, task, include file finder, and parse dialog.
+///
+/// Ported from `ghidra.app.plugin.core.cparser.CParserPlugin`,
+/// `CParserTask`, `IncludeFileFinder`, and `ParseDialog`.
+pub mod plugin;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 

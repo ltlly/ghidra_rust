@@ -9,6 +9,14 @@
 /// Ported from `ghidra.app.plugin.core.misc` action classes.
 pub mod actions;
 
+/// Font adjust, program changes display, recovery snapshot manager,
+/// and register field plugins.
+///
+/// Ported from `ghidra.app.plugin.core.misc.FontAdjustPlugin`,
+/// `MyProgramChangesDisplayPlugin`, `RecoverySnapshotMgrPlugin`,
+/// and `RegisterField`.
+pub mod plugins;
+
 /// The import type for binary files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportType {

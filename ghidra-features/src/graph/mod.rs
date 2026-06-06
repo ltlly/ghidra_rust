@@ -17,6 +17,12 @@
 /// Ported from `ghidra.app.plugin.core.graph` graph plugin classes.
 pub mod plugin;
 
+/// Address-based graph display listeners and broker listener.
+///
+/// Ported from `ghidra.app.plugin.core.graph.AddressBasedGraphDisplayListener`
+/// and `GraphDisplayBrokerListener`.
+pub mod display_listener;
+
 use std::collections::HashMap;
 
 /// Option key for the active graph provider.

@@ -16,6 +16,11 @@
 
 pub mod patch_actions;
 
+/// Assembly dual text field -- guided assembly input with autocompletion.
+///
+/// Ported from `ghidra.app.plugin.core.assembler.AssemblyDualTextField`.
+pub mod dual_text_field;
+
 use ghidra_core::Address;
 
 // ============================================================================
