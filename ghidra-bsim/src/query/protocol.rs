@@ -649,20 +649,72 @@ impl PairInputData {
 /// Ports `ghidra.features.bsim.query.protocol.PairNote`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PairNoteData {
+    /// First executable specifier.
+    pub exe_a: Option<ExeSpecifier>,
+    /// First function entry.
+    pub func_a: Option<FunctionEntryData>,
+    /// Second executable specifier.
+    pub exe_b: Option<ExeSpecifier>,
+    /// Second function entry.
+    pub func_b: Option<FunctionEntryData>,
     /// Similarity score.
     pub similarity: f64,
     /// Significance score.
     pub significance: f64,
+    /// Unnormalized dot product of the two feature vectors.
+    pub dot_product: f64,
+    /// Number of hashes from function A.
+    pub func1_hash_count: u32,
+    /// Number of hashes from function B.
+    pub func2_hash_count: u32,
+    /// Number of hashes in the intersection.
+    pub intersection_count: u32,
     /// Whether the pair was found.
     pub found: bool,
 }
 
 impl PairNoteData {
-    /// Create a new PairNote.
+    /// Create a new PairNote with full comparison metrics.
     pub fn new(similarity: f64, significance: f64) -> Self {
         Self {
+            exe_a: None,
+            func_a: None,
+            exe_b: None,
+            func_b: None,
             similarity,
             significance,
+            dot_product: 0.0,
+            func1_hash_count: 0,
+            func2_hash_count: 0,
+            intersection_count: 0,
+            found: true,
+        }
+    }
+
+    /// Create a PairNote with full details (matching Java constructor).
+    pub fn with_details(
+        exe_a: ExeSpecifier,
+        func_a: FunctionEntryData,
+        exe_b: ExeSpecifier,
+        func_b: FunctionEntryData,
+        similarity: f64,
+        significance: f64,
+        dot_product: f64,
+        func1_hash_count: u32,
+        func2_hash_count: u32,
+        intersection_count: u32,
+    ) -> Self {
+        Self {
+            exe_a: Some(exe_a),
+            func_a: Some(func_a),
+            exe_b: Some(exe_b),
+            func_b: Some(func_b),
+            similarity,
+            significance,
+            dot_product,
+            func1_hash_count,
+            func2_hash_count,
+            intersection_count,
             found: true,
         }
     }
@@ -670,10 +722,38 @@ impl PairNoteData {
     /// Create a not-found result.
     pub fn not_found() -> Self {
         Self {
+            exe_a: None,
+            func_a: None,
+            exe_b: None,
+            func_b: None,
             similarity: 0.0,
             significance: 0.0,
+            dot_product: 0.0,
+            func1_hash_count: 0,
+            func2_hash_count: 0,
+            intersection_count: 0,
             found: false,
         }
+    }
+
+    /// Get the dot product of the two feature vectors.
+    pub fn dot_product(&self) -> f64 {
+        self.dot_product
+    }
+
+    /// Get the number of hashes from function A.
+    pub fn func1_hash_count(&self) -> u32 {
+        self.func1_hash_count
+    }
+
+    /// Get the number of hashes from function B.
+    pub fn func2_hash_count(&self) -> u32 {
+        self.func2_hash_count
+    }
+
+    /// Get the number of hashes in the intersection.
+    pub fn intersection_count(&self) -> u32 {
+        self.intersection_count
     }
 }
 
@@ -1608,6 +1688,160 @@ impl InsertOptionalValues {
     }
 }
 
+// ============================================================================
+// SimilarityResultRecord -- A collection of match notes for one queried function
+// ============================================================================
+
+/// A collection of match notes for a single queried function.
+///
+/// Ports `ghidra.features.bsim.query.protocol.SimilarityResult` (the list-of-notes
+/// pattern, not the flat struct in `additional_protocol.rs`).
+#[derive(Debug, Clone)]
+pub struct SimilarityResultRecord {
+    /// The base function that was queried.
+    pub base_exe_name: String,
+    /// The base function name.
+    pub base_func_name: String,
+    /// The base function address.
+    pub base_address: u64,
+    /// Functions to which the base is similar.
+    pub notes: Vec<SimilarityNoteData>,
+    /// Total number of functions in the database meeting similarity and significance.
+    pub total_count: u32,
+}
+
+impl SimilarityResultRecord {
+    /// Create a new empty result for a queried function.
+    pub fn new(
+        base_exe_name: impl Into<String>,
+        base_func_name: impl Into<String>,
+        base_address: u64,
+    ) -> Self {
+        Self {
+            base_exe_name: base_exe_name.into(),
+            base_func_name: base_func_name.into(),
+            base_address,
+            notes: Vec::new(),
+            total_count: 0,
+        }
+    }
+
+    /// Add a similarity note (match).
+    pub fn add_note(&mut self, note: SimilarityNoteData) {
+        self.notes.push(note);
+    }
+
+    /// Get the number of notes (matches).
+    pub fn size(&self) -> usize {
+        self.notes.len()
+    }
+
+    /// Set the total count of matching functions.
+    pub fn set_total_count(&mut self, count: u32) {
+        self.total_count = count;
+    }
+
+    /// Sort notes by their natural ordering (exe, function, address).
+    pub fn sort_notes(&mut self) {
+        self.notes.sort();
+    }
+
+    /// Iterate over the notes.
+    pub fn iter(&self) -> impl Iterator<Item = &SimilarityNoteData> {
+        self.notes.iter()
+    }
+}
+
+// ============================================================================
+// FunctionStaging -- Iterator-based staging for function queries
+// ============================================================================
+
+/// A function-based staging manager that splits large queries by function count.
+///
+/// Ports `ghidra.features.bsim.query.protocol.FunctionStaging` as a staging
+/// manager (the Java class that extends `StagingManager`).
+#[derive(Debug, Clone)]
+pub struct FunctionStagingManager {
+    /// Number of functions per stage.
+    pub stage_size: usize,
+    /// Total number of functions.
+    pub total: usize,
+    /// Queries made so far.
+    pub made: usize,
+    /// Start index of the current stage.
+    pub current_start: usize,
+    /// End index (exclusive) of the current stage.
+    pub current_end: usize,
+}
+
+impl FunctionStagingManager {
+    /// Create a new FunctionStagingManager with the given stage size.
+    pub fn new(stage_size: usize) -> Self {
+        Self {
+            stage_size,
+            total: 0,
+            made: 0,
+            current_start: 0,
+            current_end: 0,
+        }
+    }
+
+    /// Get the start index for the current stage.
+    pub fn stage_start(&self) -> usize {
+        self.current_start
+    }
+
+    /// Get the end index (exclusive) for the current stage.
+    pub fn stage_end(&self) -> usize {
+        self.current_end
+    }
+
+    /// Initialize staging with the total number of items.
+    /// Returns true if there is data to stage.
+    pub fn initialize(&mut self, total: usize) -> bool {
+        self.total = total;
+        self.made = 0;
+        self.current_start = 0;
+
+        if total == 0 {
+            self.current_end = 0;
+            return false;
+        }
+
+        let count = self.stage_size.min(total);
+        self.current_end = count;
+        self.made = count;
+        true
+    }
+
+    /// Advance to the next stage. Returns false if no more stages.
+    pub fn next_stage(&mut self) -> bool {
+        if self.current_end >= self.total {
+            return false;
+        }
+
+        self.current_start = self.current_end;
+        let remaining = self.total - self.current_end;
+        let count = self.stage_size.min(remaining);
+        self.current_end += count;
+        self.made += count;
+        count > 0
+    }
+
+    /// Whether all stages are complete.
+    pub fn is_complete(&self) -> bool {
+        self.current_end >= self.total
+    }
+
+    /// Get the progress as a fraction (0.0 to 1.0).
+    pub fn progress(&self) -> f64 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (self.made as f64) / (self.total as f64)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2116,5 +2350,149 @@ mod tests {
         info.function_count = 500;
         info.schema_version = "1.0".to_string();
         assert_eq!(info.database_name, "mydb");
+    }
+
+    // ---- PairNoteData enhanced tests ----
+
+    #[test]
+    fn pair_note_data_with_details() {
+        let note = PairNoteData::with_details(
+            ExeSpecifier::new("a.exe"),
+            FunctionEntryData::new("funcA", 0x100),
+            ExeSpecifier::new("b.exe"),
+            FunctionEntryData::new("funcB", 0x200),
+            0.85,
+            12.0,
+            42.5,
+            100,
+            120,
+            80,
+        );
+        assert!(note.found);
+        assert!((note.similarity - 0.85).abs() < f64::EPSILON);
+        assert!((note.dot_product() - 42.5).abs() < f64::EPSILON);
+        assert_eq!(note.func1_hash_count(), 100);
+        assert_eq!(note.func2_hash_count(), 120);
+        assert_eq!(note.intersection_count(), 80);
+        assert!(note.exe_a.is_some());
+        assert_eq!(note.func_a.as_ref().unwrap().func_name, "funcA");
+    }
+
+    #[test]
+    fn pair_note_data_new_defaults() {
+        let note = PairNoteData::new(0.5, 2.0);
+        assert!(note.found);
+        assert!(note.exe_a.is_none());
+        assert_eq!(note.func1_hash_count(), 0);
+        assert!((note.dot_product() - 0.0).abs() < f64::EPSILON);
+    }
+
+    // ---- SimilarityResultRecord tests ----
+
+    #[test]
+    fn similarity_result_record_new() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        assert_eq!(result.base_func_name, "main");
+        assert_eq!(result.size(), 0);
+        assert_eq!(result.total_count, 0);
+    }
+
+    #[test]
+    fn similarity_result_record_add_note() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        result.add_note(SimilarityNoteData::new("exe2", "match1", 0x2000, 0.9, 5.0));
+        result.add_note(SimilarityNoteData::new("exe2", "match2", 0x3000, 0.8, 3.0));
+        assert_eq!(result.size(), 2);
+    }
+
+    #[test]
+    fn similarity_result_record_sort() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        result.add_note(SimilarityNoteData::new("exe3", "zzz", 0x4000, 0.9, 5.0));
+        result.add_note(SimilarityNoteData::new("exe2", "aaa", 0x2000, 0.8, 3.0));
+        result.sort_notes();
+        // Should sort by exe_name then func_name
+        assert_eq!(result.notes[0].exe_name, "exe2");
+        assert_eq!(result.notes[1].exe_name, "exe3");
+    }
+
+    #[test]
+    fn similarity_result_record_total_count() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        result.set_total_count(500);
+        assert_eq!(result.total_count, 500);
+    }
+
+    #[test]
+    fn similarity_result_record_iter() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        result.add_note(SimilarityNoteData::new("exe2", "f1", 0x2000, 0.9, 5.0));
+        result.add_note(SimilarityNoteData::new("exe2", "f2", 0x3000, 0.8, 3.0));
+        let names: Vec<&str> = result.iter().map(|n| n.func_name.as_str()).collect();
+        assert_eq!(names, vec!["f1", "f2"]);
+    }
+
+    // ---- FunctionStaging tests ----
+
+    #[test]
+    fn function_staging_basic() {
+        let mut fs = FunctionStagingManager::new(10);
+        assert!(fs.initialize(25));
+        assert_eq!(fs.total, 25);
+        assert_eq!(fs.made, 10);
+        assert_eq!(fs.stage_end(), 10);
+
+        assert!(fs.next_stage());
+        assert_eq!(fs.stage_end(), 20);
+        assert_eq!(fs.made, 20);
+
+        assert!(fs.next_stage());
+        assert_eq!(fs.stage_end(), 25);
+        assert_eq!(fs.made, 25);
+
+        assert!(!fs.next_stage());
+        assert!(fs.is_complete());
+    }
+
+    #[test]
+    fn function_staging_exact_batch() {
+        let mut fs = FunctionStagingManager::new(10);
+        assert!(fs.initialize(20));
+        assert_eq!(fs.stage_end(), 10);
+        assert!(fs.next_stage());
+        assert_eq!(fs.stage_end(), 20);
+        assert!(!fs.next_stage());
+    }
+
+    #[test]
+    fn function_staging_empty() {
+        let mut fs = FunctionStagingManager::new(10);
+        assert!(!fs.initialize(0));
+        assert_eq!(fs.total, 0);
+    }
+
+    #[test]
+    fn function_staging_progress() {
+        let mut fs = FunctionStagingManager::new(10);
+        fs.initialize(20);
+        assert!((fs.progress() - 0.5).abs() < f64::EPSILON);
+        fs.next_stage();
+        assert!((fs.progress() - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn function_staging_stage_ranges() {
+        let mut fs = FunctionStagingManager::new(5);
+        fs.initialize(12);
+        assert_eq!(fs.stage_start(), 0);
+        assert_eq!(fs.stage_end(), 5);
+
+        fs.next_stage();
+        assert_eq!(fs.stage_start(), 5);
+        assert_eq!(fs.stage_end(), 10);
+
+        fs.next_stage();
+        assert_eq!(fs.stage_start(), 10);
+        assert_eq!(fs.stage_end(), 12);
     }
 }

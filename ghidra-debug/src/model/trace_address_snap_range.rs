@@ -35,6 +35,47 @@ impl ImmutableTraceAddressSnapRange {
         }
     }
 
+    /// Create a range centered at a single address and snap, with given breadth.
+    ///
+    /// Ported from `ImmutableTraceAddressSnapRange.centered(...)`.
+    pub fn centered(
+        address: u64,
+        snap: i64,
+        address_breadth: u64,
+        snap_breadth: i64,
+        space: impl Into<String>,
+    ) -> Self {
+        let min_addr = address.saturating_sub(address_breadth);
+        let max_addr = address.saturating_add(address_breadth);
+        let min_snap = snap.saturating_sub(snap_breadth);
+        let max_snap = snap.saturating_add(snap_breadth);
+        Self::new(min_addr, max_addr, Lifespan::span(min_snap, max_snap), space)
+    }
+
+    /// Create a range covering a single point (address and snap).
+    pub fn at_point(address: u64, snap: i64, space: impl Into<String>) -> Self {
+        Self::new(address, address, Lifespan::at(snap), space)
+    }
+
+    /// Create a range covering an address range at a single snap.
+    pub fn at_snap(
+        min_address: u64,
+        max_address: u64,
+        snap: i64,
+        space: impl Into<String>,
+    ) -> Self {
+        Self::new(min_address, max_address, Lifespan::at(snap), space)
+    }
+
+    /// Get the address range breadth (max - min + 1, or 0 if empty).
+    pub fn address_breadth(&self) -> u64 {
+        if self.max_address >= self.min_address {
+            self.max_address - self.min_address + 1
+        } else {
+            0
+        }
+    }
+
     /// Check whether this range contains a given point.
     pub fn contains(&self, addr: u64, snap: i64) -> bool {
         addr >= self.min_address
@@ -48,6 +89,30 @@ impl ImmutableTraceAddressSnapRange {
             && self.min_address <= other.max_address
             && other.min_address <= self.max_address
             && self.lifespan.intersects(&other.lifespan)
+    }
+
+    /// Check whether this range fully contains another range.
+    pub fn encloses(&self, other: &Self) -> bool {
+        self.space == other.space
+            && self.min_address <= other.min_address
+            && self.max_address >= other.max_address
+            && self.lifespan.encloses(&other.lifespan)
+    }
+
+    /// Compute the intersection of two ranges, if they overlap.
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        if !self.intersects(other) {
+            return None;
+        }
+        Some(Self {
+            min_address: self.min_address.max(other.min_address),
+            max_address: self.min_address.min(other.max_address),
+            lifespan: {
+                let i = self.lifespan.intersect(&other.lifespan);
+                if i.is_empty() { return None; } i
+            },
+            space: self.space.clone(),
+        })
     }
 }
 

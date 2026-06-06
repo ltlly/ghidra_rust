@@ -96,6 +96,10 @@ impl TraceSection {
 }
 
 /// A static mapping between a trace address range and a program address range.
+///
+/// Ported from Ghidra's `ghidra.trace.model.modules.TraceStaticMapping`.
+/// Maps a range in a dynamic trace to a corresponding range in a static
+/// Ghidra Program.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceStaticMapping {
     /// Unique key.
@@ -108,6 +112,8 @@ pub struct TraceStaticMapping {
     pub program_min_address: u64,
     /// The program URL or path.
     pub program_url: String,
+    /// The lifespan (snap range) of this mapping.
+    pub lifespan: Lifespan,
     /// Whether the program was relocated.
     pub relocated: bool,
 }
@@ -127,7 +133,152 @@ impl TraceStaticMapping {
             trace_max_address,
             program_min_address,
             program_url: program_url.into(),
+            lifespan: Lifespan::now_on(0),
             relocated: false,
+        }
+    }
+
+    /// Create a new static mapping with an explicit lifespan.
+    pub fn with_lifespan(
+        key: i64,
+        trace_min_address: u64,
+        trace_max_address: u64,
+        program_min_address: u64,
+        program_url: impl Into<String>,
+        lifespan: Lifespan,
+    ) -> Self {
+        Self {
+            key,
+            trace_min_address,
+            trace_max_address,
+            program_min_address,
+            program_url: program_url.into(),
+            lifespan,
+            relocated: false,
+        }
+    }
+
+    /// Get the length of the mapping (trace address range size).
+    pub fn length(&self) -> u64 {
+        self.trace_max_address - self.trace_min_address + 1
+    }
+
+    /// Get the address shift from program to trace.
+    pub fn shift(&self) -> i64 {
+        (self.trace_min_address as i64) - (self.program_min_address as i64)
+    }
+
+    /// Get the starting snap of the lifespan.
+    pub fn start_snap(&self) -> i64 {
+        self.lifespan.lmin()
+    }
+
+    /// Get the ending snap of the lifespan.
+    pub fn end_snap(&self) -> i64 {
+        self.lifespan.lmax()
+    }
+
+    /// Check if this mapping is active at the given snap.
+    pub fn is_active_at(&self, snap: i64) -> bool {
+        self.lifespan.contains(snap)
+    }
+
+    /// Check if this mapping would conflict with the given prospective mapping.
+    pub fn conflicts_with(
+        &self,
+        min_addr: u64,
+        max_addr: u64,
+        lifespan: &Lifespan,
+        program_url: &str,
+        program_min_addr: u64,
+    ) -> bool {
+        if self.program_url != program_url {
+            return self.trace_min_address <= max_addr
+                && min_addr <= self.trace_max_address
+                && self.lifespan.intersects(lifespan);
+        }
+        if self.shift() != (min_addr as i64) - (program_min_addr as i64) {
+            return self.trace_min_address <= max_addr
+                && min_addr <= self.trace_max_address
+                && self.lifespan.intersects(lifespan);
+        }
+        false
+    }
+}
+
+/// Manager for static mappings between trace and program address ranges.
+///
+/// Ported from Ghidra's `ghidra.trace.model.modules.TraceStaticMappingManager`.
+/// Manages mappings from a trace into static Ghidra Programs.
+pub trait TraceStaticMappingManager {
+    /// Add a new mapping, if not already covered.
+    ///
+    /// A new mapping may overlap an existing mapping, so long as they agree
+    /// in address shift. Returns the new entry, or any entry which subsumes
+    /// the specified mapping.
+    fn add_mapping(
+        &mut self,
+        trace_min: u64,
+        trace_max: u64,
+        lifespan: Lifespan,
+        program_url: &str,
+        program_min: u64,
+    ) -> Result<TraceStaticMapping, TraceConflictedMappingException>;
+
+    /// Get all mappings in the manager.
+    fn get_all_entries(&self) -> Vec<&TraceStaticMapping>;
+
+    /// Find any mapping applicable to the given snap and address.
+    fn find_containing(&self, address: u64, snap: i64) -> Option<&TraceStaticMapping>;
+
+    /// Find any mapping that would conflict with the given prospective mapping.
+    fn find_any_conflicting(
+        &self,
+        trace_min: u64,
+        trace_max: u64,
+        lifespan: &Lifespan,
+        program_url: &str,
+        program_min: u64,
+    ) -> Option<&TraceStaticMapping>;
+
+    /// Find all mappings that overlap the given address range and span of time.
+    fn find_all_overlapping(
+        &self,
+        trace_min: u64,
+        trace_max: u64,
+        lifespan: &Lifespan,
+    ) -> Vec<&TraceStaticMapping>;
+
+    /// Remove a mapping by key.
+    fn remove_mapping(&mut self, key: i64) -> bool;
+}
+
+/// Exception thrown when a new mapping conflicts with an existing one.
+///
+/// Ported from Ghidra's `TraceConflictedMappingException`.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("Conflicting static mapping: {message}")]
+pub struct TraceConflictedMappingException {
+    /// Description of the conflict.
+    pub message: String,
+    /// The conflicting existing mapping, if known.
+    pub conflicting: Option<TraceStaticMapping>,
+}
+
+impl TraceConflictedMappingException {
+    /// Create a new conflict exception.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            conflicting: None,
+        }
+    }
+
+    /// Create a conflict exception with the conflicting mapping.
+    pub fn with_conflicting(message: impl Into<String>, conflicting: TraceStaticMapping) -> Self {
+        Self {
+            message: message.into(),
+            conflicting: Some(conflicting),
         }
     }
 }

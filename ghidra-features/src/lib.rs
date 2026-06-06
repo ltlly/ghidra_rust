@@ -267,6 +267,22 @@ pub mod table_util;
 // Ported from `ghidra.app.util.xml` -- XML parsing and serialization.
 pub mod app_util_xml;
 
+// -- New modules ported from remaining Features/Base packages --
+
+/// UI bean components for script dialogs and field widgets.
+/// Ported from `ghidra.app.util.bean` -- FixedBitSizeValueField, SetEquateDialog,
+/// SelectLanguagePanel, and related types.
+pub mod app_util_bean;
+
+/// Code unit formatting for listing display.
+/// Ported from `ghidra.program.model.listing` -- CodeUnitFormat, CodeUnitFormatOptions.
+pub mod program_model_listing;
+
+/// Test framework for Ghidra integration testing.
+/// Ported from `ghidra.test` -- TestEnv, ToyProgramBuilder, TestProgramManager,
+/// TestTool, TestLogger, ProjectTestUtils.
+pub mod test_framework;
+
 // -- Top-level re-exports of base plugin modules --
 // These modules live under `base::` (ported from `ghidra.app.plugin.core.*`)
 // but are re-exported here for direct access via `ghidra_features::<module>`.

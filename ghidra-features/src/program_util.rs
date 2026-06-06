@@ -378,6 +378,61 @@ impl Default for ProgramMergeFilter {
 }
 
 // ---------------------------------------------------------------------------
+// ProgramDiffFilter
+// ---------------------------------------------------------------------------
+
+/// Controls what categories of data are included in a diff operation.
+///
+/// Ported from `ghidra.program.util.ProgramDiffFilter`.
+#[derive(Debug, Clone)]
+pub struct ProgramDiffFilter {
+    /// Which categories to include (true = include).
+    categories: HashMap<DiffCategory, bool>,
+}
+
+impl ProgramDiffFilter {
+    /// Create a new filter that diffs everything.
+    pub fn all() -> Self {
+        let mut categories = HashMap::new();
+        for cat in [
+            DiffCategory::MemoryBytes,
+            DiffCategory::MemoryBlocks,
+            DiffCategory::CodeUnits,
+            DiffCategory::Labels,
+            DiffCategory::Comments,
+            DiffCategory::Equates,
+            DiffCategory::Functions,
+            DiffCategory::References,
+            DiffCategory::DataTypes,
+            DiffCategory::Bookmarks,
+            DiffCategory::Properties,
+        ] {
+            categories.insert(cat, true);
+        }
+        Self { categories }
+    }
+
+    /// Create a filter that diffs nothing.
+    pub fn none() -> Self {
+        Self { categories: HashMap::new() }
+    }
+
+    /// Set whether a category should be diffed.
+    pub fn set_diff(&mut self, category: DiffCategory, enabled: bool) {
+        self.categories.insert(category, enabled);
+    }
+
+    /// Check if a category should be diffed.
+    pub fn should_diff(&self, category: DiffCategory) -> bool {
+        self.categories.get(&category).copied().unwrap_or(false)
+    }
+}
+
+impl Default for ProgramDiffFilter {
+    fn default() -> Self { Self::all() }
+}
+
+// ---------------------------------------------------------------------------
 // ProgramMemoryUtil
 // ---------------------------------------------------------------------------
 
@@ -901,6 +956,445 @@ impl DefaultAddressTranslator {
 }
 
 // ---------------------------------------------------------------------------
+// ProgramSelection
+// ---------------------------------------------------------------------------
+
+/// A selection of addresses in a program.
+///
+/// Ported from `ghidra.program.util.ProgramSelection`.
+///
+/// Wraps an [`AddressSet`] with optional interior (sub-field) selection
+/// for use in the listing display.
+#[derive(Debug, Clone, Default)]
+pub struct ProgramSelection {
+    /// The selected address set.
+    pub address_set: AddressSet,
+    /// Optional interior selection within a composite.
+    pub interior: Option<InteriorSelection>,
+}
+
+impl ProgramSelection {
+    /// Create an empty selection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a selection from an address range.
+    pub fn from_range(from: Address, to: Address) -> Self {
+        let (lo, hi) = if from <= to { (from, to) } else { (to, from) };
+        let mut address_set = AddressSet::new();
+        address_set.add_range(AddressRange::new(lo, hi));
+        Self { address_set, interior: None }
+    }
+
+    /// Create a selection from an address set.
+    pub fn from_address_set(set: AddressSet) -> Self {
+        Self { address_set: set, interior: None }
+    }
+
+    /// Whether the selection is empty.
+    pub fn is_empty(&self) -> bool {
+        self.address_set.is_empty()
+    }
+
+    /// Number of addresses in the selection.
+    pub fn num_addresses(&self) -> u64 {
+        self.address_set.num_addresses()
+    }
+
+    /// Check if an address is in the selection.
+    pub fn contains(&self, addr: &Address) -> bool {
+        self.address_set.contains(addr)
+    }
+
+    /// Clear the selection.
+    pub fn clear(&mut self) {
+        self.address_set = AddressSet::new();
+        self.interior = None;
+    }
+
+    /// Add an address to the selection.
+    pub fn add(&mut self, addr: Address) {
+        self.address_set.add(addr);
+    }
+
+    /// Add a range to the selection.
+    pub fn add_range(&mut self, from: Address, to: Address) {
+        self.address_set.add_range(AddressRange::new(from, to));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ContextEvaluator
+// ---------------------------------------------------------------------------
+
+/// Evaluation action for symbolic propagation.
+///
+/// Ported from `ghidra.program.util.ContextEvaluator`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvalAction {
+    /// Continue evaluation.
+    Continue,
+    /// Stop evaluation.
+    Stop,
+    /// Skip this instruction.
+    Skip,
+}
+
+/// Callback trait for symbolic propagation.
+///
+/// Ported from `ghidra.program.util.ContextEvaluator`.
+pub trait ContextEvaluator: Send + Sync + std::fmt::Debug {
+    /// Called before an instruction is evaluated.
+    fn evaluate_context_before(
+        &self,
+        address: Address,
+        _register_state: &HashMap<String, u64>,
+    ) -> EvalAction;
+
+    /// Called after an instruction has been evaluated.
+    fn evaluate_context(
+        &self,
+        address: Address,
+        _register_state: &HashMap<String, u64>,
+    ) -> EvalAction;
+
+    /// Called when a reference is detected.
+    fn evaluate_reference(&self, _addr: Address, _target: Address, _ref_type: &str) -> bool {
+        true
+    }
+
+    /// Called when a potential constant address is detected.
+    fn evaluate_constant(&self, _addr: Address, _constant: u64, _size: usize) -> bool {
+        false
+    }
+}
+
+/// A default evaluator that always continues.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultContextEvaluator;
+
+impl ContextEvaluator for DefaultContextEvaluator {
+    fn evaluate_context_before(&self, _address: Address, _state: &HashMap<String, u64>) -> EvalAction {
+        EvalAction::Continue
+    }
+    fn evaluate_context(&self, _address: Address, _state: &HashMap<String, u64>) -> EvalAction {
+        EvalAction::Continue
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VarnodeContext
+// ---------------------------------------------------------------------------
+
+/// A context for tracking register and memory values during symbolic
+/// propagation.
+///
+/// Ported from `ghidra.program.util.VarnodeContext`.
+#[derive(Debug)]
+pub struct VarnodeContext {
+    /// Current register values.
+    reg_vals: HashMap<String, u64>,
+    /// Current memory values.
+    mem_vals: HashMap<u64, u64>,
+    /// Unique (temporary) values.
+    unique_vals: HashMap<u64, u64>,
+    /// Stack of saved states for flow forking.
+    saved_states: Vec<(HashMap<String, u64>, HashMap<u64, u64>, HashMap<u64, u64>)>,
+    /// Flow tracking.
+    flow_map: HashMap<u64, Vec<u64>>,
+}
+
+impl VarnodeContext {
+    /// Create a new empty context.
+    pub fn new() -> Self {
+        Self {
+            reg_vals: HashMap::new(),
+            mem_vals: HashMap::new(),
+            unique_vals: HashMap::new(),
+            saved_states: Vec::new(),
+            flow_map: HashMap::new(),
+        }
+    }
+
+    /// Set a register value.
+    pub fn set_register(&mut self, name: &str, value: u64) {
+        self.reg_vals.insert(name.to_string(), value);
+    }
+
+    /// Get a register value.
+    pub fn get_register(&self, name: &str) -> Option<u64> {
+        self.reg_vals.get(name).copied()
+    }
+
+    /// Remove a register value.
+    pub fn remove_register(&mut self, name: &str) -> Option<u64> {
+        self.reg_vals.remove(name)
+    }
+
+    /// Set a memory value.
+    pub fn set_memory(&mut self, addr: u64, value: u64) {
+        self.mem_vals.insert(addr, value);
+    }
+
+    /// Get a memory value.
+    pub fn get_memory(&self, addr: u64) -> Option<u64> {
+        self.mem_vals.get(&addr).copied()
+    }
+
+    /// Set a unique value.
+    pub fn set_unique(&mut self, id: u64, value: u64) {
+        self.unique_vals.insert(id, value);
+    }
+
+    /// Get a unique value.
+    pub fn get_unique(&self, id: u64) -> Option<u64> {
+        self.unique_vals.get(&id).copied()
+    }
+
+    /// Record a flow edge.
+    pub fn add_flow(&mut self, from: u64, to: u64) {
+        self.flow_map.entry(from).or_default().push(to);
+    }
+
+    /// Get flow targets from an address.
+    pub fn flow_targets(&self, from: u64) -> &[u64] {
+        self.flow_map.get(&from).map(|v| v.as_slice()).unwrap_or(&[])
+    }
+
+    /// Save (fork) the current state.
+    pub fn save_state(&mut self) {
+        self.saved_states.push((
+            self.reg_vals.clone(),
+            self.mem_vals.clone(),
+            self.unique_vals.clone(),
+        ));
+    }
+
+    /// Restore the most recently saved state. Returns false if empty.
+    pub fn restore_state(&mut self) -> bool {
+        if let Some((regs, mems, uniqs)) = self.saved_states.pop() {
+            self.reg_vals = regs;
+            self.mem_vals = mems;
+            self.unique_vals = uniqs;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Number of saved states.
+    pub fn saved_state_depth(&self) -> usize {
+        self.saved_states.len()
+    }
+
+    /// Clear all values.
+    pub fn clear(&mut self) {
+        self.reg_vals.clear();
+        self.mem_vals.clear();
+        self.unique_vals.clear();
+        self.flow_map.clear();
+    }
+}
+
+impl Default for VarnodeContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GhidraProgramUtilities
+// ---------------------------------------------------------------------------
+
+/// Utility functions for working with programs.
+///
+/// Ported from `ghidra.program.util.GhidraProgramUtilities`.
+pub struct GhidraProgramUtilities;
+
+impl GhidraProgramUtilities {
+    /// Check if a program should be prompted for analysis.
+    pub fn should_ask_to_analyze(program: &Program) -> bool {
+        program.function_manager.functions.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ListingDiff
+// ---------------------------------------------------------------------------
+
+/// Compares two program listings.
+///
+/// Ported from `ghidra.program.util.ListingDiff`.
+#[derive(Debug)]
+pub struct ListingDiff {
+    /// Categories of differences to compare.
+    pub diff_filter: ProgramDiffFilter,
+}
+
+impl ListingDiff {
+    /// Create a new ListingDiff.
+    pub fn new() -> Self {
+        Self { diff_filter: ProgramDiffFilter::all() }
+    }
+
+    /// Compare two programs.
+    pub fn diff(
+        &self,
+        program_a: &Program,
+        program_b: &Program,
+        addr_set: &AddressSet,
+    ) -> ProgramDiffReport {
+        let mut report = ProgramDiffReport::new();
+        if self.diff_filter.should_diff(DiffCategory::Labels) {
+            let label_report = ProgramDiff::diff_labels(program_a, program_b, addr_set);
+            for range in label_report.differences.iter() {
+                report.add_range(range.start, range.end, DiffCategory::Labels);
+            }
+        }
+        if self.diff_filter.should_diff(DiffCategory::Functions) {
+            let func_report = ProgramDiff::diff_functions(program_a, program_b);
+            for (cat, addrs) in func_report.by_category {
+                for range in addrs.iter() {
+                    report.add_range(range.start, range.end, cat);
+                }
+            }
+        }
+        report
+    }
+}
+
+impl Default for ListingDiff {
+    fn default() -> Self { Self::new() }
+}
+
+// ---------------------------------------------------------------------------
+// MarkerLocation
+// ---------------------------------------------------------------------------
+
+/// A location for a marker in the program.
+///
+/// Ported from `ghidra.program.util.MarkerLocation`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MarkerLocation {
+    /// Address of the marker.
+    pub address: Address,
+    /// Marker type.
+    pub marker_type: String,
+    /// Description.
+    pub description: String,
+    /// Source plugin.
+    pub source: String,
+}
+
+impl MarkerLocation {
+    pub fn new(address: Address, marker_type: impl Into<String>, description: impl Into<String>, source: impl Into<String>) -> Self {
+        Self { address, marker_type: marker_type.into(), description: description.into(), source: source.into() }
+    }
+}
+
+impl fmt::Display for MarkerLocation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[{}] 0x{:X}: {} ({})", self.marker_type, self.address.offset, self.description, self.source)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramMerge
+// ---------------------------------------------------------------------------
+
+/// Merge utility for combining two programs.
+///
+/// Ported from `ghidra.program.util.ProgramMerge`.
+pub struct ProgramMerge;
+
+impl ProgramMerge {
+    /// Merge functions from `source` into `dest` within the given address set.
+    pub fn merge_functions(dest: &mut Program, source: &Program, addr_set: &AddressSet) -> AddressSet {
+        let mut merged = AddressSet::new();
+        for (addr, func) in &source.function_manager.functions {
+            if addr_set.contains(addr) && !dest.function_manager.functions.contains_key(addr) {
+                dest.function_manager.functions.insert(*addr, func.clone());
+                merged.add(*addr);
+            }
+        }
+        merged
+    }
+
+    /// Merge symbols from `source` into `dest` within the given address set.
+    pub fn merge_symbols(dest: &mut Program, source: &Program, addr_set: &AddressSet) -> AddressSet {
+        let mut merged = AddressSet::new();
+        for (addr, name) in &source.symbols {
+            if addr_set.contains(addr) && !dest.symbols.contains_key(addr) {
+                dest.symbols.insert(*addr, name.clone());
+                merged.add(*addr);
+            }
+        }
+        merged
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramConflictException
+// ---------------------------------------------------------------------------
+
+/// Exception indicating a conflict between two programs.
+///
+/// Ported from `ghidra.program.util.ProgramConflictException`.
+#[derive(Debug, Clone)]
+pub struct ProgramConflictException {
+    /// Address of the conflict.
+    pub address: Address,
+    /// Description.
+    pub message: String,
+}
+
+impl fmt::Display for ProgramConflictException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Program conflict at 0x{:X}: {}", self.address.offset, self.message)
+    }
+}
+
+impl std::error::Error for ProgramConflictException {}
+
+// ---------------------------------------------------------------------------
+// GroupView
+// ---------------------------------------------------------------------------
+
+/// A view that groups addresses.
+///
+/// Ported from `ghidra.program.util.GroupView`.
+#[derive(Debug, Clone, Default)]
+pub struct GroupView {
+    /// The groups.
+    pub groups: Vec<AddressGroup>,
+}
+
+/// A named group of addresses.
+#[derive(Debug, Clone)]
+pub struct AddressGroup {
+    /// Group name.
+    pub name: String,
+    /// Addresses in this group.
+    pub addresses: AddressSet,
+}
+
+impl AddressGroup {
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into(), addresses: AddressSet::new() }
+    }
+}
+
+impl GroupView {
+    pub fn new() -> Self { Self::default() }
+    pub fn add_group(&mut self, group: AddressGroup) { self.groups.push(group); }
+    pub fn group_for_address(&self, addr: &Address) -> Option<&AddressGroup> {
+        self.groups.iter().find(|g| g.addresses.contains(addr))
+    }
+    pub fn group_count(&self) -> usize { self.groups.len() }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1296,5 +1790,221 @@ mod tests {
         assert!(common.contains(&Address::new(0x1500)));
         assert!(common.contains(&Address::new(0x1FFF)));
         assert!(!common.contains(&Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_program_selection() {
+        let sel = ProgramSelection::new();
+        assert!(sel.is_empty());
+
+        let sel = ProgramSelection::from_range(Address::new(0x1000), Address::new(0x2000));
+        assert!(!sel.is_empty());
+        assert!(sel.contains(&Address::new(0x1500)));
+        assert!(!sel.contains(&Address::new(0x3000)));
+        assert_eq!(sel.num_addresses(), 0x1001);
+
+        // Reversed range should work
+        let sel = ProgramSelection::from_range(Address::new(0x2000), Address::new(0x1000));
+        assert!(sel.contains(&Address::new(0x1500)));
+    }
+
+    #[test]
+    fn test_program_selection_from_address_set() {
+        let mut set = AddressSet::new();
+        set.add_range(AddressRange::new(Address::new(0x100), Address::new(0x200)));
+        let sel = ProgramSelection::from_address_set(set);
+        assert!(sel.contains(&Address::new(0x150)));
+    }
+
+    #[test]
+    fn test_program_selection_clear() {
+        let mut sel = ProgramSelection::from_range(Address::new(0x1000), Address::new(0x2000));
+        assert!(!sel.is_empty());
+        sel.clear();
+        assert!(sel.is_empty());
+    }
+
+    #[test]
+    fn test_varnode_context() {
+        let mut ctx = VarnodeContext::new();
+        assert_eq!(ctx.get_register("EAX"), None);
+
+        ctx.set_register("EAX", 0x1234);
+        assert_eq!(ctx.get_register("EAX"), Some(0x1234));
+
+        ctx.set_memory(0x401000, 0x42);
+        assert_eq!(ctx.get_memory(0x401000), Some(0x42));
+
+        ctx.set_unique(1, 99);
+        assert_eq!(ctx.get_unique(1), Some(99));
+
+        // Flow tracking
+        ctx.add_flow(0x401000, 0x401005);
+        ctx.add_flow(0x401000, 0x402000);
+        assert_eq!(ctx.flow_targets(0x401000).len(), 2);
+        assert_eq!(ctx.flow_targets(0x402000).len(), 0);
+    }
+
+    #[test]
+    fn test_varnode_context_save_restore() {
+        let mut ctx = VarnodeContext::new();
+        ctx.set_register("EAX", 100);
+        assert_eq!(ctx.saved_state_depth(), 0);
+
+        ctx.save_state();
+        assert_eq!(ctx.saved_state_depth(), 1);
+
+        ctx.set_register("EAX", 200);
+        assert_eq!(ctx.get_register("EAX"), Some(200));
+
+        assert!(ctx.restore_state());
+        assert_eq!(ctx.get_register("EAX"), Some(100));
+        assert_eq!(ctx.saved_state_depth(), 0);
+
+        // Restore on empty stack returns false
+        assert!(!ctx.restore_state());
+    }
+
+    #[test]
+    fn test_varnode_context_remove_register() {
+        let mut ctx = VarnodeContext::new();
+        ctx.set_register("EAX", 42);
+        assert_eq!(ctx.remove_register("EAX"), Some(42));
+        assert_eq!(ctx.get_register("EAX"), None);
+    }
+
+    #[test]
+    fn test_default_context_evaluator() {
+        let evaluator = DefaultContextEvaluator;
+        let state = HashMap::new();
+        assert_eq!(
+            evaluator.evaluate_context_before(Address::new(0x1000), &state),
+            EvalAction::Continue
+        );
+        assert_eq!(
+            evaluator.evaluate_context(Address::new(0x1000), &state),
+            EvalAction::Continue
+        );
+    }
+
+    #[test]
+    fn test_eval_action_variants() {
+        assert_ne!(EvalAction::Continue, EvalAction::Stop);
+        assert_ne!(EvalAction::Continue, EvalAction::Skip);
+        assert_ne!(EvalAction::Stop, EvalAction::Skip);
+    }
+
+    #[test]
+    fn test_ghidra_program_utilities() {
+        let mut prog = make_program("test");
+        // No functions -> should ask to analyze
+        assert!(GhidraProgramUtilities::should_ask_to_analyze(&prog));
+
+        prog.function_manager.functions.insert(
+            Address::new(0x1000),
+            Function {
+                name: Some("main".into()),
+                entry_point: Address::new(0x1000),
+                body: AddressSet::new(),
+                is_external: false,
+                is_thunk: false,
+                is_inline: false,
+                has_noreturn: false,
+                call_fixup: None,
+            },
+        );
+        assert!(!GhidraProgramUtilities::should_ask_to_analyze(&prog));
+    }
+
+    #[test]
+    fn test_listing_diff() {
+        let prog_a = make_program("a");
+        let prog_b = make_program("b");
+
+        let mut addr_set = AddressSet::new();
+        addr_set.add(Address::new(0x1000));
+
+        let diff = ListingDiff::new();
+        let report = diff.diff(&prog_a, &prog_b, &addr_set);
+        // Both have no symbols, so diff should be empty
+        assert!(report.is_empty());
+    }
+
+    #[test]
+    fn test_marker_location() {
+        let marker = MarkerLocation::new(
+            Address::new(0x401000),
+            "Bookmark",
+            "Important location",
+            "TestPlugin",
+        );
+        assert_eq!(marker.address.offset, 0x401000);
+        assert_eq!(marker.marker_type, "Bookmark");
+        let display = format!("{}", marker);
+        assert!(display.contains("Bookmark"));
+        assert!(display.contains("401000"));
+    }
+
+    #[test]
+    fn test_group_view() {
+        let mut gv = GroupView::new();
+        assert_eq!(gv.group_count(), 0);
+
+        let mut group = AddressGroup::new("text");
+        group.addresses.add_range(AddressRange::new(Address::new(0x401000), Address::new(0x401FFF)));
+        gv.add_group(group);
+
+        assert_eq!(gv.group_count(), 1);
+        assert!(gv.group_for_address(&Address::new(0x401500)).is_some());
+        assert!(gv.group_for_address(&Address::new(0x500000)).is_none());
+    }
+
+    #[test]
+    fn test_program_conflict_exception() {
+        let err = ProgramConflictException {
+            address: Address::new(0x401000),
+            message: "Overlapping block".to_string(),
+        };
+        let display = format!("{}", err);
+        assert!(display.contains("401000"));
+        assert!(display.contains("Overlapping block"));
+    }
+
+    #[test]
+    fn test_program_diff_filter() {
+        let filter = ProgramDiffFilter::all();
+        assert!(filter.should_diff(DiffCategory::Labels));
+        assert!(filter.should_diff(DiffCategory::Functions));
+
+        let mut filter = ProgramDiffFilter::none();
+        assert!(!filter.should_diff(DiffCategory::Labels));
+        filter.set_diff(DiffCategory::Labels, true);
+        assert!(filter.should_diff(DiffCategory::Labels));
+    }
+
+    #[test]
+    fn test_program_merge_functions() {
+        let mut dest = make_program("dest");
+        let mut source = make_program("source");
+        source.function_manager.functions.insert(
+            Address::new(0x1000),
+            Function {
+                name: Some("main".into()),
+                entry_point: Address::new(0x1000),
+                body: AddressSet::new(),
+                is_external: false,
+                is_thunk: false,
+                is_inline: false,
+                has_noreturn: false,
+                call_fixup: None,
+            },
+        );
+
+        let mut addr_set = AddressSet::new();
+        addr_set.add(Address::new(0x1000));
+
+        let merged = ProgramMerge::merge_functions(&mut dest, &source, &addr_set);
+        assert!(!merged.is_empty());
+        assert!(dest.function_manager.functions.contains_key(&Address::new(0x1000)));
     }
 }

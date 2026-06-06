@@ -48,6 +48,26 @@ pub mod run_task;
 /// `GhidraScriptProvider`, `GhidraScriptProperties`, and related types.
 pub mod ghidra_script;
 
+/// Detailed script metadata parsing from source file headers.
+///
+/// Ported from `ghidra.app.script.ScriptInfo` (the full version with
+/// header parsing), `GhidraScriptInfoManager`, `GhidraScriptConstants`,
+/// `GhidraScriptLoadException`, `GhidraScriptUnsupportedClassVersionError`,
+/// and `ImproperUseException`.
+pub mod script_info_detailed;
+
+/// Script control mechanisms: output writers, task monitors, and decoration.
+///
+/// Ported from `ghidra.app.script.ScriptControls`, `DecoratingPrintWriter`,
+/// and `StringTransformer`.
+pub mod script_controls;
+
+/// User-input dialog types for scripts.
+///
+/// Ported from `ghidra.app.script.AskDialog`, `MultipleOptionsDialog`,
+/// `SelectLanguageDialog`, and `ScriptPreferences`.
+pub mod ask_dialog;
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
