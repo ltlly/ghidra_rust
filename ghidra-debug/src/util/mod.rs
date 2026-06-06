@@ -36,3 +36,7 @@ pub use trace_register_utils::{
     compute_mask_offset, encode_register_value, is_byte_bound, pad_or_truncate,
     range_for_register, require_byte_bound, seek_component, RegisterIndex,
 };
+
+pub mod trace_coordinate_helper;
+
+pub mod trace_event_dispatch;

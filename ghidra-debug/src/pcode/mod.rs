@@ -46,6 +46,8 @@ pub use trace_property_access::{
 };
 
 pub mod abstract_trace_access;
+
+pub mod trace_emu;
 pub use abstract_trace_access::{
     CacheEntry, DefaultPropertyAccess, DefaultThreadAccess, PcodeTraceThreadAware,
     PropertyEntry as AbstractPropertyEntry, SnapAndThread, ThreadAccessContext,

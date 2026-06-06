@@ -24,7 +24,9 @@
 
 pub mod plugin;
 pub mod constant_propagation;
+pub mod constant_propagation_context_evaluator;
 pub mod elf_scalar;
+pub mod find_no_return_analyzer;
 pub mod macho_starts;
 pub mod pef_debug;
 pub mod find_references;
@@ -89,6 +91,8 @@ pub mod platform_analyzers;
 // plus new types unique to this module)
 pub use plugin::AutoAnalysisPlugin;
 pub use constant_propagation::{ConstantPropagationAnalyzer, AnalysisConstantPropagationEvaluator};
+pub use constant_propagation_context_evaluator::ConstantPropagationContextEvaluator;
+pub use find_no_return_analyzer::FindNoReturnFunctionsAnalyzer;
 pub use elf_scalar::ElfScalarOperandAnalyzer;
 pub use macho_starts::MachoFunctionStartsAnalyzer;
 pub use pef_debug::PefDebugInfoAnalyzer;

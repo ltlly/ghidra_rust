@@ -30,6 +30,11 @@ pub mod context;
 /// and `DataRowObjectToProgramLocationTableRowMapper`.
 pub mod mappers;
 
+/// Filter dialog for filtering data items by type, address range, and text.
+///
+/// Ported from `ghidra.app.plugin.core.datawindow.DataWindowFilterDialog`.
+pub mod filter_dialog;
+
 use std::collections::{BTreeMap, HashMap};
 
 /// Display name for the data value column.

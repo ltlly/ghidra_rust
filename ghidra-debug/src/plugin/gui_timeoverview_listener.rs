@@ -189,7 +189,9 @@ impl TimeOverviewListener {
                     .first()
                     .map(|e| e.label.clone())
                     .unwrap_or_default();
-                TimeOverviewColorEntry::with_label(snap, time_type.default_color(), label)
+                let mut entry = TimeOverviewColorEntry::with_label(time_type, time_type.default_color(), label);
+                entry.snap = snap;
+                entry
             })
             .collect()
     }

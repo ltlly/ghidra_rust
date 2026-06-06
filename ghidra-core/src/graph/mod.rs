@@ -71,6 +71,7 @@ pub mod mutable_wrapper;
 pub mod visual_graph;
 pub mod graph_algorithms;
 pub mod graphs;
+pub mod grid;
 mod tests_new;
 
 use std::collections::{HashMap, HashSet, VecDeque};

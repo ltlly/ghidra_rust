@@ -29,6 +29,11 @@ pub mod table;
 /// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreeProvider`.
 pub mod provider;
 
+/// Call tree plugin -- top-level plugin coordinating providers.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreePlugin`.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 

@@ -42,6 +42,7 @@ pub mod h2_file_database;
 pub mod elastic_client;
 pub mod facade_types;
 pub mod cached_tables;
+pub mod vector_store;
 
 use std::fmt;
 

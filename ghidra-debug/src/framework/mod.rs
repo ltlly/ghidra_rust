@@ -17,3 +17,7 @@ pub mod event_dispatch_ext;
 pub use event_dispatch_ext::{
     BatchDispatcher, DispatchQueue, EventPriority, EventSubscription, PendingEvent,
 };
+
+pub mod docking_model;
+
+pub mod db_data;

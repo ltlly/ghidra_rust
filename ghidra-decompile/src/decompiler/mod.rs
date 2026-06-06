@@ -116,6 +116,7 @@ pub mod token_highlight;
 pub mod clang_token_types_ext;
 pub mod decompiler_provider;
 pub mod analysis_commands;
+pub mod pcode_graph_tasks;
 
 // ============================================================================
 // Re-exports for convenience

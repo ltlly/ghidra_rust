@@ -568,3 +568,7 @@ mod tests {
         assert!(info.supports_launch);
     }
 }
+
+pub mod progress_rmi_service;
+
+pub mod watch_impl;
