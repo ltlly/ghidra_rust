@@ -760,4 +760,253 @@ mod tests {
         // Should not panic
         dialog.refresh();
     }
+
+    #[test]
+    fn test_address_type_overview_legend_panel() {
+        let mut panel = AddressTypeOverviewLegendPanel::new();
+        assert!(panel.entries().is_empty());
+
+        panel.add_entry("Code", RgbColor::new(0, 128, 255));
+        panel.add_entry("Data", RgbColor::new(0, 200, 0));
+        panel.add_entry("Undefined", RgbColor::new(128, 128, 128));
+        assert_eq!(panel.entries().len(), 3);
+    }
+
+    #[test]
+    fn test_entropy_overview_options_manager() {
+        let mut opts = EntropyOverviewOptionsManager::new();
+        assert_eq!(opts.block_size(), 64);
+        assert!(opts.use_color_gradient());
+
+        opts.set_block_size(128);
+        assert_eq!(opts.block_size(), 128);
+
+        opts.set_use_color_gradient(false);
+        assert!(!opts.use_color_gradient());
+    }
+
+    #[test]
+    fn test_knot_label_panel() {
+        let mut panel = KnotLabelPanel::new();
+        assert!(panel.labels().is_empty());
+
+        panel.add_label(0x401000, "main");
+        panel.add_label(0x402000, "init");
+        assert_eq!(panel.labels().len(), 2);
+        assert_eq!(panel.label_at(0x401000), Some("main"));
+    }
+
+    #[test]
+    fn test_palette_panel() {
+        let mut panel = PalettePanel::new(256, 32);
+        assert_eq!(panel.width(), 256);
+        assert_eq!(panel.height(), 32);
+
+        panel.set_pixel(0, 0, RgbColor::new(255, 0, 0));
+        let px = panel.pixel(0, 0);
+        assert!(px.is_some());
+        assert_eq!(px.unwrap().r, 255);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AddressTypeOverviewLegendPanel
+//
+// Ported from `ghidra.app.plugin.core.overview.AddressTypeOverviewLegendPanel`.
+// Shows a legend explaining the color coding of the overview bar.
+// ---------------------------------------------------------------------------
+
+/// A legend panel that explains the address type color coding in the overview bar.
+#[derive(Debug, Clone)]
+pub struct AddressTypeOverviewLegendPanel {
+    /// Legend entries: (label, color).
+    entries: Vec<(String, RgbColor)>,
+}
+
+impl AddressTypeOverviewLegendPanel {
+    /// Create a new empty legend panel.
+    pub fn new() -> Self {
+        Self { entries: Vec::new() }
+    }
+
+    /// Add a legend entry.
+    pub fn add_entry(&mut self, label: impl Into<String>, color: RgbColor) {
+        self.entries.push((label.into(), color));
+    }
+
+    /// Get the legend entries.
+    pub fn entries(&self) -> &[(String, RgbColor)] {
+        &self.entries
+    }
+}
+
+impl Default for AddressTypeOverviewLegendPanel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EntropyOverviewOptionsManager
+//
+// Ported from `ghidra.app.plugin.core.overview.EntropyOverviewOptionsManager`.
+// Manages options for entropy-based overview rendering.
+// ---------------------------------------------------------------------------
+
+/// Manages options for entropy-based overview rendering.
+#[derive(Debug, Clone)]
+pub struct EntropyOverviewOptionsManager {
+    /// Block size in bytes for entropy calculation.
+    block_size: usize,
+    /// Whether to use a color gradient for entropy values.
+    use_color_gradient: bool,
+    /// Minimum color (low entropy).
+    pub min_color: RgbColor,
+    /// Maximum color (high entropy).
+    pub max_color: RgbColor,
+}
+
+impl EntropyOverviewOptionsManager {
+    /// Create a new options manager with defaults.
+    pub fn new() -> Self {
+        Self {
+            block_size: 64,
+            use_color_gradient: true,
+            min_color: RgbColor::new(0, 0, 255),   // Blue = low entropy
+            max_color: RgbColor::new(255, 0, 0),    // Red = high entropy
+        }
+    }
+
+    /// Get the block size.
+    pub fn block_size(&self) -> usize {
+        self.block_size
+    }
+
+    /// Set the block size.
+    pub fn set_block_size(&mut self, size: usize) {
+        self.block_size = size.max(1);
+    }
+
+    /// Whether color gradient is enabled.
+    pub fn use_color_gradient(&self) -> bool {
+        self.use_color_gradient
+    }
+
+    /// Toggle color gradient.
+    pub fn set_use_color_gradient(&mut self, use_gradient: bool) {
+        self.use_color_gradient = use_gradient;
+    }
+}
+
+impl Default for EntropyOverviewOptionsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KnotLabelPanel / LegendPanel / PalettePanel
+//
+// Ported from overview UI components.
+// ---------------------------------------------------------------------------
+
+/// Panel that displays address labels as knots in the overview bar.
+#[derive(Debug, Clone, Default)]
+pub struct KnotLabelPanel {
+    /// Labels: (address, label_text).
+    labels: Vec<(u64, String)>,
+}
+
+impl KnotLabelPanel {
+    /// Create a new empty panel.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a label at an address.
+    pub fn add_label(&mut self, address: u64, label: impl Into<String>) {
+        self.labels.push((address, label.into()));
+    }
+
+    /// Get all labels.
+    pub fn labels(&self) -> &[(u64, String)] {
+        &self.labels
+    }
+
+    /// Get the label at a specific address.
+    pub fn label_at(&self, address: u64) -> Option<&str> {
+        self.labels.iter().find(|(a, _)| *a == address).map(|(_, l)| l.as_str())
+    }
+}
+
+/// A generic legend panel.
+#[derive(Debug, Clone, Default)]
+pub struct LegendPanel {
+    /// Entries in the legend.
+    entries: Vec<LegendEntry>,
+}
+
+impl LegendPanel {
+    /// Create a new empty legend panel.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an entry.
+    pub fn add_entry(&mut self, entry: LegendEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Get entries.
+    pub fn entries(&self) -> &[LegendEntry] {
+        &self.entries
+    }
+}
+
+/// A pixel palette panel for overview rendering.
+#[derive(Debug, Clone)]
+pub struct PalettePanel {
+    width: usize,
+    height: usize,
+    pixels: Vec<RgbColor>,
+}
+
+impl PalettePanel {
+    /// Create a new palette panel.
+    pub fn new(width: usize, height: usize) -> Self {
+        Self {
+            width,
+            height,
+            pixels: vec![RgbColor::new(0, 0, 0); width * height],
+        }
+    }
+
+    /// Width of the panel.
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    /// Height of the panel.
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    /// Get a pixel at (x, y).
+    pub fn pixel(&self, x: usize, y: usize) -> Option<&RgbColor> {
+        if x < self.width && y < self.height {
+            self.pixels.get(y * self.width + x)
+        } else {
+            None
+        }
+    }
+
+    /// Set a pixel at (x, y).
+    pub fn set_pixel(&mut self, x: usize, y: usize, color: RgbColor) {
+        if x < self.width && y < self.height {
+            let idx = y * self.width + x;
+            if idx < self.pixels.len() {
+                self.pixels[idx] = color;
+            }
+        }
+    }
 }

@@ -702,4 +702,287 @@ mod tests {
         plugin.task_completed(Some(TextSearchResult::new(loc, 0)));
         assert!(plugin.can_close_domain_object());
     }
+
+    // -- AbstractSearchTableModel tests --
+
+    #[test]
+    fn test_abstract_search_table_model() {
+        let mut model = AbstractSearchTableModel::new("Search Results");
+        assert_eq!(model.name(), "Search Results");
+        assert_eq!(model.row_count(), 0);
+
+        model.add_result(SearchResultRow::new(
+            Address::new(0x1000),
+            "MOV EAX, 1",
+            "Operand",
+            0,
+        ));
+        model.add_result(SearchResultRow::new(
+            Address::new(0x2000),
+            "CALL printf",
+            "Mnemonic",
+            1,
+        ));
+        assert_eq!(model.row_count(), 2);
+    }
+
+    #[test]
+    fn test_abstract_search_table_model_cell_values() {
+        let mut model = AbstractSearchTableModel::new("Test");
+        model.add_result(SearchResultRow::new(
+            Address::new(0x401000),
+            "int x = 42",
+            "DataType",
+            0,
+        ));
+        assert_eq!(model.cell_value(0, 0).as_deref(), Some("0x401000"));
+        assert_eq!(model.cell_value(0, 1).as_deref(), Some("int x = 42"));
+        assert_eq!(model.cell_value(0, 2).as_deref(), Some("DataType"));
+        assert!(model.cell_value(1, 0).is_none());
+    }
+
+    #[test]
+    fn test_abstract_search_table_model_clear() {
+        let mut model = AbstractSearchTableModel::new("Test");
+        model.add_result(SearchResultRow::new(Address::new(0x1000), "test", "Label", 0));
+        model.clear();
+        assert_eq!(model.row_count(), 0);
+    }
+
+    // -- ListingDisplaySearchTableModel tests --
+
+    #[test]
+    fn test_listing_display_search_table_model() {
+        let mut model = ListingDisplaySearchTableModel::new();
+        assert_eq!(model.name(), "Listing Display Search");
+        assert_eq!(model.row_count(), 0);
+    }
+
+    #[test]
+    fn test_listing_display_search_table_model_with_results() {
+        let mut model = ListingDisplaySearchTableModel::new();
+        model.add_result(SearchResultRow::new(Address::new(0x1000), "NOP", "Mnemonic", 0));
+        model.add_result(SearchResultRow::new(Address::new(0x1001), "RET", "Mnemonic", 1));
+        assert_eq!(model.row_count(), 2);
+
+        // Verify ordering
+        assert_eq!(model.cell_value(0, 0).as_deref(), Some("0x1000"));
+        assert_eq!(model.cell_value(1, 0).as_deref(), Some("0x1001"));
+    }
+
+    #[test]
+    fn test_listing_display_search_address_iterator() {
+        let mut iter = ListingDisplaySearchAddressIterator::new(
+            Address::new(0x1000),
+            Address::new(0x100F),
+        );
+        assert_eq!(iter.next(), Some(Address::new(0x1000)));
+        assert_eq!(iter.next(), Some(Address::new(0x1001)));
+        // Skip to end
+        while iter.next().is_some() {}
+        assert!(iter.next().is_none());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AbstractSearchTableModel / ListingDisplaySearchTableModel
+//
+// Ported from `AbstractSearchTableModel.java` and
+// `ListingDisplaySearchTableModel.java` in `ghidra.app.plugin.core.searchtext`.
+// ---------------------------------------------------------------------------
+
+/// A single row in a search results table.
+#[derive(Debug, Clone)]
+pub struct SearchResultRow {
+    /// The address of the search result.
+    pub address: Address,
+    /// The matching text.
+    pub text: String,
+    /// The field where the match was found.
+    pub field_name: String,
+    /// The index of this result in the overall result set.
+    pub result_index: usize,
+}
+
+impl SearchResultRow {
+    /// Create a new search result row.
+    pub fn new(
+        address: Address,
+        text: impl Into<String>,
+        field_name: impl Into<String>,
+        result_index: usize,
+    ) -> Self {
+        Self {
+            address,
+            text: text.into(),
+            field_name: field_name.into(),
+            result_index,
+        }
+    }
+}
+
+/// Abstract base for search table models.
+///
+/// Provides common functionality for displaying search results in a table.
+/// Subclasses customize which columns are available and how results are formatted.
+#[derive(Debug, Clone)]
+pub struct AbstractSearchTableModel {
+    /// Name of the model.
+    name: String,
+    /// Search result rows.
+    results: Vec<SearchResultRow>,
+    /// Column headers.
+    columns: Vec<String>,
+}
+
+impl AbstractSearchTableModel {
+    /// Create a new model with the given name.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            results: Vec::new(),
+            columns: vec![
+                "Address".to_string(),
+                "Match".to_string(),
+                "Field".to_string(),
+            ],
+        }
+    }
+
+    /// Get the model name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the number of result rows.
+    pub fn row_count(&self) -> usize {
+        self.results.len()
+    }
+
+    /// Get the number of columns.
+    pub fn column_count(&self) -> usize {
+        self.columns.len()
+    }
+
+    /// Get a column header.
+    pub fn column_name(&self, col: usize) -> Option<&str> {
+        self.columns.get(col).map(|s| s.as_str())
+    }
+
+    /// Get a cell value.
+    pub fn cell_value(&self, row: usize, col: usize) -> Option<String> {
+        let result = self.results.get(row)?;
+        match col {
+            0 => Some(format!("0x{:X}", result.address.offset)),
+            1 => Some(result.text.clone()),
+            2 => Some(result.field_name.clone()),
+            _ => None,
+        }
+    }
+
+    /// Add a search result.
+    pub fn add_result(&mut self, result: SearchResultRow) {
+        self.results.push(result);
+    }
+
+    /// Get all results.
+    pub fn results(&self) -> &[SearchResultRow] {
+        &self.results
+    }
+
+    /// Clear all results.
+    pub fn clear(&mut self) {
+        self.results.clear();
+    }
+
+    /// Get the address for a given row (for navigation).
+    pub fn get_address(&self, row: usize) -> Option<Address> {
+        self.results.get(row).map(|r| r.address)
+    }
+}
+
+/// Table model for listing display search results.
+///
+/// This is the primary search table model used when searching text
+/// within the code listing display.
+#[derive(Debug, Clone)]
+pub struct ListingDisplaySearchTableModel {
+    base: AbstractSearchTableModel,
+}
+
+impl ListingDisplaySearchTableModel {
+    /// Create a new listing display search table model.
+    pub fn new() -> Self {
+        Self {
+            base: AbstractSearchTableModel::new("Listing Display Search"),
+        }
+    }
+
+    /// Get the model name.
+    pub fn name(&self) -> &str {
+        self.base.name()
+    }
+
+    /// Get the row count.
+    pub fn row_count(&self) -> usize {
+        self.base.row_count()
+    }
+
+    /// Get a cell value.
+    pub fn cell_value(&self, row: usize, col: usize) -> Option<String> {
+        self.base.cell_value(row, col)
+    }
+
+    /// Add a result.
+    pub fn add_result(&mut self, result: SearchResultRow) {
+        self.base.add_result(result);
+    }
+
+    /// Clear results.
+    pub fn clear(&mut self) {
+        self.base.clear();
+    }
+}
+
+impl Default for ListingDisplaySearchTableModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// An iterator over addresses in a listing display search result range.
+///
+/// Ported from `ListingDisplaySearchAddressIterator.java`.
+#[derive(Debug, Clone)]
+pub struct ListingDisplaySearchAddressIterator {
+    /// Current address.
+    current: Address,
+    /// End address (exclusive).
+    end: Address,
+    /// Whether the iterator is exhausted.
+    exhausted: bool,
+}
+
+impl ListingDisplaySearchAddressIterator {
+    /// Create a new iterator over the range [start, end].
+    pub fn new(start: Address, end: Address) -> Self {
+        Self {
+            current: start,
+            end,
+            exhausted: false,
+        }
+    }
+
+    /// Get the next address.
+    pub fn next(&mut self) -> Option<Address> {
+        if self.exhausted || self.current.offset > self.end.offset {
+            return None;
+        }
+        let addr = self.current;
+        self.current = Address::new(self.current.offset + 1);
+        if self.current.offset > self.end.offset {
+            self.exhausted = true;
+        }
+        Some(addr)
+    }
 }

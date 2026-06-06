@@ -916,4 +916,170 @@ mod call_node_tests {
         assert_eq!(nodes[1].source_address.offset, 0x2000);
         assert_eq!(nodes[2].source_address.offset, 0x3000);
     }
+
+    // -- IncomingCallsRootNode / OutgoingCallsRootNode tests --
+
+    #[test]
+    fn test_incoming_calls_root_node() {
+        let root = IncomingCallsRootNode::new("main", Address::new(0x401000));
+        assert_eq!(root.name(), "main");
+        assert_eq!(root.direction(), CallTreeDirection::Incoming);
+        assert!(root.children().is_empty());
+    }
+
+    #[test]
+    fn test_outgoing_calls_root_node() {
+        let root = OutgoingCallsRootNode::new("main", Address::new(0x401000));
+        assert_eq!(root.name(), "main");
+        assert_eq!(root.direction(), CallTreeDirection::Outgoing);
+    }
+
+    #[test]
+    fn test_incoming_calls_root_node_add_child() {
+        let mut root = IncomingCallsRootNode::new("main", Address::new(0x401000));
+        root.add_child(CallRefNode::incoming("caller1", Address::new(0x402000), Address::new(0x401000), true));
+        root.add_child(CallRefNode::incoming("caller2", Address::new(0x403000), Address::new(0x401000), false));
+        assert_eq!(root.children().len(), 2);
+        assert_eq!(root.total_count(), 2);
+    }
+
+    #[test]
+    fn test_outgoing_calls_root_node_filter() {
+        let mut root = OutgoingCallsRootNode::new("main", Address::new(0x401000));
+        root.add_child(CallRefNode::outgoing("func_a", Address::new(0x401000), Address::new(0x404000), true));
+        root.add_child(CallRefNode::outgoing("func_b", Address::new(0x401000), Address::new(0x405000), false));
+        let calls_only = root.children_calls_only();
+        assert_eq!(calls_only.len(), 1);
+        assert_eq!(calls_only[0].name, "func_a");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IncomingCallsRootNode / OutgoingCallsRootNode
+//
+// Ported from `IncomingCallsRootNode.java` and `OutgoingCallsRootNode.java`
+// in `ghidra.app.plugin.core.calltree`.
+//
+// These are the root nodes of the incoming and outgoing call trees.
+// They wrap the target function and provide the typed children list.
+// ---------------------------------------------------------------------------
+
+/// Root node of the incoming (callers) call tree.
+///
+/// This node represents the target function at the root of the
+/// "Who calls this function?" tree.
+#[derive(Debug, Clone)]
+pub struct IncomingCallsRootNode {
+    /// Name of the target function.
+    name: String,
+    /// Entry point address of the target function.
+    address: Address,
+    /// Child nodes (callers).
+    children: Vec<CallRefNode>,
+}
+
+impl IncomingCallsRootNode {
+    /// Create a new incoming calls root node.
+    pub fn new(name: impl Into<String>, address: Address) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            children: Vec::new(),
+        }
+    }
+
+    /// Get the function name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the function address.
+    pub fn address(&self) -> Address {
+        self.address
+    }
+
+    /// Get the tree direction.
+    pub fn direction(&self) -> CallTreeDirection {
+        CallTreeDirection::Incoming
+    }
+
+    /// Add a caller node.
+    pub fn add_child(&mut self, child: CallRefNode) {
+        self.children.push(child);
+    }
+
+    /// Get the children (callers).
+    pub fn children(&self) -> &[CallRefNode] {
+        &self.children
+    }
+
+    /// Total number of callers.
+    pub fn total_count(&self) -> usize {
+        self.children.len()
+    }
+
+    /// Get only callers that are direct calls (not references).
+    pub fn children_calls_only(&self) -> Vec<&CallRefNode> {
+        self.children.iter().filter(|c| c.is_call_reference).collect()
+    }
+}
+
+/// Root node of the outgoing (callees) call tree.
+///
+/// This node represents the target function at the root of the
+/// "What does this function call?" tree.
+#[derive(Debug, Clone)]
+pub struct OutgoingCallsRootNode {
+    /// Name of the target function.
+    name: String,
+    /// Entry point address of the target function.
+    address: Address,
+    /// Child nodes (callees).
+    children: Vec<CallRefNode>,
+}
+
+impl OutgoingCallsRootNode {
+    /// Create a new outgoing calls root node.
+    pub fn new(name: impl Into<String>, address: Address) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            children: Vec::new(),
+        }
+    }
+
+    /// Get the function name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the function address.
+    pub fn address(&self) -> Address {
+        self.address
+    }
+
+    /// Get the tree direction.
+    pub fn direction(&self) -> CallTreeDirection {
+        CallTreeDirection::Outgoing
+    }
+
+    /// Add a callee node.
+    pub fn add_child(&mut self, child: CallRefNode) {
+        self.children.push(child);
+    }
+
+    /// Get the children (callees).
+    pub fn children(&self) -> &[CallRefNode] {
+        &self.children
+    }
+
+    /// Total number of callees.
+    pub fn total_count(&self) -> usize {
+        self.children.len()
+    }
+
+    /// Get only callees that are direct calls (not references).
+    pub fn children_calls_only(&self) -> Vec<&CallRefNode> {
+        self.children.iter().filter(|c| c.is_call_reference).collect()
+    }
 }

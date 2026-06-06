@@ -413,4 +413,127 @@ mod tests {
         mgr.register_group(HighlightGroup::new("custom", HighlightColor::cyan()));
         assert_eq!(mgr.group_names().len(), 2);
     }
+
+    #[test]
+    fn test_set_highlight_plugin() {
+        let mut plugin = SetHighlightPlugin::new("test_program");
+        assert_eq!(plugin.program_name(), "test_program");
+        assert!(plugin.is_enabled());
+
+        plugin.set_highlight(Address::new(0x401000), Some(HighlightColor::yellow()));
+        assert!(plugin.current_highlight().is_some());
+        let (addr, color) = plugin.current_highlight().unwrap();
+        assert_eq!(addr.offset, 0x401000);
+        assert_eq!(color.r, 255);
+
+        plugin.clear_highlight();
+        assert!(plugin.current_highlight().is_none());
+    }
+
+    #[test]
+    fn test_set_highlight_plugin_toggle() {
+        let mut plugin = SetHighlightPlugin::new("test_program");
+        plugin.set_highlight(Address::new(0x401000), Some(HighlightColor::yellow()));
+        // Setting same address again should clear
+        plugin.toggle_highlight(Address::new(0x401000), HighlightColor::yellow());
+        assert!(plugin.current_highlight().is_none());
+        // Setting different address should set
+        plugin.toggle_highlight(Address::new(0x402000), HighlightColor::cyan());
+        assert!(plugin.current_highlight().is_some());
+    }
+
+    #[test]
+    fn test_set_highlight_plugin_dispose() {
+        let mut plugin = SetHighlightPlugin::new("test_program");
+        plugin.set_highlight(Address::new(0x401000), Some(HighlightColor::yellow()));
+        plugin.dispose();
+        assert!(!plugin.is_enabled());
+        assert!(plugin.current_highlight().is_none());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SetHighlightPlugin
+//
+// Ported from `ghidra.app.plugin.core.highlight.SetHighlightPlugin`.
+//
+// Provides the ability to highlight the current address in the code listing
+// using the middle mouse button or a keyboard shortcut.  Highlights are
+// temporary and are cleared when the user clicks a different address or
+// explicitly clears the highlight.
+// ---------------------------------------------------------------------------
+
+/// Plugin for setting and clearing highlights in the code listing.
+///
+/// Supports middle-mouse-button highlighting: clicking on an address
+/// sets a highlight; clicking again on the same address clears it.
+#[derive(Debug, Clone)]
+pub struct SetHighlightPlugin {
+    /// The currently highlighted address and its color.
+    highlight: Option<(Address, HighlightColor)>,
+    /// Name of the program this plugin is associated with.
+    program_name: String,
+    /// Whether the plugin is enabled.
+    enabled: bool,
+}
+
+impl SetHighlightPlugin {
+    /// Create a new SetHighlightPlugin.
+    pub fn new(program_name: impl Into<String>) -> Self {
+        Self {
+            highlight: None,
+            program_name: program_name.into(),
+            enabled: true,
+        }
+    }
+
+    /// Get the program name.
+    pub fn program_name(&self) -> &str {
+        &self.program_name
+    }
+
+    /// Whether the plugin is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Get the current highlight (address, color) if set.
+    pub fn current_highlight(&self) -> Option<(Address, &HighlightColor)> {
+        self.highlight.as_ref().map(|(addr, color)| (*addr, color))
+    }
+
+    /// Set a highlight at the given address with the given color.
+    ///
+    /// If a highlight already exists at a different address, it is replaced.
+    pub fn set_highlight(&mut self, address: Address, color: Option<HighlightColor>) {
+        match color {
+            Some(c) => self.highlight = Some((address, c)),
+            None => self.highlight = None,
+        }
+    }
+
+    /// Clear the current highlight.
+    pub fn clear_highlight(&mut self) {
+        self.highlight = None;
+    }
+
+    /// Toggle highlight at the given address.
+    ///
+    /// If the address is already highlighted, the highlight is cleared.
+    /// If a different address was highlighted, it is replaced.
+    pub fn toggle_highlight(&mut self, address: Address, color: HighlightColor) {
+        if let Some((current_addr, _)) = &self.highlight {
+            if *current_addr == address {
+                self.highlight = None;
+                return;
+            }
+        }
+        self.highlight = Some((address, color));
+    }
+
+    /// Dispose of the plugin.
+    pub fn dispose(&mut self) {
+        self.enabled = false;
+        self.highlight = None;
+    }
 }

@@ -6,7 +6,7 @@
 //! - [`AddressRange`] operations (length, containment, iteration)
 //! - Address comparison, ordering, and display formatting
 
-use ghidra_core::addr::{Address, AddressRange, AddressSpace, AddressRangeIterator};
+use ghidra_core::addr::{Address, AddressRange, AddressSpace, AddressRangeIterator, AddrSpaceType};
 
 // ---------------------------------------------------------------------------
 // AddressSpace tests
@@ -14,15 +14,15 @@ use ghidra_core::addr::{Address, AddressRange, AddressSpace, AddressRangeIterato
 
 #[test]
 fn test_address_space_construction() {
-    let ram = AddressSpace::new("ram", 8, false);
+    let ram = AddressSpace::new("ram", 8, false, AddrSpaceType::Ram, 1);
     assert_eq!(ram.name, "ram");
     assert_eq!(ram.pointer_size, 8);
     assert!(!ram.big_endian);
 
-    let reg = AddressSpace::new("register", 4, false);
+    let reg = AddressSpace::new("register", 4, false, AddrSpaceType::Register, 2);
     assert_eq!(reg.pointer_size, 4);
 
-    let big = AddressSpace::new("rom", 4, true);
+    let big = AddressSpace::new("rom", 4, true, AddrSpaceType::Ram, 3);
     assert!(big.big_endian);
 }
 
@@ -36,7 +36,7 @@ fn test_address_space_default_ram() {
 
 #[test]
 fn test_address_space_display() {
-    let space = AddressSpace::new("register", 4, false);
+    let space = AddressSpace::new("register", 4, false, AddrSpaceType::Register, 2);
     assert_eq!(format!("{}", space), "register");
 
     let ram = AddressSpace::ram();
@@ -45,9 +45,9 @@ fn test_address_space_display() {
 
 #[test]
 fn test_address_space_equality() {
-    let a = AddressSpace::new("ram", 8, false);
-    let b = AddressSpace::new("ram", 8, false);
-    let c = AddressSpace::new("register", 4, false);
+    let a = AddressSpace::new("ram", 8, false, AddrSpaceType::Ram, 1);
+    let b = AddressSpace::new("ram", 8, false, AddrSpaceType::Ram, 1);
+    let c = AddressSpace::new("register", 4, false, AddrSpaceType::Register, 2);
     assert_eq!(a, b);
     assert_ne!(a, c);
 }
@@ -318,8 +318,8 @@ fn test_paginated_address_range() {
 #[test]
 fn test_address_space_independence() {
     // Addresses from different spaces can share the same offset
-    let ram = AddressSpace::new("ram", 8, false);
-    let reg = AddressSpace::new("register", 4, false);
+    let _ram = AddressSpace::new("ram", 8, false, AddrSpaceType::Ram, 1);
+    let _reg = AddressSpace::new("register", 4, false, AddrSpaceType::Register, 2);
 
     // Both can have offset 0x4, but they refer to different things
     let ram_view = Address::new(0x4);

@@ -179,5 +179,258 @@ mod tests {
         assert_eq!(info.ref_count, 100);
         assert!(info.is_primary);
     }
+
+    // -- SymbolTableDnDAdapter tests --
+
+    #[test]
+    fn test_symbol_table_dnd_adapter() {
+        let mut adapter = SymbolTableDnDAdapter::new();
+        assert!(adapter.is_empty());
+
+        adapter.add_draggable_symbol(DraggableSymbol {
+            id: 1,
+            name: "main".to_string(),
+            address: Address::new(0x401000),
+        });
+        adapter.add_draggable_symbol(DraggableSymbol {
+            id: 2,
+            name: "init".to_string(),
+            address: Address::new(0x402000),
+        });
+        assert_eq!(adapter.symbol_count(), 2);
+    }
+
+    #[test]
+    fn test_symbol_table_dnd_adapter_get_symbol() {
+        let mut adapter = SymbolTableDnDAdapter::new();
+        adapter.add_draggable_symbol(DraggableSymbol {
+            id: 1,
+            name: "main".to_string(),
+            address: Address::new(0x401000),
+        });
+        let sym = adapter.get_symbol(1);
+        assert!(sym.is_some());
+        assert_eq!(sym.unwrap().name, "main");
+    }
+
+    #[test]
+    fn test_symbol_table_drag_provider() {
+        let mut provider = SymbolTableDragProvider::new();
+        assert!(!provider.is_dragging());
+
+        provider.begin_drag(vec![1, 2, 3]);
+        assert!(provider.is_dragging());
+        assert_eq!(provider.dragged_ids().len(), 3);
+
+        provider.end_drag();
+        assert!(!provider.is_dragging());
+    }
+
+    #[test]
+    fn test_transient_symbol_table_dnd_adapter() {
+        let mut adapter = TransientSymbolTableDnDAdapter::new();
+        adapter.set_transient_symbols(vec![
+            DraggableSymbol { id: 10, name: "temp".to_string(), address: Address::new(0x5000) },
+        ]);
+        assert_eq!(adapter.symbol_count(), 1);
+
+        adapter.clear();
+        assert!(adapter.is_empty());
+    }
+
+    // -- ProgramTreeActionContext tests --
+
+    #[test]
+    fn test_program_tree_action_context() {
+        let ctx = ProgramTreeActionContext::new("MyTree", Some(42));
+        assert_eq!(ctx.tree_name(), "MyTree");
+        assert_eq!(ctx.selected_module_id(), Some(42));
+    }
+
+    #[test]
+    fn test_program_tree_action_context_no_selection() {
+        let ctx = ProgramTreeActionContext::new("MyTree", None);
+        assert!(ctx.selected_module_id().is_none());
+        assert!(!ctx.has_selection());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SymbolTableDnDAdapter, SymbolTableDragProvider, TransientSymbolTableDnDAdapter
+//
+// Ported from `SymbolTableDnDAdapter.java`, `SymbolTableDragProvider.java`,
+// and `TransientSymbolTableDnDAdapter.java` in `ghidra.app.plugin.core.symtable`.
+//
+// These provide drag-and-drop support for symbols from the symbol table.
+// ---------------------------------------------------------------------------
+
+/// A draggable symbol used for DnD operations.
+#[derive(Debug, Clone)]
+pub struct DraggableSymbol {
+    /// Symbol ID.
+    pub id: u64,
+    /// Symbol name.
+    pub name: String,
+    /// Symbol address.
+    pub address: Address,
+}
+
+/// Adapter for dragging symbols from the symbol table.
+#[derive(Debug, Clone, Default)]
+pub struct SymbolTableDnDAdapter {
+    symbols: Vec<DraggableSymbol>,
+}
+
+impl SymbolTableDnDAdapter {
+    /// Create a new empty adapter.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the adapter has no symbols.
+    pub fn is_empty(&self) -> bool {
+        self.symbols.is_empty()
+    }
+
+    /// Number of draggable symbols.
+    pub fn symbol_count(&self) -> usize {
+        self.symbols.len()
+    }
+
+    /// Add a draggable symbol.
+    pub fn add_draggable_symbol(&mut self, symbol: DraggableSymbol) {
+        self.symbols.push(symbol);
+    }
+
+    /// Get a symbol by ID.
+    pub fn get_symbol(&self, id: u64) -> Option<&DraggableSymbol> {
+        self.symbols.iter().find(|s| s.id == id)
+    }
+
+    /// Get all draggable symbols.
+    pub fn symbols(&self) -> &[DraggableSymbol] {
+        &self.symbols
+    }
+
+    /// Clear all symbols.
+    pub fn clear(&mut self) {
+        self.symbols.clear();
+    }
+}
+
+/// Provider that manages drag operations from the symbol table.
+#[derive(Debug, Clone, Default)]
+pub struct SymbolTableDragProvider {
+    /// IDs of symbols currently being dragged.
+    dragged_ids: Vec<u64>,
+    /// Whether a drag operation is in progress.
+    is_dragging: bool,
+}
+
+impl SymbolTableDragProvider {
+    /// Create a new drag provider.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether a drag operation is in progress.
+    pub fn is_dragging(&self) -> bool {
+        self.is_dragging
+    }
+
+    /// Begin a drag operation with the given symbol IDs.
+    pub fn begin_drag(&mut self, ids: Vec<u64>) {
+        self.dragged_ids = ids;
+        self.is_dragging = true;
+    }
+
+    /// End the current drag operation.
+    pub fn end_drag(&mut self) {
+        self.dragged_ids.clear();
+        self.is_dragging = false;
+    }
+
+    /// Get the IDs of the symbols being dragged.
+    pub fn dragged_ids(&self) -> &[u64] {
+        &self.dragged_ids
+    }
+}
+
+/// Adapter for transient (temporary) symbol DnD operations.
+#[derive(Debug, Clone, Default)]
+pub struct TransientSymbolTableDnDAdapter {
+    adapter: SymbolTableDnDAdapter,
+}
+
+impl TransientSymbolTableDnDAdapter {
+    /// Create a new transient adapter.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the transient symbols.
+    pub fn set_transient_symbols(&mut self, symbols: Vec<DraggableSymbol>) {
+        self.adapter.clear();
+        for sym in symbols {
+            self.adapter.add_draggable_symbol(sym);
+        }
+    }
+
+    /// Number of transient symbols.
+    pub fn symbol_count(&self) -> usize {
+        self.adapter.symbol_count()
+    }
+
+    /// Whether there are no transient symbols.
+    pub fn is_empty(&self) -> bool {
+        self.adapter.is_empty()
+    }
+
+    /// Clear all transient symbols.
+    pub fn clear(&mut self) {
+        self.adapter.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramTreeActionContext
+//
+// Ported from `ProgramTreeActionContext.java` in `ghidra.app.plugin.core.programtree`.
+// ---------------------------------------------------------------------------
+
+/// Action context for the program tree.
+///
+/// Captures the current tree name and selected module ID for action dispatch.
+#[derive(Debug, Clone)]
+pub struct ProgramTreeActionContext {
+    /// The name of the program tree.
+    tree_name: String,
+    /// The ID of the selected module, if any.
+    selected_module_id: Option<u64>,
+}
+
+impl ProgramTreeActionContext {
+    /// Create a new action context.
+    pub fn new(tree_name: impl Into<String>, selected_module_id: Option<u64>) -> Self {
+        Self {
+            tree_name: tree_name.into(),
+            selected_module_id,
+        }
+    }
+
+    /// Get the tree name.
+    pub fn tree_name(&self) -> &str {
+        &self.tree_name
+    }
+
+    /// Get the selected module ID.
+    pub fn selected_module_id(&self) -> Option<u64> {
+        self.selected_module_id
+    }
+
+    /// Whether a module is selected.
+    pub fn has_selection(&self) -> bool {
+        self.selected_module_id.is_some()
+    }
 }
 

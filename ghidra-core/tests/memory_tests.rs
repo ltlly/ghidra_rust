@@ -26,6 +26,7 @@ fn test_memory_block_creation() {
         range,
         permissions: MemoryPermissions::RX,
         initialized: true,
+        data: Vec::new(),
     };
 
     assert_eq!(block.name, ".text");
@@ -43,6 +44,7 @@ fn test_memory_block_equality_clone() {
         range,
         permissions: MemoryPermissions::R,
         initialized: true,
+        data: Vec::new(),
     };
     let b = a.clone();
     assert_eq!(a.name, b.name);
@@ -119,6 +121,7 @@ fn test_add_memory_blocks_to_program() {
             range: text_range,
             permissions: MemoryPermissions::RX,
             initialized: true,
+            data: Vec::new(),
         },
     );
 
@@ -131,6 +134,7 @@ fn test_add_memory_blocks_to_program() {
             range: data_range,
             permissions: MemoryPermissions::RW,
             initialized: true,
+            data: Vec::new(),
         },
     );
 
@@ -143,6 +147,7 @@ fn test_add_memory_blocks_to_program() {
             range: bss_range,
             permissions: MemoryPermissions::RW,
             initialized: false,
+            data: Vec::new(),
         },
     );
 
@@ -161,6 +166,7 @@ fn test_memory_block_lookup() {
             range: text_range,
             permissions: MemoryPermissions::RX,
             initialized: true,
+            data: Vec::new(),
         },
     );
 
@@ -172,6 +178,7 @@ fn test_memory_block_lookup() {
             range: data_range,
             permissions: MemoryPermissions::RW,
             initialized: true,
+            data: Vec::new(),
         },
     );
 

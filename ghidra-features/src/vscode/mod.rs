@@ -302,4 +302,103 @@ mod tests {
         // We just verify that the plugin initialized correctly.
         let _ = plugin.is_vscode_available();
     }
+
+    #[test]
+    fn test_vscode_integration_options_plugin() {
+        let mut opts_plugin = VSCodeIntegrationOptionsPlugin::new();
+        assert!(opts_plugin.is_enabled());
+
+        // Set options
+        opts_plugin.set_auto_open(true);
+        assert!(opts_plugin.auto_open());
+        opts_plugin.set_auto_open(false);
+        assert!(!opts_plugin.auto_open());
+
+        // Port option
+        opts_plugin.set_port(1234);
+        assert_eq!(opts_plugin.port(), 1234);
+
+        // Dispose
+        opts_plugin.dispose();
+        assert!(!opts_plugin.is_enabled());
+    }
+
+    #[test]
+    fn test_vscode_integration_options_plugin_defaults() {
+        let opts = VSCodeIntegrationOptionsPlugin::new();
+        assert!(!opts.auto_open());
+        assert_eq!(opts.port(), DEFAULT_PORT);
+        assert!(opts.is_enabled());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// VSCodeIntegrationOptionsPlugin
+//
+// Ported from `VSCodeIntegrationOptionsPlugin.java`.
+//
+// Manages user-configurable options for the VS Code integration, such as
+// whether to auto-open files in VS Code when navigating in Ghidra, and
+// the port number used for communication.
+// ---------------------------------------------------------------------------
+
+/// Plugin for managing VS Code integration options.
+///
+/// Provides a preferences UI for configuring the VS Code integration,
+/// including auto-open behavior and communication port.
+#[derive(Debug, Clone)]
+pub struct VSCodeIntegrationOptionsPlugin {
+    /// Whether the plugin is enabled.
+    enabled: bool,
+    /// Whether to automatically open files in VS Code.
+    auto_open: bool,
+    /// Communication port.
+    port: i32,
+}
+
+impl VSCodeIntegrationOptionsPlugin {
+    /// Create a new options plugin with defaults.
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            auto_open: false,
+            port: DEFAULT_PORT,
+        }
+    }
+
+    /// Whether the plugin is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Whether auto-open is enabled.
+    pub fn auto_open(&self) -> bool {
+        self.auto_open
+    }
+
+    /// Set auto-open mode.
+    pub fn set_auto_open(&mut self, auto_open: bool) {
+        self.auto_open = auto_open;
+    }
+
+    /// Get the communication port.
+    pub fn port(&self) -> i32 {
+        self.port
+    }
+
+    /// Set the communication port.
+    pub fn set_port(&mut self, port: i32) {
+        self.port = port;
+    }
+
+    /// Dispose of the plugin.
+    pub fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+impl Default for VSCodeIntegrationOptionsPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }

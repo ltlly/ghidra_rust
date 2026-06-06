@@ -569,3 +569,224 @@ fn test_full_debug_session_simulation() {
     inner.close();
     service.stop();
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ProposedUtils: Service Dependency Resolution Integration Tests
+// ═══════════════════════════════════════════════════════════════════
+
+use ghidra_debug::proposed_utils::{
+    DependentServiceConstructor, DependentServiceResolver, TopologicalSorter,
+    UnionedCollection, CatenatedCollection, DistinctIterator, StreamUtils,
+    SuppressableCallback, QueuedListener, DbgMsgTracer, TimedMsg,
+    DefaultObservableCollection, ID, IDKeyed, IDHashed, ProxyUtilities,
+    ByteBufferUtils,
+};
+use ghidra_debug::proposed_utils::database::{
+    CachedObjectStore, CachedObjectIndex, DirectedRecordIterator, DirectedLongKeyIterator,
+};
+use std::any::TypeId;
+
+#[test]
+fn test_service_resolver_realistic_scenario() {
+    // Simulate: Logger -> Config -> Database -> Service
+    let mut resolver = DependentServiceResolver::new();
+    let type_log = TypeId::of::<String>();
+    let type_cfg = TypeId::of::<i32>();
+    let type_db = TypeId::of::<u64>();
+    let type_svc = TypeId::of::<f64>();
+
+    resolver.add_constructor(DependentServiceConstructor::new("Logger", type_log, vec![]));
+    resolver.add_constructor(DependentServiceConstructor::new("Config", type_cfg, vec![type_log]));
+    resolver.add_constructor(DependentServiceConstructor::new("Database", type_db, vec![type_cfg]));
+    resolver.add_constructor(DependentServiceConstructor::new("Service", type_svc, vec![type_db]));
+
+    resolver.add_field_requirement(type_svc);
+
+    let order = resolver.compile().unwrap();
+    assert_eq!(order.len(), 4);
+
+    // Verify order is Logger -> Config -> Database -> Service
+    assert_eq!(order[0].name, "Logger");
+    assert_eq!(order[1].name, "Config");
+    assert_eq!(order[2].name, "Database");
+    assert_eq!(order[3].name, "Service");
+}
+
+#[test]
+fn test_topological_sorter_large_graph() {
+    let mut sorter = TopologicalSorter::new();
+    // Create a large DAG with 100 nodes
+    for i in 0..99 {
+        sorter.add_edge(i, i + 1);
+    }
+    // Add some cross edges
+    sorter.add_edge(0, 50);
+    sorter.add_edge(25, 75);
+
+    let result = sorter.sort().unwrap();
+    assert_eq!(result.len(), 100);
+
+    // Verify ordering constraints
+    let get_pos = |x: usize| result.iter().position(|r| *r == x).unwrap();
+    assert!(get_pos(0) < get_pos(50));
+    assert!(get_pos(0) < get_pos(1));
+    assert!(get_pos(25) < get_pos(75));
+}
+
+#[test]
+fn test_unioned_collection_with_complex_types() {
+    let mut uc = UnionedCollection::new();
+    uc.add_collection(vec!["alpha".to_string(), "beta".to_string()]);
+    uc.add_collection(vec!["gamma".to_string()]);
+    uc.add_collection(vec![]); // empty sub-collection
+    uc.add_collection(vec!["delta".to_string(), "epsilon".to_string()]);
+
+    assert_eq!(uc.len(), 5);
+    let items: Vec<_> = uc.iter().cloned().collect();
+    assert_eq!(items, vec!["alpha", "beta", "gamma", "delta", "epsilon"]);
+}
+
+#[test]
+fn test_stream_utils_merge_sorted_strings() {
+    let result = StreamUtils::merge_sorted(vec![
+        vec!["apple".to_string(), "cherry".to_string()],
+        vec!["banana".to_string(), "date".to_string()],
+    ]);
+    assert_eq!(result, vec!["apple", "banana", "cherry", "date"]);
+}
+
+#[test]
+fn test_suppressable_callback_reentrant() {
+    let mut cb = SuppressableCallback::new("reentrant");
+    cb.suppress();
+    assert!(!cb.trigger());
+    assert!(!cb.trigger());
+    assert!(!cb.trigger());
+    assert!(cb.is_pending());
+
+    // Resume clears pending state
+    assert!(cb.resume());
+    assert!(!cb.is_pending());
+
+    // Can trigger again normally
+    assert!(cb.trigger());
+}
+
+#[test]
+fn test_dbg_msg_tracer_serde() {
+    let mut tracer = DbgMsgTracer::new();
+    tracer.set_enabled(true);
+    tracer.trace("msg1");
+    tracer.trace("msg2");
+
+    let messages = tracer.messages().to_vec();
+    assert_eq!(messages, vec!["msg1", "msg2"]);
+}
+
+#[test]
+fn test_timed_msg_clone() {
+    let msg = TimedMsg::new("clone test", 100, 5);
+    let cloned = msg.clone();
+    assert_eq!(cloned.message, msg.message);
+    assert_eq!(cloned.timestamp_ms, msg.timestamp_ms);
+    assert_eq!(cloned.elapsed_ms, msg.elapsed_ms);
+}
+
+#[test]
+fn test_default_observable_collection_get_out_of_bounds() {
+    let mut col = DefaultObservableCollection::new();
+    col.push(1);
+    assert!(col.get(0).is_some());
+    assert!(col.get(1).is_none());
+}
+
+#[test]
+fn test_queued_listener_serial_operations() {
+    let mut ql = QueuedListener::new();
+    for i in 0..100 {
+        ql.enqueue(i);
+    }
+    assert_eq!(ql.drain().len(), 100);
+    assert!(!ql.has_pending());
+}
+
+#[test]
+fn test_id_display_format() {
+    let id1 = ID::new(42);
+    assert_eq!(format!("{}", id1), "42");
+
+    let id2 = ID::with_display(1, "Process-1/Thread-0");
+    assert_eq!(format!("{}", id2), "Process-1/Thread-0");
+}
+
+#[test]
+fn test_byte_buffer_utils_roundtrip() {
+    let original = vec![0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD];
+    let hex = ByteBufferUtils::to_hex_string(&original);
+    let recovered = ByteBufferUtils::from_hex_string(&hex).unwrap();
+    assert_eq!(original, recovered);
+}
+
+#[test]
+fn test_cached_object_store_large_insertions() {
+    let mut store = CachedObjectStore::new();
+    for i in 0..1000 {
+        store.insert(i, i * 2);
+    }
+    assert_eq!(store.len(), 1000);
+    assert_eq!(store.get(&500), Some(&1000));
+    assert_eq!(store.get(&999), Some(&1998));
+    assert_eq!(store.get(&1000), None);
+}
+
+#[test]
+fn test_cached_object_index_multi_value() {
+    let mut idx = CachedObjectIndex::new();
+    for i in 0..10 {
+        idx.insert("group", i);
+    }
+    assert_eq!(idx.get("group").unwrap().len(), 10);
+}
+
+#[test]
+fn test_directed_record_iterator_large_dataset() {
+    let data: Vec<i64> = (0..10000).collect();
+    let mut iter = DirectedRecordIterator::forward(data.clone());
+    let result = iter.collect_remaining();
+    assert_eq!(result.len(), 10000);
+    assert_eq!(result[0], 0);
+    assert_eq!(result[9999], 9999);
+}
+
+#[test]
+fn test_directed_long_key_iterator_backward_large() {
+    let keys: Vec<i64> = (0..5000).collect();
+    let mut iter = DirectedLongKeyIterator::backward(keys);
+    let result = iter.collect_remaining();
+    assert_eq!(result.len(), 5000);
+    assert_eq!(result[0], 4999);
+    assert_eq!(result[4999], 0);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Cross-module error handling tests
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_service_construction_exception_as_error() {
+    use ghidra_debug::proposed_utils::ServiceConstructionException;
+    let e = ServiceConstructionException::new("test");
+    let err: &dyn std::error::Error = &e;
+    assert!(err.to_string().contains("test"));
+}
+
+#[test]
+fn test_unsatisfied_exceptions_clone() {
+    let e1 = ghidra_debug::proposed_utils::UnsatisfiedFieldsException::new(vec!["A".into()]);
+    let e2 = e1.clone();
+    assert_eq!(e1.missing(), e2.missing());
+
+    let e3 = ghidra_debug::proposed_utils::UnsatisfiedParameterException::new(vec!["B".into()]);
+    let e4 = e3.clone();
+    assert_eq!(e3.unresolved(), e4.unresolved());
+}

@@ -474,4 +474,264 @@ mod tests {
         model.add_fragment(".text", id, Address::new(0x1000), Address::new(0x1FFF));
         assert!(model.history().len() >= 3);
     }
+
+    // -- AutoRenamePlugin tests --
+
+    #[test]
+    fn test_auto_rename_plugin_new() {
+        let plugin = AutoRenamePlugin::new();
+        assert!(plugin.is_enabled());
+        assert!(plugin.options().rename_functions);
+        assert!(plugin.options().rename_labels);
+    }
+
+    #[test]
+    fn test_auto_rename_plugin_rename_function() {
+        let mut plugin = AutoRenamePlugin::new();
+        let result = plugin.try_rename_function("sub_401000", "main");
+        assert_eq!(result, Some("main".to_string()));
+    }
+
+    #[test]
+    fn test_auto_rename_plugin_skip_special_names() {
+        let mut plugin = AutoRenamePlugin::new();
+        // Should not rename well-known names
+        let result = plugin.try_rename_function("main", "new_name");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_auto_rename_plugin_options() {
+        let mut plugin = AutoRenamePlugin::new();
+        plugin.options_mut().rename_functions = false;
+        let result = plugin.try_rename_function("sub_401000", "main");
+        assert!(result.is_none());
+    }
+
+    // -- ModuleSortPlugin tests --
+
+    #[test]
+    fn test_module_sort_plugin_new() {
+        let plugin = ModuleSortPlugin::new();
+        assert!(plugin.is_enabled());
+        assert_eq!(plugin.sort_mode(), ModuleSortMode::ByName);
+    }
+
+    #[test]
+    fn test_module_sort_plugin_sort_by_name() {
+        let mut plugin = ModuleSortPlugin::new();
+        let mut modules = vec![
+            ModuleInfo::new("zebra", 3, Some(1)),
+            ModuleInfo::new("alpha", 1, Some(1)),
+            ModuleInfo::new("middle", 2, Some(1)),
+        ];
+        plugin.sort_modules(&mut modules);
+        assert_eq!(modules[0].name, "alpha");
+        assert_eq!(modules[1].name, "middle");
+        assert_eq!(modules[2].name, "zebra");
+    }
+
+    #[test]
+    fn test_module_sort_plugin_sort_by_address() {
+        let mut plugin = ModuleSortPlugin::new();
+        plugin.set_sort_mode(ModuleSortMode::ByAddress);
+        assert_eq!(plugin.sort_mode(), ModuleSortMode::ByAddress);
+    }
+
+    #[test]
+    fn test_module_sort_plugin_dispose() {
+        let mut plugin = ModuleSortPlugin::new();
+        plugin.dispose();
+        assert!(!plugin.is_enabled());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AutoRenamePlugin
+//
+// Ported from `ghidra.app.plugin.core.module.AutoRenamePlugin`.
+//
+// Provides automatic renaming of functions and labels based on
+// analysis results. When a function's purpose is identified (e.g.,
+// by finding a call to `main`), the plugin renames it automatically.
+// ---------------------------------------------------------------------------
+
+/// Plugin for automatic renaming of functions and labels.
+///
+/// When analysis discovers a meaningful name for a function or label
+/// (from debug info, symbols, or call patterns), this plugin can
+/// apply the rename automatically.
+#[derive(Debug, Clone)]
+pub struct AutoRenamePlugin {
+    /// Whether the plugin is enabled.
+    enabled: bool,
+    /// Configuration options.
+    options: AutoRenameOptions,
+}
+
+/// Options for automatic renaming.
+#[derive(Debug, Clone)]
+pub struct AutoRenameOptions {
+    /// Whether to automatically rename functions.
+    pub rename_functions: bool,
+    /// Whether to automatically rename labels.
+    pub rename_labels: bool,
+    /// Whether to rename only symbols with default names (e.g., `sub_401000`).
+    pub rename_default_names_only: bool,
+    /// Minimum confidence level for auto-renaming (0-100).
+    pub min_confidence: u8,
+}
+
+impl Default for AutoRenameOptions {
+    fn default() -> Self {
+        Self {
+            rename_functions: true,
+            rename_labels: true,
+            rename_default_names_only: true,
+            min_confidence: 80,
+        }
+    }
+}
+
+impl AutoRenamePlugin {
+    /// Create a new auto-rename plugin.
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            options: AutoRenameOptions::default(),
+        }
+    }
+
+    /// Whether the plugin is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Get the current options.
+    pub fn options(&self) -> &AutoRenameOptions {
+        &self.options
+    }
+
+    /// Get mutable options.
+    pub fn options_mut(&mut self) -> &mut AutoRenameOptions {
+        &mut self.options
+    }
+
+    /// Try to rename a function. Returns the new name if rename should proceed.
+    ///
+    /// Returns `None` if the rename should be skipped (e.g., function already
+    /// has a meaningful name, or renaming is disabled).
+    pub fn try_rename_function(&self, current_name: &str, proposed_name: &str) -> Option<String> {
+        if !self.enabled || !self.options.rename_functions {
+            return None;
+        }
+
+        if self.options.rename_default_names_only && !is_default_name(current_name) {
+            return None;
+        }
+
+        if proposed_name.is_empty() || proposed_name == current_name {
+            return None;
+        }
+
+        Some(proposed_name.to_string())
+    }
+
+    /// Dispose of the plugin.
+    pub fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+impl Default for AutoRenamePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Check if a name looks like a default/auto-generated name.
+fn is_default_name(name: &str) -> bool {
+    name.starts_with("sub_")
+        || name.starts_with("FUN_")
+        || name.starts_with("LAB_")
+        || name.starts_with("DAT_")
+        || name.starts_with("UNK_")
+}
+
+// ---------------------------------------------------------------------------
+// ModuleSortPlugin
+//
+// Ported from `ghidra.app.plugin.core.module.ModuleSortPlugin`.
+//
+// Sorts modules in the program tree by name or address.
+// ---------------------------------------------------------------------------
+
+/// Sort mode for program tree modules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModuleSortMode {
+    /// Sort modules alphabetically by name.
+    ByName,
+    /// Sort modules by their first address.
+    ByAddress,
+    /// Sort modules by the number of fragments they contain.
+    ByFragmentCount,
+}
+
+/// Plugin for sorting modules in the program tree.
+#[derive(Debug, Clone)]
+pub struct ModuleSortPlugin {
+    enabled: bool,
+    sort_mode: ModuleSortMode,
+}
+
+impl ModuleSortPlugin {
+    /// Create a new module sort plugin.
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            sort_mode: ModuleSortMode::ByName,
+        }
+    }
+
+    /// Whether the plugin is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// Get the current sort mode.
+    pub fn sort_mode(&self) -> ModuleSortMode {
+        self.sort_mode
+    }
+
+    /// Set the sort mode.
+    pub fn set_sort_mode(&mut self, mode: ModuleSortMode) {
+        self.sort_mode = mode;
+    }
+
+    /// Sort a list of modules in-place according to the current sort mode.
+    pub fn sort_modules(&self, modules: &mut [ModuleInfo]) {
+        match self.sort_mode {
+            ModuleSortMode::ByName => {
+                modules.sort_by(|a, b| a.name.cmp(&b.name));
+            }
+            ModuleSortMode::ByAddress => {
+                modules.sort_by_key(|m| m.id);
+            }
+            ModuleSortMode::ByFragmentCount => {
+                // Fragment count sorting requires external data; sort by ID as fallback
+                modules.sort_by_key(|m| m.id);
+            }
+        }
+    }
+
+    /// Dispose of the plugin.
+    pub fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+impl Default for ModuleSortPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }

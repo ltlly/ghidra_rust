@@ -187,6 +187,289 @@ impl AnnotatedObjectInfo {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Directed Record Iterator
+// ---------------------------------------------------------------------------
+
+/// A directed record iterator that traverses in a specified direction.
+///
+/// Ported from Ghidra's `DirectedRecordIterator`.
+#[derive(Debug)]
+pub struct DirectedRecordIterator<T: Clone> {
+    records: Vec<T>,
+    pos: usize,
+    direction: IterDirection,
+}
+
+impl<T: Clone> DirectedRecordIterator<T> {
+    /// Create a forward iterator over the given records.
+    pub fn forward(records: Vec<T>) -> Self {
+        Self {
+            records,
+            pos: 0,
+            direction: IterDirection::Forward,
+        }
+    }
+
+    /// Create a backward iterator over the given records.
+    pub fn backward(records: Vec<T>) -> Self {
+        let len = records.len();
+        Self {
+            records,
+            pos: if len > 0 { len - 1 } else { 0 },
+            direction: IterDirection::Backward,
+        }
+    }
+
+    /// The direction of iteration.
+    pub fn direction(&self) -> IterDirection {
+        self.direction
+    }
+
+    /// Collect all remaining records.
+    pub fn collect_remaining(&mut self) -> Vec<T> {
+        let mut result = Vec::new();
+        match self.direction {
+            IterDirection::Forward => {
+                while self.pos < self.records.len() {
+                    result.push(self.records[self.pos].clone());
+                    self.pos += 1;
+                }
+            }
+            IterDirection::Backward => {
+                loop {
+                    result.push(self.records[self.pos].clone());
+                    if self.pos == 0 {
+                        break;
+                    }
+                    self.pos -= 1;
+                }
+            }
+        }
+        result
+    }
+}
+
+/// A directed long-key iterator.
+///
+/// Ported from Ghidra's `DirectedLongKeyIterator`.
+#[derive(Debug)]
+pub struct DirectedLongKeyIterator {
+    keys: Vec<i64>,
+    pos: usize,
+    direction: IterDirection,
+}
+
+impl DirectedLongKeyIterator {
+    /// Create a forward key iterator.
+    pub fn forward(keys: Vec<i64>) -> Self {
+        Self {
+            keys,
+            pos: 0,
+            direction: IterDirection::Forward,
+        }
+    }
+
+    /// Create a backward key iterator.
+    pub fn backward(keys: Vec<i64>) -> Self {
+        let len = keys.len();
+        Self {
+            keys,
+            pos: if len > 0 { len - 1 } else { 0 },
+            direction: IterDirection::Backward,
+        }
+    }
+
+    /// Collect all remaining keys.
+    pub fn collect_remaining(&mut self) -> Vec<i64> {
+        let mut result = Vec::new();
+        match self.direction {
+            IterDirection::Forward => {
+                while self.pos < self.keys.len() {
+                    result.push(self.keys[self.pos]);
+                    self.pos += 1;
+                }
+            }
+            IterDirection::Backward => {
+                loop {
+                    result.push(self.keys[self.pos]);
+                    if self.pos == 0 {
+                        break;
+                    }
+                    self.pos -= 1;
+                }
+            }
+        }
+        result
+    }
+}
+
+/// A cached object store entry for the DB framework.
+///
+/// Ported from Ghidra's `DBCachedObjectStore` entries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedObjectEntry<K: Clone, V: Clone> {
+    /// The key.
+    pub key: K,
+    /// The value.
+    pub value: V,
+}
+
+impl<K: Clone, V: Clone> CachedObjectEntry<K, V> {
+    /// Create a new entry.
+    pub fn new(key: K, value: V) -> Self {
+        Self { key, value }
+    }
+}
+
+/// A cached object store for the database framework.
+///
+/// Ported from Ghidra's `DBCachedObjectStore`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedObjectStore<K: Clone + Eq + std::hash::Hash, V: Clone> {
+    entries: Vec<CachedObjectEntry<K, V>>,
+    index: std::collections::HashMap<K, usize>,
+}
+
+impl<K: Clone + Eq + std::hash::Hash, V: Clone> CachedObjectStore<K, V> {
+    /// Create a new empty store.
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            index: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Insert a key-value pair.
+    pub fn insert(&mut self, key: K, value: V) {
+        let idx = self.entries.len();
+        self.index.insert(key.clone(), idx);
+        self.entries.push(CachedObjectEntry::new(key, value));
+    }
+
+    /// Get a value by key.
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.index.get(key).map(|&idx| &self.entries[idx].value)
+    }
+
+    /// Remove a value by key.
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        if let Some(idx) = self.index.remove(key) {
+            Some(self.entries.remove(idx).value)
+        } else {
+            None
+        }
+    }
+
+    /// The number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the store is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterate over entries.
+    pub fn iter(&self) -> impl Iterator<Item = &CachedObjectEntry<K, V>> {
+        self.entries.iter()
+    }
+
+    /// Get all keys.
+    pub fn keys(&self) -> impl Iterator<Item = &K> {
+        self.entries.iter().map(|e| &e.key)
+    }
+
+    /// Get all values.
+    pub fn values(&self) -> impl Iterator<Item = &V> {
+        self.entries.iter().map(|e| &e.value)
+    }
+
+    /// Check if the store contains a key.
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.index.contains_key(key)
+    }
+}
+
+impl<K: Clone + Eq + std::hash::Hash, V: Clone> Default for CachedObjectStore<K, V> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A database column definition.
+///
+/// Ported from Ghidra's `DBObjectColumn`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbObjectColumn {
+    /// Column name.
+    pub name: String,
+    /// Column index.
+    pub index: usize,
+    /// Column type (as a string).
+    pub column_type: String,
+}
+
+impl DbObjectColumn {
+    /// Create a new column.
+    pub fn new(name: impl Into<String>, index: usize, column_type: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            index,
+            column_type: column_type.into(),
+        }
+    }
+}
+
+/// A cached object index for secondary lookups.
+///
+/// Ported from Ghidra's `DBCachedObjectIndex`.
+#[derive(Debug, Clone)]
+pub struct CachedObjectIndex<V: Clone> {
+    index: std::collections::BTreeMap<String, Vec<V>>,
+}
+
+impl<V: Clone> Default for CachedObjectIndex<V> {
+    fn default() -> Self {
+        Self {
+            index: std::collections::BTreeMap::new(),
+        }
+    }
+}
+
+impl<V: Clone> CachedObjectIndex<V> {
+    /// Create a new empty index.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an entry with the given key.
+    pub fn insert(&mut self, key: impl Into<String>, value: V) {
+        self.index.entry(key.into()).or_default().push(value);
+    }
+
+    /// Get all values for a given key.
+    pub fn get(&self, key: &str) -> Option<&Vec<V>> {
+        self.index.get(key)
+    }
+
+    /// Remove all entries for a key.
+    pub fn remove(&mut self, key: &str) -> Option<Vec<V>> {
+        self.index.remove(key)
+    }
+
+    /// The number of distinct keys.
+    pub fn num_keys(&self) -> usize {
+        self.index.len()
+    }
+
+    /// Iterate over all (key, values) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &Vec<V>)> {
+        self.index.iter()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -239,5 +522,94 @@ mod tests {
 
         assert_eq!(info.columns.len(), 2);
         assert_eq!(info.fields.len(), 1);
+    }
+
+    #[test]
+    fn test_directed_record_iterator_forward() {
+        let mut iter = DirectedRecordIterator::forward(vec![10, 20, 30]);
+        assert_eq!(iter.direction(), IterDirection::Forward);
+        let result = iter.collect_remaining();
+        assert_eq!(result, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn test_directed_record_iterator_backward() {
+        let mut iter = DirectedRecordIterator::backward(vec![10, 20, 30]);
+        assert_eq!(iter.direction(), IterDirection::Backward);
+        let result = iter.collect_remaining();
+        assert_eq!(result, vec![30, 20, 10]);
+    }
+
+    #[test]
+    fn test_directed_long_key_iterator_forward() {
+        let mut iter = DirectedLongKeyIterator::forward(vec![1, 2, 3]);
+        let result = iter.collect_remaining();
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_directed_long_key_iterator_backward() {
+        let mut iter = DirectedLongKeyIterator::backward(vec![1, 2, 3]);
+        let result = iter.collect_remaining();
+        assert_eq!(result, vec![3, 2, 1]);
+    }
+
+    #[test]
+    fn test_cached_object_store() {
+        let mut store = CachedObjectStore::new();
+        assert!(store.is_empty());
+
+        store.insert("key1".to_string(), 100);
+        store.insert("key2".to_string(), 200);
+        assert_eq!(store.len(), 2);
+        assert!(store.contains_key(&"key1".to_string()));
+        assert_eq!(store.get(&"key1".to_string()), Some(&100));
+        assert_eq!(store.get(&"key2".to_string()), Some(&200));
+        assert_eq!(store.get(&"key3".to_string()), None);
+
+        let removed = store.remove(&"key1".to_string());
+        assert_eq!(removed, Some(100));
+        assert_eq!(store.len(), 1);
+        assert!(!store.contains_key(&"key1".to_string()));
+    }
+
+    #[test]
+    fn test_cached_object_store_keys_values() {
+        let mut store = CachedObjectStore::new();
+        store.insert("a".to_string(), 1);
+        store.insert("b".to_string(), 2);
+
+        let keys: Vec<_> = store.keys().cloned().collect();
+        assert!(keys.contains(&"a".to_string()));
+        assert!(keys.contains(&"b".to_string()));
+
+        let values: Vec<_> = store.values().cloned().collect();
+        assert!(values.contains(&1));
+        assert!(values.contains(&2));
+    }
+
+    #[test]
+    fn test_db_object_column() {
+        let col = DbObjectColumn::new("thread_id", 0, "long");
+        assert_eq!(col.name, "thread_id");
+        assert_eq!(col.index, 0);
+        assert_eq!(col.column_type, "long");
+    }
+
+    #[test]
+    fn test_cached_object_index() {
+        let mut idx = CachedObjectIndex::new();
+        idx.insert("thread", 1);
+        idx.insert("thread", 2);
+        idx.insert("process", 3);
+
+        assert_eq!(idx.num_keys(), 2);
+        assert_eq!(idx.get("thread"), Some(&vec![1, 2]));
+        assert_eq!(idx.get("process"), Some(&vec![3]));
+        assert_eq!(idx.get("missing"), None);
+
+        let removed = idx.remove("thread");
+        assert_eq!(removed, Some(vec![1, 2]));
+        assert_eq!(idx.num_keys(), 1);
     }
 }

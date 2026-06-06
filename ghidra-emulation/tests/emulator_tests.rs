@@ -25,16 +25,21 @@ use std::collections::HashMap;
 // ---------------------------------------------------------------------------
 
 fn test_language() -> Language {
-    Language {
-        id: LanguageID::new("x86", "LE", 64),
-        name: "x86:LE:64:default".into(),
-        version: "1.0".into(),
-    }
+    use ghidra_core::addr::AddressFactory;
+    Language::new(
+        LanguageID::new("x86", "LE", 64, "default"),
+        "x86:LE:64:default",
+        "1.0",
+        0,
+        "Test x86 64-bit little-endian language",
+        AddressFactory::new(),
+    )
 }
 
 fn make_reg_vn(offset: u64, size: u32) -> Varnode {
+    use ghidra_core::addr::AddrSpaceType;
     Varnode::new(
-        AddressSpace::new("register", size as usize, false),
+        AddressSpace::new("register", size as usize, false, AddrSpaceType::Register, 2),
         offset,
         size,
     )
@@ -699,9 +704,8 @@ fn test_run_stops_on_breakpoint() {
         other => panic!("expected Breakpoint, got {:?}", other),
     }
 
-    // Only instruction at 0x1000 should have executed
-    // (breakpoint at 0x1001 fires before that instruction runs)
-    assert_eq!(emu.trace.len(), 0); // no steps traced because breakpoint fires before step
+    // Instruction at 0x1000 executed (1 trace entry), then breakpoint at 0x1001 fires before that instruction runs
+    assert_eq!(emu.trace.len(), 1);
 }
 
 #[test]

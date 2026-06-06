@@ -575,4 +575,361 @@ mod tests {
         let text = LabelListingHover.get_hover_text(&ctx);
         assert!(text.is_none());
     }
+
+    // -- Hover plugin wrapper tests --
+
+    #[test]
+    fn test_hover_plugin_wrappers_name() {
+        assert_eq!(DataTypeListingHoverPlugin::NAME, "DataTypeListingHoverPlugin");
+        assert_eq!(FunctionSignatureListingHoverPlugin::NAME, "FunctionSignatureListingHoverPlugin");
+        assert_eq!(LabelListingHoverPlugin::NAME, "LabelListingHoverPlugin");
+        assert_eq!(ReferenceListingHoverPlugin::NAME, "ReferenceListingHoverPlugin");
+        assert_eq!(ScalarOperandListingHoverPlugin::NAME, "ScalarOperandListingHoverPlugin");
+        assert_eq!(TruncatedTextListingHoverPlugin::NAME, "TruncatedTextListingHoverPlugin");
+        assert_eq!(ProgramAddressRelationshipListingHoverPlugin::NAME, "ProgramAddressRelationshipListingHoverPlugin");
+    }
+
+    #[test]
+    fn test_hover_plugin_wrappers_category() {
+        let p = DataTypeListingHoverPlugin::new();
+        assert_eq!(p.category(), "CODE_VIEWER");
+        assert!(p.is_enabled());
+    }
+
+    #[test]
+    fn test_hover_plugin_wrappers_service_name() {
+        let p = DataTypeListingHoverPlugin::new();
+        assert_eq!(p.service_provided(), "ListingHoverService");
+    }
+
+    #[test]
+    fn test_hover_plugin_wrappers_dispose() {
+        let mut p = FunctionSignatureListingHoverPlugin::new();
+        assert!(p.is_enabled());
+        p.dispose();
+        assert!(!p.is_enabled());
+    }
+
+    #[test]
+    fn test_hover_plugin_wrappers_description() {
+        let p = LabelListingHoverPlugin::new();
+        assert!(!p.description().is_empty());
+        assert!(p.description().contains("label") || p.description().contains("Label"));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hover Plugin wrappers
+//
+// These thin plugins register the concrete hover services with the tool.
+// Ported from the *ListingHoverPlugin.java classes in
+// `ghidra.app.plugin.core.codebrowser.hover`.
+// ---------------------------------------------------------------------------
+
+/// Trait for hover plugin wrappers that register a listing hover service.
+///
+/// Each concrete hover plugin creates its corresponding hover service and
+/// registers it as a `ListingHoverService` with the plugin tool.
+pub trait HoverPlugin: Send + Sync + std::fmt::Debug {
+    /// Plugin name constant.
+    const NAME: &'static str;
+
+    /// Plugin category (typically "CODE_VIEWER").
+    fn category(&self) -> &str {
+        "CODE_VIEWER"
+    }
+
+    /// Short description for the plugin.
+    fn description(&self) -> &str;
+
+    /// The name of the service this plugin provides.
+    fn service_provided(&self) -> &str {
+        "ListingHoverService"
+    }
+
+    /// Whether the plugin is currently enabled.
+    fn is_enabled(&self) -> bool;
+
+    /// Dispose of the plugin (unregister service).
+    fn dispose(&mut self);
+}
+
+/// Plugin that registers the [`DataTypeListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.DataTypeListingHoverPlugin`.
+#[derive(Debug)]
+pub struct DataTypeListingHoverPlugin {
+    enabled: bool,
+}
+
+impl DataTypeListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "DataTypeListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for DataTypeListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for DataTypeListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays data type information in a tooltip as you hover over a data type name in the Code Viewer."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+/// Plugin that registers the [`FunctionSignatureListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.FunctionSignatureListingHoverPlugin`.
+#[derive(Debug)]
+pub struct FunctionSignatureListingHoverPlugin {
+    enabled: bool,
+}
+
+impl FunctionSignatureListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "FunctionSignatureListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for FunctionSignatureListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for FunctionSignatureListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays function signature information in a tooltip as you hover over a function name in the Code Viewer."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+/// Plugin that registers the [`LabelListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.LabelListingHoverPlugin`.
+#[derive(Debug)]
+pub struct LabelListingHoverPlugin {
+    enabled: bool,
+}
+
+impl LabelListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "LabelListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for LabelListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for LabelListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays the fully qualified label name in a tooltip as you hover over a label in the Code Viewer."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+/// Plugin that registers the [`ReferenceListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.ReferenceListingHoverPlugin`.
+#[derive(Debug)]
+pub struct ReferenceListingHoverPlugin {
+    enabled: bool,
+}
+
+impl ReferenceListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "ReferenceListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for ReferenceListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for ReferenceListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays reference information in a tooltip as you hover over addresses in the Code Viewer."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+/// Plugin that registers the [`ScalarOperandListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.ScalarOperandListingHoverPlugin`.
+#[derive(Debug)]
+pub struct ScalarOperandListingHoverPlugin {
+    enabled: bool,
+}
+
+impl ScalarOperandListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "ScalarOperandListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for ScalarOperandListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for ScalarOperandListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays scalar operand values in multiple bases (decimal, hex, octal, binary, ASCII) in a tooltip."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+/// Plugin that registers the [`TruncatedTextListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.TruncatedTextListingHoverPlugin`.
+#[derive(Debug)]
+pub struct TruncatedTextListingHoverPlugin {
+    enabled: bool,
+}
+
+impl TruncatedTextListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "TruncatedTextListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for TruncatedTextListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for TruncatedTextListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays the full text when listing text is truncated in the Code Viewer."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
+}
+
+/// Plugin that registers the [`ProgramAddressRelationshipListingHover`] service.
+///
+/// Ported from `ghidra.app.plugin.core.codebrowser.hover.ProgramAddressRelationshipListingHoverPlugin`.
+#[derive(Debug)]
+pub struct ProgramAddressRelationshipListingHoverPlugin {
+    enabled: bool,
+}
+
+impl ProgramAddressRelationshipListingHoverPlugin {
+    /// Plugin name.
+    pub const NAME: &'static str = "ProgramAddressRelationshipListingHoverPlugin";
+
+    /// Create a new plugin instance.
+    pub fn new() -> Self {
+        Self { enabled: true }
+    }
+}
+
+impl Default for ProgramAddressRelationshipListingHoverPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl HoverPlugin for ProgramAddressRelationshipListingHoverPlugin {
+    const NAME: &'static str = Self::NAME;
+
+    fn description(&self) -> &str {
+        "Displays address relationship information in a tooltip as you hover over addresses in the Code Viewer."
+    }
+
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn dispose(&mut self) {
+        self.enabled = false;
+    }
 }

@@ -40,6 +40,12 @@ pub mod extra_actions;
 /// Ported from `ghidra.app.plugin.core.function` individual action classes.
 pub mod action_creators;
 
+/// Function signature editing dialog (AbstractEditFunctionSignatureDialog,
+/// EditFunctionSignatureDialog).
+///
+/// Ported from `ghidra.app.plugin.core.function` dialog classes.
+pub mod signature_dialog;
+
 /// Extended function analyzers (CreateThunkAnalyzer, SharedReturnAnalyzer,
 /// StackVariableAnalyzer, X86FunctionPurgeAnalyzer, ExternalEntryFunctionAnalyzer).
 ///
