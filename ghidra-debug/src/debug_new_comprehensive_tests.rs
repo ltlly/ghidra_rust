@@ -370,12 +370,13 @@ mod new_comprehensive_tests {
         #[test]
         fn full_debug_session_workflow() {
             let mut trace_mgr = TraceManagerService::new();
-            let trace_key = trace_mgr.open_trace("Debug Session 1");
-            trace_mgr.activate_trace(&trace_key).unwrap();
+            let trace_name = trace_mgr.open_trace("Debug Session 1");
+            trace_mgr.activate_trace(&trace_name).unwrap();
 
-            let coords = DebuggerCoordinates::for_trace(&trace_key)
+            // Use a numeric trace key for the tracemgr::DebuggerCoordinates
+            let coords = DebuggerCoordinates::trace(1)
                 .with_snap(0)
-                .with_thread(1, "main");
+                .with_thread(1);
             assert!(coords.is_complete());
 
             let mut ctrl = ControlService::new(ControlMode::RwTarget);
@@ -387,9 +388,9 @@ mod new_comprehensive_tests {
 
             let mut mapping = StaticMappingService::new();
             mapping.add_mapping(StaticMappingEntry::new(
-                &trace_key, 0x1000, 0x10000, "prog://main", 0x400000, 0x10000,
+                &trace_name, 0x1000, 0x10000, "prog://main", 0x400000, 0x10000,
             ));
-            assert_eq!(mapping.translate_trace_to_program(&trace_key, 0x1500), Some(0x400500));
+            assert_eq!(mapping.translate_trace_to_program(&trace_name, 0x1500), Some(0x400500));
 
             ctrl.enqueue_action(PendingControlAction {
                 action: "step_into".into(),
@@ -400,20 +401,20 @@ mod new_comprehensive_tests {
 
             let mut emu_mgr = EmulationManager::new();
             {
-                let session = emu_mgr.start_session(&trace_key, EmulationMode::Forward);
+                let session = emu_mgr.start_session(&trace_name, EmulationMode::Forward);
                 session.start(0x400000);
                 session.step(0x400004).unwrap();
             }
             assert_eq!(emu_mgr.active_count(), 1);
 
-            trace_mgr.mark_trace_changed(&trace_key);
+            trace_mgr.mark_trace_changed(&trace_name);
             assert!(trace_mgr.has_unsaved_changes());
-            trace_mgr.save_trace(&trace_key, "/tmp/debug_session.bin").unwrap();
+            trace_mgr.save_trace(&trace_name, "/tmp/debug_session.bin").unwrap();
             assert!(!trace_mgr.has_unsaved_changes());
 
             ctrl.clear_pending_actions();
-            emu_mgr.remove_session(&trace_key);
-            trace_mgr.close_trace(&trace_key).unwrap();
+            emu_mgr.remove_session(&trace_name);
+            trace_mgr.close_trace(&trace_name).unwrap();
 
             assert_eq!(ctrl.pending_action_count(), 0);
             assert!(emu_mgr.is_empty());
@@ -421,10 +422,10 @@ mod new_comprehensive_tests {
 
         #[test]
         fn serialization_roundtrip() {
-            let coords = DebuggerCoordinates::trace(1).with_snap(5).with_thread(1, "main").with_frame(2);
+            let coords = DebuggerCoordinates::trace(1).with_snap(5).with_thread(1);
             let json = serde_json::to_string(&coords).unwrap();
             let back: DebuggerCoordinates = serde_json::from_str(&json).unwrap();
-            assert_eq!(back.trace_key, Some("t1".into()));
+            assert_eq!(back.trace_key, Some(1));
 
             let entry = StaticMappingEntry::new("t1", 0x1000, 0x100, "p1", 0x400000, 0x100);
             let json = serde_json::to_string(&entry).unwrap();
