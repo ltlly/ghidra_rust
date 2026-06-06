@@ -24,6 +24,20 @@ pub enum TraceSymbolKind {
     Equate,
 }
 
+impl TraceSymbolKind {
+    /// Get all symbol kind variants.
+    pub fn all_kinds() -> &'static [TraceSymbolKind] {
+        &[
+            TraceSymbolKind::Label,
+            TraceSymbolKind::Namespace,
+            TraceSymbolKind::Class,
+            TraceSymbolKind::Function,
+            TraceSymbolKind::Reference,
+            TraceSymbolKind::Equate,
+        ]
+    }
+}
+
 /// A symbol in the trace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceSymbol {

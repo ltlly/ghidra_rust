@@ -185,6 +185,75 @@ pub mod viewer;
 // LoadException, AddressSetPartitioner, and library resolution.
 pub mod app_util_opinion;
 
+// -- New modules ported from Ghidra's Features/Base remaining packages --
+/// Quick-fix framework: executable items for bulk program modifications.
+/// Ported from `ghidra.features.base.quickfix`.
+pub mod quickfix;
+
+/// Search-and-replace framework across program elements.
+/// Ported from `ghidra.features.base.replace`.
+pub mod replace;
+
+/// Ghidra-specific values map for typed parameter storage.
+/// Ported from `ghidra.features.base.values`.
+pub mod values;
+
+/// Ghidra virtual file system (GFileSystem) framework.
+/// Ported from `ghidra.formats.gfilesystem`.
+pub mod gfilesystem;
+
+/// Framework main: application configuration, data-tree dialogs, project browsing.
+/// Ported from `ghidra.framework.main`.
+pub mod framework_main;
+
+/// Importer plugin: language selection, import options, import utilities.
+/// Ported from `ghidra.plugin.importer`.
+pub mod plugin_importer;
+
+/// Batch import framework for importing multiple files into a Ghidra project.
+/// Ported from `ghidra.plugins.importer.batch`.
+pub mod batch_import;
+
+/// Program graph types and display options.
+/// Ported from `ghidra.graph`.
+pub mod graph_types;
+
+/// Byte-based trie with Aho-Corasick multi-pattern search.
+/// Ported from `ghidra.util.search.trie`.
+pub mod trie;
+
+/// ASCII and character-set utilities for binary analysis.
+/// Ported from `ghidra.util.ascii`.
+pub mod util_ascii;
+
+/// Search utilities including user-input-to-regex conversion.
+/// Ported from `ghidra.util.search`.
+pub mod util_search;
+
+/// Data structure utilities (accumulators, selections).
+/// Ported from `ghidra.util.data`.
+pub mod util_data;
+
+/// Analysis state and context management for function analysis.
+/// Ported from `ghidra.util.state`.
+pub mod analysis_state;
+
+/// String search utilities for program analysis.
+/// Ported from `ghidra.program.util.string`.
+pub mod program_util_string;
+
+/// Program database abstractions and property management.
+/// Ported from `ghidra.program.database`.
+pub mod program_database;
+
+/// Flat API for program interaction (scripting convenience).
+/// Ported from `ghidra.program.flatapi`.
+pub mod program_flatapi;
+
+/// Program examiner for analysis summary and statistics.
+/// Ported from `ghidra.program.examiner`.
+pub mod program_examiner;
+
 // Ported from `ghidra.program.util` -- program diff, memory diff, function utilities,
 // symbolic propagator, string searcher, and address translation.
 pub mod program_util;

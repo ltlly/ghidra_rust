@@ -9,6 +9,9 @@ pub mod results;
 pub mod search;
 pub mod overview_model;
 
+// Extended BSim filter types (Architecture, Blank, Date, Category, FunctionTag, etc.)
+pub mod filter_extended;
+
 /// BSim search configuration.
 #[derive(Debug, Clone)]
 pub struct BSimSearchConfig {

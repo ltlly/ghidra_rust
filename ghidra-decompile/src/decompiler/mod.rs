@@ -121,6 +121,9 @@ pub mod decompiler_provider;
 pub mod analysis_commands;
 pub mod pcode_graph_tasks;
 
+// Extended Clang token types (ClangCommentToken, ClangCaseToken, ClangFieldToken, etc.)
+pub mod clang_token_extended;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

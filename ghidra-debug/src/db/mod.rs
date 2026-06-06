@@ -372,3 +372,14 @@ pub mod target_iface_impl;
 // Core DB modules (ported from trace/database)
 pub mod trace_db_main;
 pub mod trace_db_manager_impl;
+
+// New modules from remaining Debug module port
+pub mod trace_db_object_write_cache;
+pub mod trace_db_symbol_multi_views;
+
+pub use trace_db_object_write_cache::{
+    CacheKey, CacheOperation, CachedChange, ObjectValueWriteCache,
+};
+pub use trace_db_symbol_multi_views::{
+    MultiTypeFilter, MultiTypeSymbolEntry, MultiTypeSymbolViewBuilder,
+};

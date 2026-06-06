@@ -18,6 +18,10 @@ pub mod theme_events;
 pub mod web_colors;
 pub mod dynamic_help_location;
 
+// Missing GUI types: OptionsChangeListener, property editors, theme event wrappers,
+// icon wrappers, task monitors, SwingRunnable
+pub mod missing_gui_types;
+
 pub use bean_utils::{OptionEditorModel, OptionEditorPanel, PropertyChangeEvent, PropertyValue};
 pub use color_utils::ColorUtils;
 pub use file_chooser::{ExtensionFileFilter, GhidraFileChooserModel, GhidraFileFilter};

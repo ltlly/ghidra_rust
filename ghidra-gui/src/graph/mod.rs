@@ -63,6 +63,9 @@ pub mod viewer_utils;
 // New module: missing graph types (animator jobs, mouse plugins, Jung adapters, etc.)
 pub mod graph_missing;
 
+// Extended graph algorithms (descendants, ancestors, SCC, complexity depth, subgraph)
+pub mod graph_algorithms_ext;
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::hash::Hash;
