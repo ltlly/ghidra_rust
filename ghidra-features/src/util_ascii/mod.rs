@@ -319,19 +319,21 @@ mod tests {
 
     #[test]
     fn test_find_ascii_strings() {
+        //                0    1    2    3    4    5    6    7    8    9   10   11   12   13   14   15
         let data = b"\x00\x00Hello\x00\x01\x02World\x00";
         let strings = find_ascii_strings(data, 3);
         assert_eq!(strings.len(), 2);
-        assert_eq!(strings[0], (2, 5)); // "Hello"
-        assert_eq!(strings[1], (9, 5)); // "World"
+        assert_eq!(strings[0], (2, 5)); // "Hello" at bytes 2..7
+        assert_eq!(strings[1], (10, 5)); // "World" at bytes 10..15
     }
 
     #[test]
     fn test_find_ascii_strings_min_length() {
+        //            0    1    2    3    4    5    6    7
         let data = b"AB\x00CDEF";
         let strings = find_ascii_strings(data, 4);
         assert_eq!(strings.len(), 1);
-        assert_eq!(strings[0], (4, 4)); // "CDEF"
+        assert_eq!(strings[0], (3, 4)); // "CDEF" at bytes 3..7
     }
 
     #[test]

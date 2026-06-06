@@ -157,29 +157,18 @@ impl StringSearcher {
         }
 
         let mut i = 0;
-        while i <= data.len() - width {
+        while i + width <= data.len() {
             let start = i;
             let mut chars_found = 0;
 
-            while i <= data.len() - width {
-                let ch = match self.char_width {
-                    CharWidth::One => {
-                        let b = data[i];
-                        if is_printable(b, self.include_extended) {
-                            Some(b as char)
-                        } else {
-                            None
-                        }
-                    }
+            while i + width <= data.len() {
+                let printable = match self.char_width {
+                    CharWidth::One => is_printable(data[i], self.include_extended),
                     CharWidth::Two => {
                         let lo = data[i] as u16;
                         let hi = data[i + 1] as u16;
                         let code = lo | (hi << 8);
-                        if code >= 0x20 && code < 0x7F {
-                            char::from_u32(code as u32)
-                        } else {
-                            None
-                        }
+                        (0x20..0x7F).contains(&code)
                     }
                     CharWidth::Four => {
                         let b0 = data[i] as u32;
@@ -187,18 +176,13 @@ impl StringSearcher {
                         let b2 = data[i + 2] as u32;
                         let b3 = data[i + 3] as u32;
                         let code = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-                        if code >= 0x20 && code < 0x7F {
-                            char::from_u32(code)
-                        } else {
-                            None
-                        }
+                        (0x20..0x7F).contains(&code)
                     }
                 };
 
-                if let Some(c) = ch {
+                if printable {
                     chars_found += 1;
                     i += width;
-                    let _ = c; // consume the character
                 } else {
                     break;
                 }
@@ -225,6 +209,12 @@ impl StringSearcher {
                 if !callback.found_string(&found) {
                     return;
                 }
+            }
+
+            // If the inner loop found no characters (non-printable at start position),
+            // advance by 1 to avoid infinite re-entry at the same position.
+            if chars_found == 0 {
+                i += 1;
             }
         }
     }
