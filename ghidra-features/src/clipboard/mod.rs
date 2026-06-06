@@ -306,6 +306,110 @@ impl ClipboardManager {
     }
 }
 
+// ---------------------------------------------------------------------------
+// CodeBrowserClipboardProvider
+// ---------------------------------------------------------------------------
+
+/// Clipboard provider for the code browser listing.
+///
+/// Ported from `ghidra.app.plugin.core.clipboard.CodeBrowserClipboardProvider`.
+#[derive(Debug, Clone)]
+pub struct CodeBrowserClipboardProvider {
+    /// The current clipboard content.
+    pub content: Option<ClipboardEntry>,
+    /// Whether the provider supports paste.
+    pub paste_enabled: bool,
+    /// The format to use for paste operations.
+    pub paste_format: PasteFormat,
+}
+
+/// Format for paste operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PasteFormat {
+    /// Paste as raw bytes.
+    Bytes,
+    /// Paste as disassembly.
+    Disassembly,
+    /// Paste as data.
+    Data,
+}
+
+impl CodeBrowserClipboardProvider {
+    /// Create a new clipboard provider.
+    pub fn new() -> Self {
+        Self {
+            content: None,
+            paste_enabled: false,
+            paste_format: PasteFormat::Bytes,
+        }
+    }
+
+    /// Set the clipboard content.
+    pub fn set_content(&mut self, entry: ClipboardEntry) {
+        self.paste_enabled = true;
+        self.content = Some(entry);
+    }
+
+    /// Get the clipboard content.
+    pub fn get_content(&self) -> Option<&ClipboardEntry> {
+        self.content.as_ref()
+    }
+
+    /// Clear the clipboard.
+    pub fn clear(&mut self) {
+        self.content = None;
+        self.paste_enabled = false;
+    }
+}
+
+impl Default for CodeBrowserClipboardProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CopyPasteSpecialDialog
+// ---------------------------------------------------------------------------
+
+/// Dialog for selecting special paste options.
+///
+/// Ported from `ghidra.app.plugin.core.clipboard.CopyPasteSpecialDialog`.
+#[derive(Debug, Clone)]
+pub struct CopyPasteSpecialDialog {
+    /// The selected paste format.
+    pub format: PasteFormat,
+    /// Whether to include comments in the paste.
+    pub include_comments: bool,
+    /// Whether to include labels in the paste.
+    pub include_labels: bool,
+    /// Whether the dialog was confirmed.
+    pub confirmed: bool,
+}
+
+impl CopyPasteSpecialDialog {
+    /// Create a new copy/paste special dialog.
+    pub fn new() -> Self {
+        Self {
+            format: PasteFormat::Bytes,
+            include_comments: false,
+            include_labels: false,
+            confirmed: false,
+        }
+    }
+
+    /// Confirm the dialog.
+    pub fn confirm(&mut self) {
+        self.confirmed = true;
+    }
+}
+
+impl Default for CopyPasteSpecialDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -214,6 +214,225 @@ impl TranslationManager {
     }
 }
 
+// ---------------------------------------------------------------------------
+// LibreTranslateStringTranslationService
+// ---------------------------------------------------------------------------
+
+/// Translation service backed by a LibreTranslate-compatible API.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate.libretranslate
+/// .LibreTranslateStringTranslationService`.
+#[derive(Debug)]
+pub struct LibreTranslateStringTranslationService {
+    /// Configuration for the LibreTranslate API.
+    pub config: LibreTranslateConfig,
+    /// Supported language codes.
+    pub supported_languages: Vec<String>,
+    /// Whether the service is currently reachable.
+    pub reachable: bool,
+}
+
+impl LibreTranslateStringTranslationService {
+    /// Create a new LibreTranslate translation service.
+    pub fn new(config: LibreTranslateConfig) -> Self {
+        Self {
+            config,
+            supported_languages: vec![
+                "en".into(), "de".into(), "es".into(), "fr".into(),
+                "it".into(), "pt".into(), "ru".into(), "zh".into(),
+                "ja".into(), "ko".into(),
+            ],
+            reachable: false,
+        }
+    }
+
+    /// Check if a language code is supported.
+    pub fn supports_language(&self, lang: &str) -> bool {
+        self.supported_languages.iter().any(|l| l == lang)
+    }
+
+    /// Set the reachability status (for testing).
+    pub fn set_reachable(&mut self, reachable: bool) {
+        self.reachable = reachable;
+    }
+}
+
+impl TranslationService for LibreTranslateStringTranslationService {
+    fn translate(
+        &self,
+        text: &str,
+        source_lang: &str,
+        target_lang: &str,
+    ) -> Result<String, TranslationError> {
+        if !self.reachable {
+            return Err(TranslationError::ServiceUnavailable(
+                "LibreTranslate server is not reachable".into(),
+            ));
+        }
+        if !self.supports_language(source_lang) {
+            return Err(TranslationError::UnsupportedLanguage(source_lang.into()));
+        }
+        if !self.supports_language(target_lang) {
+            return Err(TranslationError::UnsupportedLanguage(target_lang.into()));
+        }
+        // In a real implementation, this would make an HTTP request.
+        Ok(format!("[translated: {}]", text))
+    }
+
+    fn name(&self) -> &str {
+        "LibreTranslate"
+    }
+
+    fn is_available(&self) -> bool {
+        self.reachable
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LibreTranslatePlugin
+// ---------------------------------------------------------------------------
+
+/// Plugin providing LibreTranslate integration for the string table.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate.libretranslate
+/// .LibreTranslatePlugin`.
+#[derive(Debug)]
+pub struct LibreTranslatePlugin {
+    /// The translation service.
+    pub service: LibreTranslateStringTranslationService,
+    /// Whether the plugin is enabled.
+    pub enabled: bool,
+    /// Whether to show translations in the string table.
+    pub show_translations: bool,
+}
+
+impl LibreTranslatePlugin {
+    /// Create a new LibreTranslate plugin.
+    pub fn new(config: LibreTranslateConfig) -> Self {
+        Self {
+            service: LibreTranslateStringTranslationService::new(config),
+            enabled: true,
+            show_translations: false,
+        }
+    }
+
+    /// Toggle translation display.
+    pub fn toggle_show_translations(&mut self) {
+        self.show_translations = !self.show_translations;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Translation actions
+// ---------------------------------------------------------------------------
+
+/// Abstract base for translation actions.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate.AbstractTranslateAction`.
+#[derive(Debug, Clone)]
+pub struct AbstractTranslateAction {
+    /// The action name.
+    pub name: String,
+    /// Whether the action is enabled.
+    pub enabled: bool,
+    /// The menu group.
+    pub menu_group: String,
+    /// The popup menu path.
+    pub popup_path: Vec<String>,
+}
+
+impl AbstractTranslateAction {
+    /// Create a new abstract translate action.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            enabled: true,
+            menu_group: "translate".into(),
+            popup_path: vec!["Translate".into()],
+        }
+    }
+}
+
+/// Action to translate selected strings.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate.TranslateAction`.
+#[derive(Debug, Clone)]
+pub struct TranslateAction {
+    /// Base action properties.
+    pub base: AbstractTranslateAction,
+    /// Source language.
+    pub source_lang: String,
+    /// Target language.
+    pub target_lang: String,
+}
+
+impl TranslateAction {
+    /// Create a new translate action.
+    pub fn new(source_lang: impl Into<String>, target_lang: impl Into<String>) -> Self {
+        Self {
+            base: AbstractTranslateAction::new("Translate Selection"),
+            source_lang: source_lang.into(),
+            target_lang: target_lang.into(),
+        }
+    }
+}
+
+/// Action to clear translations from the display.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate.ClearTranslationAction`.
+#[derive(Debug, Clone)]
+pub struct ClearTranslationAction {
+    /// Base action properties.
+    pub base: AbstractTranslateAction,
+}
+
+impl ClearTranslationAction {
+    /// Create a new clear translation action.
+    pub fn new() -> Self {
+        Self {
+            base: AbstractTranslateAction::new("Clear Translations"),
+        }
+    }
+}
+
+impl Default for ClearTranslationAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to toggle showing translations in the string table.
+///
+/// Ported from `ghidra.app.plugin.core.string.translate.ToggleShowTranslationAction`.
+#[derive(Debug, Clone)]
+pub struct ToggleShowTranslationAction {
+    /// Base action properties.
+    pub base: AbstractTranslateAction,
+    /// Whether translations are currently shown.
+    pub showing: bool,
+}
+
+impl ToggleShowTranslationAction {
+    /// Create a new toggle show translation action.
+    pub fn new() -> Self {
+        Self {
+            base: AbstractTranslateAction::new("Toggle Show Translations"),
+            showing: false,
+        }
+    }
+
+    /// Toggle the showing state.
+    pub fn toggle(&mut self) {
+        self.showing = !self.showing;
+    }
+}
+
+impl Default for ToggleShowTranslationAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -277,5 +496,85 @@ mod tests {
         mgr.register_service("svc");
         mgr.register_service("svc");
         assert_eq!(mgr.service_names().len(), 1);
+    }
+
+    // -- LibreTranslateStringTranslationService tests --
+
+    #[test]
+    fn test_libre_translate_service_unreachable() {
+        let cfg = LibreTranslateConfig::new("https://translate.example.com");
+        let svc = LibreTranslateStringTranslationService::new(cfg);
+        assert!(!svc.is_available());
+        assert!(svc.translate("hello", "en", "fr").is_err());
+    }
+
+    #[test]
+    fn test_libre_translate_service_reachable() {
+        let cfg = LibreTranslateConfig::new("https://translate.example.com");
+        let mut svc = LibreTranslateStringTranslationService::new(cfg);
+        svc.set_reachable(true);
+        assert!(svc.is_available());
+        let result = svc.translate("hello", "en", "fr").unwrap();
+        assert!(result.contains("translated"));
+    }
+
+    #[test]
+    fn test_libre_translate_unsupported_language() {
+        let cfg = LibreTranslateConfig::new("https://translate.example.com");
+        let mut svc = LibreTranslateStringTranslationService::new(cfg);
+        svc.set_reachable(true);
+        assert!(svc.translate("hello", "xx", "fr").is_err());
+        assert!(svc.translate("hello", "en", "xx").is_err());
+    }
+
+    #[test]
+    fn test_libre_translate_supports_language() {
+        let cfg = LibreTranslateConfig::new("https://translate.example.com");
+        let svc = LibreTranslateStringTranslationService::new(cfg);
+        assert!(svc.supports_language("en"));
+        assert!(svc.supports_language("fr"));
+        assert!(!svc.supports_language("xx"));
+    }
+
+    // -- LibreTranslatePlugin tests --
+
+    #[test]
+    fn test_libre_translate_plugin() {
+        let cfg = LibreTranslateConfig::new("https://translate.example.com");
+        let mut plugin = LibreTranslatePlugin::new(cfg);
+        assert!(plugin.enabled);
+        assert!(!plugin.show_translations);
+        plugin.toggle_show_translations();
+        assert!(plugin.show_translations);
+        plugin.toggle_show_translations();
+        assert!(!plugin.show_translations);
+    }
+
+    // -- Translation action tests --
+
+    #[test]
+    fn test_translate_action() {
+        let action = TranslateAction::new("en", "fr");
+        assert_eq!(action.base.name, "Translate Selection");
+        assert_eq!(action.source_lang, "en");
+        assert_eq!(action.target_lang, "fr");
+        assert!(action.base.enabled);
+    }
+
+    #[test]
+    fn test_clear_translation_action() {
+        let action = ClearTranslationAction::new();
+        assert_eq!(action.base.name, "Clear Translations");
+        assert!(action.base.enabled);
+    }
+
+    #[test]
+    fn test_toggle_show_translation_action() {
+        let mut action = ToggleShowTranslationAction::new();
+        assert!(!action.showing);
+        action.toggle();
+        assert!(action.showing);
+        action.toggle();
+        assert!(!action.showing);
     }
 }

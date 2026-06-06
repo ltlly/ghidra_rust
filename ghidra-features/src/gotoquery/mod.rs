@@ -511,6 +511,39 @@ impl GoToQueryResultsTableModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// DefaultNavigatableLocationMemento
+// ---------------------------------------------------------------------------
+
+/// Default memento for saving and restoring navigatable locations.
+///
+/// Ported from `ghidra.app.plugin.core.gotoquery.DefaultNavigatableLocationMemento`.
+#[derive(Debug, Clone)]
+pub struct DefaultNavigatableLocationMemento {
+    /// The program name.
+    pub program_name: String,
+    /// The address.
+    pub address: u64,
+    /// The component path (for composite data).
+    pub component_path: Vec<u64>,
+}
+
+impl DefaultNavigatableLocationMemento {
+    /// Create a new memento.
+    pub fn new(program_name: impl Into<String>, address: u64) -> Self {
+        Self {
+            program_name: program_name.into(),
+            address,
+            component_path: Vec::new(),
+        }
+    }
+
+    /// Add a component path entry.
+    pub fn add_component(&mut self, offset: u64) {
+        self.component_path.push(offset);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

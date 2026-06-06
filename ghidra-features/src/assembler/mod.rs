@@ -214,6 +214,39 @@ impl AssemblerModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AbstractPatchAction
+// ---------------------------------------------------------------------------
+
+/// Abstract base for assembly patch actions.
+///
+/// Ported from `ghidra.app.plugin.core.assembler.AbstractPatchAction`.
+#[derive(Debug, Clone)]
+pub struct AbstractPatchAction {
+    /// The action name.
+    pub name: String,
+    /// Whether the action is enabled.
+    pub enabled: bool,
+    /// The target address for the patch.
+    pub target_address: Option<u64>,
+}
+
+impl AbstractPatchAction {
+    /// Create a new patch action.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            enabled: true,
+            target_address: None,
+        }
+    }
+
+    /// Set the target address.
+    pub fn set_target(&mut self, address: u64) {
+        self.target_address = Some(address);
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

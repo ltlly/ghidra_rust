@@ -352,6 +352,7 @@ pub mod action;
 pub mod breakpoint;
 pub mod colors;
 pub mod console;
+pub mod control;
 pub mod copying;
 pub mod diff;
 pub mod internal;

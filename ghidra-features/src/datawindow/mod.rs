@@ -439,6 +439,70 @@ impl Default for DataWindowPlugin {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Data-to-Address table row mappers
+// ---------------------------------------------------------------------------
+
+/// Maps data window rows to address table rows.
+///
+/// Ported from `ghidra.app.plugin.core.datawindow
+/// .DataToAddressTableRowMapper`.
+#[derive(Debug, Clone)]
+pub struct DataToAddressTableRowMapper {
+    /// The mapper name.
+    pub name: String,
+}
+
+impl DataToAddressTableRowMapper {
+    /// Create a new mapper.
+    pub fn new() -> Self {
+        Self {
+            name: "DataToAddress".into(),
+        }
+    }
+
+    /// Map a data row to an address.
+    pub fn map(&self, row: &DataRowObject) -> u64 {
+        row.address_key
+    }
+}
+
+impl Default for DataToAddressTableRowMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Maps data window rows to program location table rows.
+///
+/// Ported from `ghidra.app.plugin.core.datawindow
+/// .DataToProgramLocationTableRowMapper`.
+#[derive(Debug, Clone)]
+pub struct DataToProgramLocationTableRowMapper {
+    /// The mapper name.
+    pub name: String,
+}
+
+impl DataToProgramLocationTableRowMapper {
+    /// Create a new mapper.
+    pub fn new() -> Self {
+        Self {
+            name: "DataToProgramLocation".into(),
+        }
+    }
+
+    /// Map a data row to a program location (address + component path).
+    pub fn map(&self, row: &DataRowObject) -> (u64, Vec<u64>) {
+        (row.address_key, Vec::new())
+    }
+}
+
+impl Default for DataToProgramLocationTableRowMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================

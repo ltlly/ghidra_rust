@@ -138,6 +138,73 @@ pub use crate::base::analyzer::StoredAnalyzerTimes;
 pub use crate::base::analyzer::TransientProgramProperties;
 pub use crate::base::analyzer::AnalysisOptionsUpdater;
 
+// ---------------------------------------------------------------------------
+// PefAnalyzer / PefDebugAnalyzer
+// ---------------------------------------------------------------------------
+
+/// Analyzer for PEF (Preferred Executable Format) binaries.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.PefAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct PefAnalyzer {
+    /// Analyzer name.
+    pub name: String,
+    /// Whether the analyzer is enabled.
+    pub enabled: bool,
+    /// Analysis priority.
+    pub priority: i32,
+}
+
+impl PefAnalyzer {
+    /// Create a new PEF analyzer.
+    pub fn new() -> Self {
+        Self {
+            name: "PEF Analyzer".into(),
+            enabled: true,
+            priority: 0,
+        }
+    }
+}
+
+impl Default for PefAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Analyzer for PEF debug information.
+///
+/// Ported from `ghidra.app.plugin.core.analysis.PefDebugAnalyzer`.
+#[derive(Debug, Clone)]
+pub struct PefDebugAnalyzer {
+    /// Analyzer name.
+    pub name: String,
+    /// Whether the analyzer is enabled.
+    pub enabled: bool,
+    /// Whether to create labels from debug info.
+    pub create_labels: bool,
+    /// Whether to create functions from debug info.
+    pub create_functions: bool,
+}
+
+impl PefDebugAnalyzer {
+    /// Create a new PEF debug analyzer.
+    pub fn new() -> Self {
+        Self {
+            name: "PEF Debug Analyzer".into(),
+            enabled: true,
+            create_labels: true,
+            create_functions: true,
+        }
+    }
+}
+
+impl Default for PefDebugAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

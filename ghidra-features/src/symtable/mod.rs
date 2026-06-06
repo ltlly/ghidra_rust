@@ -126,6 +126,43 @@ impl SymbolDisplayInfo {
 }
 
 // ---------------------------------------------------------------------------
+// ReferenceTableContext
+// ---------------------------------------------------------------------------
+
+/// Context for the reference table in the symbol table.
+///
+/// Ported from `ghidra.app.plugin.core.symtable.ReferenceTableContext`.
+#[derive(Debug, Clone)]
+pub struct ReferenceTableContext {
+    /// The selected symbol name.
+    pub symbol_name: String,
+    /// The selected symbol address.
+    pub address: u64,
+    /// Whether the context has a selection.
+    pub has_selection: bool,
+    /// Selected reference addresses.
+    pub selected_references: Vec<u64>,
+}
+
+impl ReferenceTableContext {
+    /// Create a new reference table context.
+    pub fn new(symbol_name: impl Into<String>, address: u64) -> Self {
+        Self {
+            symbol_name: symbol_name.into(),
+            address,
+            has_selection: false,
+            selected_references: Vec::new(),
+        }
+    }
+
+    /// Add a selected reference.
+    pub fn select_reference(&mut self, address: u64) {
+        self.selected_references.push(address);
+        self.has_selection = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

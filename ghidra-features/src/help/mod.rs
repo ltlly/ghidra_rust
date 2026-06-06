@@ -258,6 +258,53 @@ impl HelpService for HelpModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AboutProgramPlugin
+// ---------------------------------------------------------------------------
+
+/// Plugin providing the "About Program" dialog.
+///
+/// Ported from `ghidra.app.plugin.core.help.AboutProgramPlugin`.
+#[derive(Debug, Clone)]
+pub struct AboutProgramPlugin {
+    /// The program name.
+    pub program_name: String,
+    /// The program file path.
+    pub file_path: Option<String>,
+    /// The language ID.
+    pub language_id: Option<String>,
+    /// The compiler specification ID.
+    pub compiler_spec_id: Option<String>,
+    /// Program creation date.
+    pub created_date: Option<String>,
+    /// Program properties.
+    pub properties: Vec<(String, String)>,
+}
+
+impl AboutProgramPlugin {
+    /// Create a new about program plugin.
+    pub fn new(program_name: impl Into<String>) -> Self {
+        Self {
+            program_name: program_name.into(),
+            file_path: None,
+            language_id: None,
+            compiler_spec_id: None,
+            created_date: None,
+            properties: Vec::new(),
+        }
+    }
+
+    /// Add a property.
+    pub fn add_property(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.properties.push((key.into(), value.into()));
+    }
+
+    /// Get a property value by key.
+    pub fn get_property(&self, key: &str) -> Option<&str> {
+        self.properties.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

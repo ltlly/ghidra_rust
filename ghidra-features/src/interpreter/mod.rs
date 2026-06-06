@@ -1093,6 +1093,183 @@ impl CodeCompletionModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// CompletionWindowTrigger
+// ---------------------------------------------------------------------------
+
+/// Describes what triggered the code completion window.
+///
+/// Ported from `ghidra.app.plugin.core.interpreter.CompletionWindowTrigger`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompletionWindowTrigger {
+    /// User explicitly requested completion (e.g., Ctrl+Space).
+    Explicit,
+    /// Completion triggered by typing a dot (member access).
+    DotAccess,
+    /// Completion triggered by typing a space after a keyword.
+    KeywordSpace,
+    /// Completion triggered by typing an open parenthesis.
+    ParenOpen,
+}
+
+impl CompletionWindowTrigger {
+    /// Whether this trigger should automatically select the first candidate.
+    pub fn auto_select(&self) -> bool {
+        matches!(self, Self::DotAccess | Self::ParenOpen)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InterpreterComponentProvider
+// ---------------------------------------------------------------------------
+
+/// Component provider for the interpreter panel window.
+///
+/// Ported from `ghidra.app.plugin.core.interpreter.InterpreterComponentProvider`.
+#[derive(Debug)]
+pub struct InterpreterComponentProvider {
+    /// The provider title.
+    pub title: String,
+    /// Whether the provider is visible.
+    pub visible: bool,
+    /// The current interpreter language.
+    pub language: String,
+    /// Window position and size.
+    pub window_bounds: WindowBounds,
+}
+
+/// Window position and size.
+#[derive(Debug, Clone)]
+pub struct WindowBounds {
+    /// X position.
+    pub x: i32,
+    /// Y position.
+    pub y: i32,
+    /// Width.
+    pub width: i32,
+    /// Height.
+    pub height: i32,
+}
+
+impl Default for WindowBounds {
+    fn default() -> Self {
+        Self {
+            x: 100,
+            y: 100,
+            width: 600,
+            height: 400,
+        }
+    }
+}
+
+impl InterpreterComponentProvider {
+    /// Create a new interpreter component provider.
+    pub fn new(title: impl Into<String>, language: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            visible: false,
+            language: language.into(),
+            window_bounds: WindowBounds::default(),
+        }
+    }
+
+    /// Show the provider.
+    pub fn show(&mut self) {
+        self.visible = true;
+    }
+
+    /// Hide the provider.
+    pub fn hide(&mut self) {
+        self.visible = false;
+    }
+
+    /// Whether the provider is visible.
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InterpreterConnection
+// ---------------------------------------------------------------------------
+
+/// Represents a connection to an interpreter process.
+///
+/// Ported from `ghidra.app.plugin.core.interpreter.InterpreterConnection`.
+#[derive(Debug)]
+pub struct InterpreterConnection {
+    /// The interpreter language.
+    pub language: String,
+    /// Whether the connection is active.
+    pub connected: bool,
+    /// Process ID of the interpreter, if running.
+    pub process_id: Option<u32>,
+    /// Buffer for pending output.
+    pub output_buffer: Vec<String>,
+}
+
+impl InterpreterConnection {
+    /// Create a new interpreter connection.
+    pub fn new(language: impl Into<String>) -> Self {
+        Self {
+            language: language.into(),
+            connected: false,
+            process_id: None,
+            output_buffer: Vec::new(),
+        }
+    }
+
+    /// Connect to the interpreter.
+    pub fn connect(&mut self) {
+        self.connected = true;
+    }
+
+    /// Disconnect from the interpreter.
+    pub fn disconnect(&mut self) {
+        self.connected = false;
+        self.process_id = None;
+    }
+
+    /// Whether the connection is active.
+    pub fn is_connected(&self) -> bool {
+        self.connected
+    }
+
+    /// Send a command to the interpreter.
+    pub fn send_command(&mut self, command: &str) -> Result<(), String> {
+        if !self.connected {
+            return Err("Not connected".into());
+        }
+        // In a real implementation, this would send to the interpreter process.
+        self.output_buffer.push(format!("> {}", command));
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InterpreterPanelService
+// ---------------------------------------------------------------------------
+
+/// Service interface for the interpreter panel.
+///
+/// Ported from `ghidra.app.plugin.core.interpreter.InterpreterPanelService`.
+pub trait InterpreterPanelService: Send + Sync {
+    /// Get the current interpreter language.
+    fn language(&self) -> &str;
+
+    /// Write text to the interpreter output.
+    fn write(&mut self, text: &str);
+
+    /// Write a line to the interpreter output.
+    fn writeln(&mut self, text: &str);
+
+    /// Clear the interpreter output.
+    fn clear(&mut self);
+
+    /// Whether the interpreter is ready for input.
+    fn is_ready(&self) -> bool;
+}
+
 // ===========================================================================
 // Tests for ANSI parser, renderer, and code completion
 // ===========================================================================
@@ -1378,5 +1555,43 @@ mod ansi_tests {
         let c = CompletionCandidate::with_description("myFunc", "void myFunc(int x)");
         assert_eq!(c.text, "myFunc");
         assert_eq!(c.description.as_deref(), Some("void myFunc(int x)"));
+    }
+
+    // -- CompletionWindowTrigger tests --
+
+    #[test]
+    fn test_completion_window_trigger() {
+        assert!(!CompletionWindowTrigger::Explicit.auto_select());
+        assert!(CompletionWindowTrigger::DotAccess.auto_select());
+        assert!(CompletionWindowTrigger::ParenOpen.auto_select());
+        assert!(!CompletionWindowTrigger::KeywordSpace.auto_select());
+    }
+
+    // -- InterpreterComponentProvider tests --
+
+    #[test]
+    fn test_interpreter_component_provider() {
+        let mut provider = InterpreterComponentProvider::new("Interpreter", "jython");
+        assert!(!provider.is_visible());
+        assert_eq!(provider.language, "jython");
+        provider.show();
+        assert!(provider.is_visible());
+        provider.hide();
+        assert!(!provider.is_visible());
+    }
+
+    // -- InterpreterConnection tests --
+
+    #[test]
+    fn test_interpreter_connection() {
+        let mut conn = InterpreterConnection::new("jython");
+        assert!(!conn.is_connected());
+        assert!(conn.send_command("print('hi')").is_err());
+        conn.connect();
+        assert!(conn.is_connected());
+        assert!(conn.send_command("print('hi')").is_ok());
+        assert_eq!(conn.output_buffer.len(), 1);
+        conn.disconnect();
+        assert!(!conn.is_connected());
     }
 }

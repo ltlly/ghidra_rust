@@ -237,6 +237,63 @@ impl LabelValidator {
     }
 }
 
+// ---------------------------------------------------------------------------
+// LabelHistoryAction
+// ---------------------------------------------------------------------------
+
+/// Action to show the history of label changes at an address.
+///
+/// Ported from `ghidra.app.plugin.core.label.LabelHistoryAction`.
+#[derive(Debug, Clone)]
+pub struct LabelHistoryAction {
+    /// The action name.
+    pub name: String,
+    /// Whether the action is enabled.
+    pub enabled: bool,
+    /// History entries.
+    pub history: Vec<LabelHistoryEntry>,
+}
+
+/// A single label history entry.
+#[derive(Debug, Clone)]
+pub struct LabelHistoryEntry {
+    /// The label name.
+    pub label_name: String,
+    /// The address.
+    pub address: u64,
+    /// The action performed (added, renamed, deleted).
+    pub action: String,
+    /// Timestamp.
+    pub timestamp: u64,
+}
+
+impl LabelHistoryAction {
+    /// Create a new label history action.
+    pub fn new() -> Self {
+        Self {
+            name: "Show Label History".into(),
+            enabled: true,
+            history: Vec::new(),
+        }
+    }
+
+    /// Add a history entry.
+    pub fn add_entry(&mut self, entry: LabelHistoryEntry) {
+        self.history.push(entry);
+    }
+
+    /// Get the history for a specific address.
+    pub fn history_at(&self, address: u64) -> Vec<&LabelHistoryEntry> {
+        self.history.iter().filter(|e| e.address == address).collect()
+    }
+}
+
+impl Default for LabelHistoryAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

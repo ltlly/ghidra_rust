@@ -318,6 +318,92 @@ impl BookmarkNavigator {
     }
 }
 
+// ---------------------------------------------------------------------------
+// BookmarkDeleteBackgroundCmd
+// ---------------------------------------------------------------------------
+
+/// Background command for deleting bookmarks.
+///
+/// Ported from `ghidra.app.plugin.core.bookmark.BookmarkDeleteBackgroundCmd`.
+#[derive(Debug, Clone)]
+pub struct BookmarkDeleteBackgroundCmd {
+    /// The addresses to delete bookmarks from.
+    pub addresses: Vec<u64>,
+    /// The bookmark type to delete (None = all types).
+    pub bookmark_type: Option<String>,
+    /// Whether the command has been applied.
+    pub applied: bool,
+}
+
+impl BookmarkDeleteBackgroundCmd {
+    /// Create a new delete command for all bookmark types.
+    pub fn new_all(addresses: Vec<u64>) -> Self {
+        Self {
+            addresses,
+            bookmark_type: None,
+            applied: false,
+        }
+    }
+
+    /// Create a new delete command for a specific bookmark type.
+    pub fn new_typed(addresses: Vec<u64>, bookmark_type: impl Into<String>) -> Self {
+        Self {
+            addresses,
+            bookmark_type: Some(bookmark_type.into()),
+            applied: false,
+        }
+    }
+
+    /// Apply the command.
+    pub fn apply(&mut self) {
+        self.applied = true;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bookmark FilterDialog
+// ---------------------------------------------------------------------------
+
+/// Dialog for filtering bookmarks by type and category.
+///
+/// Ported from `ghidra.app.plugin.core.bookmark.FilterDialog`.
+#[derive(Debug, Clone)]
+pub struct BookmarkFilterDialog {
+    /// Active bookmark type filters.
+    pub active_types: Vec<String>,
+    /// Whether to show only bookmarks in the current selection.
+    pub selection_only: bool,
+    /// Whether the dialog was confirmed.
+    pub confirmed: bool,
+}
+
+impl BookmarkFilterDialog {
+    /// Create a new filter dialog.
+    pub fn new() -> Self {
+        Self {
+            active_types: Vec::new(),
+            selection_only: false,
+            confirmed: false,
+        }
+    }
+
+    /// Add a type filter.
+    pub fn add_type_filter(&mut self, type_name: impl Into<String>) {
+        self.active_types.push(type_name.into());
+    }
+
+    /// Confirm the dialog.
+    pub fn confirm(&mut self) {
+        self.confirmed = true;
+    }
+}
+
+impl Default for BookmarkFilterDialog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================

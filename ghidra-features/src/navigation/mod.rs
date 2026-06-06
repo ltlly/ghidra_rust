@@ -841,6 +841,47 @@ impl LocationReferencesProviderContext {
     }
 }
 
+// ---------------------------------------------------------------------------
+// AbstractNextPreviousAction
+// ---------------------------------------------------------------------------
+
+/// Abstract base for next/previous navigation actions.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.AbstractNextPreviousAction`.
+#[derive(Debug, Clone)]
+pub struct AbstractNextPreviousAction {
+    /// The action name.
+    pub name: String,
+    /// Whether this is a "next" (forward) or "previous" (backward) action.
+    pub forward: bool,
+    /// Whether the action is enabled.
+    pub enabled: bool,
+    /// The navigation provider name.
+    pub provider_name: Option<String>,
+}
+
+impl AbstractNextPreviousAction {
+    /// Create a new next/previous action.
+    pub fn new(name: impl Into<String>, forward: bool) -> Self {
+        Self {
+            name: name.into(),
+            forward,
+            enabled: true,
+            provider_name: None,
+        }
+    }
+
+    /// Create a "next" action.
+    pub fn next_action(name: impl Into<String>) -> Self {
+        Self::new(name, true)
+    }
+
+    /// Create a "previous" action.
+    pub fn previous_action(name: impl Into<String>) -> Self {
+        Self::new(name, false)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

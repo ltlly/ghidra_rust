@@ -621,6 +621,80 @@ impl SignatureApplyAction {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Additional apply action types
+// ---------------------------------------------------------------------------
+
+/// Abstract base for function comparison apply actions.
+///
+/// Ported from `ghidra.app.plugin.core.functioncompare
+/// .AbstractFunctionComparisonApplyAction`.
+#[derive(Debug, Clone)]
+pub struct AbstractFunctionComparisonApplyAction {
+    /// The action name.
+    pub name: String,
+    /// Whether the action is enabled.
+    pub enabled: bool,
+    /// The comparison panel this action operates on.
+    pub panel_id: Option<String>,
+}
+
+impl AbstractFunctionComparisonApplyAction {
+    /// Create a new apply action.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            enabled: true,
+            panel_id: None,
+        }
+    }
+}
+
+/// Action to apply an empty signature to the target function.
+///
+/// Ported from `ghidra.app.plugin.core.functioncompare.EmptySignatureApplyAction`.
+#[derive(Debug, Clone)]
+pub struct EmptySignatureApplyAction {
+    /// Base action.
+    pub base: AbstractFunctionComparisonApplyAction,
+}
+
+impl EmptySignatureApplyAction {
+    /// Create a new empty signature apply action.
+    pub fn new() -> Self {
+        Self {
+            base: AbstractFunctionComparisonApplyAction::new("Apply Empty Signature"),
+        }
+    }
+}
+
+impl Default for EmptySignatureApplyAction {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Action to apply a function name to the target function.
+///
+/// Ported from `ghidra.app.plugin.core.functioncompare.FunctionNameApplyAction`.
+#[derive(Debug, Clone)]
+pub struct FunctionNameApplyAction {
+    /// Base action.
+    pub base: AbstractFunctionComparisonApplyAction,
+    /// The function name to apply.
+    pub function_name: String,
+}
+
+impl FunctionNameApplyAction {
+    /// Create a new function name apply action.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            base: AbstractFunctionComparisonApplyAction::new("Apply Function Name"),
+            function_name: name.into(),
+        }
+    }
+}
+
 // ===========================================================================
 // Additional tests
 // ===========================================================================

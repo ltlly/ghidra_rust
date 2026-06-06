@@ -828,6 +828,332 @@ impl Default for AnsiProcessor {
     }
 }
 
+// ---------------------------------------------------------------------------
+// TerminalAwtEventEncoder
+// ---------------------------------------------------------------------------
+
+/// Encodes AWT keyboard events into terminal escape sequences.
+///
+/// Ported from `ghidra.app.plugin.core.terminal.TerminalAwtEventEncoder`.
+#[derive(Debug)]
+pub struct TerminalAwtEventEncoder {
+    /// Whether the terminal is in application cursor key mode.
+    pub application_cursor_keys: bool,
+    /// Whether the terminal is in application keypad mode.
+    pub application_keypad: bool,
+}
+
+impl TerminalAwtEventEncoder {
+    /// Create a new event encoder.
+    pub fn new() -> Self {
+        Self {
+            application_cursor_keys: false,
+            application_keypad: false,
+        }
+    }
+
+    /// Encode a key press into terminal bytes.
+    ///
+    /// Returns `None` if the key is not mapped.
+    pub fn encode_key(&self, key_code: u32, modifiers: u32) -> Option<Vec<u8>> {
+        // Arrow keys
+        match key_code {
+            37 => Some(if self.application_cursor_keys {
+                b"\x1bOD".to_vec()
+            } else {
+                b"\x1b[D".to_vec()
+            }), // Left
+            38 => Some(if self.application_cursor_keys {
+                b"\x1bOA".to_vec()
+            } else {
+                b"\x1b[A".to_vec()
+            }), // Up
+            39 => Some(if self.application_cursor_keys {
+                b"\x1bOC".to_vec()
+            } else {
+                b"\x1b[C".to_vec()
+            }), // Right
+            40 => Some(if self.application_cursor_keys {
+                b"\x1bOB".to_vec()
+            } else {
+                b"\x1b[B".to_vec()
+            }), // Down
+            33 => Some(b"\x1b[5~".to_vec()),  // Page Up
+            34 => Some(b"\x1b[6~".to_vec()),  // Page Down
+            36 => Some(b"\x1b[H".to_vec()),   // Home
+            35 => Some(b"\x1b[F".to_vec()),   // End
+            46 => Some(b"\x1b[3~".to_vec()),  // Delete
+            112 => Some(b"\x1bOP".to_vec()),  // F1
+            113 => Some(b"\x1bOQ".to_vec()),  // F2
+            114 => Some(b"\x1bOR".to_vec()),  // F3
+            115 => Some(b"\x1bOS".to_vec()),  // F4
+            _ => None,
+        }
+    }
+}
+
+impl Default for TerminalAwtEventEncoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TerminalClipboardProvider
+// ---------------------------------------------------------------------------
+
+/// Provides clipboard integration for the terminal.
+///
+/// Ported from `ghidra.app.plugin.core.terminal.TerminalClipboardProvider`.
+#[derive(Debug, Clone)]
+pub struct TerminalClipboardProvider {
+    /// Internal clipboard content.
+    pub clipboard: String,
+    /// Whether the clipboard has content.
+    pub has_content: bool,
+    /// Selection start (row, col).
+    pub selection_start: Option<(usize, usize)>,
+    /// Selection end (row, col).
+    pub selection_end: Option<(usize, usize)>,
+}
+
+impl TerminalClipboardProvider {
+    /// Create a new clipboard provider.
+    pub fn new() -> Self {
+        Self {
+            clipboard: String::new(),
+            has_content: false,
+            selection_start: None,
+            selection_end: None,
+        }
+    }
+
+    /// Copy text to the clipboard.
+    pub fn copy(&mut self, text: impl Into<String>) {
+        self.clipboard = text.into();
+        self.has_content = !self.clipboard.is_empty();
+    }
+
+    /// Get the clipboard content.
+    pub fn paste(&self) -> Option<&str> {
+        if self.has_content {
+            Some(&self.clipboard)
+        } else {
+            None
+        }
+    }
+
+    /// Clear the clipboard.
+    pub fn clear(&mut self) {
+        self.clipboard.clear();
+        self.has_content = false;
+        self.selection_start = None;
+        self.selection_end = None;
+    }
+
+    /// Set the selection range.
+    pub fn set_selection(&mut self, start: (usize, usize), end: (usize, usize)) {
+        self.selection_start = Some(start);
+        self.selection_end = Some(end);
+    }
+
+    /// Whether there is an active selection.
+    pub fn has_selection(&self) -> bool {
+        self.selection_start.is_some() && self.selection_end.is_some()
+    }
+}
+
+impl Default for TerminalClipboardProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TerminalTextFieldElement / TerminalTextField
+// ---------------------------------------------------------------------------
+
+/// A single element in the terminal text field.
+///
+/// Ported from `ghidra.app.plugin.core.terminal.TerminalTextFieldElement`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalTextFieldElement {
+    /// The text content.
+    pub text: String,
+    /// The style attributes.
+    pub style: TerminalTextStyle,
+    /// The column position.
+    pub column: usize,
+}
+
+/// Text style for terminal text field elements.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalTextStyle {
+    /// Foreground color.
+    pub foreground: TerminalColor,
+    /// Background color.
+    pub background: TerminalColor,
+    /// Whether the text is bold.
+    pub bold: bool,
+    /// Whether the text is underlined.
+    pub underline: bool,
+    /// Whether the text is reversed.
+    pub reversed: bool,
+}
+
+impl Default for TerminalTextStyle {
+    fn default() -> Self {
+        Self {
+            foreground: TerminalColor::Default,
+            background: TerminalColor::Default,
+            bold: false,
+            underline: false,
+            reversed: false,
+        }
+    }
+}
+
+impl TerminalTextFieldElement {
+    /// Create a new text field element.
+    pub fn new(text: impl Into<String>, column: usize) -> Self {
+        Self {
+            text: text.into(),
+            style: TerminalTextStyle::default(),
+            column,
+        }
+    }
+
+    /// Create a styled text field element.
+    pub fn styled(text: impl Into<String>, column: usize, style: TerminalTextStyle) -> Self {
+        Self {
+            text: text.into(),
+            style,
+            column,
+        }
+    }
+}
+
+/// A text field for terminal input.
+///
+/// Ported from `ghidra.app.plugin.core.terminal.TerminalTextField`.
+#[derive(Debug)]
+pub struct TerminalTextField {
+    /// The current input text.
+    pub text: String,
+    /// Cursor position within the text.
+    pub cursor_position: usize,
+    /// Whether the field is editable.
+    pub editable: bool,
+    /// Command history for the text field.
+    pub history: VecDeque<String>,
+    /// History navigation position.
+    pub history_position: Option<usize>,
+}
+
+impl TerminalTextField {
+    /// Create a new terminal text field.
+    pub fn new() -> Self {
+        Self {
+            text: String::new(),
+            cursor_position: 0,
+            editable: true,
+            history: VecDeque::new(),
+            history_position: None,
+        }
+    }
+
+    /// Insert a character at the cursor position.
+    pub fn insert_char(&mut self, ch: char) {
+        if self.editable {
+            self.text.insert(self.cursor_position, ch);
+            self.cursor_position += 1;
+        }
+    }
+
+    /// Delete the character before the cursor.
+    pub fn backspace(&mut self) {
+        if self.cursor_position > 0 && self.editable {
+            self.cursor_position -= 1;
+            self.text.remove(self.cursor_position);
+        }
+    }
+
+    /// Delete the character at the cursor.
+    pub fn delete(&mut self) {
+        if self.cursor_position < self.text.len() && self.editable {
+            self.text.remove(self.cursor_position);
+        }
+    }
+
+    /// Move the cursor left.
+    pub fn cursor_left(&mut self) {
+        if self.cursor_position > 0 {
+            self.cursor_position -= 1;
+        }
+    }
+
+    /// Move the cursor right.
+    pub fn cursor_right(&mut self) {
+        if self.cursor_position < self.text.len() {
+            self.cursor_position += 1;
+        }
+    }
+
+    /// Submit the current text (adds to history, clears field).
+    pub fn submit(&mut self) -> String {
+        let text = std::mem::take(&mut self.text);
+        self.cursor_position = 0;
+        self.history_position = None;
+        if !text.is_empty() {
+            self.history.push_back(text.clone());
+        }
+        text
+    }
+
+    /// Navigate to the previous history entry.
+    pub fn history_previous(&mut self) {
+        if self.history.is_empty() {
+            return;
+        }
+        let new_pos = match self.history_position {
+            None => self.history.len() - 1,
+            Some(0) => return,
+            Some(p) => p - 1,
+        };
+        self.history_position = Some(new_pos);
+        if let Some(entry) = self.history.get(new_pos) {
+            self.text = entry.clone();
+            self.cursor_position = self.text.len();
+        }
+    }
+
+    /// Navigate to the next history entry.
+    pub fn history_next(&mut self) {
+        match self.history_position {
+            None => return,
+            Some(p) if p >= self.history.len() - 1 => {
+                self.history_position = None;
+                self.text.clear();
+                self.cursor_position = 0;
+            }
+            Some(p) => {
+                let new_pos = p + 1;
+                self.history_position = Some(new_pos);
+                if let Some(entry) = self.history.get(new_pos) {
+                    self.text = entry.clone();
+                    self.cursor_position = self.text.len();
+                }
+            }
+        }
+    }
+}
+
+impl Default for TerminalTextField {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -1098,5 +1424,144 @@ mod tests {
         assert_eq!(AnsiProcessor::ansi_color(7), TerminalColor::White);
         assert_eq!(AnsiProcessor::ansi_bright_color(0), TerminalColor::BrightBlack);
         assert_eq!(AnsiProcessor::ansi_bright_color(7), TerminalColor::BrightWhite);
+    }
+
+    // -- TerminalAwtEventEncoder tests --
+
+    #[test]
+    fn test_event_encoder_normal_mode() {
+        let encoder = TerminalAwtEventEncoder::new();
+        assert!(!encoder.application_cursor_keys);
+        // Up arrow in normal mode
+        let bytes = encoder.encode_key(38, 0).unwrap();
+        assert_eq!(bytes, b"\x1b[A");
+        // Left arrow in normal mode
+        let bytes = encoder.encode_key(37, 0).unwrap();
+        assert_eq!(bytes, b"\x1b[D");
+    }
+
+    #[test]
+    fn test_event_encoder_application_mode() {
+        let mut encoder = TerminalAwtEventEncoder::new();
+        encoder.application_cursor_keys = true;
+        let bytes = encoder.encode_key(38, 0).unwrap();
+        assert_eq!(bytes, b"\x1bOA");
+    }
+
+    #[test]
+    fn test_event_encoder_special_keys() {
+        let encoder = TerminalAwtEventEncoder::new();
+        assert_eq!(encoder.encode_key(33, 0).unwrap(), b"\x1b[5~"); // Page Up
+        assert_eq!(encoder.encode_key(34, 0).unwrap(), b"\x1b[6~"); // Page Down
+        assert_eq!(encoder.encode_key(46, 0).unwrap(), b"\x1b[3~"); // Delete
+        assert!(encoder.encode_key(999, 0).is_none()); // Unknown
+    }
+
+    // -- TerminalClipboardProvider tests --
+
+    #[test]
+    fn test_clipboard_provider() {
+        let mut clip = TerminalClipboardProvider::new();
+        assert!(clip.paste().is_none());
+        clip.copy("hello world");
+        assert_eq!(clip.paste(), Some("hello world"));
+        assert!(clip.has_content);
+        clip.clear();
+        assert!(clip.paste().is_none());
+    }
+
+    #[test]
+    fn test_clipboard_selection() {
+        let mut clip = TerminalClipboardProvider::new();
+        assert!(!clip.has_selection());
+        clip.set_selection((0, 0), (0, 5));
+        assert!(clip.has_selection());
+    }
+
+    // -- TerminalTextField tests --
+
+    #[test]
+    fn test_text_field_insert() {
+        let mut tf = TerminalTextField::new();
+        tf.insert_char('h');
+        tf.insert_char('i');
+        assert_eq!(tf.text, "hi");
+        assert_eq!(tf.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_text_field_backspace() {
+        let mut tf = TerminalTextField::new();
+        tf.insert_char('a');
+        tf.insert_char('b');
+        tf.insert_char('c');
+        tf.backspace();
+        assert_eq!(tf.text, "ab");
+        assert_eq!(tf.cursor_position, 2);
+    }
+
+    #[test]
+    fn test_text_field_cursor_movement() {
+        let mut tf = TerminalTextField::new();
+        tf.insert_char('a');
+        tf.insert_char('b');
+        tf.insert_char('c');
+        tf.cursor_left();
+        tf.cursor_left();
+        assert_eq!(tf.cursor_position, 1);
+        tf.insert_char('X');
+        assert_eq!(tf.text, "aXbc");
+    }
+
+    #[test]
+    fn test_text_field_submit() {
+        let mut tf = TerminalTextField::new();
+        tf.insert_char('c');
+        tf.insert_char('m');
+        tf.insert_char('d');
+        let submitted = tf.submit();
+        assert_eq!(submitted, "cmd");
+        assert!(tf.text.is_empty());
+        assert_eq!(tf.cursor_position, 0);
+        assert_eq!(tf.history.len(), 1);
+    }
+
+    #[test]
+    fn test_text_field_history() {
+        let mut tf = TerminalTextField::new();
+        tf.insert_char('1');
+        tf.submit();
+        tf.insert_char('2');
+        tf.submit();
+        tf.history_previous();
+        assert_eq!(tf.text, "2");
+        tf.history_previous();
+        assert_eq!(tf.text, "1");
+        tf.history_next();
+        assert_eq!(tf.text, "2");
+        tf.history_next();
+        assert!(tf.text.is_empty());
+    }
+
+    // -- TerminalTextFieldElement tests --
+
+    #[test]
+    fn test_text_field_element() {
+        let elem = TerminalTextFieldElement::new("hello", 5);
+        assert_eq!(elem.text, "hello");
+        assert_eq!(elem.column, 5);
+        assert_eq!(elem.style.foreground, TerminalColor::Default);
+    }
+
+    #[test]
+    fn test_text_field_element_styled() {
+        let style = TerminalTextStyle {
+            foreground: TerminalColor::Red,
+            bold: true,
+            ..Default::default()
+        };
+        let elem = TerminalTextFieldElement::styled("err", 0, style);
+        assert_eq!(elem.style.foreground, TerminalColor::Red);
+        assert!(elem.style.bold);
     }
 }

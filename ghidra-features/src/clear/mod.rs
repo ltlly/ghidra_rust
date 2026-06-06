@@ -242,6 +242,119 @@ impl ClearModel {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ClearDialog
+// ---------------------------------------------------------------------------
+
+/// Dialog for configuring clear options before applying.
+///
+/// Ported from `ghidra.app.plugin.core.clear.ClearDialog`.
+#[derive(Debug, Clone)]
+pub struct ClearDialog {
+    /// The clear options selected by the user.
+    pub options: ClearOptions,
+    /// Whether the dialog was confirmed.
+    pub confirmed: bool,
+    /// The address range to clear.
+    pub start_address: u64,
+    /// End address of the range.
+    pub end_address: u64,
+}
+
+impl ClearDialog {
+    /// Create a new clear dialog.
+    pub fn new(start: u64, end: u64) -> Self {
+        Self {
+            options: ClearOptions::default(),
+            confirmed: false,
+            start_address: start,
+            end_address: end,
+        }
+    }
+
+    /// Confirm the dialog.
+    pub fn confirm(&mut self) {
+        self.confirmed = true;
+    }
+
+    /// Get the address count.
+    pub fn address_count(&self) -> u64 {
+        self.end_address.saturating_sub(self.start_address) + 1
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClearFlowDialog
+// ---------------------------------------------------------------------------
+
+/// Dialog for clearing with flow override options.
+///
+/// Ported from `ghidra.app.plugin.core.clear.ClearFlowDialog`.
+#[derive(Debug, Clone)]
+pub struct ClearFlowDialog {
+    /// Base clear dialog.
+    pub clear_dialog: ClearDialog,
+    /// Whether to clear flow override.
+    pub clear_flow_override: bool,
+    /// Whether to remove instruction context.
+    pub remove_context: bool,
+}
+
+impl ClearFlowDialog {
+    /// Create a new clear flow dialog.
+    pub fn new(start: u64, end: u64) -> Self {
+        Self {
+            clear_dialog: ClearDialog::new(start, end),
+            clear_flow_override: true,
+            remove_context: false,
+        }
+    }
+
+    /// Confirm the dialog.
+    pub fn confirm(&mut self) {
+        self.clear_dialog.confirm();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ClearPlugin
+// ---------------------------------------------------------------------------
+
+/// Plugin providing clear functionality.
+///
+/// Ported from `ghidra.app.plugin.core.clear.ClearPlugin`.
+#[derive(Debug)]
+pub struct ClearPlugin {
+    /// Plugin name.
+    pub name: String,
+    /// Whether the plugin is enabled.
+    pub enabled: bool,
+    /// Last clear operation performed.
+    pub last_operation: Option<ClearOperation>,
+}
+
+impl ClearPlugin {
+    /// Create a new clear plugin.
+    pub fn new() -> Self {
+        Self {
+            name: "ClearPlugin".into(),
+            enabled: true,
+            last_operation: None,
+        }
+    }
+
+    /// Perform a clear operation.
+    pub fn perform_clear(&mut self, op: ClearOperation) {
+        self.last_operation = Some(op);
+    }
+}
+
+impl Default for ClearPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
