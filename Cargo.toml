@@ -25,7 +25,9 @@ members = [
     "ghidra-emulation",
     "ghidra-features",
     "ghidra-gui",
+    "ghidra-help",
     "ghidra-processors",
+    "ghidra-pty",
 ]
 
 [workspace.dependencies]

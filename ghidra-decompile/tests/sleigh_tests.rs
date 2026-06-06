@@ -58,9 +58,9 @@ fn test_token_field_extract_unsigned_nibble() {
 
 #[test]
 fn test_token_field_extract_signed_negative() {
-    // 4-bit signed field: value 0b1110 = -2
-    let field = TokenField::new(0, 0, 4, true);
-    // Byte: 0b1110_0101 -> low nibble is 0b1110
+    // 4-bit signed field starting at bit 4: high nibble 0b1110 = -2
+    let field = TokenField::new(0, 4, 4, true);
+    // Byte: 0b1110_0101 -> bits 4..8 = 0b1110 = 14 unsigned, -2 signed
     let value = field.extract_signed(&[0xE5]);
     assert_eq!(value, -2);
 }
@@ -651,10 +651,10 @@ fn test_reset_to_defaults() {
 
 #[test]
 fn test_field_extract_encode() {
-    let field = ContextField::new("Mode", 4, 8, 0);
+    let field = ContextField::new("Mode", 4, 12, 0);
     let mut bits = vec![0u8; 2]; // 16 bits
 
-    // Encode 0xAB into bits[4..8]
+    // Encode 0xAB into bits [4..12] (8-bit field)
     field.encode(&mut bits, 0xAB);
     let extracted = field.extract(&bits);
     assert_eq!(extracted, 0xAB);

@@ -76,6 +76,8 @@ impl Default for CppExportOptions {
 ///     body: "{\n    return 0;\n}".into(),
 ///     return_type: Some("int".into()),
 ///     parameter_types: vec!["int".into(), "char **".into()],
+///     is_static: false,
+///     is_extern: false,
 /// });
 /// let source = exporter.export();
 /// assert!(source.contains("int main"));

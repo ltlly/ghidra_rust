@@ -572,3 +572,10 @@ mod tests {
 pub mod progress_rmi_service;
 
 pub mod watch_impl;
+
+// New comprehensive service modules ported from remaining Debug code
+pub mod breakpoint_lifecycle;
+pub mod trace_lifecycle;
+pub mod emulation_lifecycle;
+pub mod static_mapping_service;
+pub mod control_service;

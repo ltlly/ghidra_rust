@@ -1800,6 +1800,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ghidra-help"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ghidra-core",
+ "lazy_static",
+ "log",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "ghidra-processors"
 version = "0.1.0"
 dependencies = [
@@ -1810,6 +1824,18 @@ dependencies = [
  "log",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "ghidra-pty"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ghidra-core",
+ "libc",
+ "log",
+ "thiserror 2.0.18",
+ "winapi",
 ]
 
 [[package]]
