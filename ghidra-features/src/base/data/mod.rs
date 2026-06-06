@@ -18,6 +18,8 @@ pub mod actions;
 pub mod actions_ext;
 pub mod settings;
 pub mod dialogs;
+pub mod recently_used;
+pub mod rename_dialog;
 
 pub use plugin::*;
 pub use actions::*;

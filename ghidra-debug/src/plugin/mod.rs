@@ -363,3 +363,5 @@ pub mod gui_action_contexts_ext;
 pub use gui_action_contexts_ext::DebuggerObjectPathActionContext;
 
 pub mod platform_impl;
+pub mod platform_opinion_framework;
+pub mod mapping_context;

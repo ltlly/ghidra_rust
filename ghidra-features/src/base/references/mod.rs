@@ -35,6 +35,7 @@ pub mod edit_provider;
 pub mod exceptions;
 pub mod external_provider;
 pub mod instruction_info;
+pub mod instruction_listener;
 pub mod offset_table;
 pub mod plugin;
 pub mod ref_type_factory;

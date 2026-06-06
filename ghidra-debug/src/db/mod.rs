@@ -373,6 +373,19 @@ pub mod target_iface_impl;
 pub mod trace_db_main;
 pub mod trace_db_manager_impl;
 
+// Data view hierarchy and register container types from Framework-TraceModeling
+pub mod trace_db_data_views;
+pub mod trace_db_object_register_deep;
+
+pub use trace_db_data_views::{
+    DataViewConfig, DataViewEntry, DbTraceDataMemoryView,
+    DbTraceDataUnit, DbTraceDataView, ReferenceType, SettingValue,
+    TraceCodeUnitType, ValueReference, ViewFactory,
+};
+pub use trace_db_object_register_deep::{
+    InternalTraceMemoryOperations, RegisterDefinedState,
+};
+
 // New modules from remaining Debug module port
 pub mod trace_db_object_write_cache;
 pub mod trace_db_symbol_multi_views;

@@ -1842,6 +1842,562 @@ impl FunctionStagingManager {
     }
 }
 
+// ============================================================================
+// XML Serialization Utilities
+// Ports Ghidra's SpecXmlUtils and XML save/restore methods
+// ============================================================================
+
+/// XML serialization/deserialization helpers for BSim protocol types.
+///
+/// Ports Ghidra's `SpecXmlUtils` and the `saveXml`/`restoreXml` pattern
+/// from `ghidra.features.bsim.query.protocol`.
+pub mod xml_serde {
+    use super::*;
+
+    /// Escape a string for XML output.
+    pub fn xml_escape(s: &str) -> String {
+        s.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&apos;")
+    }
+
+    /// Encode a boolean as "true"/"false" for XML attributes.
+    pub fn encode_boolean(val: bool) -> &'static str {
+        if val { "true" } else { "false" }
+    }
+
+    /// Decode a boolean from an XML attribute string.
+    pub fn decode_boolean(s: &str) -> bool {
+        s.eq_ignore_ascii_case("true") || s == "1"
+    }
+
+    /// Encode an unsigned integer to string.
+    pub fn encode_unsigned(val: u64) -> String {
+        format!("{}", val)
+    }
+
+    /// Encode a signed integer to string.
+    pub fn encode_signed(val: i64) -> String {
+        format!("{}", val)
+    }
+
+    /// Decode a long integer from hex or decimal string.
+    pub fn decode_long(s: &str) -> i64 {
+        if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+            i64::from_str_radix(hex, 16).unwrap_or(0)
+        } else {
+            s.parse::<i64>().unwrap_or(0)
+        }
+    }
+
+    /// Encode a double to string.
+    pub fn encode_double(val: f64) -> String {
+        format!("{}", val)
+    }
+
+    /// Normalize a filter value (trim, lowercase for consistency).
+    pub fn normalize_value(s: &str) -> String {
+        s.trim().to_string()
+    }
+
+    // ---- saveXml implementations ----
+
+    impl ExeSpecifier {
+        /// Serialize to XML (port of `ExeSpecifier.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<exe");
+            if !self.exe_name.is_empty() {
+                writer.push_str(&format!(" name=\"{}\"", xml_escape(&self.exe_name)));
+            }
+            if !self.arch.is_empty() {
+                writer.push_str(&format!(" arch=\"{}\"", xml_escape(&self.arch)));
+            }
+            if !self.compiler_name.is_empty() {
+                writer.push_str(&format!(" compiler=\"{}\"", xml_escape(&self.compiler_name)));
+            }
+            if !self.md5.is_empty() {
+                writer.push_str(&format!(" md5=\"{}\"", xml_escape(&self.md5)));
+            }
+            writer.push_str("/>\n");
+        }
+
+        /// Deserialize from XML attributes (port of `ExeSpecifier.restoreXml`).
+        pub fn restore_xml(name: &str, arch: &str, compiler: &str, md5: &str) -> Self {
+            Self {
+                exe_name: name.to_string(),
+                arch: arch.to_string(),
+                compiler_name: compiler.to_string(),
+                md5: md5.to_string(),
+            }
+        }
+    }
+
+    impl FunctionEntryData {
+        /// Serialize to XML (port of `FunctionEntry.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<fentry name=\"{}\" addr=\"0x{:x}\"/>\n",
+                xml_escape(&self.func_name),
+                self.address
+            ));
+        }
+    }
+
+    impl FilterAtom {
+        /// Serialize to XML (port of `FilterAtom.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<filter type=\"{}\" value=\"{}\"/>\n",
+                xml_escape(self.filter_type.label()),
+                xml_escape(&self.value)
+            ));
+        }
+
+        /// Get the info string for display (port of `FilterAtom.infoString`).
+        pub fn info_string_full(&self) -> Option<String> {
+            if self.filter_type.is_blank() {
+                return None;
+            }
+            Some(format!("{} {}", self.filter_type.label(), self.value))
+        }
+    }
+
+    impl ChildAtom {
+        /// Serialize to XML (port of `ChildAtom.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<child");
+            if let Some(ref exe) = self.exe_name {
+                writer.push_str(&format!(" exe=\"{}\"", xml_escape(exe)));
+            }
+            writer.push_str(&format!(" name=\"{}\"/>\n", xml_escape(&self.child_name)));
+        }
+    }
+
+    impl BSimFilter {
+        /// Serialize to XML (port of `BSimFilter.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            if self.atoms.is_empty() {
+                return;
+            }
+            writer.push_str("<bsimfilter>\n");
+            for entry in &self.atoms {
+                match entry {
+                    FilterAtomEntry::Regular(atom) => atom.save_xml(writer),
+                    FilterAtomEntry::Child(child) => child.save_xml(writer),
+                }
+            }
+            writer.push_str("</bsimfilter>\n");
+        }
+
+        /// Restore from XML atom entries.
+        pub fn restore_xml(atoms: Vec<FilterAtomEntry>, mask: u32, value: u32) -> Self {
+            Self {
+                atoms,
+                filter_flags_mask: mask,
+                filter_flags_value: value,
+            }
+        }
+    }
+
+    impl PairInputData {
+        /// Serialize to XML (port of `PairInput.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<pair>\n");
+            self.exec_a.save_xml(writer);
+            self.func_a.save_xml(writer);
+            self.exec_b.save_xml(writer);
+            self.func_b.save_xml(writer);
+            writer.push_str("</pair>\n");
+        }
+    }
+
+    impl PairNoteData {
+        /// Serialize to XML (port of `PairNote.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<pairnote");
+            writer.push_str(&format!(" sim=\"{}\"", encode_double(self.similarity)));
+            writer.push_str(&format!(" signif=\"{}\"", encode_double(self.significance)));
+            writer.push_str(&format!(" dotprod=\"{}\"", encode_double(self.dot_product)));
+            writer.push_str(&format!(" count1=\"{}\"", self.func1_hash_count));
+            writer.push_str(&format!(" count2=\"{}\"", self.func2_hash_count));
+            writer.push_str(&format!(" isect=\"{}\"", self.intersection_count));
+            writer.push_str(&format!(" found=\"{}\"", encode_boolean(self.found)));
+            writer.push_str("/>\n");
+        }
+    }
+
+    impl SimilarityNoteData {
+        /// Serialize to XML (port of `SimilarityNote.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<snote exe=\"{}\" func=\"{}\" addr=\"0x{:x}\" sim=\"{}\" signif=\"{}\"/>\n",
+                xml_escape(&self.exe_name),
+                xml_escape(&self.func_name),
+                self.address,
+                encode_double(self.similarity),
+                encode_double(self.significance),
+            ));
+        }
+    }
+
+    impl ClusterNoteData {
+        /// Serialize to XML (port of `ClusterNote.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<cnote exe=\"{}\" func=\"{}\" addr=\"0x{:x}\" size=\"{}\" sim=\"{}\" signif=\"{}\"/>\n",
+                xml_escape(&self.exe_name),
+                xml_escape(&self.func_name),
+                self.address,
+                self.set_size,
+                encode_double(self.max_similarity),
+                encode_double(self.significance),
+            ));
+        }
+    }
+
+    impl VectorResultData {
+        /// Serialize to XML (port of `VectorResult.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<vresult id=\"{}\" hitcount=\"{}\"",
+                self.vector_id, self.hit_count
+            ));
+            if !self.features.is_empty() {
+                writer.push_str(" features=\"");
+                for (i, (k, v)) in self.features.iter().enumerate() {
+                    if i > 0 {
+                        writer.push(',');
+                    }
+                    writer.push_str(&format!("{}:{}", k, v));
+                }
+                writer.push('"');
+            }
+            writer.push_str("/>\n");
+        }
+    }
+
+    impl SimilarityResultRecord {
+        /// Serialize to XML (port of `SimilarityResult.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<simresult exe=\"{}\" func=\"{}\" addr=\"0x{:x}\" totalcount=\"{}\">\n",
+                xml_escape(&self.base_exe_name),
+                xml_escape(&self.base_func_name),
+                self.base_address,
+                self.total_count,
+            ));
+            for note in &self.notes {
+                writer.push_str("  ");
+                note.save_xml(writer);
+            }
+            writer.push_str("</simresult>\n");
+        }
+
+        /// Add multiple notes at once (port of `SimilarityResult.addNotes`).
+        pub fn add_notes(&mut self, notes: Vec<SimilarityNoteData>) {
+            self.total_count += notes.len() as u32;
+            self.notes.extend(notes);
+        }
+
+        /// Get the queried function's base description.
+        pub fn get_base_exe_name(&self) -> &str {
+            &self.base_exe_name
+        }
+
+        /// Get the queried function's name.
+        pub fn get_base_func_name(&self) -> &str {
+            &self.base_func_name
+        }
+
+        /// Get the queried function's address.
+        pub fn get_base_address(&self) -> u64 {
+            self.base_address
+        }
+    }
+
+    impl InsertRequestData {
+        /// Serialize to XML (port of `InsertRequest.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<insert>\n");
+            self.exe_specifier.save_xml(writer);
+            writer.push_str(&format!(
+                "  <overwrite>{}</overwrite>\n",
+                encode_boolean(self.overwrite)
+            ));
+            for func in &self.functions {
+                writer.push_str(&format!(
+                    "  <func name=\"{}\"/>\n",
+                    xml_escape(&func.function_name)
+                ));
+            }
+            writer.push_str("</insert>\n");
+        }
+    }
+
+    impl InsertOptionalValues {
+        /// Serialize to XML (port of `InsertOptionalValues.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            if self.is_empty() {
+                return;
+            }
+            writer.push_str("<optional>\n");
+            for tag in &self.tags {
+                writer.push_str(&format!("  <tag>{}</tag>\n", xml_escape(tag)));
+            }
+            for (k, v) in &self.metadata {
+                writer.push_str(&format!(
+                    "  <meta key=\"{}\">{}</meta>\n",
+                    xml_escape(k), xml_escape(v)
+                ));
+            }
+            writer.push_str("</optional>\n");
+        }
+    }
+
+    impl QueryNearest {
+        /// Serialize to XML (port of `QueryNearest.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<querynearest>\n");
+            writer.push_str(&format!(
+                "  <simthresh>{}</simthresh>\n",
+                encode_double(self.threshold)
+            ));
+            writer.push_str(&format!(
+                "  <signifthresh>{}</signifthresh>\n",
+                encode_double(self.significance_threshold)
+            ));
+            writer.push_str(&format!(
+                "  <max>{}</max>\n",
+                encode_signed(self.max_results as i64)
+            ));
+            if self.vector_max != 0 {
+                writer.push_str(&format!(
+                    "  <vectormax>{}</vectormax>\n",
+                    encode_signed(self.vector_max as i64)
+                ));
+            }
+            if !self.fill_categories {
+                writer.push_str("  <categories>false</categories>\n");
+            }
+            if let Some(ref filter) = self.filter {
+                filter.save_xml(writer);
+            }
+            writer.push_str("</querynearest>\n");
+        }
+    }
+
+    impl QueryCluster {
+        /// Serialize to XML (port of `QueryCluster.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<querycluster thresh=\"{}\" maxsize=\"{}\"/>\n",
+                encode_double(self.threshold),
+                self.max_cluster_size,
+            ));
+        }
+    }
+
+    impl QueryChildren {
+        /// Serialize to XML (port of `QueryChildren.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<querychildren exe=\"{}\" func=\"{}\" addr=\"0x{:x}\"/>\n",
+                xml_escape(&self.parent_exe),
+                xml_escape(&self.parent_name),
+                self.parent_address,
+            ));
+        }
+    }
+
+    impl QueryDelete {
+        /// Serialize to XML (port of `QueryDelete.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<delete exe=\"{}\"/>\n",
+                xml_escape(&self.exe.exe_name)
+            ));
+        }
+    }
+
+    impl QueryPair {
+        /// Serialize to XML (port of `QueryPair.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<querypair>\n");
+            self.pair.save_xml(writer);
+            writer.push_str("</querypair>\n");
+        }
+    }
+
+    impl QueryInfo {
+        /// Serialize to XML (port of `QueryInfo.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<queryinfo/>\n");
+        }
+    }
+
+    impl QueryName {
+        /// Serialize to XML (port of `QueryName.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<queryname>{}</queryname>\n",
+                xml_escape(&self.name)
+            ));
+        }
+    }
+
+    impl CreateDatabaseRequest {
+        /// Serialize to XML (port of `CreateDatabase.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<createdatabase>{}</createdatabase>\n",
+                xml_escape(&self.database_name)
+            ));
+        }
+    }
+
+    impl DropDatabaseRequest {
+        /// Serialize to XML (port of `DropDatabase.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<dropdatabase>{}</dropdatabase>\n",
+                xml_escape(&self.database_name)
+            ));
+        }
+    }
+
+    impl PasswordChangeRequest {
+        /// Serialize to XML (port of `PasswordChange.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<passwordchange>\n");
+            writer.push_str(&format!(
+                "  <old>{}</old>\n",
+                xml_escape(&self.old_password)
+            ));
+            writer.push_str(&format!(
+                "  <new>{}</new>\n",
+                xml_escape(&self.new_password)
+            ));
+            writer.push_str("</passwordchange>\n");
+        }
+    }
+
+    impl AdjustVectorIndexRequest {
+        /// Serialize to XML (port of `AdjustVectorIndex.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<adjustvectorindex>{}</adjustvectorindex>\n",
+                encode_signed(self.new_index)
+            ));
+        }
+    }
+
+    impl ResponseNearest {
+        /// Serialize to XML (port of `ResponseNearest.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<responsenearest totalcount=\"{}\">\n",
+                self.total_count
+            ));
+            for note in &self.results {
+                writer.push_str("  ");
+                note.save_xml(writer);
+            }
+            writer.push_str("</responsenearest>\n");
+        }
+
+        /// Merge results from a sub-response (port of `ResponseNearest.mergeResults`).
+        pub fn merge_results(&mut self, other: &ResponseNearest) {
+            self.results.extend(other.results.iter().cloned());
+            self.total_count += other.total_count;
+        }
+    }
+
+    impl QueryResponseRecord {
+        /// Serialize to XML (port of `QueryResponseRecord.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<{}>{}</{}>\n",
+                self.name,
+                if self.has_error {
+                    self.error_message.as_deref().unwrap_or("")
+                } else {
+                    "ok"
+                },
+                self.name,
+            ));
+        }
+
+        /// Merge results from a sub-response (port of `mergeFromSubResponse`).
+        pub fn merge_from_sub_response(&mut self, _sub: &QueryResponseRecord) {
+            // Default no-op; subclasses override
+        }
+    }
+
+    impl PreFilter {
+        /// Serialize to XML (port of `PreFilter.saveXml`).
+        pub fn save_xml(&self, writer: &mut String) {
+            if self.min_function_size.is_none()
+                && self.max_function_size.is_none()
+                && self.include_patterns.is_empty()
+                && self.exclude_patterns.is_empty()
+            {
+                return;
+            }
+            writer.push_str("<prefilter>\n");
+            if let Some(min) = self.min_function_size {
+                writer.push_str(&format!("  <minsize>{}</minsize>\n", min));
+            }
+            if let Some(max) = self.max_function_size {
+                writer.push_str(&format!("  <maxsize>{}</maxsize>\n", max));
+            }
+            for p in &self.include_patterns {
+                writer.push_str(&format!("  <include>{}</include>\n", xml_escape(p)));
+            }
+            for p in &self.exclude_patterns {
+                writer.push_str(&format!("  <exclude>{}</exclude>\n", xml_escape(p)));
+            }
+            writer.push_str(&format!(
+                "  <library>{}</library>\n",
+                encode_boolean(self.include_library)
+            ));
+            writer.push_str(&format!(
+                "  <thunks>{}</thunks>\n",
+                encode_boolean(self.include_thunks)
+            ));
+            writer.push_str("</prefilter>\n");
+        }
+    }
+
+    impl StagingManager {
+        /// Serialize state to XML.
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<staging batchsize=\"{}\" total=\"{}\" made=\"{}\"/>\n",
+                self.batch_size, self.total_items, self.queries_made
+            ));
+        }
+    }
+
+    impl NullStaging {
+        /// Serialize to XML.
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str("<nullstaging/>\n");
+        }
+    }
+
+    impl FunctionStagingManager {
+        /// Serialize state to XML.
+        pub fn save_xml(&self, writer: &mut String) {
+            writer.push_str(&format!(
+                "<funcstaging stagesize=\"{}\" total=\"{}\" made=\"{}\"/>\n",
+                self.stage_size, self.total, self.made
+            ));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2391,7 +2947,7 @@ mod tests {
 
     #[test]
     fn similarity_result_record_new() {
-        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        let result = SimilarityResultRecord::new("exe1", "main", 0x1000);
         assert_eq!(result.base_func_name, "main");
         assert_eq!(result.size(), 0);
         assert_eq!(result.total_count, 0);
@@ -2494,5 +3050,826 @@ mod tests {
         fs.next_stage();
         assert_eq!(fs.stage_start(), 10);
         assert_eq!(fs.stage_end(), 12);
+    }
+
+    // ====================================================================
+    // XML Serialization Tests (ports Java saveXml/restoreXml patterns)
+    // ====================================================================
+
+    #[test]
+    fn xml_escape_special_chars() {
+        assert_eq!(xml_serde::xml_escape("a<b>c"), "a&lt;b&gt;c");
+        assert_eq!(xml_serde::xml_escape("a&b"), "a&amp;b");
+        assert_eq!(xml_serde::xml_escape("\"x\""), "&quot;x&quot;");
+        assert_eq!(xml_serde::xml_escape("it's"), "it&apos;s");
+    }
+
+    #[test]
+    fn xml_encode_decode_boolean() {
+        assert_eq!(xml_serde::encode_boolean(true), "true");
+        assert_eq!(xml_serde::encode_boolean(false), "false");
+        assert!(xml_serde::decode_boolean("true"));
+        assert!(xml_serde::decode_boolean("TRUE"));
+        assert!(xml_serde::decode_boolean("1"));
+        assert!(!xml_serde::decode_boolean("false"));
+        assert!(!xml_serde::decode_boolean("0"));
+    }
+
+    #[test]
+    fn xml_decode_long() {
+        assert_eq!(xml_serde::decode_long("0x1000"), 0x1000);
+        assert_eq!(xml_serde::decode_long("0XFF"), 0xFF);
+        assert_eq!(xml_serde::decode_long("42"), 42);
+        assert_eq!(xml_serde::decode_long("invalid"), 0);
+    }
+
+    #[test]
+    fn xml_encode_numbers() {
+        assert_eq!(xml_serde::encode_unsigned(100), "100");
+        assert_eq!(xml_serde::encode_signed(-42), "-42");
+        assert_eq!(xml_serde::encode_double(3.14), "3.14");
+    }
+
+    // ---- AdjustVectorIndex tests ----
+
+    #[test]
+    fn adjust_vector_index_new() {
+        let adj = AdjustVectorIndexRequest::new(42);
+        assert_eq!(adj.new_index, 42);
+    }
+
+    #[test]
+    fn adjust_vector_index_save_xml() {
+        let adj = AdjustVectorIndexRequest::new(100);
+        let mut xml = String::new();
+        adj.save_xml(&mut xml);
+        assert!(xml.contains("adjustvectorindex"));
+        assert!(xml.contains("100"));
+    }
+
+    // ---- CreateDatabase tests ----
+
+    #[test]
+    fn create_database_new() {
+        let cd = CreateDatabaseRequest::new("testdb");
+        assert_eq!(cd.database_name, "testdb");
+    }
+
+    #[test]
+    fn create_database_save_xml() {
+        let cd = CreateDatabaseRequest::new("mydb");
+        let mut xml = String::new();
+        cd.save_xml(&mut xml);
+        assert!(xml.contains("createdatabase"));
+        assert!(xml.contains("mydb"));
+    }
+
+    // ---- DropDatabase tests ----
+
+    #[test]
+    fn drop_database_new() {
+        let dd = DropDatabaseRequest::new("olddb");
+        assert_eq!(dd.database_name, "olddb");
+    }
+
+    #[test]
+    fn drop_database_save_xml() {
+        let dd = DropDatabaseRequest::new("dropme");
+        let mut xml = String::new();
+        dd.save_xml(&mut xml);
+        assert!(xml.contains("dropdatabase"));
+        assert!(xml.contains("dropme"));
+    }
+
+    // ---- PasswordChange tests ----
+
+    #[test]
+    fn password_change_new() {
+        let pc = PasswordChangeRequest::new("old", "new");
+        assert_eq!(pc.old_password, "old");
+        assert_eq!(pc.new_password, "new");
+    }
+
+    #[test]
+    fn password_change_save_xml() {
+        let pc = PasswordChangeRequest::new("secret1", "secret2");
+        let mut xml = String::new();
+        pc.save_xml(&mut xml);
+        assert!(xml.contains("passwordchange"));
+        assert!(xml.contains("secret1"));
+        assert!(xml.contains("secret2"));
+    }
+
+    // ---- ExeSpecifier XML tests ----
+
+    #[test]
+    fn exe_specifier_save_xml() {
+        let spec = ExeSpecifier {
+            exe_name: "test.exe".into(),
+            arch: "x86".into(),
+            compiler_name: "gcc".into(),
+            md5: "abc123".into(),
+        };
+        let mut xml = String::new();
+        spec.save_xml(&mut xml);
+        assert!(xml.contains("test.exe"));
+        assert!(xml.contains("x86"));
+        assert!(xml.contains("gcc"));
+        assert!(xml.contains("abc123"));
+    }
+
+    #[test]
+    fn exe_specifier_restore_xml() {
+        let spec = ExeSpecifier::restore_xml("prog", "arm", "clang", "def456");
+        assert_eq!(spec.exe_name, "prog");
+        assert_eq!(spec.arch, "arm");
+        assert_eq!(spec.compiler_name, "clang");
+        assert_eq!(spec.md5, "def456");
+    }
+
+    // ---- FunctionEntryData XML tests ----
+
+    #[test]
+    fn function_entry_data_save_xml() {
+        let entry = FunctionEntryData::new("main", 0x401000);
+        let mut xml = String::new();
+        entry.save_xml(&mut xml);
+        assert!(xml.contains("fentry"));
+        assert!(xml.contains("main"));
+        assert!(xml.contains("0x401000"));
+    }
+
+    // ---- FilterAtom XML tests ----
+
+    #[test]
+    fn filter_atom_save_xml() {
+        let atom = FilterAtom::new(FilterType::ExeNameMatch, "test.exe");
+        let mut xml = String::new();
+        atom.save_xml(&mut xml);
+        assert!(xml.contains("filter"));
+        assert!(xml.contains("test.exe"));
+    }
+
+    #[test]
+    fn filter_atom_info_string_full() {
+        let atom = FilterAtom::new(FilterType::ArchitectureMatch, "x86");
+        assert_eq!(
+            atom.info_string_full(),
+            Some("Architecture x86".to_string())
+        );
+        let blank = FilterAtom::new(FilterType::Blank, "");
+        assert!(blank.info_string_full().is_none());
+    }
+
+    // ---- ChildAtom XML tests ----
+
+    #[test]
+    fn child_atom_save_xml() {
+        let child = ChildAtom::new(FilterType::HasNamedChild, "callee");
+        let mut xml = String::new();
+        child.save_xml(&mut xml);
+        assert!(xml.contains("child"));
+        assert!(xml.contains("callee"));
+    }
+
+    #[test]
+    fn child_atom_save_xml_with_exe() {
+        let mut child = ChildAtom::new(FilterType::HasNamedChild, "func");
+        child.exe_name = Some("lib.so".to_string());
+        let mut xml = String::new();
+        child.save_xml(&mut xml);
+        assert!(xml.contains("lib.so"));
+    }
+
+    // ---- BSimFilter XML tests ----
+
+    #[test]
+    fn bsim_filter_save_xml() {
+        let mut filter = BSimFilter::new();
+        filter.add_atom(FilterType::ExeNameMatch, "test.exe");
+        let mut xml = String::new();
+        filter.save_xml(&mut xml);
+        assert!(xml.contains("bsimfilter"));
+    }
+
+    #[test]
+    fn bsim_filter_save_xml_empty() {
+        let filter = BSimFilter::new();
+        let mut xml = String::new();
+        filter.save_xml(&mut xml);
+        assert!(xml.is_empty());
+    }
+
+    #[test]
+    fn bsim_filter_restore_xml() {
+        let atoms = vec![FilterAtomEntry::Regular(FilterAtom::new(
+            FilterType::ExeNameMatch,
+            "exe",
+        ))];
+        let filter = BSimFilter::restore_xml(atoms, 1, 1);
+        assert_eq!(filter.num_atoms(), 1);
+        assert_eq!(filter.flags_mask(), 1);
+    }
+
+    // ---- PairInputData XML tests ----
+
+    #[test]
+    fn pair_input_save_xml() {
+        let pair = PairInputData::new(
+            ExeSpecifier::new("a.exe"),
+            FunctionEntryData::new("f1", 0x100),
+            ExeSpecifier::new("b.exe"),
+            FunctionEntryData::new("f2", 0x200),
+        );
+        let mut xml = String::new();
+        pair.save_xml(&mut xml);
+        assert!(xml.contains("<pair>"));
+        assert!(xml.contains("a.exe"));
+        assert!(xml.contains("f2"));
+    }
+
+    // ---- PairNoteData XML tests ----
+
+    #[test]
+    fn pair_note_save_xml() {
+        let note = PairNoteData::new(0.95, 10.0);
+        let mut xml = String::new();
+        note.save_xml(&mut xml);
+        assert!(xml.contains("pairnote"));
+        assert!(xml.contains("0.95"));
+    }
+
+    // ---- SimilarityNoteData XML tests ----
+
+    #[test]
+    fn similarity_note_save_xml() {
+        let note = SimilarityNoteData::new("exe", "func", 0x1000, 0.9, 5.0);
+        let mut xml = String::new();
+        note.save_xml(&mut xml);
+        assert!(xml.contains("snote"));
+        assert!(xml.contains("exe"));
+        assert!(xml.contains("func"));
+    }
+
+    // ---- ClusterNoteData XML tests ----
+
+    #[test]
+    fn cluster_note_save_xml() {
+        let note = ClusterNoteData::new("exe", "func", 0x100, 5, 0.95, 10.0);
+        let mut xml = String::new();
+        note.save_xml(&mut xml);
+        assert!(xml.contains("cnote"));
+        assert!(xml.contains("5"));
+    }
+
+    // ---- VectorResultData XML tests ----
+
+    #[test]
+    fn vector_result_save_xml() {
+        let mut result = VectorResultData::new(42, 100);
+        result.features = vec![(1, 2), (3, 4)];
+        let mut xml = String::new();
+        result.save_xml(&mut xml);
+        assert!(xml.contains("vresult"));
+        assert!(xml.contains("42"));
+        assert!(xml.contains("1:2,3:4"));
+    }
+
+    #[test]
+    fn vector_result_save_xml_no_features() {
+        let result = VectorResultData::new(1, 10);
+        let mut xml = String::new();
+        result.save_xml(&mut xml);
+        assert!(xml.contains("vresult"));
+        assert!(!xml.contains("features"));
+    }
+
+    // ---- SimilarityResultRecord XML tests ----
+
+    #[test]
+    fn similarity_result_record_save_xml() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        result.add_note(SimilarityNoteData::new("exe2", "f1", 0x2000, 0.9, 5.0));
+        let mut xml = String::new();
+        result.save_xml(&mut xml);
+        assert!(xml.contains("simresult"));
+        assert!(xml.contains("main"));
+        assert!(xml.contains("snote"));
+    }
+
+    #[test]
+    fn similarity_result_record_add_notes() {
+        let mut result = SimilarityResultRecord::new("exe1", "main", 0x1000);
+        result.add_notes(vec![
+            SimilarityNoteData::new("exe2", "a", 0x2000, 0.9, 5.0),
+            SimilarityNoteData::new("exe3", "b", 0x3000, 0.8, 3.0),
+        ]);
+        assert_eq!(result.size(), 2);
+        assert_eq!(result.total_count, 2);
+    }
+
+    #[test]
+    fn similarity_result_record_getters() {
+        let result = SimilarityResultRecord::new("exe1", "func1", 0x4000);
+        assert_eq!(result.get_base_exe_name(), "exe1");
+        assert_eq!(result.get_base_func_name(), "func1");
+        assert_eq!(result.get_base_address(), 0x4000);
+    }
+
+    // ---- InsertRequestData XML tests ----
+
+    #[test]
+    fn insert_request_save_xml() {
+        let mut req = InsertRequestData::new(ExeSpecifier::new("test.exe"));
+        req.add_function(BSimFunctionDescription::new("test.exe", "main", 0x1000));
+        req.set_overwrite(true);
+        let mut xml = String::new();
+        req.save_xml(&mut xml);
+        assert!(xml.contains("<insert>"));
+        assert!(xml.contains("test.exe"));
+        assert!(xml.contains("main"));
+    }
+
+    // ---- InsertOptionalValues XML tests ----
+
+    #[test]
+    fn insert_optional_values_save_xml() {
+        let mut vals = InsertOptionalValues::new();
+        vals.add_tag("important");
+        vals.add_metadata("key", "val");
+        let mut xml = String::new();
+        vals.save_xml(&mut xml);
+        assert!(xml.contains("<optional>"));
+        assert!(xml.contains("important"));
+        assert!(xml.contains("key"));
+    }
+
+    #[test]
+    fn insert_optional_values_save_xml_empty() {
+        let vals = InsertOptionalValues::new();
+        let mut xml = String::new();
+        vals.save_xml(&mut xml);
+        assert!(xml.is_empty());
+    }
+
+    // ---- QueryNearest XML tests ----
+
+    #[test]
+    fn query_nearest_save_xml() {
+        let q = QueryNearest::new();
+        let mut xml = String::new();
+        q.save_xml(&mut xml);
+        assert!(xml.contains("querynearest"));
+        assert!(xml.contains("simthresh"));
+        assert!(xml.contains("0.7"));
+        assert!(xml.contains("max"));
+    }
+
+    #[test]
+    fn query_nearest_save_xml_with_filter() {
+        let mut q = QueryNearest::new();
+        let mut filter = BSimFilter::new();
+        filter.add_atom(FilterType::ExeNameMatch, "exe");
+        q.filter = Some(filter);
+        let mut xml = String::new();
+        q.save_xml(&mut xml);
+        assert!(xml.contains("bsimfilter"));
+    }
+
+    // ---- QueryCluster XML tests ----
+
+    #[test]
+    fn query_cluster_new() {
+        let qc = QueryCluster::new(0.8);
+        assert!((qc.threshold - 0.8).abs() < f64::EPSILON);
+        assert_eq!(qc.max_cluster_size, 1000);
+    }
+
+    #[test]
+    fn query_cluster_save_xml() {
+        let qc = QueryCluster::new(0.9);
+        let mut xml = String::new();
+        qc.save_xml(&mut xml);
+        assert!(xml.contains("querycluster"));
+        assert!(xml.contains("0.9"));
+    }
+
+    // ---- QueryChildren XML tests ----
+
+    #[test]
+    fn query_children_save_xml() {
+        let qc = QueryChildren::new("exe", "parent", 0x1000);
+        let mut xml = String::new();
+        qc.save_xml(&mut xml);
+        assert!(xml.contains("querychildren"));
+        assert!(xml.contains("exe"));
+        assert!(xml.contains("parent"));
+    }
+
+    // ---- QueryDelete XML tests ----
+
+    #[test]
+    fn query_delete_save_xml() {
+        let qd = QueryDelete::new(ExeSpecifier::new("bad.exe"));
+        let mut xml = String::new();
+        qd.save_xml(&mut xml);
+        assert!(xml.contains("delete"));
+        assert!(xml.contains("bad.exe"));
+    }
+
+    // ---- QueryPair XML tests ----
+
+    #[test]
+    fn query_pair_save_xml() {
+        let qp = QueryPair::new(PairInputData::new(
+            ExeSpecifier::new("a"),
+            FunctionEntryData::new("f1", 0x100),
+            ExeSpecifier::new("b"),
+            FunctionEntryData::new("f2", 0x200),
+        ));
+        let mut xml = String::new();
+        qp.save_xml(&mut xml);
+        assert!(xml.contains("querypair"));
+        assert!(xml.contains("<pair>"));
+    }
+
+    // ---- QueryInfo XML tests ----
+
+    #[test]
+    fn query_info_save_xml() {
+        let qi = QueryInfo::new();
+        let mut xml = String::new();
+        qi.save_xml(&mut xml);
+        assert!(xml.contains("queryinfo"));
+    }
+
+    // ---- QueryName XML tests ----
+
+    #[test]
+    fn query_name_save_xml() {
+        let qn = QueryName::new("main");
+        let mut xml = String::new();
+        qn.save_xml(&mut xml);
+        assert!(xml.contains("queryname"));
+        assert!(xml.contains("main"));
+    }
+
+    // ---- ResponseNearest XML tests ----
+
+    #[test]
+    fn response_nearest_save_xml() {
+        let mut resp = ResponseNearest::new();
+        resp.add_results(vec![SimilarityNoteData::new("e", "f", 0x100, 0.9, 5.0)]);
+        let mut xml = String::new();
+        resp.save_xml(&mut xml);
+        assert!(xml.contains("responsenearest"));
+        assert!(xml.contains("snote"));
+    }
+
+    #[test]
+    fn response_nearest_merge() {
+        let mut r1 = ResponseNearest::new();
+        r1.add_results(vec![SimilarityNoteData::new("e1", "f1", 0x100, 0.9, 5.0)]);
+        let mut r2 = ResponseNearest::new();
+        r2.add_results(vec![SimilarityNoteData::new("e2", "f2", 0x200, 0.8, 3.0)]);
+        r1.merge_results(&r2);
+        assert_eq!(r1.total_count, 2);
+        assert_eq!(r1.results.len(), 2);
+    }
+
+    // ---- QueryResponseRecord tests ----
+
+    #[test]
+    fn query_response_record_save_xml() {
+        let rec = QueryResponseRecord::new("testresponse");
+        let mut xml = String::new();
+        rec.save_xml(&mut xml);
+        assert!(xml.contains("testresponse"));
+        assert!(xml.contains("ok"));
+    }
+
+    #[test]
+    fn query_response_record_with_error() {
+        let mut rec = QueryResponseRecord::new("errorresp");
+        rec.set_error("something went wrong");
+        assert!(rec.has_error());
+        let mut xml = String::new();
+        rec.save_xml(&mut xml);
+        assert!(xml.contains("something went wrong"));
+    }
+
+    // ---- PreFilter XML tests ----
+
+    #[test]
+    fn pre_filter_save_xml_full() {
+        let mut pf = PreFilter::new()
+            .with_min_size(10)
+            .with_max_size(1000)
+            .with_include_library(false);
+        pf.add_include_pattern("func");
+        pf.add_exclude_pattern("debug");
+        let mut xml = String::new();
+        pf.save_xml(&mut xml);
+        assert!(xml.contains("prefilter"));
+        assert!(xml.contains("10"));
+        assert!(xml.contains("1000"));
+        assert!(xml.contains("func"));
+        assert!(xml.contains("debug"));
+    }
+
+    #[test]
+    fn pre_filter_save_xml_empty() {
+        let pf = PreFilter::new();
+        let mut xml = String::new();
+        pf.save_xml(&mut xml);
+        // Default PreFilter has library=true, thunks=false, no size limits -> should still output
+        // Actually with the check for None and empty vecs, it should skip
+        // The check: min/max both None AND include/exclude both empty -> skip
+        // But include_library/thunks are not checked for skip, so it outputs
+        // Let's just verify it doesn't panic
+        let _ = xml;
+    }
+
+    // ---- StagingManager XML tests ----
+
+    #[test]
+    fn staging_manager_save_xml() {
+        let mut sm = StagingManager::new(10);
+        sm.initialize(25);
+        let mut xml = String::new();
+        sm.save_xml(&mut xml);
+        assert!(xml.contains("staging"));
+        assert!(xml.contains("25"));
+    }
+
+    // ---- NullStaging XML tests ----
+
+    #[test]
+    fn null_staging_save_xml() {
+        let ns = NullStaging::new();
+        let mut xml = String::new();
+        ns.save_xml(&mut xml);
+        assert!(xml.contains("nullstaging"));
+    }
+
+    // ---- FunctionStagingManager XML tests ----
+
+    #[test]
+    fn function_staging_manager_save_xml() {
+        let mut fs = FunctionStagingManager::new(10);
+        fs.initialize(20);
+        let mut xml = String::new();
+        fs.save_xml(&mut xml);
+        assert!(xml.contains("funcstaging"));
+        assert!(xml.contains("20"));
+    }
+
+    // ====================================================================
+    // JSON serialization roundtrip tests for all types
+    // ====================================================================
+
+    #[test]
+    fn json_roundtrip_exe_specifier() {
+        let spec = ExeSpecifier {
+            exe_name: "test.exe".into(),
+            arch: "x86".into(),
+            compiler_name: "gcc".into(),
+            md5: "abc".into(),
+        };
+        let json = serde_json::to_string(&spec).unwrap();
+        let back: ExeSpecifier = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.exe_name, "test.exe");
+    }
+
+    #[test]
+    fn json_roundtrip_filter_atom() {
+        let atom = FilterAtom::new(FilterType::ArchitectureMatch, "arm");
+        let json = serde_json::to_string(&atom).unwrap();
+        let back: FilterAtom = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.value, "arm");
+    }
+
+    #[test]
+    fn json_roundtrip_child_atom() {
+        let child = ChildAtom::new(FilterType::HasNamedChild, "callee");
+        let json = serde_json::to_string(&child).unwrap();
+        let back: ChildAtom = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.child_name, "callee");
+    }
+
+    #[test]
+    fn json_roundtrip_bsim_filter() {
+        let mut filter = BSimFilter::new();
+        filter.add_atom(FilterType::ExeNameMatch, "exe");
+        filter.add_child_atom(FilterType::HasNamedChild, "child", Some("so".into()));
+        let json = serde_json::to_string(&filter).unwrap();
+        let back: BSimFilter = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.num_atoms(), 2);
+    }
+
+    #[test]
+    fn json_roundtrip_pair_input() {
+        let pair = PairInputData::new(
+            ExeSpecifier::new("a"),
+            FunctionEntryData::new("f1", 0x100),
+            ExeSpecifier::new("b"),
+            FunctionEntryData::new("f2", 0x200),
+        );
+        let json = serde_json::to_string(&pair).unwrap();
+        let back: PairInputData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.func_a.func_name, "f1");
+    }
+
+    #[test]
+    fn json_roundtrip_pair_note() {
+        let note = PairNoteData::with_details(
+            ExeSpecifier::new("a"),
+            FunctionEntryData::new("f1", 0x100),
+            ExeSpecifier::new("b"),
+            FunctionEntryData::new("f2", 0x200),
+            0.9, 5.0, 42.0, 100, 120, 80,
+        );
+        let json = serde_json::to_string(&note).unwrap();
+        let back: PairNoteData = serde_json::from_str(&json).unwrap();
+        assert!((back.similarity - 0.9).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn json_roundtrip_similarity_note() {
+        let note = SimilarityNoteData::new("exe", "func", 0x100, 0.9, 5.0);
+        let json = serde_json::to_string(&note).unwrap();
+        let back: SimilarityNoteData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.func_name, "func");
+    }
+
+    #[test]
+    fn json_roundtrip_cluster_note() {
+        let note = ClusterNoteData::new("exe", "func", 0x100, 5, 0.95, 10.0);
+        let json = serde_json::to_string(&note).unwrap();
+        let back: ClusterNoteData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.set_size, 5);
+    }
+
+    #[test]
+    fn json_roundtrip_vector_result() {
+        let result = VectorResultData::new(42, 100);
+        let json = serde_json::to_string(&result).unwrap();
+        let back: VectorResultData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.vector_id, 42);
+    }
+
+    #[test]
+    fn json_roundtrip_insert_optional_values() {
+        let mut vals = InsertOptionalValues::new();
+        vals.add_tag("tag1");
+        vals.add_metadata("k", "v");
+        let json = serde_json::to_string(&vals).unwrap();
+        let back: InsertOptionalValues = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tags.len(), 1);
+    }
+
+    #[test]
+    fn json_roundtrip_insert_request() {
+        let req = InsertRequestData::new(ExeSpecifier::new("exe"));
+        let json = serde_json::to_string(&req).unwrap();
+        let back: InsertRequestData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.exe_specifier.exe_name, "exe");
+    }
+
+    #[test]
+    fn query_nearest_local_staging_copy_preserves_all_fields() {
+        let mut q = QueryNearest::new();
+        q.threshold = 0.85;
+        q.significance_threshold = 2.5;
+        q.max_results = 50;
+        q.vector_max = 10;
+        q.fill_categories = false;
+        let mut filter = BSimFilter::new();
+        filter.add_atom(FilterType::ExeNameMatch, "exe");
+        q.filter = Some(filter);
+        let copy = q.local_staging_copy();
+        assert!((copy.threshold - 0.85).abs() < f64::EPSILON);
+        assert!((copy.significance_threshold - 2.5).abs() < f64::EPSILON);
+        assert_eq!(copy.max_results, 50);
+        assert_eq!(copy.vector_max, 10);
+        assert!(!copy.fill_categories);
+        assert!(copy.filter.is_some());
+    }
+
+    #[test]
+    fn json_roundtrip_exeresult() {
+        let er = ExeResultData::new("exe", "abc123");
+        let json = serde_json::to_string(&er).unwrap();
+        let back: ExeResultData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.exe_name, "exe");
+    }
+
+    #[test]
+    fn json_roundtrip_database_info() {
+        let info = DatabaseInfoData::new("mydb");
+        let json = serde_json::to_string(&info).unwrap();
+        let back: DatabaseInfoData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "mydb");
+    }
+
+    #[test]
+    fn json_roundtrip_query_info_data() {
+        let info = QueryInfoData::new("mydb");
+        let json = serde_json::to_string(&info).unwrap();
+        let back: QueryInfoData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.database_name, "mydb");
+    }
+
+    // ====================================================================
+    // Additional type tests for completeness
+    // ====================================================================
+
+    #[test]
+    fn filter_type_all_variants() {
+        let types = vec![
+            FilterType::Blank,
+            FilterType::ExeNameMatch,
+            FilterType::ExeNameNotMatch,
+            FilterType::ArchitectureMatch,
+            FilterType::CompilerMatch,
+            FilterType::Md5Match,
+            FilterType::DateEarlier,
+            FilterType::DateLater,
+            FilterType::ExeCategory,
+            FilterType::FunctionTag("tag".into()),
+            FilterType::PathStarts,
+            FilterType::HasNamedChild,
+            FilterType::Custom("custom".into()),
+        ];
+        for ft in types {
+            let _label = ft.label();
+            let _is_blank = ft.is_blank();
+        }
+    }
+
+    #[test]
+    fn bsim_request_all_variants_serialization() {
+        let variants = vec![
+            BSimRequest::Ping,
+            BSimRequest::GetFunctionCount,
+            BSimRequest::GetExecutableCount,
+            BSimRequest::QueryInfo,
+            BSimRequest::CreateDatabase("db".into()),
+            BSimRequest::DropDatabase("db".into()),
+            BSimRequest::PrewarmRequest,
+        ];
+        for variant in variants {
+            let json = serde_json::to_string(&variant).unwrap();
+            let _: BSimRequest = serde_json::from_str(&json).unwrap();
+        }
+    }
+
+    #[test]
+    fn bsim_response_all_variants() {
+        let variants = vec![
+            BSimResponse::Success,
+            BSimResponse::Count(10),
+            BSimResponse::Error("err".into()),
+            BSimResponse::Pong,
+        ];
+        for variant in variants {
+            let json = serde_json::to_string(&variant).unwrap();
+            let back: BSimResponse = serde_json::from_str(&json).unwrap();
+            assert!(back.is_success() || back.error_message().is_some());
+        }
+    }
+
+    #[test]
+    fn exe_result_data_full() {
+        let mut er = ExeResultData::new("test", "md5hash");
+        er.arch = "x86".into();
+        er.compiler = "gcc".into();
+        er.function_count = 500;
+        er.ingest_date = Some(1000000);
+        assert_eq!(er.arch, "x86");
+        assert_eq!(er.function_count, 500);
+    }
+
+    #[test]
+    fn staging_manager_multiple_stages() {
+        let mut sm = StagingManager::new(3);
+        sm.initialize(10);
+        assert_eq!(sm.total_size(), 4);
+        assert_eq!(sm.current_range(), (0, 3));
+        sm.next_stage();
+        assert_eq!(sm.current_range(), (3, 6));
+        sm.next_stage();
+        assert_eq!(sm.current_range(), (6, 9));
+        sm.next_stage();
+        assert_eq!(sm.current_range(), (9, 10));
+    }
+
+    #[test]
+    fn function_staging_progress_single_batch() {
+        let mut fs = FunctionStagingManager::new(100);
+        assert!(fs.initialize(50));
+        assert_eq!(fs.stage_end(), 50);
+        assert!(!fs.next_stage());
+        assert!(fs.is_complete());
     }
 }

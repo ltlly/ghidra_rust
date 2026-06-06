@@ -43,6 +43,8 @@ pub mod watch;
 pub mod model;
 pub mod target_listener;
 pub mod trace_address_snap_range;
+pub mod tracermi_connection;
+pub mod platform_mapper_api;
 
 pub use action::{
     ActionSource, AutoMapSpec, AutoMapSpecRegistry, AutoReadMemorySpec, AutoReadMemorySpecRegistry,
@@ -76,6 +78,18 @@ pub use watch::{ValStr, ValueFormat, WatchRow};
 pub use tracermi_listener::{
     CompositeTraceRmiServiceListener, ConnectMode, RecordingServiceListener,
     TraceRmiServiceEvent, TraceRmiServiceListener,
+};
+
+// Re-exports from new tracermi_connection module
+pub use tracermi_connection::{
+    ConnectionStatus, LaunchParameter, LaunchParameterType, RemoteMethodResult,
+    TraceRmiConnectionInfo, TraceRmiTarget,
+};
+
+// Re-exports from new platform_mapper_api module
+pub use platform_mapper_api::{
+    AddressSpaceDesc, DisassemblyResult, Endianness, FlowType, PlatformMapperConfig,
+    PlatformOffer, PlatformOpinionConfig, RegisterMappingEntry,
 };
 
 // Factory modules from remaining Debugger-api port

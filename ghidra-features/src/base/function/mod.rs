@@ -32,6 +32,7 @@ pub mod table_model;
 pub mod cycle_group;
 pub mod function_data_view;
 pub mod storage_editor;
+pub mod extra_actions;
 
 pub use plugin::*;
 pub use actions::*;
