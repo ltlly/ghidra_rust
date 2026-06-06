@@ -15,6 +15,7 @@
 
 pub mod actions;
 pub mod conflict;
+pub mod cycle_group;
 pub mod edit_field;
 pub mod settings;
 

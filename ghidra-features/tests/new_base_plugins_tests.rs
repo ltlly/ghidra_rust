@@ -823,3 +823,385 @@ mod integration_tests {
         assert!(restored.has_fall_through);
     }
 }
+
+// ===========================================================================
+// Equate Convert Actions Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod equate_convert_tests {
+    use ghidra_features::base::equate::convert_actions::*;
+    use ghidra_features::base::equate::convert_cmd::ScalarFormat;
+    use ghidra_features::base::equate::Scalar;
+
+    #[test]
+    fn test_scalar_hex_format() {
+        let s = Scalar::unsigned(32, 0xDEADBEEF);
+        assert_eq!(s.bit_length(), 32);
+        assert_eq!(s.unsigned_value(), 0xDEADBEEF);
+    }
+
+    #[test]
+    fn test_scalar_signed_decimal_negative() {
+        let s = Scalar::signed(8, -1);
+        assert_eq!(s.signed_value(), -1);
+        assert_eq!(s.unsigned_value(), 0xFF);
+    }
+
+    #[test]
+    fn test_scalar_binary_format() {
+        let s = Scalar::unsigned(8, 0b10101010);
+        let ba = s.byte_array_value();
+        assert_eq!(ba, vec![0xAA]);
+    }
+
+    #[test]
+    fn test_convert_action_models_all_variants() {
+        let models = all_convert_action_models();
+        assert_eq!(models.len(), 10);
+    }
+
+    #[test]
+    fn test_abstract_convert_action_model_hex() {
+        let model = AbstractConvertActionModel::new(ScalarFormat::Hex, false);
+        assert!(!model.is_signed);
+        assert!(model.menu_path.len() >= 2);
+    }
+
+    #[test]
+    fn test_abstract_convert_action_model_signed_decimal() {
+        let model = AbstractConvertActionModel::new(ScalarFormat::SignedDecimal, true);
+        assert!(model.is_signed);
+    }
+
+    #[test]
+    fn test_abstract_convert_action_model_applicable() {
+        let model = AbstractConvertActionModel::new(ScalarFormat::Hex, false);
+        let scalar = Scalar::unsigned(32, 0xFF);
+        assert!(model.is_applicable(&scalar));
+    }
+
+    #[test]
+    fn test_abstract_convert_action_model_float_only_32bit() {
+        let model = AbstractConvertActionModel::new(ScalarFormat::Float, false);
+        let scalar32 = Scalar::unsigned(32, 0x41200000);
+        assert!(model.is_applicable(&scalar32));
+        let scalar64 = Scalar::unsigned(64, 0x41200000);
+        assert!(!model.is_applicable(&scalar64));
+    }
+}
+
+// ===========================================================================
+// Equate Provider Model Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod equate_provider_tests {
+    use ghidra_features::base::equate::table_provider::*;
+    use ghidra_features::base::equate::table::*;
+    use ghidra_features::base::equate::Scalar;
+    use ghidra_core::Address;
+
+    #[test]
+    fn test_equate_table_model_full_lifecycle() {
+        let mut table = ghidra_features::base::equate::EquateTable::new();
+        table.create_equate("FOO", 0x100).unwrap();
+        table.create_equate("BAR", 0x200).unwrap();
+        table.create_equate("BAZ", 0x300).unwrap();
+
+        let mut model = EquateTableModel::new();
+        model.update(&table);
+        assert_eq!(model.row_count(), 3);
+
+        model.set_sort(equate_columns::NAME, SortOrder::Ascending);
+        assert_eq!(model.cell_value(0, 0).unwrap(), "BAR");
+    }
+
+    #[test]
+    fn test_equate_reference_table_model_full() {
+        let mut table = ghidra_features::base::equate::EquateTable::new();
+        table.create_equate("FOO", 0x100).unwrap();
+        table.add_reference("FOO", Address::new(0x400000), 0);
+        table.add_reference("FOO", Address::new(0x400010), 1);
+
+        let mut model = EquateReferenceTableModel::new();
+        model.set_equate(&table, Some("FOO"));
+        assert_eq!(model.row_count(), 2);
+    }
+
+    #[test]
+    fn test_equate_table_provider_state() {
+        let state = EquateTableProviderState::new();
+        assert_eq!(state.width, 800);
+        assert_eq!(state.height, 600);
+        assert!(state.sort_ascending);
+        assert!(state.references_visible);
+    }
+}
+
+// ===========================================================================
+// Bookmark Edit Command Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod bookmark_edit_tests {
+    use ghidra_features::bookmark::edit_cmd::*;
+
+    #[test]
+    fn test_bookmark_edit_cmd_all_variants() {
+        let mut cmd1 = BookmarkEditCmd::new_for_address(0x400000, "Info", "Analysis", "test");
+        assert_eq!(cmd1.target_addresses(), vec![0x400000]);
+        assert!(cmd1.apply());
+
+        let mut cmd2 = BookmarkEditCmd::new_for_address_set(vec![0x1000, 0x2000], "Warning", "S", "w");
+        assert_eq!(cmd2.target_addresses().len(), 2);
+
+        let mut cmd3 = BookmarkEditCmd::new_for_edit(42, "Note", "User", "updated");
+        assert_eq!(cmd3.name(), "Edit Note Bookmark");
+        assert!(cmd3.apply());
+    }
+
+    #[test]
+    fn test_bookmark_table_model_filtering() {
+        let mut model = BookmarkTableModel::new();
+        model.add_row(BookmarkRowObject::new("Info", "Analysis", "a", 0x1000, 1));
+        model.add_row(BookmarkRowObject::new("Warning", "Security", "b", 0x2000, 2));
+        model.add_row(BookmarkRowObject::new("Note", "User", "c", 0x3000, 3));
+        assert_eq!(model.row_count(), 3);
+
+        model.set_filter_type(Some("Info".to_string()));
+        assert_eq!(model.row_count(), 1);
+        model.clear_filters();
+        assert_eq!(model.row_count(), 3);
+    }
+
+    #[test]
+    fn test_bookmark_delete_cmd() {
+        let mut cmd = BookmarkDeleteCmd::new(vec![1, 2, 3]);
+        assert_eq!(cmd.bookmark_ids.len(), 3);
+        assert!(cmd.apply());
+        assert!(cmd.was_applied());
+    }
+
+    #[test]
+    fn test_bookmark_row_object_from_data() {
+        use ghidra_features::bookmark::{BookmarkData, BookmarkType};
+        use ghidra_core::Address;
+        let bm = BookmarkData::new(Address::new(0x1000), BookmarkType::warning(), "careful", 99);
+        let row = BookmarkRowObject::from_bookmark_data(&bm);
+        assert_eq!(row.type_string, "Warning");
+        assert_eq!(row.address, 0x1000);
+    }
+
+    #[test]
+    fn test_bookmark_row_mappers() {
+        let row = BookmarkRowObject::new("Info", "Analysis", "test", 0x400000, 42);
+        let addr = BookmarkRowObjectToAddressTableRowMapper::map(&row);
+        assert_eq!(addr, 0x400000);
+        let loc = BookmarkRowObjectToProgramLocationTableRowMapper::map(&row);
+        assert_eq!(loc.address, 0x400000);
+        assert_eq!(loc.bookmark_id, 42);
+    }
+}
+
+// ===========================================================================
+// Data Plugin Cycle Group Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod data_cycle_group_tests {
+    use ghidra_features::data_plugin::cycle_group::*;
+
+    #[test]
+    fn test_cycle_group_cycling() {
+        let groups = builtin_cycle_groups();
+        let dword_group = &groups[2];
+        assert_eq!(dword_group.next_type("dword"), Some("int"));
+        assert_eq!(dword_group.next_type("int"), Some("uint"));
+        assert_eq!(dword_group.next_type("uint"), Some("float"));
+        assert_eq!(dword_group.next_type("float"), Some("dword"));
+    }
+
+    #[test]
+    fn test_recently_used_eviction() {
+        let mut recent = RecentlyUsedDataTypes::new(3);
+        recent.use_type("int");
+        recent.use_type("char");
+        recent.use_type("float");
+        recent.use_type("double");
+        assert_eq!(recent.len(), 3);
+        assert_eq!(recent.most_recent(), Some("double"));
+    }
+
+    #[test]
+    fn test_data_type_settings_dialog_full() {
+        let mut dialog = DataTypeSettingsDialog::new("int");
+        dialog.add_bool_setting("signed", "Signed", true, None);
+        dialog.add_int_setting("bits", "Bit Size", 32, None);
+        dialog.add_enum_setting("format", "Format", 0, vec!["Hex".into(), "Dec".into()], None);
+        assert_eq!(dialog.len(), 3);
+
+        dialog.set_bool("signed", false);
+        dialog.set_int("bits", 64);
+        dialog.set_enum_index("format", 1);
+        assert!(dialog.is_dirty());
+
+        dialog.reset_to_defaults();
+        assert!(!dialog.is_dirty());
+    }
+
+    #[test]
+    fn test_create_array_dialog() {
+        let dialog = CreateArrayDialog::new("int", 10, 4);
+        assert!(dialog.validate().is_ok());
+        assert_eq!(dialog.total_size(), 40);
+    }
+
+    #[test]
+    fn test_create_structure_dialog() {
+        let mut dialog = CreateStructureDialog::new("S");
+        dialog.add_component("x", "int", 4);
+        dialog.add_component("y", "char", 1);
+        assert_eq!(dialog.component_count(), 2);
+        assert_eq!(dialog.total_size, 5);
+        assert!(dialog.validate().is_ok());
+    }
+
+    #[test]
+    fn test_rename_data_field_dialog_validation() {
+        let mut dialog = RenameDataFieldDialog::new("old");
+        dialog.set_new_name("new_name");
+        assert!(dialog.validate().is_ok());
+
+        let mut bad = RenameDataFieldDialog::new("name");
+        bad.set_new_name("123bad");
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn test_edit_data_field_dialog() {
+        let mut dialog = EditDataFieldDialog::new("buf", "byte[256]", 0, 256);
+        assert!(!dialog.type_changed());
+        dialog.set_new_type("char[256]");
+        assert!(dialog.type_changed());
+        assert!(dialog.validate().is_ok());
+    }
+}
+
+// ===========================================================================
+// Composite Editor Panel Tests
+// ===========================================================================
+
+#[cfg(test)]
+mod composite_editor_panel_tests {
+    use ghidra_features::compositeeditor::comp_editor_panel::*;
+
+    #[test]
+    fn test_panel_state_selection_workflow() {
+        let mut state = CompEditorPanelState::new("S", true);
+        state.select_row(0);
+        state.add_to_selection(2);
+        state.add_to_selection(4);
+        assert_eq!(state.selected_rows.len(), 3);
+        assert_eq!(state.primary_selection(), Some(0));
+        state.clear_selection();
+        assert!(!state.has_selection());
+    }
+
+    #[test]
+    fn test_panel_state_editing_workflow() {
+        let mut state = CompEditorPanelState::new("S", true);
+        state.start_editing(2, 1, "int".to_string());
+        assert!(state.editing);
+        let result = state.commit_editing().unwrap();
+        assert_eq!(result, (2, 1, "int".to_string()));
+        assert!(!state.editing);
+    }
+
+    #[test]
+    fn test_panel_state_drag_and_drop() {
+        let mut state = CompEditorPanelState::new("S", true);
+        state.start_drag(3);
+        state.set_drop_target(1);
+        let result = state.end_drag();
+        assert_eq!(result, Some((3, 1)));
+    }
+
+    #[test]
+    fn test_comp_editor_model_undo_redo() {
+        let mut model = CompEditorModel::new("S", true);
+        let snap = CompEditorSnapshot::new(vec!["int".into()], vec!["x".into()], vec![4]);
+        model.save_undo_snapshot(snap);
+        assert!(model.can_undo());
+        model.undo();
+        assert!(model.can_redo());
+    }
+
+    #[test]
+    fn test_comp_editor_model_lock_unlock() {
+        let mut model = CompEditorModel::new("S", true);
+        model.lock();
+        assert!(model.locked);
+        model.unlock();
+        assert!(!model.locked);
+    }
+
+    #[test]
+    fn test_panel_state_type_name() {
+        let s = CompEditorPanelState::new("S", true);
+        assert_eq!(s.type_name(), "Structure");
+        let u = CompEditorPanelState::new("U", false);
+        assert_eq!(u.type_name(), "Union");
+    }
+}
+
+// ===========================================================================
+// Cross-module integration tests
+// ===========================================================================
+
+#[cfg(test)]
+mod new_integration_tests {
+    use ghidra_features::bookmark::{BookmarkManager, BookmarkType};
+    use ghidra_features::data_plugin::*;
+    use ghidra_features::data_plugin::cycle_group::*;
+    use ghidra_features::compositeeditor::*;
+    use ghidra_core::Address;
+
+    #[test]
+    fn test_equate_with_bookmark_integration() {
+        let mut bm_mgr = BookmarkManager::new();
+        let addr = Address::new(0x400000);
+        bm_mgr.set_bookmark(addr, &BookmarkType::info(), "Equate conversion needed");
+
+        let bookmarks = bm_mgr.get_bookmarks_at(addr);
+        assert_eq!(bookmarks.len(), 1);
+    }
+
+    #[test]
+    fn test_data_with_cycle_group_integration() {
+        let mut model = DataPluginModel::new();
+        model.create_data(Address::new(0x1000), DataAction::DWord, 4).unwrap();
+
+        let groups = builtin_cycle_groups();
+        let dword_group = &groups[2];
+        assert_eq!(dword_group.next_type("dword"), Some("int"));
+
+        let mut recent = RecentlyUsedDataTypes::new(5);
+        recent.use_type("dword");
+        recent.use_type("int");
+        assert_eq!(recent.most_recent(), Some("int"));
+    }
+
+    #[test]
+    fn test_composite_editor_with_settings() {
+        let mut ce_model = CompositeEditorModel::new("MyStruct", true);
+        ce_model.add_component(0, "int");
+        ce_model.add_component(1, "char");
+        assert_eq!(ce_model.component_count(), 2);
+
+        let mut dialog = DataTypeSettingsDialog::new("MyStruct");
+        dialog.add_bool_setting("packed", "Packed", false, None);
+        dialog.set_bool("packed", true);
+        assert!(dialog.is_dirty());
+    }
+}

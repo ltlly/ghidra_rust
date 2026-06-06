@@ -407,3 +407,14 @@ pub use trace_db_query_cache::{
     CachePointKey, CachedRangeEntry, CachedSequenceRegion,
     ContainingQueryCache, SequenceQueryCache,
 };
+
+// New modules ported from remaining Framework-TraceModeling classes
+pub mod trace_db_record_manager;
+pub mod trace_db_namespace_manager;
+pub mod trace_db_snapshot_manager;
+pub mod trace_db_property_map_impl;
+
+pub use trace_db_record_manager::{RecordInfo, RecordKey, TraceRecordManager};
+pub use trace_db_namespace_manager::{TraceNamespace, TraceNamespaceManager};
+pub use trace_db_snapshot_manager::{TraceSnapshot, TraceSnapshotManager};
+pub use trace_db_property_map_impl::{PropertyMapRangeEntry, TracePropertyRangeMap};

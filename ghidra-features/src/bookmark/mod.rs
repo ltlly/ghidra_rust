@@ -19,6 +19,12 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.bookmark` Java package.
 pub mod plugin;
 
+/// Bookmark edit command, table row objects, and table mappers.
+///
+/// Ported from `ghidra.app.plugin.core.bookmark.BookmarkEditCmd`,
+/// `BookmarkRowObject`, `BookmarkTableModel`, and row mapper classes.
+pub mod edit_cmd;
+
 /// Bookmark user actions (add, edit, delete, goto).
 ///
 /// Ported from Ghidra's `ghidra.app.plugin.core.bookmark` action classes.

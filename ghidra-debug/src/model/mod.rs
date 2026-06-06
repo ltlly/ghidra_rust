@@ -318,3 +318,10 @@ pub use trace_equate_manager::{TraceEquateManager, TraceEquateManagerImpl, valid
 pub use trace_property_map_manager::{PropertyMapValue, TracePropertyMapManager};
 pub use trace_static_map_manager::{TraceStaticMapManager, StaticMappingEntry, TraceStaticMappingChangeListener};
 pub use location_tracking::LocationTrackingSpecChangeListener;
+
+// Builtin interface factory ported from Framework-TraceModeling
+pub mod builtin_interface_factory;
+pub use builtin_interface_factory::{
+    global_factory, is_builtin_interface, BuiltinInterfaceFactory,
+    InterfaceCategory, InterfaceRegistration,
+};

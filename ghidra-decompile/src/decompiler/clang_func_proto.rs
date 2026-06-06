@@ -1,21 +1,22 @@
-//! Port of `ClangFuncProto`.
-use std::collections::HashMap;
-/// Struct porting `ClangFuncProto`.
-#[derive(Debug, Clone)]
-pub struct ClangFuncProto {
-    _phantom: std::marker::PhantomData<()>,
+//! ClangFuncProto: a function prototype token group.
+//!
+//! Ports Ghidra's `ghidra.app.decompiler.ClangFuncProto`.
+//! Re-exports `ClangFuncProtoData` from `clang_node`.
+
+pub use super::clang_node::ClangFuncProtoData;
+
+/// Create an empty function prototype group.
+pub fn empty_func_proto() -> ClangFuncProtoData {
+    ClangFuncProtoData::default()
 }
-impl ClangFuncProto {
-    /// Create a new instance.
-    pub fn new() -> Self { Self::default() }
-}
-impl Default for ClangFuncProto {
-    fn default() -> Self { Self { _phantom: std::marker::PhantomData } }
-}
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn test_clang_func_proto_new() { let _ = ClangFuncProto::new(); }
+    fn test_empty_func_proto() {
+        let p = empty_func_proto();
+        assert!(p.group.children.is_empty());
+    }
 }

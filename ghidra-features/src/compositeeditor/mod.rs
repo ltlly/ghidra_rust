@@ -102,6 +102,13 @@ pub mod action_manager;
 /// Ported from `ghidra.app.plugin.core.compositeeditor.DataTypeHelper`.
 pub mod data_type_helper;
 
+/// CompEditorPanel state and CompEditorModel with undo/redo snapshot support.
+///
+/// Ported from `ghidra.app.plugin.core.compositeeditor.CompEditorModel`,
+/// `CompEditorPanel`, `StructureEditorPanel`, `UnionEditorPanel`,
+/// and `UnionEditorProvider`.
+pub mod comp_editor_panel;
+
 use serde::{Deserialize, Serialize};
 
 /// Maximum number of components allowed in a composite type.

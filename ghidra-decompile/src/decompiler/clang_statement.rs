@@ -1,21 +1,37 @@
-//! Port of `ClangStatement`.
-use std::collections::HashMap;
-/// Struct porting `ClangStatement`.
-#[derive(Debug, Clone)]
-pub struct ClangStatement {
-    _phantom: std::marker::PhantomData<()>,
+//! ClangStatement: a C statement grouping under a PcodeOp.
+//!
+//! Ports Ghidra's `ghidra.app.decompiler.ClangStatement`.
+//! Re-exports `ClangStatementData` from `clang_node`.
+
+pub use super::clang_node::ClangStatementData;
+
+/// Create an empty statement group.
+pub fn empty_statement() -> ClangStatementData {
+    ClangStatementData::default()
 }
-impl ClangStatement {
-    /// Create a new instance.
-    pub fn new() -> Self { Self::default() }
+
+/// Create a statement group with a p-code op reference.
+pub fn statement_with_op(op_ref: u32) -> ClangStatementData {
+    ClangStatementData {
+        group: Default::default(),
+        op_ref: Some(op_ref),
+    }
 }
-impl Default for ClangStatement {
-    fn default() -> Self { Self { _phantom: std::marker::PhantomData } }
-}
-}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
-    fn test_clang_statement_new() { let _ = ClangStatement::new(); }
+    fn test_empty_statement() {
+        let s = empty_statement();
+        assert!(s.group.children.is_empty());
+        assert!(s.op_ref.is_none());
+    }
+
+    #[test]
+    fn test_statement_with_op() {
+        let s = statement_with_op(42);
+        assert_eq!(s.op_ref, Some(42));
+    }
 }

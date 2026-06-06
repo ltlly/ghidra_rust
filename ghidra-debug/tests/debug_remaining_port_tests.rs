@@ -790,3 +790,135 @@ fn test_unsatisfied_exceptions_clone() {
     let e4 = e3.clone();
     assert_eq!(e3.unresolved(), e4.unresolved());
 }
+
+// ============================================================
+// Tests for new modules ported from remaining Debug Java classes
+// ============================================================
+
+#[test]
+fn test_new_record_manager_full_lifecycle() {
+    use ghidra_debug::db::TraceRecordManager;
+
+    let mut mgr = TraceRecordManager::<String>::new("test_lifecycle");
+
+    let k1 = mgr.insert("first".to_string());
+    let k2 = mgr.insert("second".to_string());
+    let k3 = mgr.insert("third".to_string());
+
+    assert_eq!(mgr.len(), 3);
+    assert!(!mgr.is_empty());
+    assert_eq!(mgr.get(k1), Some(&"first".to_string()));
+    assert_eq!(mgr.get(k2), Some(&"second".to_string()));
+    assert_eq!(mgr.get(k3), Some(&"third".to_string()));
+
+    // Dirty tracking
+    assert_eq!(mgr.dirty_records().len(), 3);
+    mgr.clear_dirty();
+    assert!(mgr.dirty_records().is_empty());
+
+    if let Some(val) = mgr.get_mut(k2) {
+        val.push_str("_modified");
+    }
+    assert_eq!(mgr.dirty_records().len(), 1);
+
+    // Remove
+    let removed = mgr.remove(k1);
+    assert_eq!(removed, Some("first".to_string()));
+    assert_eq!(mgr.len(), 2);
+}
+
+#[test]
+fn test_new_namespace_manager_path_resolution() {
+    use ghidra_debug::db::TraceNamespaceManager;
+
+    let mut mgr = TraceNamespaceManager::new();
+
+    let std_key = mgr.create_namespace("std", 0, 0).unwrap();
+    let io_key = mgr.create_namespace("io", std_key, 0).unwrap();
+    let result_key = mgr.create_namespace("Result", io_key, 0).unwrap();
+
+    assert_eq!(mgr.resolve_path("::std"), Some(std_key));
+    assert_eq!(mgr.resolve_path("::std::io"), Some(io_key));
+    assert_eq!(mgr.resolve_path("::std::io::Result"), Some(result_key));
+    assert_eq!(mgr.resolve_path("::nonexistent"), None);
+    assert_eq!(mgr.path_of(result_key), "::std::io::Result");
+
+    let desc = mgr.descendants_of(0);
+    assert_eq!(desc.len(), 3);
+
+    // Cascade removal
+    let removed = mgr.remove_namespace(std_key);
+    assert_eq!(removed.len(), 3);
+    assert_eq!(mgr.len(), 1);
+}
+
+#[test]
+fn test_new_snapshot_manager_timeline() {
+    use ghidra_debug::db::TraceSnapshotManager;
+
+    let mut mgr = TraceSnapshotManager::new();
+    mgr.create_snapshot_with_desc(10, "initial state");
+    mgr.create_snapshot(20);
+    mgr.create_snapshot(50);
+    mgr.create_snapshot(100);
+
+    assert_eq!(mgr.len(), 4);
+    assert_eq!(mgr.min_snap(), Some(10));
+    assert_eq!(mgr.max_snap(), Some(100));
+
+    assert_eq!(mgr.floor_snap(15).unwrap().snap, 10);
+    assert_eq!(mgr.ceil_snap(25).unwrap().snap, 50);
+    assert_eq!(mgr.next_snap(20), Some(50));
+    assert_eq!(mgr.prev_snap(50), Some(20));
+
+    let range = mgr.range(10, 50);
+    assert_eq!(range.len(), 3);
+    assert_eq!(mgr.get_by_snap(10).unwrap().description, "initial state");
+
+    // Remove
+    let removed = mgr.remove_snapshot(20);
+    assert!(removed.is_some());
+    assert_eq!(mgr.len(), 3);
+}
+
+#[test]
+fn test_new_property_range_map_operations() {
+    use ghidra_debug::db::{PropertyMapRangeEntry, TracePropertyRangeMap};
+    use ghidra_debug::model::Lifespan;
+
+    let mut map = TracePropertyRangeMap::<i32>::new("ram");
+    map.set_range(0x1000, 0x1FFF, Lifespan::span(0, 100), 1);
+    map.set_range(0x1000, 0x1FFF, Lifespan::span(50, 200), 2);
+    map.set_range(0x2000, 0x2FFF, Lifespan::span(0, 100), 3);
+
+    assert_eq!(map.len(), 3);
+
+    let results = map.get_range(0x1500, 0x2500, &Lifespan::span(25, 75));
+    assert!(results.len() >= 2);
+
+    assert_eq!(map.get(0x2000, 30), Some(&3));
+    assert_eq!(map.get(0x3000, 30), None);
+
+    // Point entry
+    let entry = PropertyMapRangeEntry::<bool>::point(0x400000, 10, true);
+    assert!(entry.contains(0x400000, 10));
+    assert!(!entry.contains(0x400000, 11));
+}
+
+#[test]
+fn test_new_builtin_interface_factory() {
+    use ghidra_debug::model::{builtin_interface_factory, BuiltinInterfaceFactory, InterfaceCategory};
+
+    let factory = BuiltinInterfaceFactory::new();
+    assert!(!factory.by_category(InterfaceCategory::Process).is_empty());
+    assert!(!factory.by_category(InterfaceCategory::Thread).is_empty());
+    assert!(!factory.by_category(InterfaceCategory::Memory).is_empty());
+    assert!(factory.len() >= 8);
+
+    assert!(builtin_interface_factory::is_builtin_interface(
+        "ghidra.trace.target.TraceProcess"
+    ));
+    assert!(!builtin_interface_factory::is_builtin_interface(
+        "nonexistent.FakeInterface"
+    ));
+}
