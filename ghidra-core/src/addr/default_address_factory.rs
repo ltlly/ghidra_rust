@@ -7,6 +7,7 @@
 //! that reserved spaces (stack, external, variable, join) are not duplicated.
 
 use crate::addr::{Address, AddressSet, AddrSpaceType};
+use crate::addr::address_factory::AddressFactory;
 use crate::addr::generic_address_space::GenericAddressSpace;
 use std::collections::HashMap;
 
@@ -307,6 +308,113 @@ impl std::fmt::Display for DefaultAddressFactory {
             self.spaces.len(),
             self.default_space().name()
         )
+    }
+}
+
+impl AddressFactory for DefaultAddressFactory {
+    fn get_address(&self, addr_string: &str) -> Option<Address> {
+        self.get_address_from_string(addr_string)
+    }
+
+    fn get_all_addresses(&self, addr_string: &str, case_sensitive: bool) -> Vec<Address> {
+        let mut results = Vec::new();
+
+        // Try each space
+        for space in &self.spaces {
+            match space.parse_address(addr_string, case_sensitive) {
+                Ok(Some(addr)) => results.push(addr),
+                _ => {}
+            }
+        }
+
+        // If no loaded memory addresses found, try non-loaded spaces
+        // (In this simplified model, we just return what we have)
+        results
+    }
+
+    fn get_default_address_space(&self) -> &GenericAddressSpace {
+        self.default_space()
+    }
+
+    fn get_address_spaces(&self) -> Vec<&GenericAddressSpace> {
+        self.physical_spaces()
+    }
+
+    fn get_all_address_spaces(&self) -> Vec<&GenericAddressSpace> {
+        self.all_spaces().iter().collect()
+    }
+
+    fn get_address_space_by_name(&self, name: &str) -> Option<&GenericAddressSpace> {
+        self.get_space_by_name(name)
+    }
+
+    fn get_address_space_by_id(&self, space_id: u32) -> Option<&GenericAddressSpace> {
+        self.get_space_by_id(space_id)
+    }
+
+    fn num_address_spaces(&self) -> usize {
+        self.num_address_spaces()
+    }
+
+    fn is_valid_address(&self, _addr: &Address) -> bool {
+        // In this simplified model, any non-null address is valid
+        !_addr.is_null()
+    }
+
+    fn get_index(&self, addr: Address) -> u64 {
+        self.get_index(addr)
+    }
+
+    fn get_physical_space<'a>(&'a self, space: &'a GenericAddressSpace) -> &'a GenericAddressSpace {
+        space.get_physical_space()
+    }
+
+    fn get_physical_spaces(&self) -> Vec<&GenericAddressSpace> {
+        self.physical_spaces()
+    }
+
+    fn get_address_in_space(&self, space_id: u32, offset: u64) -> Option<Address> {
+        self.get_address(space_id, offset)
+    }
+
+    fn get_constant_space(&self) -> Option<&GenericAddressSpace> {
+        self.constant_space()
+    }
+
+    fn get_unique_space(&self) -> Option<&GenericAddressSpace> {
+        self.unique_space()
+    }
+
+    fn get_stack_space(&self) -> Option<&GenericAddressSpace> {
+        // Stack space is reserved and not stored in DefaultAddressFactory
+        None
+    }
+
+    fn get_register_space(&self) -> Option<&GenericAddressSpace> {
+        self.register_space()
+    }
+
+    fn get_constant_address(&self, offset: u64) -> Address {
+        self.get_constant_address(offset)
+    }
+
+    fn get_address_set(&self, min: Address, max: Address) -> AddressSet {
+        self.get_address_set(min, max)
+    }
+
+    fn get_full_address_set(&self) -> AddressSet {
+        self.memory_address_set().clone()
+    }
+
+    fn old_get_address_from_long(&self, value: u64) -> Option<Address> {
+        // Old encoding: space_id << 48 | offset
+        let _space_id = (value >> 48) as u32;
+        let offset = value & 0x0000_FFFF_FFFF_FFFF;
+        Some(Address::new(offset))
+    }
+
+    fn has_multiple_memory_spaces(&self) -> bool {
+        self.has_multiple_memory_spaces()
     }
 }
 

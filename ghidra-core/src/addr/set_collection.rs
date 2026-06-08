@@ -1,11 +1,11 @@
-//! Address set collection traits and implementations.
+//! Address set collection trait.
 //!
-//! Direct translation of `ghidra.program.model.address.AddressSetCollection`
-//! and `ghidra.program.model.address.SingleAddressSetCollection`.
+//! Direct translation of `ghidra.program.model.address.AddressSetCollection`.
 //!
 //! Provides the [`AddressSetCollection`] trait for efficiently operating on
-//! a collection of address sets, and [`SingleAddressSetCollection`] as a
-//! simple wrapper for a single set.
+//! a collection of address sets. The [`SingleAddressSetCollection`]
+//! implementation has been moved to
+//! [`single_address_set_collection`](super::single_address_set_collection).
 
 use crate::addr::{Address, AddressSet};
 use crate::addr::set_view::AddressSetView;
@@ -47,96 +47,6 @@ pub trait AddressSetCollection {
     fn get_max_address(&self) -> Option<Address>;
 }
 
-// ---------------------------------------------------------------------------
-// SingleAddressSetCollection
-// ---------------------------------------------------------------------------
-
-/// A collection that wraps exactly one [`AddressSetView`].
-///
-/// Corresponds to `ghidra.program.model.address.SingleAddressSetCollection`.
-///
-/// # Examples
-///
-/// ```
-/// use ghidra_core::addr::{Address, AddressSet};
-/// use ghidra_core::addr::set_collection::{AddressSetCollection, SingleAddressSetCollection};
-/// use ghidra_core::addr::set_view::AddressSetView;
-///
-/// let mut set = AddressSet::new();
-/// set.add_range(Address::new(0x100), Address::new(0x200));
-///
-/// let collection = SingleAddressSetCollection::new(&set);
-/// assert!(collection.contains(&Address::new(0x150)));
-/// assert_eq!(collection.get_min_address().unwrap().offset, 0x100);
-/// ```
-pub struct SingleAddressSetCollection<'a> {
-    set: &'a dyn AddressSetView,
-}
-
-impl<'a> SingleAddressSetCollection<'a> {
-    /// Create a new collection wrapping the given set.
-    pub fn new(set: &'a dyn AddressSetView) -> Self {
-        Self { set }
-    }
-}
-
-impl<'a> AddressSetCollection for SingleAddressSetCollection<'a> {
-    fn intersects(&self, addr_set: &dyn AddressSetView) -> bool {
-        for range in self.set.iter_ranges() {
-            if addr_set.intersects_range(range.start, range.end) {
-                return true;
-            }
-        }
-        false
-    }
-
-    fn intersects_range(&self, start: Address, end: Address) -> bool {
-        self.set.intersects_range(start, end)
-    }
-
-    fn contains(&self, address: &Address) -> bool {
-        self.set.contains(address)
-    }
-
-    fn has_fewer_ranges_than(&self, threshold: usize) -> bool {
-        self.set.num_address_ranges() < threshold
-    }
-
-    fn get_combined_address_set(&self) -> AddressSet {
-        let mut result = AddressSet::new();
-        for range in self.set.iter_ranges() {
-            result.add_range(range.start, range.end);
-        }
-        result
-    }
-
-    fn find_first_in_common(&self, other: &dyn AddressSetView) -> Option<Address> {
-        for range in self.set.iter_ranges() {
-            if other.contains_range(range.start, range.end) {
-                return Some(range.start);
-            }
-            for addr in range.iter() {
-                if other.contains(&addr) {
-                    return Some(addr);
-                }
-            }
-        }
-        None
-    }
-
-    fn is_empty(&self) -> bool {
-        self.set.is_empty()
-    }
-
-    fn get_min_address(&self) -> Option<Address> {
-        self.set.get_min_address()
-    }
-
-    fn get_max_address(&self) -> Option<Address> {
-        self.set.get_max_address()
-    }
-}
-
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -144,6 +54,7 @@ impl<'a> AddressSetCollection for SingleAddressSetCollection<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::addr::single_address_set_collection::SingleAddressSetCollection;
 
     #[test]
     fn test_single_collection_basic() {

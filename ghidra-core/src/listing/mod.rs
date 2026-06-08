@@ -5,12 +5,22 @@
 //! function tags, bookmarks, and the disassembly listing view.
 
 pub mod auto_parameter_type;
+pub mod bookmark_manager;
 pub mod code_unit;
+pub mod code_unit_iterator;
 pub mod comment_history;
 pub mod comment_type;
+pub mod data;
 pub mod flow_override;
+pub mod function;
+pub mod function_manager;
 pub mod function_tag;
 pub mod group;
+pub mod instruction;
+pub mod listing;
+pub mod parameter;
+pub mod program_fragment;
+pub mod program_module;
 pub mod stack_frame;
 pub mod variable;
 pub mod variable_filter;
@@ -20,12 +30,22 @@ use serde::{Deserialize, Serialize};
 
 // Re-export key types
 pub use auto_parameter_type::AutoParameterType;
+pub use bookmark_manager::{Bookmark, BookmarkManager, BookmarkType};
 pub use code_unit::{CodeUnit, CodeUnitData, MNEMONIC};
+pub use code_unit_iterator::{AddressCodeUnitIterator, CodeUnitIterator, DataIterator, InstructionIterator, IteratorDirection};
 pub use comment_history::CommentHistory;
 pub use comment_type::CommentType;
+pub use data::Data;
 pub use flow_override::FlowOverride;
+pub use function::{Function, FunctionApi};
+pub use function_manager::FunctionManager;
 pub use function_tag::FunctionTag;
 pub use group::{Group, GroupData};
+pub use instruction::{FlowType, Instruction, Operand};
+pub use listing::{CodeUnitComments, InMemoryListing, Listing};
+pub use parameter::{FunctionUpdateType, Parameter, ParameterImpl};
+pub use program_fragment::ProgramFragment;
+pub use program_module::{CircularDependencyException, DuplicateGroupException, ProgramModule, ProgramModuleData};
 pub use stack_frame::{StackFrame, StackFrameData, GROWS_NEGATIVE, GROWS_POSITIVE, UNKNOWN_PARAM_OFFSET};
 pub use variable::{Variable, VariableData};
 pub use variable_filter::{VariableFilter, filters};

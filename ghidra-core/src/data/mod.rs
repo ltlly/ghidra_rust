@@ -61,6 +61,7 @@ pub mod noisy_structure_builder;
 pub mod string_render;
 pub mod data_utilities;
 pub mod aligned_structure;
+pub mod abstract_data_type;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -75,6 +76,9 @@ pub use types::{
     SerializableDataType, StandaloneDataTypeManager, StringDataType,
     StructureDataType, TypedefDataType, UndefinedDataType, UnionDataType,
 };
+
+// Re-export abstract data type.
+pub use abstract_data_type::AbstractDataType;
 
 // Re-export the bitfield info type.
 pub use types::BitfieldInfo;

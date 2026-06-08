@@ -9,10 +9,20 @@
 //! - [`RefType`], [`FlowType`], and [`DataRefType`] for classifying references
 //! - [`SymbolType`] and [`SourceType`] enums
 //!
+//! # Sub-modules
+//!
+//! * [`source_type`] — [`SourceType`](source_type::SourceType) enum for symbol provenance.
+//! * [`symbol_type`] — [`SymbolType`](symbol_type::SymbolType) enum for symbol classification.
+//! * [`namespace`] — [`Namespace`](namespace::Namespace) trait and concrete implementations.
+//! * [`utilities`] — Utility functions for symbol operations.
+//!
 //! This module is a direct translation of Ghidra's
 //! `ghidra.program.model.symbol` package.
 
 pub mod utilities;
+pub mod source_type;
+pub mod symbol_type;
+pub mod namespace;
 
 use crate::addr::Address;
 use serde::{Deserialize, Serialize};

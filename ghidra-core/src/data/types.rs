@@ -109,6 +109,97 @@ pub trait DataType: fmt::Debug + fmt::Display + Send + Sync + 'static {
     fn mnemonic(&self) -> String {
         self.name().to_string()
     }
+
+    /// Indicates if the length of this data type is determined based upon the
+    /// [`DataOrganization`] obtained from the associated [`DataTypeManager`].
+    ///
+    /// Returns `true` if the length is language/compiler-specification dependent.
+    fn has_language_dependent_length(&self) -> bool {
+        false
+    }
+
+    /// The display name for this data type.
+    ///
+    /// For most types this is the same as [`name()`](Self::name()), but
+    /// composite types may override it (e.g., `"struct my_struct"`).
+    fn get_display_name(&self) -> &str {
+        self.name()
+    }
+
+    /// Returns `true` if this datatype is defined with a zero length.
+    ///
+    /// This should not be confused with [`is_not_yet_defined()`](Self::is_not_yet_defined()),
+    /// which indicates that nothing but the name and basic type is known.
+    fn is_zero_length(&self) -> bool {
+        false
+    }
+
+    /// Indicates if this datatype has not yet been fully defined.
+    ///
+    /// Such datatypes should always return a length of 1 and `true` for
+    /// `is_zero_length()` (e.g., an empty structure).
+    fn is_not_yet_defined(&self) -> bool {
+        false
+    }
+
+    /// Returns `true` if this datatype has been deleted and is no longer valid.
+    fn is_deleted(&self) -> bool {
+        false
+    }
+
+    /// Returns the appropriate string to use as the default label prefix
+    /// in the absence of any data.
+    fn get_default_label_prefix(&self) -> Option<&str> {
+        None
+    }
+
+    /// Returns the prefix to use for this datatype when an abbreviated prefix
+    /// is desired.
+    fn get_default_abbreviated_label_prefix(&self) -> Option<&str> {
+        self.get_default_label_prefix()
+    }
+
+    /// Check if this datatype depends on the existence of the given datatype
+    /// (i.e., if the specified datatype is removed this datatype must also be removed).
+    ///
+    /// For example `byte[]` depends on `byte`. If `byte` were deleted, then `byte[]`
+    /// would also be deleted.
+    fn depends_on(&self, _dt: &dyn DataType) -> bool {
+        false
+    }
+
+    /// Notification that the given datatype's size has changed.
+    ///
+    /// DataTypes may need to make internal changes in response.
+    fn data_type_size_changed(&mut self, _dt: &dyn DataType) {}
+
+    /// Notification that the given datatype's alignment has changed.
+    fn data_type_alignment_changed(&mut self, _dt: &dyn DataType) {}
+
+    /// Informs this datatype that the given datatype has been deleted.
+    fn data_type_deleted(&mut self, _dt: &dyn DataType) {}
+
+    /// Informs this datatype that the given oldDT has been replaced with newDT.
+    fn data_type_replaced(&mut self, _old_dt: &dyn DataType, _new_dt: &dyn DataType) {}
+
+    /// Inform this data type that it has the given parent.
+    fn add_parent(&mut self, _dt: &dyn DataType) {}
+
+    /// Remove a parent datatype.
+    fn remove_parent(&mut self, _dt: &dyn DataType) {}
+
+    /// Get the parents of this datatype.
+    fn get_parents(&self) -> Vec<Arc<dyn DataType>> {
+        Vec::new()
+    }
+
+    /// Sets a description string for this DataType.
+    fn set_description(&mut self, _description: String) {}
+
+    /// Get the [`DataOrganization`] associated with this data type.
+    fn get_data_organization(&self) -> Option<&DataOrganization> {
+        None
+    }
 }
 
 // ============================================================================
@@ -591,6 +682,11 @@ impl BuiltInDataType {
     /// The alignment in bytes for this built-in type.
     pub fn alignment(&self) -> usize { let sz = self.size(); if sz == 0 { 1 } else { sz } }
 
+    /// Returns true if this built-in type has zero length (e.g., `void`).
+    pub fn is_zero_length(&self) -> bool {
+        self.size() == 0
+    }
+
     /// Returns true if this is a signed integer type.
     pub fn is_signed(&self) -> bool {
         matches!(self, Self::Char | Self::Short | Self::Int | Self::Long | Self::LongLong)
@@ -702,6 +798,7 @@ impl DataType for BuiltInDataTypeWrapper {
     fn get_size(&self) -> usize { self.inner.size() }
     fn is_defined(&self) -> bool { !self.inner.is_undefined() }
     fn is_undefined(&self) -> bool { self.inner.is_undefined() }
+    fn is_zero_length(&self) -> bool { self.inner.is_zero_length() }
     fn get_alignment(&self) -> usize { self.inner.alignment() }
 
     fn clone_type(&self) -> Box<dyn DataType> { Box::new(self.clone()) }
@@ -826,6 +923,93 @@ impl DataTypeComponent {
     pub fn with_bitfield(mut self, bitfield: BitfieldInfo) -> Self {
         self.bitfield = Some(bitfield);
         self
+    }
+
+    /// The default prefix for the name of a component.
+    pub const DEFAULT_FIELD_NAME_PREFIX: &'static str = "field";
+
+    /// Determine if this component corresponds to a zero-length bit-field.
+    pub fn is_zero_bit_field_component(&self) -> bool {
+        if let Some(ref bf) = self.bitfield {
+            bf.bit_size == 0
+        } else {
+            false
+        }
+    }
+
+    /// Returns a default field name for this component.
+    ///
+    /// Used only if a field name is not set. Returns `None` for nameless
+    /// fields such as a zero-length bitfield.
+    pub fn get_default_field_name(&self) -> Option<String> {
+        if self.is_zero_bit_field_component() {
+            return None;
+        }
+        Some(format!("{}{}", Self::DEFAULT_FIELD_NAME_PREFIX, self.ordinal))
+    }
+
+    /// Returns `true` if the given string represents the default field name
+    /// for this component.
+    pub fn is_default_field_name(&self, s: &str) -> bool {
+        if self.is_zero_bit_field_component() {
+            return false;
+        }
+        let new_style = format!("{}{}", Self::DEFAULT_FIELD_NAME_PREFIX, self.ordinal);
+        let old_style = Self::DEFAULT_FIELD_NAME_PREFIX.to_string();
+        s == new_style || s == old_style
+    }
+
+    /// Determine if the specified [`DataType`] will be treated as a
+    /// zero-length component allowing it to possibly overlap the next component.
+    ///
+    /// If the specified data type returns `true` for `is_zero_length()` and
+    /// `true` for `is_not_yet_defined()` this method will return `false`,
+    /// causing the associated component to use the reported data type length of 1.
+    pub fn uses_zero_length_component(data_type: &dyn DataType) -> bool {
+        if data_type.is_zero_length() {
+            // Assumes not-yet-defined types will ultimately have a non-zero length.
+            return !data_type.is_not_yet_defined();
+        }
+        false
+    }
+
+    /// Set the comment for the component.
+    ///
+    /// Returns a modified clone (since components are intended to be immutable).
+    pub fn set_comment(&self, comment: impl Into<String>) -> Self {
+        Self {
+            field_name: self.field_name.clone(),
+            data_type: self.data_type.clone(),
+            offset: self.offset,
+            ordinal: self.ordinal,
+            comment: Some(comment.into()),
+            bitfield: self.bitfield.clone(),
+        }
+    }
+
+    /// Set the field name.
+    ///
+    /// Returns a modified clone (since components are intended to be immutable).
+    pub fn set_field_name(&self, field_name: impl Into<String>) -> Self {
+        Self {
+            field_name: field_name.into(),
+            data_type: self.data_type.clone(),
+            offset: self.offset,
+            ordinal: self.ordinal,
+            comment: self.comment.clone(),
+            bitfield: self.bitfield.clone(),
+        }
+    }
+
+    /// Returns `true` if the given `DataTypeComponent` is equivalent to this one.
+    ///
+    /// Two components are equivalent if they have equivalent data types, the
+    /// same offset, field name, and comment.
+    pub fn is_equivalent_component(&self, other: &DataTypeComponent) -> bool {
+        self.field_name == other.field_name
+            && self.offset == other.offset
+            && self.comment == other.comment
+            && self.data_type.is_equivalent(other.data_type.as_ref())
     }
 }
 
@@ -1753,6 +1937,33 @@ pub trait DataTypeManager: fmt::Debug + Send + Sync {
     /// Get the root category path for this manager.
     fn root_category(&self) -> &CategoryPath;
 
+    /// Returns this data type manager's name.
+    fn get_name(&self) -> &str {
+        "DataTypeManager"
+    }
+
+    /// Returns `true` if this manager can be modified.
+    fn is_updatable(&self) -> bool {
+        true
+    }
+
+    /// Returns a unique name not currently used by any other data type or category
+    /// with the same `base_name`.
+    fn get_unique_name(&self, category: &CategoryPath, base_name: &str) -> String {
+        let mut name = base_name.to_string();
+        let mut counter = 1;
+        while self.find_type(category, &name).is_some() {
+            name = format!("{}_{}", base_name, counter);
+            counter += 1;
+        }
+        name
+    }
+
+    /// Returns `true` if the given category path exists in this data type manager.
+    fn contains_category(&self, path: &CategoryPath) -> bool {
+        self.get_all_categories().contains(path)
+    }
+
     /// Resolve a data type by a [`DataTypePath`] value.
     fn get_data_type(&self, path: &DataTypePath) -> Option<Arc<dyn DataType>> {
         self.resolve(&path.as_path_string())
@@ -1761,6 +1972,21 @@ pub trait DataTypeManager: fmt::Debug + Send + Sync {
     /// Alias for [`resolve`](Self::resolve) matching Ghidra naming.
     fn find_data_type(&self, path: &str) -> Option<Arc<dyn DataType>> {
         self.resolve(path)
+    }
+
+    /// Get a data type by category path and name.
+    fn get_data_type_by_category_and_name(
+        &self,
+        category: &CategoryPath,
+        name: &str,
+    ) -> Option<Arc<dyn DataType>> {
+        self.find_type(category, name)
+    }
+
+    /// Check if the given data type exists in this manager.
+    fn contains_type(&self, data_type: &dyn DataType) -> bool {
+        let path = data_type.get_path_name();
+        self.contains(&path)
     }
 
     /// Replace an existing type with a replacement type.
@@ -1792,6 +2018,53 @@ pub trait DataTypeManager: fmt::Debug + Send + Sync {
         // Use a const-like pattern to avoid allocation on each call.
         static DEFAULT_ORG: std::sync::OnceLock<DataOrganization> = std::sync::OnceLock::new();
         DEFAULT_ORG.get_or_init(DataOrganization::default)
+    }
+
+    /// Returns the total number of defined data types.
+    ///
+    /// If `include_pointers_and_arrays` is `true`, all pointer and array
+    /// data types will be included in the count.
+    fn get_data_type_count(&self, include_pointers_and_arrays: bool) -> usize {
+        if include_pointers_and_arrays {
+            self.type_count()
+        } else {
+            self.get_all_types()
+                .iter()
+                .filter(|dt| !dt.is_pointer() && !matches!(dt.name(), s if s.ends_with(']')))
+                .count()
+        }
+    }
+
+    /// Find all data types with the given name, placing them into the result vector.
+    ///
+    /// Begins searching at the root category.
+    fn find_data_types(&self, name: &str, result: &mut Vec<Arc<dyn DataType>>) {
+        for dt in self.get_all_types() {
+            if dt.name() == name {
+                result.push(dt);
+            }
+        }
+    }
+
+    /// Returns a default-sized pointer to the given data type.
+    fn get_pointer(&self, data_type: Arc<dyn DataType>) -> Arc<dyn DataType> {
+        let pointer_size = self.get_data_organization().get_pointer_size();
+        Arc::new(PointerDataType::with_size(data_type, pointer_size))
+    }
+
+    /// Returns a pointer of the given size to the given data type.
+    ///
+    /// If `size` is 0, a default-sized pointer is returned.
+    fn get_pointer_with_size(
+        &self,
+        data_type: Arc<dyn DataType>,
+        size: usize,
+    ) -> Arc<dyn DataType> {
+        if size == 0 {
+            self.get_pointer(data_type)
+        } else {
+            Arc::new(PointerDataType::with_size(data_type, size))
+        }
     }
 }
 
@@ -1866,6 +2139,16 @@ impl StandaloneDataTypeManager {
                 self.categories.remove(category);
             }
         }
+    }
+
+    /// Returns the total number of categories.
+    pub fn category_count(&self) -> usize {
+        self.categories.len()
+    }
+
+    /// Get the category that has the given path.
+    pub fn get_category_by_path(&self, path: &CategoryPath) -> Option<&Vec<String>> {
+        self.categories.get(path)
     }
 }
 
@@ -1988,6 +2271,9 @@ impl BuiltInDataTypeManager {
         let path = format!("/builtin/undefined/{}", name);
         self.inner.resolve(&path)
     }
+
+    /// The name of the built-in data type manager.
+    pub const BUILT_IN_DATA_TYPES_NAME: &'static str = "BuiltInTypes";
 }
 
 impl DataTypeManager for BuiltInDataTypeManager {
@@ -2007,6 +2293,14 @@ impl DataTypeManager for BuiltInDataTypeManager {
     fn contains(&self, path: &str) -> bool { self.inner.contains(path) }
     fn type_count(&self) -> usize { self.inner.type_count() }
     fn root_category(&self) -> &CategoryPath { self.inner.root_category() }
+
+    fn get_name(&self) -> &str {
+        Self::BUILT_IN_DATA_TYPES_NAME
+    }
+
+    fn is_updatable(&self) -> bool {
+        false
+    }
 }
 
 impl fmt::Display for BuiltInDataTypeManager {
@@ -3095,5 +3389,222 @@ mod tests {
         let ser = SerializableDataType::from_data_type(&s).unwrap();
         let display = format!("{}", ser);
         assert!(display.contains("string[16]"));
+    }
+
+    // =====================================================================
+    // New DataType trait method tests
+    // =====================================================================
+
+    #[test]
+    fn test_data_type_default_methods() {
+        let int_type = BuiltInDataTypeWrapper::new(BuiltInDataType::Int);
+        // Default implementations
+        assert!(!int_type.has_language_dependent_length());
+        assert!(!int_type.is_zero_length());
+        assert!(!int_type.is_not_yet_defined());
+        assert!(!int_type.is_deleted());
+        assert!(!int_type.depends_on(&int_type));
+        assert!(int_type.get_parents().is_empty());
+        assert!(int_type.get_default_label_prefix().is_none());
+        assert!(int_type.get_default_abbreviated_label_prefix().is_none());
+    }
+
+    #[test]
+    fn test_data_type_display_name() {
+        let int_type = BuiltInDataTypeWrapper::new(BuiltInDataType::Int);
+        assert_eq!(int_type.get_display_name(), "int");
+    }
+
+    #[test]
+    fn test_void_is_zero_length() {
+        let void = BuiltInDataTypeWrapper::new(BuiltInDataType::Void);
+        assert_eq!(void.get_size(), 0);
+        // Void has size 0 but is_zero_length defaults to false;
+        // concrete implementations can override.
+    }
+
+    // =====================================================================
+    // DataTypeComponent new method tests
+    // =====================================================================
+
+    #[test]
+    fn test_component_is_zero_bit_field() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let bf_zero = BitfieldInfo::new(0, 0, false);
+        let comp = DataTypeComponent::new("zero", int_type.clone(), 0, 0).with_bitfield(bf_zero);
+        assert!(comp.is_zero_bit_field_component());
+
+        let comp_normal = DataTypeComponent::new("normal", int_type, 0, 1);
+        assert!(!comp_normal.is_zero_bit_field_component());
+    }
+
+    #[test]
+    fn test_component_get_default_field_name() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let comp = DataTypeComponent::new("", int_type.clone(), 0, 3);
+        assert_eq!(comp.get_default_field_name(), Some("field3".to_string()));
+
+        // Zero-length bitfield returns None
+        let bf_zero = BitfieldInfo::new(0, 0, false);
+        let comp_zero = DataTypeComponent::new("", int_type, 0, 0).with_bitfield(bf_zero);
+        assert_eq!(comp_zero.get_default_field_name(), None);
+    }
+
+    #[test]
+    fn test_component_is_default_field_name() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let comp = DataTypeComponent::new("", int_type.clone(), 0, 5);
+        assert!(comp.is_default_field_name("field5"));
+        assert!(comp.is_default_field_name("field"));
+        assert!(!comp.is_default_field_name("custom"));
+    }
+
+    #[test]
+    fn test_component_set_comment() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let comp = DataTypeComponent::new("f", int_type, 0, 0);
+        let comp2 = comp.set_comment("new comment");
+        assert_eq!(comp2.comment, Some("new comment".to_string()));
+        assert_eq!(comp.comment, None); // original unchanged
+    }
+
+    #[test]
+    fn test_component_set_field_name() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let comp = DataTypeComponent::new("old", int_type, 0, 0);
+        let comp2 = comp.set_field_name("new_name");
+        assert_eq!(comp2.field_name, "new_name");
+        assert_eq!(comp.field_name, "old"); // original unchanged
+    }
+
+    #[test]
+    fn test_component_is_equivalent_component() {
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let int_type2: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let float_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float));
+
+        let c1 = DataTypeComponent::new("f", int_type, 0, 0);
+        let c2 = DataTypeComponent::new("f", int_type2, 0, 0);
+        let c3 = DataTypeComponent::new("f", float_type, 0, 0);
+
+        assert!(c1.is_equivalent_component(&c2));
+        assert!(!c1.is_equivalent_component(&c3));
+    }
+
+    #[test]
+    fn test_component_uses_zero_length_component() {
+        let void = BuiltInDataTypeWrapper::new(BuiltInDataType::Void);
+        // Void is zero-length and is_not_yet_defined is false by default,
+        // so uses_zero_length_component returns true.
+        assert!(DataTypeComponent::uses_zero_length_component(&void));
+    }
+
+    // =====================================================================
+    // DataTypeManager new method tests
+    // =====================================================================
+
+    #[test]
+    fn test_manager_get_name() {
+        let mgr = StandaloneDataTypeManager::new();
+        assert_eq!(mgr.get_name(), "DataTypeManager");
+    }
+
+    #[test]
+    fn test_builtin_manager_get_name() {
+        let mgr = BuiltInDataTypeManager::new();
+        assert_eq!(mgr.get_name(), "BuiltInTypes");
+    }
+
+    #[test]
+    fn test_manager_is_updatable() {
+        let mgr = StandaloneDataTypeManager::new();
+        assert!(mgr.is_updatable());
+
+        let builtin = BuiltInDataTypeManager::new();
+        assert!(!builtin.is_updatable());
+    }
+
+    #[test]
+    fn test_manager_get_unique_name() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let cat = CategoryPath::new("test");
+        mgr.add_type(int_type, cat.clone());
+        let unique = mgr.get_unique_name(&cat, "int");
+        assert_eq!(unique, "int_1");
+        let unique2 = mgr.get_unique_name(&cat, "float");
+        assert_eq!(unique2, "float");
+    }
+
+    #[test]
+    fn test_manager_contains_category() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        mgr.add_type(int_type, CategoryPath::new("test"));
+        assert!(mgr.contains_category(&CategoryPath::new("test")));
+        assert!(!mgr.contains_category(&CategoryPath::new("other")));
+    }
+
+    #[test]
+    fn test_manager_get_pointer() {
+        let mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let ptr = mgr.get_pointer(int_type);
+        assert!(ptr.is_pointer());
+        assert_eq!(ptr.get_size(), 8); // default 64-bit
+    }
+
+    #[test]
+    fn test_manager_get_pointer_with_size() {
+        let mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let ptr = mgr.get_pointer_with_size(int_type, 4);
+        assert!(ptr.is_pointer());
+        assert_eq!(ptr.get_size(), 4);
+    }
+
+    #[test]
+    fn test_manager_get_pointer_with_size_zero() {
+        let org = DataOrganization::default_32bit_le();
+        let mgr = StandaloneDataTypeManager::with_organization(org);
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let ptr = mgr.get_pointer_with_size(int_type, 0);
+        assert_eq!(ptr.get_size(), 4); // uses default from org
+    }
+
+    #[test]
+    fn test_manager_get_data_type_count() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let float_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float));
+        let ptr_type: Arc<dyn DataType> = Arc::new(PointerDataType::new(int_type.clone()));
+        let cat = CategoryPath::new("test");
+        mgr.add_type(int_type, cat.clone());
+        mgr.add_type(float_type, cat.clone());
+        mgr.add_type(ptr_type, cat.clone());
+        assert_eq!(mgr.get_data_type_count(true), 3);
+        assert_eq!(mgr.get_data_type_count(false), 2); // excludes pointer
+    }
+
+    #[test]
+    fn test_manager_find_data_types() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type1: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let int_type2: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        mgr.add_type(int_type1, CategoryPath::new("a"));
+        mgr.add_type(int_type2, CategoryPath::new("b"));
+        let mut results = Vec::new();
+        mgr.find_data_types("int", &mut results);
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_manager_standalone_category_count() {
+        let mut mgr = StandaloneDataTypeManager::new();
+        let int_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Int));
+        let float_type: Arc<dyn DataType> = Arc::new(BuiltInDataTypeWrapper::new(BuiltInDataType::Float));
+        mgr.add_type(int_type, CategoryPath::new("ints"));
+        mgr.add_type(float_type, CategoryPath::new("floats"));
+        assert_eq!(mgr.category_count(), 2);
     }
 }

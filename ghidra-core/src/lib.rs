@@ -492,9 +492,8 @@ mod tests {
 
     #[test]
     fn test_segmented_address_real_mode() {
-        let space = Arc::new(AddressSpace::new("seg16", 4, false, AddrSpaceType::Segmented, 10));
-        let seg_space = addr::SegmentedAddressSpace::new_real_mode(space);
-        let seg_addr = addr::SegmentedAddress::from_segment_offset(&seg_space, 0x1234, 0x5678);
+        let seg_space = addr::segmented_address_space::SegmentedAddressSpace::new_real_mode("seg16", 10);
+        let seg_addr = addr::segmented_address::SegmentedAddress::from_segment_offset(&seg_space, 0x1234, 0x5678);
         assert_eq!(seg_addr.get_segment(), 0x1234);
         assert_eq!(seg_addr.get_segment_offset(), 0x5678);
         let expected_flat = (0x1234u64 << 4) + 0x5678;
@@ -503,9 +502,8 @@ mod tests {
 
     #[test]
     fn test_segmented_address_display() {
-        let space = Arc::new(AddressSpace::new("seg16", 4, false, AddrSpaceType::Segmented, 10));
-        let seg_space = addr::SegmentedAddressSpace::new_real_mode(space);
-        let seg_addr = addr::SegmentedAddress::from_segment_offset(&seg_space, 0xABCD, 0x1234);
+        let seg_space = addr::segmented_address_space::SegmentedAddressSpace::new_real_mode("seg16", 10);
+        let seg_addr = addr::segmented_address::SegmentedAddress::from_segment_offset(&seg_space, 0xABCD, 0x1234);
         assert_eq!(seg_addr.to_segment_string(), "abcd:1234");
     }
 
@@ -514,8 +512,8 @@ mod tests {
     #[test]
     fn test_overlay_address_space() {
         let base = Arc::new(AddressSpace::ram());
-        let mut ov = addr::OverlayAddressSpace::new("my_overlay", base.clone(), 100, "my_overlay");
-        assert!(ov.own_space().is_overlay_space());
+        let mut ov = addr::overlay_address_space::OverlayAddressSpace::new("my_overlay", base.clone(), 100, "my_overlay");
+        assert!(ov.is_overlay_space());
         assert_eq!(ov.get_overlayed_space().get_name(), "ram");
 
         ov.add_overlay_region(Address::new(0x1000), Address::new(0x2000));
@@ -526,7 +524,7 @@ mod tests {
     #[test]
     fn test_overlay_address_translation() {
         let base = Arc::new(AddressSpace::ram());
-        let mut ov = addr::OverlayAddressSpace::new("ov", base.clone(), 100, "ov");
+        let mut ov = addr::overlay_address_space::OverlayAddressSpace::new("ov", base.clone(), 100, "ov");
         ov.add_overlay_region(Address::new(0x1000), Address::new(0x2000));
 
         let overlay_addr = ov.get_address(0x1500);

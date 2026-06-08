@@ -5,6 +5,13 @@
 //! [`MemoryBlockType`], error types, [`ByteMappingScheme`], [`MemBuffer`] trait,
 //! [`WrappedMemBuffer`], and the concrete [`MemoryMap`] implementation.
 //!
+//! # Sub-modules
+//!
+//! * [`memory_permission`] — [`MemoryPermission`](memory_permission::MemoryPermission) enum for ergonomic permission checks.
+//! * [`memory_block_type`] — [`MemoryBlockType`](memory_block_type::MemoryBlockType) enum re-export.
+//! * [`memory_error`] — Error types ([`MemoryAccessError`](memory_error::MemoryAccessError), etc.).
+//! * [`db`] — Database-backed memory implementation.
+//!
 //! # Block Types
 //!
 //! * **Initialized** — a memory block with known data (from file bytes, input stream, or zero-filled).
@@ -12,6 +19,10 @@
 //! * **Byte-Mapped** — bytes are mapped to another memory region via a [`ByteMappingScheme`].
 //! * **Bit-Mapped** — bytes correspond to individual bits in another memory region.
 //! * **Overlay** — alternate content for a physical memory region in a different execution context.
+
+pub mod memory_permission;
+pub mod memory_block_type;
+pub mod memory_error;
 
 use crate::addr::{Address, AddressRange, AddressRangeIterator};
 use crate::error::GhidraError;

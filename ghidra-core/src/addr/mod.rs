@@ -5,21 +5,32 @@
 //! register space, etc.).
 
 pub mod address_error;
+pub mod address_factory;
 pub mod address_iterator;
+pub mod address_map_impl;
+pub mod address_object_map;
+pub mod address_range_comparator;
 pub mod address_range_impl;
 pub mod chunker;
 pub mod collectors;
 pub mod default_address_factory;
 pub mod generic_address_space;
+pub mod global_namespace;
+pub mod global_symbol;
 pub mod immutable_address_set;
 pub mod key_range;
 pub mod label_info;
+pub mod old_generic_namespace_address;
+pub mod overlay_address_space;
 pub mod protected_address_space;
 pub mod range_splitter;
+pub mod segmented_address;
+pub mod segmented_address_space;
 pub mod set_collection;
 pub mod set_mapping;
 pub mod set_view;
 pub mod set_view_adapter;
+pub mod single_address_set_collection;
 pub mod special_address;
 
 use serde::{Deserialize, Serialize};
@@ -1087,6 +1098,7 @@ impl AddressSet {
             range_iter: self.ranges.iter(),
             current: 0,
             end: 0,
+            started: false,
         }
     }
 }
@@ -1133,6 +1145,7 @@ pub struct AddressSetAddrIter<'a> {
     range_iter: std::collections::btree_map::Iter<'a, u64, u64>,
     current: u64,
     end: u64,
+    started: bool,
 }
 
 impl<'a> Iterator for AddressSetAddrIter<'a> {
@@ -1140,7 +1153,7 @@ impl<'a> Iterator for AddressSetAddrIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.current <= self.end {
+            if self.started && self.current <= self.end {
                 let addr = Address::new(self.current);
                 self.current += 1;
                 return Some(addr);
@@ -1148,6 +1161,7 @@ impl<'a> Iterator for AddressSetAddrIter<'a> {
             let (&s, &e) = self.range_iter.next()?;
             self.current = s;
             self.end = e;
+            self.started = true;
         }
     }
 }
@@ -1176,8 +1190,8 @@ impl fmt::Display for AddressSet {
 /// comparison, and arithmetic to the space.
 #[derive(Debug, Clone)]
 pub struct GenericAddress {
-    space: Arc<AddressSpace>,
-    offset: u64,
+    pub(crate) space: Arc<AddressSpace>,
+    pub(crate) offset: u64,
 }
 
 impl GenericAddress {
@@ -1541,407 +1555,4 @@ impl From<&GenericAddress> for Address {
     }
 }
 
-// ===========================================================================
-// SegmentedAddress — Intel segmented (segment:offset) addresses
-// ===========================================================================
 
-/// An address for Intel-style segmented address spaces (e.g. x86 real mode).
-///
-/// Stores a **flat offset** (used internally for comparison and arithmetic)
-/// together with the **segment value** that produced it. The mapping between
-/// `(segment, offset_within_segment)` and the flat encoding is delegated to
-/// the [`SegmentedAddressSpace`] helper.
-///
-/// In Ghidra Java, `SegmentedAddress extends GenericAddress`. Here we compose
-/// rather than inherit: the type wraps a [`GenericAddress`] and adds the
-/// segment fields.
-#[derive(Debug, Clone)]
-pub struct SegmentedAddress {
-    inner: GenericAddress,
-    /// The segment value associated with this address.
-    segment: u16,
-    /// The offset within the segment.
-    segment_offset: u16,
-}
-
-/// Helper that models the encoding/decoding of segmented addresses.
-///
-/// In x86 real mode a flat address is computed as `segment * 16 + offset`.
-/// In protected mode the mapping is different, but the same helper can be
-/// parameterised accordingly.
-#[derive(Debug, Clone)]
-pub struct SegmentedAddressSpace {
-    /// The underlying address space that holds the flat encoding.
-    space: Arc<AddressSpace>,
-    /// Number of bits in the segment part (default: 16 for real mode).
-    segment_bits: u32,
-    /// Shift applied to the segment when computing the flat offset (default: 4 for real mode).
-    segment_shift: u32,
-    /// Mask applied to the offset-within-segment (default: 0xFFFF).
-    offset_mask: u64,
-}
-
-impl SegmentedAddressSpace {
-    /// Create a segmented address space for x86 real mode (segment << 4 + offset).
-    pub fn new_real_mode(space: Arc<AddressSpace>) -> Self {
-        Self {
-            space,
-            segment_bits: 16,
-            segment_shift: 4,
-            offset_mask: 0xFFFF,
-        }
-    }
-
-    /// Create a custom segmented address space.
-    pub fn new(
-        space: Arc<AddressSpace>,
-        segment_bits: u32,
-        segment_shift: u32,
-        offset_mask: u64,
-    ) -> Self {
-        Self { space, segment_bits, segment_shift, offset_mask }
-    }
-
-    /// Compute the flat offset from a (segment, offset_within_segment) pair.
-    pub fn get_flat_offset(&self, segment: u16, offset_in_segment: u16) -> u64 {
-        ((segment as u64) << self.segment_shift) + (offset_in_segment as u64)
-    }
-
-    /// Derive the default segment from a flat offset.
-    pub fn get_default_segment_from_flat(&self, flat: u64) -> u16 {
-        ((flat >> self.segment_shift) & ((1u64 << self.segment_bits) - 1)) as u16
-    }
-
-    /// Derive the offset-within-segment from a flat offset.
-    pub fn get_default_offset_from_flat(&self, flat: u64) -> u16 {
-        (flat & self.offset_mask) as u16
-    }
-
-    /// Get the offset within a specific segment given a flat offset.
-    pub fn get_offset_from_flat(&self, flat: u64, segment: u16) -> u16 {
-        let seg_flat_base = (segment as u64) << self.segment_shift;
-        (flat.wrapping_sub(seg_flat_base) & self.offset_mask) as u16
-    }
-
-    /// The underlying address space.
-    pub fn get_space(&self) -> &Arc<AddressSpace> {
-        &self.space
-    }
-}
-
-impl SegmentedAddress {
-    /// Separator between segment and offset in display ("SEGM:OFF").
-    pub const SEPARATOR: char = ':';
-
-    /// Create a segmented address from a flat offset.
-    pub fn from_flat(seg_space: &SegmentedAddressSpace, flat: u64) -> Self {
-        let segment = seg_space.get_default_segment_from_flat(flat);
-        let segment_offset = seg_space.get_default_offset_from_flat(flat);
-        Self {
-            inner: GenericAddress::new(Arc::clone(&seg_space.space), flat),
-            segment,
-            segment_offset,
-        }
-    }
-
-    /// Create a segmented address from a (segment, offset) pair.
-    pub fn from_segment_offset(
-        seg_space: &SegmentedAddressSpace,
-        segment: u16,
-        offset_in_segment: u16,
-    ) -> Self {
-        let flat = seg_space.get_flat_offset(segment, offset_in_segment);
-        Self {
-            inner: GenericAddress::new(Arc::clone(&seg_space.space), flat),
-            segment,
-            segment_offset: offset_in_segment,
-        }
-    }
-
-    /// Returns the segment value.
-    pub fn get_segment(&self) -> u16 {
-        self.segment
-    }
-
-    /// Returns the offset within the segment.
-    pub fn get_segment_offset(&self) -> u16 {
-        self.segment_offset
-    }
-
-    /// Returns the flat offset (same as `GenericAddress::get_offset`).
-    pub fn get_flat_offset(&self) -> u64 {
-        self.inner.get_offset()
-    }
-
-    /// Returns a reference to the inner [`GenericAddress`].
-    pub fn as_generic(&self) -> &GenericAddress {
-        &self.inner
-    }
-
-    /// Consumes self, returning the inner [`GenericAddress`].
-    pub fn into_generic(self) -> GenericAddress {
-        self.inner
-    }
-
-    /// Returns a new address normalized to the given segment. If the flat
-    /// address cannot be represented in that segment, returns `self`.
-    pub fn normalize(&self, seg_space: &SegmentedAddressSpace, seg: u16) -> Self {
-        let flat = self.inner.get_offset();
-        let off = seg_space.get_offset_from_flat(flat, seg);
-        // Check that the reconstructed flat matches the original (i.e. the
-        // segment:offset pair is valid for this flat).
-        let reconstructed = seg_space.get_flat_offset(seg, off);
-        if reconstructed != flat {
-            return self.clone();
-        }
-        Self {
-            inner: GenericAddress::new(Arc::clone(&self.inner.space), flat),
-            segment: seg,
-            segment_offset: off,
-        }
-    }
-
-    /// Display as "SSSS:OOOO" (4 hex digits each).
-    pub fn to_segment_string(&self) -> String {
-        format!("{:04x}{:}{:04x}", self.segment, Self::SEPARATOR, self.segment_offset)
-    }
-}
-
-impl fmt::Display for SegmentedAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:04x}{:}{:04x}",
-            self.segment,
-            Self::SEPARATOR,
-            self.segment_offset
-        )
-    }
-}
-
-impl fmt::LowerHex for SegmentedAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:08x}", self.inner.offset)
-    }
-}
-
-impl PartialEq for SegmentedAddress {
-    fn eq(&self, other: &Self) -> bool {
-        self.inner.space.space_id == other.inner.space.space_id
-            && self.inner.offset == other.inner.offset
-    }
-}
-
-impl Eq for SegmentedAddress {}
-
-impl PartialOrd for SegmentedAddress {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for SegmentedAddress {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.inner.cmp(&other.inner)
-    }
-}
-
-impl std::hash::Hash for SegmentedAddress {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.inner.hash(state);
-    }
-}
-
-impl From<SegmentedAddress> for Address {
-    fn from(sa: SegmentedAddress) -> Self {
-        Address::new(sa.inner.offset)
-    }
-}
-
-impl From<SegmentedAddress> for GenericAddress {
-    fn from(sa: SegmentedAddress) -> Self {
-        sa.inner
-    }
-}
-
-// ===========================================================================
-// OverlayAddressSpace — an address space that overlays a base space
-// ===========================================================================
-
-/// An address space that overlays (shadows) a region of another address space.
-///
-/// This is the Rust equivalent of Ghidra's `OverlayAddressSpace`. Each
-/// overlay has its own identity (name + `ordered_key`) while sharing the
-/// physical layout of the `base_space`. An `AddressSet` tracks which
-/// offsets are "defined" within the overlay; offsets outside that set
-/// fall through to the base space.
-#[derive(Debug, Clone)]
-pub struct OverlayAddressSpace {
-    /// Our own `AddressSpace` descriptor (with `is_overlay = true`).
-    own_space: AddressSpace,
-    /// The base space being overlaid.
-    base_space: Arc<AddressSpace>,
-    /// Unique ordered key used for identity comparison.
-    ordered_key: String,
-    /// Defined overlay regions (offsets that belong to this overlay).
-    overlay_regions: AddressSet,
-}
-
-impl OverlayAddressSpace {
-    /// Separator shown between the overlay name and the address in display.
-    pub const OV_SEPARATOR: &'static str = ":";
-
-    /// Create a new overlay address space.
-    ///
-    /// `name`    – the overlay space name.
-    /// `base`    – the space being overlaid.
-    /// `unique`  – a unique sequence number for this overlay in the factory.
-    /// `key`     – an ordered key (normally equal to the name) used for
-    ///             identity and ordering.
-    pub fn new(
-        name: impl Into<String>,
-        base: Arc<AddressSpace>,
-        unique: u32,
-        key: impl Into<String>,
-    ) -> Self {
-        let mut own = AddressSpace::new(
-            name,
-            base.pointer_size,
-            base.big_endian,
-            base.space_type,
-            unique,
-        );
-        own.is_overlay = true;
-        Self {
-            own_space: own,
-            base_space: base,
-            ordered_key: key.into(),
-            overlay_regions: AddressSet::new(),
-        }
-    }
-
-    /// Returns a reference to the overlay's own address space descriptor.
-    pub fn own_space(&self) -> &AddressSpace {
-        &self.own_space
-    }
-
-    /// Returns an `Arc` pointing to the base (overlaid) space.
-    pub fn get_overlayed_space(&self) -> &Arc<AddressSpace> {
-        &self.base_space
-    }
-
-    /// Returns the ordered key (used for identity comparison).
-    pub fn get_ordered_key(&self) -> &str {
-        &self.ordered_key
-    }
-
-    /// Returns the space ID of the base space.
-    pub fn get_base_space_id(&self) -> u32 {
-        self.base_space.space_id
-    }
-
-    /// Returns the physical space of the base.
-    pub fn get_physical_space(&self) -> &AddressSpace {
-        // In this simplified model, the base is always physical.
-        &self.base_space
-    }
-
-    // -- Overlay region management ----------------------------------------------
-
-    /// Add a defined overlay region `[start, end]` (offsets).
-    pub fn add_overlay_region(&mut self, start: Address, end: Address) {
-        self.overlay_regions.add_range(start, end);
-    }
-
-    /// Remove a defined overlay region `[start, end]`.
-    pub fn delete_overlay_region(&mut self, start: Address, end: Address) {
-        self.overlay_regions.delete_range(start, end);
-    }
-
-    /// True if `offset` falls within a defined overlay region.
-    pub fn contains_offset(&self, offset: u64) -> bool {
-        self.overlay_regions.contains(&Address::new(offset))
-    }
-
-    /// Returns the set of defined overlay regions.
-    pub fn get_overlay_address_set(&self) -> &AddressSet {
-        &self.overlay_regions
-    }
-
-    // -- Address resolution -----------------------------------------------------
-
-    /// Get an address in this overlay space.
-    ///
-    /// If `offset` is within the overlay region, returns an overlay address;
-    /// otherwise returns the equivalent address in the base space.
-    pub fn get_address(&self, offset: u64) -> GenericAddress {
-        if self.contains_offset(offset) {
-            GenericAddress::new(Arc::new(self.own_space.clone()), offset)
-        } else {
-            GenericAddress::new(Arc::clone(&self.base_space), offset)
-        }
-    }
-
-    /// Get an address in this overlay space regardless of containment.
-    pub fn get_address_in_this_space_only(&self, offset: u64) -> GenericAddress {
-        GenericAddress::new(Arc::new(self.own_space.clone()), offset)
-    }
-
-    /// Translate an address in the base space to this overlay if the offset
-    /// falls within the defined overlay region.
-    pub fn get_overlay_address(&self, addr: &GenericAddress) -> GenericAddress {
-        if addr.get_address_space().space_id == self.base_space.space_id
-            && self.contains_offset(addr.get_offset())
-        {
-            GenericAddress::new(Arc::new(self.own_space.clone()), addr.get_offset())
-        } else {
-            addr.clone()
-        }
-    }
-
-    /// Translate an overlay-space address to the base space.
-    ///
-    /// If `force` is `false` and the offset is within the overlay region the
-    /// original address is returned unchanged.
-    pub fn translate_to_base(&self, addr: &GenericAddress, force: bool) -> GenericAddress {
-        if !force && self.contains_offset(addr.get_offset()) {
-            return addr.clone();
-        }
-        GenericAddress::new(Arc::clone(&self.base_space), addr.get_offset())
-    }
-
-    // -- Comparison (matches Java OverlayAddressSpace.compareOverlay) -----------
-
-    /// Compare this overlay to another overlay (for ordering in a factory).
-    pub fn compare_overlay(&self, other: &OverlayAddressSpace) -> std::cmp::Ordering {
-        self.base_space
-            .space_id
-            .cmp(&other.base_space.space_id)
-            .then_with(|| self.own_space.space_type.cmp(&other.own_space.space_type))
-            .then_with(|| self.ordered_key.cmp(&other.ordered_key))
-    }
-}
-
-impl PartialEq for OverlayAddressSpace {
-    fn eq(&self, other: &Self) -> bool {
-        self.ordered_key == other.ordered_key
-            && self.own_space.space_type == other.own_space.space_type
-            && self.own_space.pointer_size == other.own_space.pointer_size
-            && self.base_space.space_id == other.base_space.space_id
-    }
-}
-
-impl Eq for OverlayAddressSpace {}
-
-impl std::hash::Hash for OverlayAddressSpace {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.ordered_key.hash(state);
-        self.base_space.space_id.hash(state);
-    }
-}
-
-impl fmt::Display for OverlayAddressSpace {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}{}", self.own_space.name, Self::OV_SEPARATOR)
-    }
-}

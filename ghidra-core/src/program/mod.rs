@@ -25,6 +25,11 @@ pub mod program;
 pub mod listing;
 pub mod lang;
 pub mod dynamic_var;
+pub mod language_id;
+pub mod register;
+pub mod processor;
+pub mod compiler_spec;
+pub mod language;
 
 // ============================================================================
 // Re-exports from program.rs
