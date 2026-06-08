@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::description::{ExecutableRecord, FunctionDescription, SignatureRecord};
+use super::super::description::SignatureRecord;
 #[cfg(test)]
 use super::super::FeatureVector;
 

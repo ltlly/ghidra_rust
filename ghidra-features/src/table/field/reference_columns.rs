@@ -14,8 +14,8 @@
 use ghidra_core::addr::Address;
 
 use super::traits::{ProgramBasedDynamicTableColumn, ProgramInfo, ProgramLocationTableColumn,
-                    ProgramLocationTableColumnExt, RefType, ServiceProvider, Settings};
-use super::core::{IncomingReferenceEndpoint, OutgoingReferenceEndpoint, ReferenceAddressPair};
+                    ProgramLocationTableColumnExt, ServiceProvider, Settings};
+use super::core::{IncomingReferenceEndpoint, ReferenceAddressPair};
 use super::super::mapper::ProgramLocation;
 
 // ---------------------------------------------------------------------------
@@ -298,6 +298,7 @@ impl ProgramLocationTableColumnExt<ProgramLocation> for PreviewTableColumn {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::traits::RefType;
 
     fn test_program() -> ProgramInfo {
         ProgramInfo::new("test", "x86:LE:64:default")

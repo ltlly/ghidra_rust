@@ -4,9 +4,12 @@
 //! to Rust. It provides:
 //!
 //! - [`LabelManager`] -- core label operations (add, edit, remove, history)
+//! - [`LabelPlugin`] -- full plugin with action registration and callbacks
 //! - [`LabelAction`] -- enum of available label management actions
 //! - [`LabelActionContext`] -- context for determining action enablement
 //! - [`LabelHistoryEntry`] / [`LabelHistoryTableModel`] -- label history display
+//! - [`LabelHistoryDialog`] -- dialog for displaying label history
+//! - [`AllHistoryAction`] -- action for searching all label history
 //! - Action enablement functions matching Ghidra's `isEnabledForContext`
 //!
 //! # Architecture
@@ -21,15 +24,19 @@
 //! by any frontend.
 
 pub mod actions;
+pub mod all_history_action;
 pub mod dialogs;
 pub mod history;
+pub mod label_history_dialog;
+pub mod label_plugin;
 pub mod operand_label;
 pub mod plugin;
 
 pub use actions::{
-    is_add_label_enabled, is_edit_label_enabled, is_label_history_enabled,
-    is_remove_label_enabled, LabelAction, LabelActionContext,
+    is_add_label_enabled, is_edit_label_enabled, is_label_history_enabled, is_remove_label_enabled,
+    LabelAction, LabelActionContext,
 };
+pub use all_history_action::AllHistoryAction;
 pub use dialogs::{
     EditExternalLabelAction, LabelHistoryInputDialog, LabelHistoryPanel, LabelHistoryTask,
     SymbolChooserDialog,
@@ -37,5 +44,9 @@ pub use dialogs::{
 pub use history::{
     LabelHistoryAction, LabelHistoryColumn, LabelHistoryEntry, LabelHistoryListener,
     LabelHistoryTableModel,
+};
+pub use label_history_dialog::LabelHistoryDialog;
+pub use label_plugin::{
+    LabelPlugin, ListingContext, ListingFieldType, RegisteredAction, SymbolInfo,
 };
 pub use plugin::{LabelHistoryAction as PluginHistoryAction, LabelManager};

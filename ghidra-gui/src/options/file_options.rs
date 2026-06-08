@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use super::option::OptionEntry;
-use super::option_type::OptionType;
 use super::option_value::OptionValue;
 
 /// Options that are persisted to/from a JSON file.

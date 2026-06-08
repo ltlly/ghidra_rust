@@ -10,7 +10,6 @@
 
 use super::operation::Varnode;
 use super::opcodes::OpCode;
-use super::sequence::SequenceNumber;
 use ghidra_core::addr::Address;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -752,7 +751,7 @@ impl GlobalSymbolMap {
         addr: Address,
         name: String,
         data_type: Option<String>,
-        size: u32,
+        _size: u32,
     ) -> HighSymbol {
         let sym = HighSymbol::new(id, name, data_type);
         let result = sym.clone();
@@ -1002,7 +1001,7 @@ impl HighFunction {
     }
 
     /// Find a symbol by address and PC address.
-    pub fn find_symbol(&self, addr: Address, pc: Option<Address>) -> Option<&HighSymbol> {
+    pub fn find_symbol(&self, addr: Address, _pc: Option<Address>) -> Option<&HighSymbol> {
         // Search local symbols first
         for sym in self.local_symbols.get_symbols() {
             if let Some(entry) = sym.get_first_entry() {
@@ -1023,7 +1022,7 @@ impl HighFunction {
     }
 
     /// Get the PC address for a representative varnode.
-    pub fn get_pc_address(&self, rep: &Varnode) -> Option<Address> {
+    pub fn get_pc_address(&self, _rep: &Varnode) -> Option<Address> {
         // Simplified: return entry point as fallback
         Some(self.entry_point)
     }
@@ -1396,14 +1395,14 @@ impl HighFunctionDBUtil {
     }
 
     /// Get the first vararg index from a program at a given address.
-    pub fn get_first_var_arg(program_name: &str, addr: Address) -> i32 {
+    pub fn get_first_var_arg(_program_name: &str, _addr: Address) -> i32 {
         // Simplified: return -1 (no varargs)
         -1
     }
 
     /// Get the address referenced by a spacebase operation.
     pub fn get_spacebase_reference_address(
-        addr_factory_name: &str,
+        _addr_factory_name: &str,
         op: Option<&PcodeOpRef>,
     ) -> Option<Address> {
         op.and_then(|o| {
@@ -1574,7 +1573,7 @@ mod tests {
     #[test]
     fn test_local_symbol_map_params() {
         let mut map = LocalSymbolMap::new(None);
-        let sym = map.new_mapped_symbol(
+        let _sym = map.new_mapped_symbol(
             0,
             "param1".to_string(),
             Some("int".to_string()),
@@ -1591,7 +1590,7 @@ mod tests {
     fn test_global_symbol_map() {
         let mut map = GlobalSymbolMap::new();
         let addr = Address::new(0x2000);
-        let sym = map.new_symbol(100, addr, "global_var".to_string(), Some("int".to_string()), 4);
+        let _sym = map.new_symbol(100, addr, "global_var".to_string(), Some("int".to_string()), 4);
         assert!(map.get_symbol(100).is_some());
         assert!(map.get_symbol_by_addr(addr).is_some());
     }

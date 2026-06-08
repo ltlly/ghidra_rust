@@ -4,7 +4,6 @@
 //! the decompiler's view of variables, symbols, and function prototypes.
 
 use crate::addr::Address;
-use crate::pcode::varnode::Varnode;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;

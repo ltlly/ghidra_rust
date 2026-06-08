@@ -40,9 +40,11 @@ pub struct ArchitectureFilter {
 }
 
 impl ArchitectureFilter {
+    /// Create a new architecture filter.
     pub fn new(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: false }
     }
+    /// Create a negated architecture filter.
     pub fn not(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: true }
     }
@@ -64,14 +66,18 @@ impl BSimFilterType for ArchitectureFilter {
 /// Filter by compiler (e.g., gcc, clang, msvc).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompilerFilter {
+    /// The compiler value to match.
     pub value: String,
+    /// Whether this is a negated filter.
     pub negated: bool,
 }
 
 impl CompilerFilter {
+    /// Create a new compiler filter.
     pub fn new(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: false }
     }
+    /// Create a negated compiler filter.
     pub fn not(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: true }
     }
@@ -93,14 +99,18 @@ impl BSimFilterType for CompilerFilter {
 /// Filter by executable name.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutableNameFilter {
+    /// The executable name to match.
     pub value: String,
+    /// Whether this is a negated filter.
     pub negated: bool,
 }
 
 impl ExecutableNameFilter {
+    /// Create a new executable name filter.
     pub fn new(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: false }
     }
+    /// Create a negated executable name filter.
     pub fn not(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: true }
     }
@@ -122,14 +132,18 @@ impl BSimFilterType for ExecutableNameFilter {
 /// Filter by executable category.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutableCategoryFilter {
+    /// The category value to match.
     pub value: String,
+    /// Whether this is a negated filter.
     pub negated: bool,
 }
 
 impl ExecutableCategoryFilter {
+    /// Create a new executable category filter.
     pub fn new(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: false }
     }
+    /// Create a negated executable category filter.
     pub fn not(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: true }
     }
@@ -151,14 +165,18 @@ impl BSimFilterType for ExecutableCategoryFilter {
 /// Filter by MD5 hash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Md5Filter {
+    /// The MD5 hash to match.
     pub value: String,
+    /// Whether this is a negated filter.
     pub negated: bool,
 }
 
 impl Md5Filter {
+    /// Create a new MD5 filter.
     pub fn new(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: false }
     }
+    /// Create a negated MD5 filter.
     pub fn not(value: impl Into<String>) -> Self {
         Self { value: value.into(), negated: true }
     }
@@ -185,6 +203,7 @@ pub struct DateEarlierFilter {
 }
 
 impl DateEarlierFilter {
+    /// Create a new date-earlier filter.
     pub fn new(date: impl Into<String>) -> Self {
         Self { date: date.into() }
     }
@@ -203,10 +222,12 @@ impl BSimFilterType for DateEarlierFilter {
 /// Filter by date (later than a given date).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DateLaterFilter {
+    /// ISO-8601 date string.
     pub date: String,
 }
 
 impl DateLaterFilter {
+    /// Create a new date-later filter.
     pub fn new(date: impl Into<String>) -> Self {
         Self { date: date.into() }
     }
@@ -459,10 +480,12 @@ impl BSimFilterBasis {
 /// Filter by function tag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionTagFilter {
+    /// The function tag to match.
     pub tag: String,
 }
 
 impl FunctionTagFilter {
+    /// Create a new function tag filter.
     pub fn new(tag: impl Into<String>) -> Self {
         Self { tag: tag.into() }
     }
@@ -479,10 +502,12 @@ impl BSimFilterType for FunctionTagFilter {
 /// Filter by path prefix.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathStartsFilter {
+    /// The path prefix to match.
     pub prefix: String,
 }
 
 impl PathStartsFilter {
+    /// Create a new path-starts filter.
     pub fn new(prefix: impl Into<String>) -> Self {
         Self { prefix: prefix.into() }
     }

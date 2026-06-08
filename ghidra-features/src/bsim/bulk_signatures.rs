@@ -6,7 +6,7 @@
 //! Provides batch operations for generating BSim signatures from
 //! multiple functions and bulk-loading them into a database.
 
-use super::{BSimDatabase, BSimSignature, FeatureVector};
+use super::{BSimDatabase, BSimSignature};
 use ghidra_core::program::listing::Function;
 use anyhow::Result;
 

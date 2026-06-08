@@ -106,6 +106,7 @@ pub struct BookmarkTableEntry {
 /// - Loading rows from a BookmarkManager
 /// - In-place editing of category and comment columns
 /// - Snapshot of filter state for persistence
+#[derive(Debug)]
 pub struct BookmarkTableModel {
     /// Current rows (ordered).
     rows: Vec<BookmarkTableEntry>,

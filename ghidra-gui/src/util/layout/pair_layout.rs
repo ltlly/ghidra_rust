@@ -154,7 +154,7 @@ impl PairLayout {
     pub fn layout(
         &self,
         container_width: f64,
-        container_height: f64,
+        _container_height: f64,
         items: &[LayoutItemSize],
     ) -> PairLayoutResult {
         let left_width = self.compute_left_width(items);

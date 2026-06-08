@@ -186,7 +186,7 @@ pub fn create_default_registry() -> PlatformOpinionRegistry {
 mod tests {
     use super::*;
     use super::super::platform_gdb::GdbPlatformOpinion;
-    use super::super::platform_lldb::LldbPlatformOpinion;
+    
 
     #[test]
     fn test_platform_opinion_creation() {

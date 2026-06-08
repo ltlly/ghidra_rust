@@ -9,7 +9,6 @@ use ghidra_core::addr::Address;
 
 use super::traits::{ProgramBasedDynamicTableColumn, ProgramInfo, ProgramLocationTableColumn,
                     ProgramLocationTableColumnExt, ServiceProvider, Settings};
-use super::core::CodeUnitTableCellData;
 use super::settings_defs::{CODE_UNIT_COUNT_DEF, CODE_UNIT_OFFSET_DEF};
 use super::super::mapper::ProgramLocation;
 
@@ -39,7 +38,7 @@ impl ProgramBasedDynamicTableColumn<ProgramLocation> for CodeUnitTableColumn {
         name
     }
 
-    fn get_value(&self, row: &ProgramLocation, settings: &Settings, _program: &ProgramInfo,
+    fn get_value(&self, row: &ProgramLocation, _settings: &Settings, _program: &ProgramInfo,
                  _sp: &ServiceProvider) -> Option<String> {
         // In a real implementation, this would format the code unit listing.
         Some(format!("0x{:x}", row.address.offset))

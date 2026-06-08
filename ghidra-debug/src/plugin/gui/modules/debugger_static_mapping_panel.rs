@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerStaticMappingPanel::new(4);
+        let _obj = DebuggerStaticMappingPanel::new(4);
         assert!(true);
     }
 

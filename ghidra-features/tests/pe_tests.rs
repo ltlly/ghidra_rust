@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Tests for PE format: DOS header, NT headers, optional header, section headers,
 //! import/export tables.
 //!

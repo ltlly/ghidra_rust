@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = UnknownStatePcodeExecutionException::new(0, "test".to_string());
+        let _obj = UnknownStatePcodeExecutionException::new(0, "test".to_string());
         assert!(true);
     }
 

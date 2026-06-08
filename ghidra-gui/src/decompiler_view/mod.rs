@@ -922,14 +922,14 @@ int check_flag(unsigned int flags, int bit) {
             // Handle multi-line comment regions
             if in_comment {
                 // Find the start by scanning backward
-                let mut comment_start = line_idx;
+                let mut _comment_start = line_idx;
                 for prev in (0..line_idx).rev() {
                     if let Some(tokens) = self.tokens.get(prev) {
                         if tokens
                             .iter()
                             .any(|t| t.kind == CTokenKind::Comment && t.text.starts_with("/*"))
                         {
-                            comment_start = prev;
+                            _comment_start = prev;
                             break;
                         }
                     }
@@ -979,7 +979,7 @@ int check_flag(unsigned int flags, int bit) {
                 if self.folded_regions.contains(&region.start_line) {
                     // Check if an ancestor is also folded (nested folding)
                     // Walk up to find the outermost folded ancestor
-                    let mut is_folded = true;
+                    let is_folded = true;
                     // Look for a containing region whose start line is also folded,
                     // and whose range fully contains the current region
                     for outer in &self.fold_regions {
@@ -1223,7 +1223,7 @@ int check_flag(unsigned int flags, int bit) {
                             });
 
                             // Annotate the function name token
-                            if let Some(name_pos) = self.find_token_at(line_idx, next_token.col) {
+                            if let Some(_name_pos) = self.find_token_at(line_idx, next_token.col) {
                                 // Mark as function name
                             }
                         }
@@ -1530,7 +1530,7 @@ static C_TYPES: &[&str] = &[
 static C_CONSTANTS: &[&str] = &["NULL", "true", "false", "TRUE", "FALSE", "__null"];
 
 /// Preprocessor directive keywords.
-static PREPROCESSOR_DIRECTIVES: &[&str] = &[
+static _PREPROCESSOR_DIRECTIVES: &[&str] = &[
     "define", "include", "ifdef", "ifndef", "if", "else", "elif", "endif", "undef", "pragma",
     "error", "line",
 ];
@@ -1623,6 +1623,7 @@ fn tokenize_line(line: &str, line_idx: usize, current_function: Option<&str>) ->
                 i += 1;
                 col += 1;
             }
+            let _ = col;
             tokens.push(CToken::new(
                 CTokenKind::Preprocessor,
                 directive,
@@ -1641,6 +1642,7 @@ fn tokenize_line(line: &str, line_idx: usize, current_function: Option<&str>) ->
                 i += 1;
                 col += 1;
             }
+            let _ = col;
             tokens.push(CToken::new(
                 CTokenKind::Comment,
                 comment,
@@ -1860,7 +1862,6 @@ fn tokenize_line(line: &str, line_idx: usize, current_function: Option<&str>) ->
                     | "|="
                     | "^="
                     | "::"
-                    | "->"
             ) {
                 tokens.push(CToken::new(CTokenKind::Operator, op.clone(), line_idx, col));
                 i += 2;

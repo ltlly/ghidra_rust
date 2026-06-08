@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! DecompileDebug: debug container for decompiler/database communication.
 //!
 //! Port of Ghidra's `ghidra.app.decompiler.DecompileDebug`.
@@ -22,9 +23,9 @@ pub struct DecompileDebug {
     /// Name of the program.
     program_name: Option<String>,
     /// Debug file path.
-    debug_file: Option<String>,
+    _debug_file: Option<String>,
     /// Local extensions to the compiler spec.
-    spec_extensions: BTreeMap<String, String>,
+    _spec_extensions: BTreeMap<String, String>,
     /// Database scope entries.
     database_scope: Vec<DatabaseScopeEntry>,
     /// Data type entries.
@@ -90,8 +91,8 @@ impl DecompileDebug {
             function_entry: None,
             function_name: None,
             program_name: None,
-            debug_file: None,
-            spec_extensions: BTreeMap::new(),
+            _debug_file: None,
+            _spec_extensions: BTreeMap::new(),
             database_scope: Vec::new(),
             data_types: Vec::new(),
             context_registers: Vec::new(),

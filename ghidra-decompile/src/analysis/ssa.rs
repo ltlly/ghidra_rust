@@ -82,7 +82,7 @@ impl DominatorTree {
     pub fn strictly_dominated_by(&self, node: NodeIndex) -> Vec<NodeIndex> {
         self.idom
             .iter()
-            .filter(|(child, &dom)| **child != node && self.dominates(node, **child))
+            .filter(|(child, &_dom)| **child != node && self.dominates(node, **child))
             .map(|(child, _)| *child)
             .collect()
     }
@@ -382,7 +382,7 @@ impl SsaBuilder {
     /// Map each variable to the set of basic blocks where it is defined.
     fn find_definition_blocks(
         &self,
-        all_vars: &HashSet<Varnode>,
+        _all_vars: &HashSet<Varnode>,
     ) -> HashMap<Varnode, HashSet<NodeIndex>> {
         let mut def_blocks: HashMap<Varnode, HashSet<NodeIndex>> = HashMap::new();
 

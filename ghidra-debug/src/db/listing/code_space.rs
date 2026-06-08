@@ -127,7 +127,7 @@ impl DbTraceCodeSpace {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::CodeUnitType;
+    
 
     fn make_instruction(offset: u64, length: u32, snap: i64) -> DbTraceInstruction {
         DbTraceInstruction::new(offset, length, snap, "x86", vec![0x90; length as usize])

@@ -6,7 +6,7 @@
 //! loaded program.
 
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::dialog::TableServiceTableChooserDialog;
 use super::provider::TableComponentProvider;

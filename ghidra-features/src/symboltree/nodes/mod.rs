@@ -331,7 +331,7 @@ pub struct SearchKeySymbolNode {
 impl SearchKeySymbolNode {
     /// Create a new search key node with a custom search name.
     pub fn new(
-        name: impl Into<String>,
+        _name: impl Into<String>,
         kind: SymbolNodeKind,
         symbol_id: u64,
         search_name: impl Into<String>,

@@ -38,7 +38,7 @@ use petgraph::Direction;
 
 use ghidra_core::addr::Address;
 use ghidra_core::data::{BuiltInDataType, DataType, PointerDataType};
-use ghidra_core::error::{GhidraError, Result};
+use ghidra_core::error::Result;
 
 use crate::pcode::{OpCode, PcodeOperation, Varnode};
 
@@ -846,7 +846,7 @@ impl TypeRecoveryEngine {
                 }
             }
 
-            OpCode::FLOAT_INT2FLOAT | OpCode::FLOAT_FLOAT2INT | OpCode::FLOAT_INT2FLOAT => {
+            OpCode::FLOAT_INT2FLOAT | OpCode::FLOAT_FLOAT2INT => {
                 if let Some(ref dest) = op.output {
                     if let Some(ref src) = op.inputs.first() {
                         self.type_propagator.add_flow(src, dest);
@@ -1227,7 +1227,7 @@ impl TypeRecoveryEngine {
 
         let mut structs: Vec<InferredStruct> = Vec::new();
 
-        for (base_vn, mut fields) in struct_groups {
+        for (_base_vn, mut fields) in struct_groups {
             if fields.len() < 2 {
                 // A struct needs at least two fields to be meaningful.
                 continue;
@@ -1866,7 +1866,7 @@ impl HeapStruct {
     /// Return a formatted C-like declaration.
     pub fn to_c_declaration(&self) -> String {
         let mut s = format!("struct heap_struct /* size=0x{:x} */ {{\n", self.total_size);
-        for (offset, size, ty) in &self.fields {
+        for (offset, _size, ty) in &self.fields {
             s.push_str(&format!(
                 "    /* 0x{:04x} */ {};\n",
                 offset, ty.data_type.name()

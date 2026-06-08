@@ -456,7 +456,7 @@ impl ThreeColumnLayout {
     }
 
     /// Calculate column positions given container width and component widths.
-    pub fn column_positions(&self, container_width: f64, left_width: f64, center_width: f64, right_width: f64) -> [f64; 3] {
+    pub fn column_positions(&self, container_width: f64, _left_width: f64, center_width: f64, right_width: f64) -> [f64; 3] {
         let left_x = 0.0;
         let center_x = (container_width - center_width) / 2.0;
         let right_x = container_width - right_width;

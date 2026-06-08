@@ -9,10 +9,9 @@
 
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
 
-use super::configuration::{BSimServerConfig, BSimDatabaseType};
-use super::{FeatureVector, BSimMetadata, BSimSignature};
+use super::configuration::BSimServerConfig;
+use super::FeatureVector;
 
 // ============================================================================
 // ElasticConnection
@@ -222,7 +221,7 @@ impl<C: ElasticConnection> ElasticDatabase<C> {
 
     /// Build a search query JSON for finding similar vectors.
     pub fn build_vector_similarity_query(
-        query_vector: &FeatureVector,
+        _query_vector: &FeatureVector,
         band: usize,
         bucket: u32,
         max_results: usize,

@@ -553,7 +553,7 @@ pub struct SyncActionResult {
 impl SyncActionResult {
     /// Create a successful result.
     pub fn success(operation: SyncOperation, archive_name: impl Into<String>, types: Vec<String>) -> Self {
-        let count = types.len();
+        let _count = types.len();
         Self {
             operation,
             archive_name: archive_name.into(),

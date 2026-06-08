@@ -9,7 +9,7 @@
 
 use super::super::clang_node::{ClangNodeId, SyntaxType};
 use super::clang_decompiler_highlighter::ClangDecompilerHighlighter;
-use super::layout_pixel_index_map::{LayoutPixelIndexMap, VerticalLayoutPixelIndexMap};
+use super::layout_pixel_index_map::VerticalLayoutPixelIndexMap;
 
 /// Cursor position in the decompiler panel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

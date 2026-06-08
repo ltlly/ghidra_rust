@@ -2,8 +2,7 @@
 //!
 //! Ports `generic.theme.ThemeManager`.
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use super::color_value::ColorValue;
 use super::font_value::FontValue;

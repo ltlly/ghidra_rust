@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DefaultTraceLocation::new(0, 0, None);
+        let _obj = DefaultTraceLocation::new(0, 0, None);
         assert!(true);
     }
 

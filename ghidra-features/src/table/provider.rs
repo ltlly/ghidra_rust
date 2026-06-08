@@ -5,12 +5,9 @@
 //! wraps a table model with navigation, marker, and filter support.
 
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
 
 use ghidra_core::addr::Address;
 
-use super::model::{SimpleRowObject, TableChooserTableModel, TableSortState};
-use super::traits::AddressableRowObject;
 
 // ---------------------------------------------------------------------------
 // MarkerSet

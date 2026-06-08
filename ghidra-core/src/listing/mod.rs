@@ -1,10 +1,34 @@
-//! Listing (disassembly) row types for Ghidra Rust.
+//! Listing (disassembly) model types for Ghidra Rust.
 //!
-//! Models the rows shown in a disassembly listing view, including addresses,
-//! bytes, mnemonics, operands, and comments.
+//! Models Ghidra's `ghidra.program.model.listing` package, including
+//! code unit types, comment types, flow overrides, variables, stack frames,
+//! function tags, bookmarks, and the disassembly listing view.
+
+pub mod auto_parameter_type;
+pub mod code_unit;
+pub mod comment_history;
+pub mod comment_type;
+pub mod flow_override;
+pub mod function_tag;
+pub mod group;
+pub mod stack_frame;
+pub mod variable;
+pub mod variable_filter;
 
 use crate::addr::Address;
 use serde::{Deserialize, Serialize};
+
+// Re-export key types
+pub use auto_parameter_type::AutoParameterType;
+pub use code_unit::{CodeUnit, CodeUnitData, MNEMONIC};
+pub use comment_history::CommentHistory;
+pub use comment_type::CommentType;
+pub use flow_override::FlowOverride;
+pub use function_tag::FunctionTag;
+pub use group::{Group, GroupData};
+pub use stack_frame::{StackFrame, StackFrameData, GROWS_NEGATIVE, GROWS_POSITIVE, UNKNOWN_PARAM_OFFSET};
+pub use variable::{Variable, VariableData};
+pub use variable_filter::{VariableFilter, filters};
 
 /// The mnemonic part of an instruction (e.g., "mov", "call", "push").
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

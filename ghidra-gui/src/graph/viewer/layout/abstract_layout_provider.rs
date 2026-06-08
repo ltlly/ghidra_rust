@@ -5,8 +5,8 @@
 //! A base implementation of the LayoutProvider interface that provides
 //! default stub methods. Concrete implementations override `compute_layout`.
 
-use super::{GridPoint, LayoutLocationMap, LayoutPositions, VisualGraphLayout};
-use super::super::{Point2D, Rect2D, VisualEdge, VisualGraph, VisualVertex};
+use super::{LayoutLocationMap, LayoutPositions, VisualGraphLayout};
+use super::super::Point2D;
 
 /// Extension point for layout providers.
 ///

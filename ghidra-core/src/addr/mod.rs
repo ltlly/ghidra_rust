@@ -4,6 +4,24 @@
 //! a location in a program, which may span multiple address spaces (RAM, ROM,
 //! register space, etc.).
 
+pub mod address_error;
+pub mod address_iterator;
+pub mod address_range_impl;
+pub mod chunker;
+pub mod collectors;
+pub mod default_address_factory;
+pub mod generic_address_space;
+pub mod immutable_address_set;
+pub mod key_range;
+pub mod label_info;
+pub mod protected_address_space;
+pub mod range_splitter;
+pub mod set_collection;
+pub mod set_mapping;
+pub mod set_view;
+pub mod set_view_adapter;
+pub mod special_address;
+
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
@@ -314,6 +332,16 @@ impl Address {
         self.offset
     }
 
+    /// Returns the raw offset value (alias for `get_offset`).
+    pub fn raw(&self) -> u64 {
+        self.offset
+    }
+
+    /// Returns the address value (alias for `get_offset`).
+    pub fn value(&self) -> u64 {
+        self.offset
+    }
+
     /// Returns the word offset using the given addressable unit size.
     pub fn get_addressable_word_offset(&self, unit_size: u64) -> u64 {
         if unit_size == 0 {
@@ -512,7 +540,12 @@ impl AddressRange {
         Self { start, end }
     }
 
-    /// The size (number of addresses) in the range.
+    /// Create a range containing a single address.
+    pub fn single(addr: Address) -> Self {
+        Self { start: addr, end: addr }
+    }
+
+    /// The size (number of addresses) in the range as `u64`.
     pub fn len(&self) -> u64 {
         if self.end.offset >= self.start.offset {
             self.end.offset - self.start.offset + 1
@@ -521,9 +554,19 @@ impl AddressRange {
         }
     }
 
+    /// The size (number of addresses) in the range as `usize`.
+    pub fn length(&self) -> usize {
+        self.len() as usize
+    }
+
     /// Returns true if the range is empty.
     pub fn is_empty(&self) -> bool {
         self.end.offset < self.start.offset
+    }
+
+    /// Returns the minimum (inclusive) address of the range.
+    pub fn min(&self) -> Address {
+        self.start
     }
 
     /// Returns the minimum (inclusive) address of the range.
@@ -795,6 +838,11 @@ impl AddressSet {
         self.ranges.is_empty()
     }
 
+    /// Returns the total number of addresses in the set as `usize`.
+    pub fn len(&self) -> usize {
+        self.num_addresses() as usize
+    }
+
     pub fn num_address_ranges(&self) -> usize {
         self.ranges.len()
     }
@@ -807,6 +855,11 @@ impl AddressSet {
 
     pub fn get_min_address(&self) -> Option<Address> {
         self.ranges.keys().next().map(|&o| Address::new(o))
+    }
+
+    /// Alias for `get_min_address`.
+    pub fn min_address(&self) -> Option<Address> {
+        self.get_min_address()
     }
 
     pub fn get_max_address(&self) -> Option<Address> {
@@ -866,12 +919,12 @@ impl AddressSet {
             return;
         }
         let (mut lo, mut hi) = (start.offset, end.offset);
-        // Merge with any overlapping/adjacent existing ranges.
+        // Collect all existing ranges that overlap or are adjacent to [lo, hi].
+        // A range [s, e] overlaps if s <= hi+1 and e >= lo-1 (adjacent counts).
         let overlaps: Vec<u64> = self
             .ranges
             .range(..=hi + 1)
-            .rev()
-            .take_while(|(&s, _)| s >= lo.saturating_sub(1))
+            .filter(|(_, &e)| e >= lo.saturating_sub(1))
             .map(|(&s, _)| s)
             .collect();
         for k in overlaps {
@@ -910,8 +963,7 @@ impl AddressSet {
         let keys: Vec<u64> = self
             .ranges
             .range(..=hi)
-            .rev()
-            .take_while(|(&s, _)| s >= lo.saturating_sub(1))
+            .filter(|(_, &e)| e >= lo)
             .map(|(&s, _)| s)
             .collect();
         for k in keys {

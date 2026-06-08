@@ -239,7 +239,7 @@ impl ConstantPropagationContextEvaluator {
     /// Ported from `ConstantPropagationContextEvaluator.evaluateReference()`.
     pub fn evaluate_reference(
         &self,
-        from: &Address,
+        _from: &Address,
         to: &Address,
         memory_size: u64,
     ) -> PropagationResult {

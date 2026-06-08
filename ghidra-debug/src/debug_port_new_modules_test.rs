@@ -15,7 +15,7 @@ mod tests {
     // =========================================================================
 
     use crate::model::data::{
-        DataTypeId, DataTypeConflictHandler, DataTypeDependencyException,
+        DataTypeId, DataTypeConflictHandler,
         InMemoryTraceDataTypeManager, TraceBasedDataTypeManager, TraceDataType,
     };
 

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Clang markup builder -- port of Ghidra's `ghidra.app.decompiler.ClangMarkup`.
 //!
 //! Provides the `build_clang_tree` entry point that parses a serialized
@@ -243,7 +244,7 @@ impl MarkupParser {
 enum ParsedTag {
     Text(String),
     Open { name: String, children: Vec<ParsedTag> },
-    Close(String),
+    Close(#[allow(dead_code)] String),
     SelfClosing(String),
 }
 

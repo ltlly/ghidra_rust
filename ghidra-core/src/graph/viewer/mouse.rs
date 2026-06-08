@@ -775,7 +775,7 @@ impl SatelliteTranslatingPlugin {
 #[derive(Debug)]
 pub struct AnimatedPickingPlugin {
     /// The base picking behavior.
-    picking: PickingGraphMousePlugin,
+    _picking: PickingGraphMousePlugin,
     /// Whether animation is enabled.
     animate: bool,
 }
@@ -784,7 +784,7 @@ impl AnimatedPickingPlugin {
     /// Create a new animated picking plugin.
     pub fn new() -> Self {
         Self {
-            picking: PickingGraphMousePlugin::new(),
+            _picking: PickingGraphMousePlugin::new(),
             animate: true,
         }
     }

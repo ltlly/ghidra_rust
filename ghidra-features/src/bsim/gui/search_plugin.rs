@@ -10,9 +10,8 @@
 //! - Task lifecycle for search operations
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
-use super::{BSimMatchResult, BSimResultStatus, BSimSearchSettings, BSimServerInfo, ConnectionType};
+use super::{BSimSearchSettings, BSimServerInfo};
 
 /// Manager for BSim server connections.
 ///
@@ -267,6 +266,7 @@ impl Default for BSimSearchPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ConnectionType;
 
     fn sample_server_info() -> BSimServerInfo {
         BSimServerInfo {

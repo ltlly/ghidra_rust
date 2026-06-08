@@ -18,8 +18,7 @@ mod tests {
         trace_db_symbol::TraceSymbolDbExt,
     };
     use crate::model::{
-        breakpoint::TraceBreakpointKind,
-        guest::{TraceGuestPlatformMappedRange, TracePlatform, TracePlatformManager},
+        guest::{TraceGuestPlatformMappedRange, TracePlatformManager},
         lifespan::Lifespan,
         memory::TraceMemoryRegion,
         symbol::{TraceReference, TraceSymbol, TraceSymbolManager},
@@ -28,8 +27,8 @@ mod tests {
     use crate::pcode::{
         data_access::{
             DefaultPcodeTraceAccess, DefaultPcodeTraceMemoryAccess, DefaultPcodeTraceRegistersAccess,
-            PcodeTraceAccess as PcodeAccessTrait, PcodeTraceDataAccess as PcodeDataTrait,
-            PcodeTraceMemoryAccess, PcodeTraceRegistersAccess,
+            PcodeTraceAccess as PcodeAccessTrait,
+            PcodeTraceMemoryAccess,
         },
         memory_state::{TraceMemoryStateArithmetic, TraceMemoryStatePiece},
         sleigh_utils::TraceSleighUtils,
@@ -44,9 +43,9 @@ mod tests {
     fn test_full_trace_lifecycle() {
         // 1. Create symbol manager and add symbols
         let mut sym_mgr = TraceSymbolManager::new();
-        let main_key = sym_mgr.create_label("main", 0x400000, "ram", Lifespan::now_on(0));
-        let printf_key = sym_mgr.create_label("printf", 0x500000, "ram", Lifespan::now_on(0));
-        let ns_key = sym_mgr.create_namespace("libc", None, Lifespan::ALL);
+        let _main_key = sym_mgr.create_label("main", 0x400000, "ram", Lifespan::now_on(0));
+        let _printf_key = sym_mgr.create_label("printf", 0x500000, "ram", Lifespan::now_on(0));
+        let _ns_key = sym_mgr.create_namespace("libc", None, Lifespan::ALL);
 
         // 2. Add references
         let call_ref = TraceReference::memory(0, 0x400010, 0x500000, Lifespan::now_on(0))
@@ -435,7 +434,7 @@ mod tests {
         // Add type with ReplaceExisting
         mgr.add_data_type(root_id, "other", 4, false, DataTypeConflictHandler::ReplaceExisting)
             .unwrap();
-        let id = mgr
+        let _id = mgr
             .add_data_type(root_id, "other", 8, false, DataTypeConflictHandler::ReplaceExisting)
             .unwrap();
         let dt = mgr.get_data_type_by_path("/other").unwrap().unwrap();

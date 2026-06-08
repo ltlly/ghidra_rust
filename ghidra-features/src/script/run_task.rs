@@ -5,7 +5,6 @@
 //! Provides a task abstraction for running scripts asynchronously,
 //! tracking progress, and handling cancellation.
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

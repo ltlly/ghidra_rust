@@ -225,7 +225,7 @@ impl MicrosoftDemangler {
         }
 
         let chars: Vec<char> = trimmed.chars().collect();
-        let mut index = 0;
+        let mut index;
 
         // Determine what kind of mangled symbol this is
         let mut result = DemangleResult::new(trimmed);

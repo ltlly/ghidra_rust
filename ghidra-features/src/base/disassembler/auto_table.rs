@@ -86,7 +86,7 @@ impl AutoTableDisassemblerPlugin {
     ) -> usize {
         self.tables.clear();
 
-        let options = AddressTableOptions {
+        let _options = AddressTableOptions {
             min_table_size: 4,
             table_alignment: self.offset_len,
             ptr_alignment: self.offset_len,

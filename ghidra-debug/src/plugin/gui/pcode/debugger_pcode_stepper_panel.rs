@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerPcodeStepperPanel::new(4, 4);
+        let _obj = DebuggerPcodeStepperPanel::new(4, 4);
         assert!(true);
     }
 

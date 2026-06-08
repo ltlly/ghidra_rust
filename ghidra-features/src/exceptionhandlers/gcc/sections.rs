@@ -5,9 +5,9 @@
 //! Provides parsers for `.eh_frame_hdr`, `.eh_frame`, `.debug_frame`,
 //! and related DWARF exception handling sections.
 
-use super::decode::{StandardDwarfEhDecoder, DwarfEhDecoder, make_decoder};
+use super::decode::{StandardDwarfEhDecoder, DwarfEhDecoder};
 use super::utils::*;
-use super::{ExceptionHandlerError, RegionDescriptor, LsdaCallSiteRecord, LsdaActionRecord};
+use super::{ExceptionHandlerError, RegionDescriptor};
 
 /// Section name constants matching Ghidra's memory block naming.
 pub const EH_FRAME_HEADER_BLOCK_NAME: &str = ".eh_frame_hdr";
@@ -266,7 +266,7 @@ pub struct CommonInformationEntry {
 
 impl CommonInformationEntry {
     /// Parse a CIE from its data (after the length and CIE ID fields).
-    fn parse(data: &[u8], pointer_size: usize) -> Result<Self, ExceptionHandlerError> {
+    fn parse(data: &[u8], _pointer_size: usize) -> Result<Self, ExceptionHandlerError> {
         // data[0..4] is the CIE ID (0), which we've already checked
         let mut offset = 4;
 
@@ -309,7 +309,7 @@ impl CommonInformationEntry {
         let mut lsda_encoding = None;
         let mut personality_encoding = None;
         let mut personality_address = None;
-        let mut segment_size = None;
+        let segment_size = None;
 
         if has_z_augmentation && offset < data.len() {
             // Read augmentation data length (ULEB128)
@@ -418,7 +418,7 @@ pub struct FrameDescriptionEntry {
 
 impl FrameDescriptionEntry {
     /// Parse an FDE from its data (after the length field).
-    fn parse(data: &[u8], entry_length: usize, pointer_size: usize) -> Result<Self, ExceptionHandlerError> {
+    fn parse(data: &[u8], _entry_length: usize, _pointer_size: usize) -> Result<Self, ExceptionHandlerError> {
         if data.len() < 4 {
             return Err(ExceptionHandlerError::InvalidFrame(
                 "FDE data too short".into(),

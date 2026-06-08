@@ -10,8 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use super::layout::{LayoutLocationMap, LayoutPositions, VisualGraphLayout};
-use super::Point2D;
+use super::layout::{LayoutPositions, VisualGraphLayout};
 
 /// Status of a layout computation task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

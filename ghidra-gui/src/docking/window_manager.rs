@@ -6,13 +6,12 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::Arc;
 
 use super::action::DockingAction;
-use super::component::{ComponentProvider, DockingComponent, WindowPosition};
-use super::context::{ActionContext, ContextManager, DefaultActionContext};
-use super::drop::{DropCode, DropState};
-use super::layout::{DockArea, DockingLayout, SplitDirection, SplitNode};
+use super::component::ComponentProvider;
+use super::context::{ContextManager, DefaultActionContext};
+use super::drop::DropState;
+use super::layout::{DockArea, DockingLayout};
 
 // ---------------------------------------------------------------------------
 // ComponentPlaceholder — tracks a component in the window hierarchy
@@ -531,6 +530,7 @@ impl fmt::Debug for DockingWindowManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::docking::context::ActionContext;
 
     #[test]
     fn test_placeholder_new() {

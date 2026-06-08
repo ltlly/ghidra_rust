@@ -71,13 +71,13 @@ pub trait DomainObject: fmt::Debug + Send + Sync {
 }
 
 pub struct DomainObjectLock<'a> {
-    obj: &'a dyn DomainObject,
+    _obj: &'a dyn DomainObject,
     acquired_at: Instant,
 }
 
 impl<'a> DomainObjectLock<'a> {
     pub fn new(obj: &'a dyn DomainObject) -> Self {
-        Self { obj, acquired_at: Instant::now() }
+        Self { _obj: obj, acquired_at: Instant::now() }
     }
     pub fn acquired_at(&self) -> Instant { self.acquired_at }
 }
@@ -346,17 +346,17 @@ impl ProgramSymbolTable {
 }
 
 #[derive(Debug, Clone, Default)]
-struct ProgramExternalManager {
+pub struct ProgramExternalManager {
     externals: HashMap<String, ProgramExternal>,
     external_locations: HashMap<Address, String>,
 }
 
 #[derive(Debug, Clone)]
-struct ProgramExternal {
+pub struct ProgramExternal {
     pub name: String,
-    path: Option<String>,
+    _path: Option<String>,
     external_address: Option<Address>,
-    external_data_type: Option<Arc<dyn DataType>>,
+    _external_data_type: Option<Arc<dyn DataType>>,
     resolved: bool,
 }
 
@@ -373,12 +373,12 @@ struct ProgramRelocationTable {
 }
 
 #[derive(Debug, Clone)]
-struct ProgramRelocation {
-    address: Address,
-    relocation_type: String,
-    value: Vec<u64>,
-    bytes: Vec<u8>,
-    comment: Option<String>,
+pub struct ProgramRelocation {
+    _address: Address,
+    _relocation_type: String,
+    _value: Vec<u64>,
+    _bytes: Vec<u8>,
+    _comment: Option<String>,
 }
 
 // ============================================================================
@@ -653,7 +653,7 @@ impl Program {
     pub fn add_external(&mut self, name: impl Into<String>, path: Option<String>) {
         let name = name.into();
         self.externals.externals.insert(name.clone(), ProgramExternal {
-            name, path, external_address: None, external_data_type: None, resolved: false,
+            name, _path: path, external_address: None, _external_data_type: None, resolved: false,
         });
         self.touch();
     }
@@ -969,7 +969,7 @@ impl Program {
     // ---------- Relocations ----------
     pub fn add_relocation(&mut self, address: Address, relocation_type: impl Into<String>, value: Vec<u64>, bytes: Vec<u8>) {
         self.relocations.relocations.insert(address, ProgramRelocation {
-            address, relocation_type: relocation_type.into(), value, bytes, comment: None,
+            _address: address, _relocation_type: relocation_type.into(), _value: value, _bytes: bytes, _comment: None,
         });
         if let Some(cs) = self.change_set.as_mut() { cs.relocations_changed.insert(address); }
         self.touch();

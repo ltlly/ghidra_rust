@@ -7,12 +7,11 @@
 //! - Symbol table and listing data
 
 use ghidra_core::addr::{Address, AddressRange};
-use ghidra_core::data::DataType;
 use ghidra_core::listing::ListingRow;
 use ghidra_core::program::{
     Comment, CommentKind, ListingData, MemoryBlock, MemoryPermissions, Program, SymbolTable,
 };
-use ghidra_core::symbol::{Symbol, SymbolKind, SymbolSource};
+use ghidra_core::symbol::{Symbol, SourceType, SymbolType};
 
 // ---------------------------------------------------------------------------
 // MemoryBlock tests
@@ -165,7 +164,7 @@ fn test_symbol_table_add_lookup() {
     let sym = table.get(&Address::new(0x1000));
     assert!(sym.is_some());
     assert_eq!(sym.unwrap().name(), "main");
-    assert_eq!(sym.unwrap().kind(), SymbolKind::Function);
+    assert_eq!(sym.unwrap().kind(), SymbolType::Function);
 }
 
 #[test]
@@ -184,10 +183,10 @@ fn test_symbol_table_multiple_types() {
     assert_eq!(symbols.len(), 4);
 
     // Verify kinds
-    let kinds: Vec<SymbolKind> = symbols.iter().map(|s| s.kind()).collect();
-    assert!(kinds.contains(&SymbolKind::Function));
-    assert!(kinds.contains(&SymbolKind::Label));
-    assert!(kinds.contains(&SymbolKind::Import));
+    let kinds: Vec<SymbolType> = symbols.iter().map(|s| s.kind()).collect();
+    assert!(kinds.contains(&SymbolType::Function));
+    assert!(kinds.contains(&SymbolType::Label));
+    assert!(kinds.contains(&SymbolType::Import));
 }
 
 #[test]
@@ -348,15 +347,15 @@ fn test_xrefs_to() {
 #[test]
 fn test_symbol_kind_display() {
     let displays = [
-        (SymbolKind::Function, "Function"),
-        (SymbolKind::Label, "Label"),
-        (SymbolKind::Import, "Import"),
-        (SymbolKind::Export, "Export"),
-        (SymbolKind::Class, "Class"),
-        (SymbolKind::Namespace, "Namespace"),
-        (SymbolKind::Library, "Library"),
-        (SymbolKind::Parameter, "Parameter"),
-        (SymbolKind::Unknown, "Unknown"),
+        (SymbolType::Function, "Function"),
+        (SymbolType::Label, "Label"),
+        (SymbolType::Import, "Import"),
+        (SymbolType::Export, "Export"),
+        (SymbolType::Class, "Class"),
+        (SymbolType::Namespace, "Namespace"),
+        (SymbolType::Library, "Library"),
+        (SymbolType::Parameter, "Parameter"),
+        (SymbolType::Unknown, "Unknown"),
     ];
 
     for (kind, expected) in &displays {
@@ -367,10 +366,10 @@ fn test_symbol_kind_display() {
 #[test]
 fn test_symbol_source() {
     let sources = [
-        SymbolSource::UserDefined,
-        SymbolSource::Imported,
-        SymbolSource::Analysis,
-        SymbolSource::Default,
+        SourceType::UserDefined,
+        SourceType::Imported,
+        SourceType::Analysis,
+        SourceType::Default,
     ];
     // All variants are distinct
     for i in 0..sources.len() {
@@ -382,11 +381,11 @@ fn test_symbol_source() {
 
 #[test]
 fn test_symbol_creation() {
-    let sym = Symbol::new("test_func", Address::new(0x400000), SymbolKind::Function);
+    let sym = Symbol::new("test_func", Address::new(0x400000), SymbolType::Function);
     assert_eq!(sym.name(), "test_func");
     assert_eq!(*sym.address(), Address::new(0x400000));
-    assert_eq!(sym.kind(), SymbolKind::Function);
+    assert_eq!(sym.kind(), SymbolType::Function);
 
     let imported = Symbol::import("kernel32.dll", Address::new(0x8000));
-    assert_eq!(imported.kind(), SymbolKind::Import);
+    assert_eq!(imported.kind(), SymbolType::Import);
 }

@@ -7,16 +7,16 @@
 
 use ghidra_debug::db::{
     OffsetSnap, OffsetThenSnapKey, SnapThenOffsetKey, TraceDatabaseInfo, TraceDbUtils,
-    compute_diffs_ranges, decode_string, encode_compiler_spec_id, encode_language_id,
-    encode_string, encode_url, hash_bytes, table_name, EncodedRefType,
+    compute_diffs_ranges, decode_string,
+    encode_string, hash_bytes, table_name, EncodedRefType,
 };
 use ghidra_debug::model::Lifespan;
 use ghidra_debug::plugin::gui::pcode::pcode_row_types::{
-    BranchPcodeRow, OpPcodeRow, PcodeRowKind, UniqueRefType, UniqueRowData, VarnodeDisplay,
+    BranchPcodeRow, OpPcodeRow, UniqueRefType, UniqueRowData, VarnodeDisplay,
 };
 use ghidra_debug::plugin::gui::breakpoint::breakpoint_timeline::{
     BreakpointHitEvent, BreakpointTimelineEntry, BreakpointTimelineFilter,
-    BreakpointTimelineModel, TimelineColors, TimelineViewport,
+    BreakpointTimelineModel, TimelineViewport,
 };
 use ghidra_debug::services::module_map_proposal_impl::{
     ModuleMapEntry, ModuleMapProposalResult, BLOCK_MASK, quantize_range,

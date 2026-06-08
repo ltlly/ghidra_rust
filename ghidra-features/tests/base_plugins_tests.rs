@@ -4,32 +4,24 @@
 //! ported plugin models compile and function correctly end-to-end.
 
 use ghidra_core::Address;
-use ghidra_features::instructionsearch::{InstructionSearchApi, MaskContainer, MaskSettings};
+use ghidra_features::instructionsearch::InstructionSearchApi;
 use ghidra_features::instructionsearch::utils::InstructionSearchUtils;
 use ghidra_features::bookmark::{BookmarkManager, BookmarkNavigator, BookmarkType};
-use ghidra_features::calltree::{CallTreeBuilder, CallTreeDirection, CallTreeEdgeType, FunctionRef};
-use ghidra_features::reachability::{ReachabilityAnalyzer, ReachabilityGraph, FRVertex};
+use ghidra_features::calltree::{CallTreeBuilder, CallTreeEdgeType, FunctionRef};
+use ghidra_features::reachability::{ReachabilityGraph, FRVertex};
 use ghidra_features::fallthrough::FallThroughModel;
-use ghidra_features::label::{LabelInfo, LabelManager, LabelScope, LabelValidator};
-use ghidra_features::memory::{MemoryBlockInfo, MemoryBlockPermission, MemoryBlockType, MemoryMapModel};
+use ghidra_features::label::{LabelInfo, LabelManager, LabelValidator};
+use ghidra_features::memory::{MemoryBlockInfo, MemoryBlockType, MemoryMapModel};
 use ghidra_features::reloc::{Relocation, RelocationFixupModel, RelocationType};
 use ghidra_features::disassembler::DisassemblerModel;
 use ghidra_features::assembler::{AssemblerModel, AssemblyInstruction};
-use ghidra_features::scalartable::{ScalarCategory, ScalarEntry, ScalarTableModel};
-use ghidra_features::stackeditor::{StackEditorModel, StackVariableEntry};
+use ghidra_features::scalartable::{ScalarEntry, ScalarTableModel};
 use ghidra_features::sourcefilestable::{SourceFileEntry, SourceFilesTableModel};
 use ghidra_features::module::ProgramTreeModel;
 use ghidra_features::clipboard::ClipboardManager;
-use ghidra_features::clear::{ClearModel, ClearOperation, ClearType};
 use ghidra_features::select::{AddressSet, SelectionModel};
 use ghidra_features::highlight::{HighlightColor, HighlightManager};
-use ghidra_features::flowarrow::{FlowArrow, FlowArrowModel, FlowArrowType};
-use ghidra_features::colorizer::{ColorizerMode, ColorizerModel};
-use ghidra_features::comments_plugin::CommentsModel;
-use ghidra_features::commentwindow::{CommentEntry, CommentWindowModel};
-use ghidra_features::printing::PrintModel;
 use ghidra_features::misc::{AddressDisplayFormat, ImportType};
-use ghidra_features::hover::{HoverElementType, HoverInfo, HoverModel};
 use ghidra_features::help::{HelpLocation, HelpModel, HelpService, HelpTopic};
 use ghidra_features::check::{ValidationCheck, ValidationModel, ValidationResult, ValidationSeverity};
 use ghidra_features::data_plugin::{DataAction, DataPluginModel};

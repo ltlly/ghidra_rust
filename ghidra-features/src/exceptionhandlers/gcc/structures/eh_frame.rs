@@ -4,7 +4,7 @@
 //!
 //! Contains data structures for the DWARF `.eh_frame` and `.debug_frame` sections.
 
-use crate::exceptionhandlers::gcc::decode::{read_uleb128, read_sleb128};
+use crate::exceptionhandlers::gcc::decode::read_uleb128;
 
 /// DWARF Call Frame instruction opcodes (from DWARF specification / dwarf2.h).
 ///

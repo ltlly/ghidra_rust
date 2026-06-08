@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceSleighUtils::new("test".to_string(), "test".to_string());
+        let _obj = TraceSleighUtils::new("test".to_string(), "test".to_string());
         assert!(true);
     }
 

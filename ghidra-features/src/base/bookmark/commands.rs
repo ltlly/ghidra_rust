@@ -10,7 +10,7 @@
 
 use ghidra_core::addr::Address;
 
-use super::model::{Bookmark, BookmarkManager};
+use super::model::BookmarkManager;
 
 // ---------------------------------------------------------------------------
 // AddressSet (simplified for command support)

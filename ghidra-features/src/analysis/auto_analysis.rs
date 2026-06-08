@@ -8,8 +8,8 @@
 //! including scheduling, priority ordering, progress tracking, and
 //! background/foreground execution.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
-use std::sync::{Arc, Mutex, RwLock};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::enablement::AnalyzerEnablementState;

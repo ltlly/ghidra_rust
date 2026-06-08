@@ -6,7 +6,7 @@
 //! - [`AddressRange`] operations (length, containment, iteration)
 //! - Address comparison, ordering, and display formatting
 
-use ghidra_core::addr::{Address, AddressRange, AddressSpace, AddressRangeIterator, AddrSpaceType};
+use ghidra_core::addr::{Address, AddressRange, AddressSpace, AddrSpaceType};
 
 // ---------------------------------------------------------------------------
 // AddressSpace tests

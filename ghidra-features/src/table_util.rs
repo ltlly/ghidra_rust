@@ -22,8 +22,6 @@
 //! assert_eq!(model.get_value(0, 0), Some(".text"));
 //! ```
 
-use std::collections::HashMap;
-use std::fmt;
 
 use crate::base::analyzer::{Address, AddressSet};
 
@@ -119,7 +117,7 @@ pub trait GhidraTableModel {
     fn get_value(&self, row: usize, col: usize) -> Option<&str>;
 
     /// Get the address associated with a row (if any).
-    fn get_address(&self, row: usize) -> Option<Address> {
+    fn get_address(&self, _row: usize) -> Option<Address> {
         None
     }
 

@@ -21,8 +21,7 @@
 
 use std::collections::HashMap;
 
-use super::{TypeRecord, SymbolRecord, FieldRecord, MsfFile, PdbInfoStream, DbiStream, TpiStream};
-use super::debug_info::{C13FileChecksum, C13FileRecord, C13LineRecord};
+use super::{TypeRecord, SymbolRecord, MsfFile, DbiStream};
 
 // =============================================================================
 // Type ID -- resolved type identifier within a PDB

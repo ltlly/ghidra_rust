@@ -5,7 +5,7 @@
 //! Provides the UI component for displaying bundle status information
 //! in a table format within the Ghidra tool window.
 
-use super::status_table::{BundleStatusColumns, BundleStatusTableModel, BundleStatusEntry};
+use super::status_table::BundleStatusTableModel;
 use super::{BundleStatus, GhidraBundle};
 
 /// Configuration for the bundle status provider.

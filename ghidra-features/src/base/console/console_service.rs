@@ -234,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_mock_stdout_writer() {
-        let mut svc = MockConsoleService::new();
+        let svc = MockConsoleService::new();
         {
             let mut writer = svc.get_stdout();
             write!(writer, "written via stdout").unwrap();
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn test_mock_stderr_writer() {
-        let mut svc = MockConsoleService::new();
+        let svc = MockConsoleService::new();
         {
             let mut writer = svc.get_stderr();
             write!(writer, "error via stderr").unwrap();

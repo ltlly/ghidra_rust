@@ -45,8 +45,8 @@ impl PlatformOpinionProvider for OverridePlatformOpinion {
 
     fn get_offers(
         &self,
-        debugger: Option<&str>,
-        arch: &str,
+        _debugger: Option<&str>,
+        _arch: &str,
         _os: &str,
         _endian: Option<Endian>,
         include_overrides: bool,

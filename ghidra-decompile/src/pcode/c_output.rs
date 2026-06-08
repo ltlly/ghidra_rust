@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! C code output generation from decompiled P-code.
 //!
 //! Converts decompiled P-code operations (after analysis, SSA, and
@@ -7,7 +8,7 @@
 use super::analysis::ControlFlowGraph;
 use super::{OpCode, PcodeOperation, Varnode};
 use ghidra_core::addr::Address;
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 // ---------------------------------------------------------------------------
@@ -635,7 +636,7 @@ pub struct ControlFlowStructurer {
     /// Next unique variable name counter.
     var_counter: u64,
     /// Label counter for goto labels.
-    label_counter: u64,
+    _label_counter: u64,
 }
 
 impl ControlFlowStructurer {
@@ -644,7 +645,7 @@ impl ControlFlowStructurer {
         Self {
             var_names: HashMap::new(),
             var_counter: 0,
-            label_counter: 0,
+            _label_counter: 0,
         }
     }
 

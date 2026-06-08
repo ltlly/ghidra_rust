@@ -548,69 +548,56 @@ impl X86InstructionDecoder {
         let mut address_size_16 = false;
         let mut has_rex = false;
         let mut rex_byte = 0u8;
-        let mut segment_override: Option<PrefixInfo> = None;
-        let mut has_lock = false;
-        let mut has_rep = false;
-        let mut has_repne = false;
 
         loop {
             let b = self.peek()?;
             match b {
                 0xF0 => {
-                    has_lock = true;
                     prefixes.push(PrefixInfo::Lock);
                     self.next_byte();
                 }
                 0xF2 => {
-                    has_repne = true;
                     prefixes.push(PrefixInfo::Repne);
                     self.next_byte();
                 }
                 0xF3 => {
-                    has_rep = true;
                     prefixes.push(PrefixInfo::Rep);
                     self.next_byte();
                 }
                 0x26 => {
-                    segment_override = Some(PrefixInfo::SegmentOverride(
+                    prefixes.push(PrefixInfo::SegmentOverride(
                         crate::x86::instructions::SegmentRegister::ES,
                     ));
-                    prefixes.push(segment_override.unwrap());
                     self.next_byte();
                 }
                 0x2E => {
-                    segment_override = Some(PrefixInfo::SegmentOverride(
+                    prefixes.push(PrefixInfo::SegmentOverride(
                         crate::x86::instructions::SegmentRegister::CS,
                     ));
-                    prefixes.push(segment_override.unwrap());
                     self.next_byte();
                 }
                 0x36 => {
-                    segment_override = Some(PrefixInfo::SegmentOverride(
+                    prefixes.push(PrefixInfo::SegmentOverride(
                         crate::x86::instructions::SegmentRegister::SS,
                     ));
-                    prefixes.push(segment_override.unwrap());
                     self.next_byte();
                 }
                 0x3E => {
-                    segment_override = Some(PrefixInfo::SegmentOverride(
+                    prefixes.push(PrefixInfo::SegmentOverride(
                         crate::x86::instructions::SegmentRegister::DS,
                     ));
-                    prefixes.push(segment_override.unwrap());
                     self.next_byte();
                 }
                 0x64 => {
-                    segment_override = Some(PrefixInfo::SegmentOverride(
+                    prefixes.push(PrefixInfo::SegmentOverride(
                         crate::x86::instructions::SegmentRegister::FS,
                     ));
-                    prefixes.push(segment_override.unwrap());
                     self.next_byte();
                 }
                 0x65 => {
-                    segment_override = Some(PrefixInfo::SegmentOverride(
+                    prefixes.push(PrefixInfo::SegmentOverride(
                         crate::x86::instructions::SegmentRegister::GS,
                     ));
-                    prefixes.push(segment_override.unwrap());
                     self.next_byte();
                 }
                 0x66 => {
@@ -699,7 +686,7 @@ impl X86InstructionDecoder {
     ) -> (X86Mnemonic, Vec<Operand>, bool, Option<u64>, bool) {
         let mut operands = Vec::new();
         let mut is_branch = false;
-        let mut branch_target = None;
+        let branch_target: Option<u64> = None;
         let mut is_terminator = false;
 
         match opcode {
@@ -774,8 +761,6 @@ impl X86InstructionDecoder {
                 let offset = self.next_byte().map(|b| b as i8 as i64).unwrap_or(0);
                 let target = ((current_address as i64) + 2 + offset) as u64;
                 operands.push(Operand::AbsAddr(target));
-                is_branch = true;
-                branch_target = Some(target);
                 (X86Mnemonic::Jcc(cc), operands, true, Some(target), false)
             }
 
@@ -838,8 +823,6 @@ impl X86InstructionDecoder {
                 let offset = self.next_bytes_le(4).unwrap_or(0) as i32 as i64;
                 let target = ((current_address as i64) + 5 + offset) as u64;
                 operands.push(Operand::AbsAddr(target));
-                is_branch = true;
-                branch_target = Some(target);
                 (X86Mnemonic::CALL, operands, true, Some(target), false)
             }
 
@@ -848,9 +831,6 @@ impl X86InstructionDecoder {
                 let offset = self.next_bytes_le(4).unwrap_or(0) as i32 as i64;
                 let target = ((current_address as i64) + 5 + offset) as u64;
                 operands.push(Operand::AbsAddr(target));
-                is_branch = true;
-                branch_target = Some(target);
-                is_terminator = true;
                 (X86Mnemonic::JMP, operands, true, Some(target), true)
             }
 
@@ -859,9 +839,6 @@ impl X86InstructionDecoder {
                 let offset = self.next_byte().map(|b| b as i8 as i64).unwrap_or(0);
                 let target = ((current_address as i64) + 2 + offset) as u64;
                 operands.push(Operand::AbsAddr(target));
-                is_branch = true;
-                branch_target = Some(target);
-                is_terminator = true;
                 (X86Mnemonic::JMP, operands, true, Some(target), true)
             }
 
@@ -999,8 +976,8 @@ impl X86InstructionDecoder {
                 (shift_mnem, operands, false, None, false)
             }
 
-            // --- TEST r/m, r ---
-            0x84 | 0x85 => {
+            // --- TEST r/m8, r8 ---
+            0x84 => {
                 let modrm = self.next_byte().map(ModRM::new).unwrap_or(ModRM::new(0));
                 operands.push(self.decode_modrm_operand(&modrm, operand_size));
                 let reg = self.gp_register_name(modrm.reg(), operand_size as u32);

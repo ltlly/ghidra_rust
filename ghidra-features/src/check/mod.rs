@@ -6,7 +6,6 @@
 //! to validate their structure and detect anomalies.
 
 use ghidra_core::Address;
-use std::collections::HashMap;
 
 /// The severity of a validation result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]

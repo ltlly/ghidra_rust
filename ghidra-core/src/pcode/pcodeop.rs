@@ -88,6 +88,7 @@ impl fmt::Display for SequenceNumber {
 /// Java constants in `PcodeOp`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[repr(u16)]
+#[allow(non_camel_case_types)]
 pub enum OpCode {
     /// Place holder for unimplemented instruction.
     UNIMPLEMENTED = 0,

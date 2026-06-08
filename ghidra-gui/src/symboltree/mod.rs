@@ -23,10 +23,10 @@ const INDENT_WIDTH: f32 = 16.0;
 const TRIANGLE_WIDTH: f32 = 16.0;
 
 /// Icon width for symbol type indicators.
-const ICON_WIDTH: f32 = 24.0;
+const _ICON_WIDTH: f32 = 24.0;
 
 /// Padding around tree rows.
-const ROW_PAD: f32 = 2.0;
+const _ROW_PAD: f32 = 2.0;
 
 // ============================================================================
 // Drag-and-drop payload types
@@ -470,13 +470,13 @@ impl SymbolTreePanel {
         let available_w = ui.available_width();
 
         let row_height = ROW_HEIGHT;
-        let row_rect = egui::Rect::from_min_size(
+        let _row_rect = egui::Rect::from_min_size(
             ui.next_widget_position(),
             egui::Vec2::new(available_w, row_height),
         );
 
         // Determine the row id for unique identification
-        let row_id = egui::Id::new(("symtree_row", node.path.clone()));
+        let _row_id = egui::Id::new(("symtree_row", node.path.clone()));
         let (row_rect_sense, row_response) = ui.allocate_at_least(
             egui::Vec2::new(available_w, row_height),
             egui::Sense::click_and_drag(),
@@ -498,10 +498,10 @@ impl SymbolTreePanel {
         }
 
         // --- Row Content ---
-        let mut child_ui = ui.child_ui(
-            row_rect_sense,
-            egui::Layout::left_to_right(egui::Align::Center),
-            None,
+        let mut child_ui = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(row_rect_sense)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
 
         // 1. Indent
@@ -515,10 +515,10 @@ impl SymbolTreePanel {
                 egui::Vec2::new(TRIANGLE_WIDTH, row_height),
             );
 
-            let mut tri_ui = child_ui.child_ui(
-                triangle_rect,
-                egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-                None,
+            let mut tri_ui = child_ui.new_child(
+                egui::UiBuilder::new()
+                    .max_rect(triangle_rect)
+                    .layout(egui::Layout::centered_and_justified(egui::Direction::LeftToRight)),
             );
 
             let tri_response = tri_ui.add(
@@ -720,7 +720,7 @@ impl SymbolTreePanel {
         &mut self,
         node: &SymbolTreeNode,
         response: &egui::Response,
-        ui: &mut egui::Ui,
+        _ui: &mut egui::Ui,
     ) {
         let path = node.path.clone();
         let has_sym = node.symbol.is_some();
@@ -1028,7 +1028,7 @@ impl SymbolTreePanel {
         let drag_released = _ui.input(|i| i.pointer.any_released());
 
         if drag_released {
-            if let Some(target) = self.drop_target.take() {
+            if let Some(_target) = self.drop_target.take() {
                 if let Some(_payload) = drag_data {
                     // In a full implementation, this would:
                     // 1. Re-parent the dragged symbol under the target

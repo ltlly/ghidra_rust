@@ -13,7 +13,7 @@ use std::fmt;
 
 use ghidra_core::addr::Address;
 
-use super::model::{Bookmark, BookmarkManager};
+use super::model::BookmarkManager;
 use super::types::BookmarkType;
 
 // ---------------------------------------------------------------------------

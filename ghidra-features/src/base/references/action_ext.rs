@@ -10,10 +10,7 @@
 //! - [`ShowReferencesAction`] -- opens the references provider for an address
 //! - [`AddReferenceAction`] -- adds a new reference with configurable type
 
-use super::commands::{
-    AddMemRefCmd, AddOffsetMemRefCmd, AddRegisterRefCmd, AddStackRefCmd, RemoveAllReferencesCmd,
-};
-use super::plugin::ReferencesPlugin;
+use super::commands::RemoveAllReferencesCmd;
 use super::ReferenceClass;
 use ghidra_core::Address;
 use serde::{Deserialize, Serialize};

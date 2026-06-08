@@ -6,7 +6,7 @@ pub mod links;
 pub mod location;
 pub mod model;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use model::{AnchorDefinition, HelpFile, InvalidLink, TOCItemDefinition};

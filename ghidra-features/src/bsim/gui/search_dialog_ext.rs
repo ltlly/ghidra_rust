@@ -14,7 +14,6 @@
 //! - [`BSimApplyResultsDisplayDialog`] -- apply results dialog.
 //! - [`ShowNamespaceSettingsDefinition`] -- settings for showing namespaces.
 
-use std::collections::HashMap;
 
 /// BSim search service trait.
 ///

@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use super::SymbolCategory;
-use super::nodes::{SymbolTreeNodeData, SymbolNodeKind};
+use super::nodes::SymbolTreeNodeData;
 
 // ---------------------------------------------------------------------------
 // Category node types

@@ -213,6 +213,7 @@ mod tests {
             active: usize,
         }
 
+        #[allow(non_local_definitions)]
         impl TraceInfo for String {
             fn key(&self) -> i64 { 0 }
             fn name(&self) -> &str { self }
@@ -493,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_trace_activated_event() {
-        use crate::plugin::{TraceActivatedEvent, ActivationCause};
+        use crate::plugin::TraceActivatedEvent;
         let event = TraceActivatedEvent::new("trace1");
         assert_eq!(event.trace_id, "trace1");
     }

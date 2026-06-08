@@ -8,7 +8,7 @@
 
 use std::collections::VecDeque;
 
-use super::attributes::{VtAttributes, ReverseVideo, AnsiColor};
+use super::attributes::VtAttributes;
 use super::line::VtLine;
 
 /// Default number of rows in the terminal.
@@ -347,7 +347,7 @@ impl VtBuffer {
     /// Set the scroll region (0-based start, exclusive end).
     pub fn set_scroll_region(&mut self, start: Option<u16>, end: Option<u16>) {
         self.scroll_start = start.map(|s| s as usize).unwrap_or(0).min(self.rows);
-        self.scroll_end = end.map(|e| (e as usize + 1)).unwrap_or(self.rows).min(self.rows);
+        self.scroll_end = end.map(|e| e as usize + 1).unwrap_or(self.rows).min(self.rows);
         if self.scroll_end <= self.scroll_start {
             self.scroll_end = self.scroll_start + 1;
         }

@@ -8,7 +8,7 @@ use serde_json::{json, Value as JsonValue};
 /// Build an Elasticsearch query body for a BSim function search.
 pub fn build_similarity_query(
     vector: &[f32],
-    index: &str,
+    _index: &str,
     num_results: usize,
 ) -> JsonValue {
     json!({

@@ -45,7 +45,7 @@ use crate::listing::{
     convert_core_rows, render_listing_view, ListingAction, ListingRow, ListingView,
 };
 use crate::mainview::menu::{self, KeyBindings, MenuAction};
-use crate::mainview::{render_status_bar, render_toolbar, ToolbarAction, ToolbarState};
+use crate::mainview::{render_toolbar, ToolbarAction, ToolbarState};
 use crate::symboltree::SymbolTreePanel;
 use ghidra_core::addr::Address;
 use ghidra_core::program::Program;
@@ -1184,7 +1184,7 @@ impl GhidraApp {
         &mut self,
         action: MenuAction,
         ctx: &egui::Context,
-        frame: &mut eframe::Frame,
+        _frame: &mut eframe::Frame,
     ) {
         match action {
             MenuAction::None => {}

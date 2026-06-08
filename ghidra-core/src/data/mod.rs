@@ -48,6 +48,19 @@ pub mod resource_types;
 pub mod pointer_sizes;
 pub mod dynamic_types;
 pub mod errors;
+pub mod enums;
+pub mod comparators;
+pub mod category;
+pub mod conflict_handler;
+pub mod data_type_instance;
+pub mod cycle_group;
+pub mod custom_format;
+pub mod parameter_definition;
+pub mod enum_value_partitioner;
+pub mod noisy_structure_builder;
+pub mod string_render;
+pub mod data_utilities;
+pub mod aligned_structure;
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -145,6 +158,59 @@ pub use dynamic_types::{
 pub use errors::{
     DataTypeDependencyError, DataTypeEncodeError, IllegalRenameError,
     InvalidDataTypeError, InvalidNameError,
+};
+
+// Re-export enum types.
+pub use enums::{
+    AlignmentType, ArchiveType, GenericCallingConvention, PackingType,
+};
+
+// Re-export comparator types.
+pub use comparators::{
+    compare_data_type_names, compare_data_types, get_conflict_name, get_conflict_value,
+    get_name_without_conflict, DataTypeComparator, DataTypeNameComparator, DataTypeOrName,
+    CONFLICT_SUFFIX,
+};
+
+// Re-export category types.
+pub use category::{Category, CategoryTree};
+
+// Re-export conflict handler types.
+pub use conflict_handler::{
+    ConflictResolutionPolicy, ConflictResult, DataTypeConflictHandler,
+};
+
+// Re-export data type instance.
+pub use data_type_instance::DataTypeInstance;
+
+// Re-export cycle group types.
+pub use cycle_group::{CycleGroup, CycleGroupManager};
+
+// Re-export custom format types.
+pub use custom_format::{CustomFormat, CustomFormatType};
+
+// Re-export parameter definition types.
+pub use parameter_definition::{
+    ParameterDefinition, ParameterDefinitionImpl, UNASSIGNED_ORDINAL,
+};
+
+// Re-export enum value partitioner.
+pub use enum_value_partitioner::{EnumValuePartitioner, PartitionEntry};
+
+// Re-export noisy structure builder.
+pub use noisy_structure_builder::NoisyStructureBuilder;
+
+// Re-export string render types.
+pub use string_render::{
+    StringDataInstance, StringRenderBuilder, StringRenderError, StringRenderParser, UNKNOWN,
+};
+
+// Re-export data utilities (module is accessible via `crate::data::data_utilities::*`).
+
+// Re-export aligned structure types.
+pub use aligned_structure::{
+    AlignedComponentPacker, AlignedStructureInspector, AlignedStructurePacker, AlignmentMode,
+    GapInfo, StructureLayout,
 };
 
 // ============================================================================

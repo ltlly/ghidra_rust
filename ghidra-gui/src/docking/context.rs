@@ -527,7 +527,7 @@ mod tests {
         let ctx = DefaultActionContext::new();
         assert!(ctx.is_default_context());
 
-        let ctx = DefaultActionContext::with_provider(ComponentProvider::Console);
+        let _ctx = DefaultActionContext::with_provider(ComponentProvider::Console);
         // Has provider but no context object.
         // Ghidra considers this non-default; our trait considers it default
         // since there's no context object.  This is fine for the Rust port.

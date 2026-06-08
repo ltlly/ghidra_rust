@@ -14,9 +14,9 @@
 //!   [`CodeBlockModel::externals_included`] is `true`.
 
 use super::block_model::{
-    BlockFlowType, CodeBlock, CodeBlockModel, CodeBlockReference, TaskMonitor,
+    CodeBlock, CodeBlockModel, CodeBlockReference, TaskMonitor,
 };
-use crate::base::analyzer::core::{Address, AddressRange, AddressSet, CancelledError};
+use crate::base::analyzer::core::{Address, AddressSet, CancelledError};
 
 // ============================================================================
 // SubroutineDestReferenceIterator
@@ -64,7 +64,7 @@ impl SubroutineDestReferenceIterator {
         model: &dyn CodeBlockModel,
         monitor: &dyn TaskMonitor,
     ) -> Result<usize, CancelledError> {
-        let mut count = 0usize;
+        let _count = 0usize;
         Self::collect_destinations(block, model, &mut None::<&mut Vec<CodeBlockReference>>, monitor)?;
         // When queue is None we still need to count. Use the private helper.
         // Actually, let's just build and count -- simpler.
@@ -181,6 +181,7 @@ impl Iterator for SubroutineDestReferenceIterator {
 mod tests {
     use super::*;
     use crate::base::analyzer::core::AddressRange;
+    use super::super::block_model::BlockFlowType;
 
     /// A minimal in-memory `CodeBlockModel` for testing.
     struct TestBlockModel {

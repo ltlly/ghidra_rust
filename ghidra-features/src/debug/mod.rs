@@ -28,6 +28,7 @@ pub mod breakpoint;
 pub mod change_set;
 pub mod control_mode;
 pub mod core_types;
+pub mod db_viewer;
 pub mod listing;
 pub mod memory;
 pub mod modules;
@@ -48,6 +49,7 @@ pub use breakpoint::{BreakpointKindSet, BreakpointLocation, BreakpointManager, B
 pub use change_set::TraceChangeSet;
 pub use control_mode::ControlMode;
 pub use core_types::{AddressSnap, Lifespan, TraceAddressSnapRange, TraceExecutionState, TraceSpan, SNAP_MAX, SNAP_MIN};
+pub use db_viewer::{DatabaseHandle, DatabaseKind, DatabaseRecord, DbTable, DbViewer, DbViewerState, TableStatistics, TableStatisticsCache};
 pub use listing::{CodeUnitType, CommentType, TraceCodeManager, TraceCodeSpace, TraceCodeUnit, TraceComment};
 pub use memory::{TraceMemoryBlock, TraceMemoryFlag, TraceMemoryManager, TraceMemoryRegion, TraceMemoryState};
 pub use modules::{TraceModule, TraceModuleManager, TraceSection};

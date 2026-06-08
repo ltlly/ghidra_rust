@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceHighlightPluginEvent::new("test".to_string());
+        let _obj = TraceHighlightPluginEvent::new("test".to_string());
         assert!(true);
     }
 

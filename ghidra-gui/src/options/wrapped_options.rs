@@ -544,7 +544,7 @@ mod tests {
 
     #[test]
     fn test_wrapped_custom_option_basic() {
-        let mut co = WrappedCustomOption::new("com.example.MyOption");
+        let co = WrappedCustomOption::new("com.example.MyOption");
         assert!(co.is_valid());
         assert_eq!(co.class_name(), "com.example.MyOption");
         assert_eq!(co.option_type(), OptionType::CustomType);

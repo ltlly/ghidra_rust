@@ -8,7 +8,6 @@
 //! - `parse_basic_data_type()` -- handles single-character type codes
 
 use super::{DataType, Sign};
-use crate::demangler::microsoft::modifier::CVMod;
 
 /// Parse a data type from the character stream.
 ///

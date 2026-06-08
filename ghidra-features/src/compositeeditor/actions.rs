@@ -19,7 +19,6 @@
 //! - [`ArrayAction`] -- creates an array from selected component
 //! - [`CycleGroupAction`] -- cycles through related data types
 
-use super::EditorAction;
 
 /// The component action group name.
 pub const COMPONENT_ACTION_GROUP: &str = "ComponentActions";

@@ -78,16 +78,16 @@ pub struct ProgramDBChangeSet {
 struct ChangeDiff {
     changed_data_type_ids: HashSet<i64>,
     changed_category_ids: HashSet<i64>,
-    changed_program_tree_ids: HashSet<i64>,
+    _changed_program_tree_ids: HashSet<i64>,
     changed_symbol_ids: HashSet<i64>,
     changed_source_archive_ids: HashSet<i64>,
-    changed_tag_ids: HashSet<i64>,
+    _changed_tag_ids: HashSet<i64>,
     added_data_type_ids: HashSet<i64>,
     added_category_ids: HashSet<i64>,
-    added_program_tree_ids: HashSet<i64>,
+    _added_program_tree_ids: HashSet<i64>,
     added_symbol_ids: HashSet<i64>,
     added_source_archive_ids: HashSet<i64>,
-    added_tag_ids: HashSet<i64>,
+    _added_tag_ids: HashSet<i64>,
 }
 
 impl ProgramDBChangeSet {
@@ -162,16 +162,16 @@ impl ProgramDBChangeSet {
             let diff = ChangeDiff {
                 changed_data_type_ids: self.tmp_changed_data_type_ids.clone(),
                 changed_category_ids: self.tmp_changed_category_ids.clone(),
-                changed_program_tree_ids: self.tmp_changed_program_tree_ids.clone(),
+                _changed_program_tree_ids: self.tmp_changed_program_tree_ids.clone(),
                 changed_symbol_ids: self.tmp_changed_symbol_ids.clone(),
                 changed_source_archive_ids: self.tmp_changed_source_archive_ids.clone(),
-                changed_tag_ids: self.tmp_changed_tag_ids.clone(),
+                _changed_tag_ids: self.tmp_changed_tag_ids.clone(),
                 added_data_type_ids: self.tmp_added_data_type_ids.clone(),
                 added_category_ids: self.tmp_added_category_ids.clone(),
-                added_program_tree_ids: self.tmp_added_program_tree_ids.clone(),
+                _added_program_tree_ids: self.tmp_added_program_tree_ids.clone(),
                 added_symbol_ids: self.tmp_added_symbol_ids.clone(),
                 added_source_archive_ids: self.tmp_added_source_archive_ids.clone(),
-                added_tag_ids: self.tmp_added_tag_ids.clone(),
+                _added_tag_ids: self.tmp_added_tag_ids.clone(),
             };
 
             self.changed_data_type_ids.extend(&self.tmp_changed_data_type_ids);

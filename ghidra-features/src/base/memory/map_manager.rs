@@ -5,8 +5,7 @@
 //! of a [`Program`], validating preconditions and executing the
 //! corresponding [`MemoryCommand`]s.
 
-use ghidra_core::addr::{Address, AddressRange, AddressSet};
-use ghidra_core::mem::{MemoryBlock, MemoryBlockType};
+use ghidra_core::addr::{Address, AddressRange};
 use ghidra_core::program::program::Program;
 
 use super::commands::{MergeBlocksCmd, MemoryCommand, SplitBlockCmd, UninitializedBlockCmd};

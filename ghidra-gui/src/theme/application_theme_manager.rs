@@ -5,16 +5,12 @@
 use std::collections::{HashMap, HashSet};
 use super::color_value::ColorValue;
 use super::font_value::FontValue;
-use super::g_color::{GColor, MISSING_COLOR_RGB};
+use super::g_color::GColor;
 use super::g_icon::GIcon;
 use super::g_theme::GTheme;
 use super::g_theme_value_map::GThemeValueMap;
-use super::icon_value::IconValue;
 use super::laf_type::LafType;
-use super::theme_event::ThemeEvent;
 use super::theme_manager::ThemeManager;
-use crate::gui_util::web_colors::RgbaColor;
-use crate::options::option_value::FontDescriptor;
 
 /// Stores user preferences for the active theme.
 #[derive(Debug, Clone)]
@@ -135,6 +131,7 @@ impl Default for ApplicationThemeManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gui_util::web_colors::RgbaColor;
 
     #[test]
     fn app_theme_mgr_new() {

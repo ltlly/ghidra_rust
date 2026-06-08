@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerOverviewPanel::new("test".to_string(), None, 4);
+        let _obj = DebuggerOverviewPanel::new("test".to_string(), None, 4);
         assert!(true);
     }
 

@@ -9,10 +9,8 @@
 //! - <https://www.gnu.org/software/tar/manual/html_node/Standard.html>
 
 use nom::{
-    bytes::complete::{tag, take},
-    combinator::{map, map_res, opt},
-    number::complete::{le_u8, be_u64},
-    sequence::tuple,
+    bytes::complete::take,
+    number::complete::le_u8,
     IResult,
 };
 use std::fmt;

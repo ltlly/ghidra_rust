@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TimeOverviewPanel::new(0, 0, 4);
+        let _obj = TimeOverviewPanel::new(0, 0, 4);
         assert!(true);
     }
 

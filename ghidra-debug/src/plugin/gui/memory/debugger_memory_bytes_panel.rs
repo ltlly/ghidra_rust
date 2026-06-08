@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerMemoryBytesPanel::new(0, 4);
+        let _obj = DebuggerMemoryBytesPanel::new(0, 4);
         assert!(true);
     }
 

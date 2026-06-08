@@ -8,13 +8,13 @@ use super::r#trait::*;
 pub struct AnalysisResults { pub tasks_executed: usize, pub was_cancelled: bool, pub total_time_ms: u64, pub task_times: Vec<(String, u64)> }
 impl AnalysisResults { pub fn has_changes(&self) -> bool { self.tasks_executed > 0 && !self.was_cancelled } }
 
-pub(crate) struct AnalysisSchedulerState { pub analyzer: Box<dyn Analyzer>, pub enabled: bool, pub default_enablement: bool, pub add_set: AddressSet, pub remove_set: AddressSet, pub scheduled: bool }
+pub(crate) struct AnalysisSchedulerState { pub analyzer: Box<dyn Analyzer>, pub enabled: bool, pub _default_enablement: bool, pub add_set: AddressSet, pub remove_set: AddressSet, pub scheduled: bool }
 impl AnalysisSchedulerState {
     pub(crate) fn new(analyzer: Box<dyn Analyzer>, program: &Program) -> Self {
         let default_enablement = analyzer.default_enablement(program);
         let lang = program.get_language();
         let enabled = if lang.has_property("DisableAllAnalyzers") { lang.get_property_as_bool(&format!("Analyzers.{}", analyzer.name()), default_enablement) } else { default_enablement };
-        Self { analyzer, enabled, default_enablement, add_set: AddressSet::new(), remove_set: AddressSet::new(), scheduled: false }
+        Self { analyzer, enabled, _default_enablement: default_enablement, add_set: AddressSet::new(), remove_set: AddressSet::new(), scheduled: false }
     }
     pub(crate) fn priority(&self) -> i32 { self.analyzer.priority().priority() }
     pub(crate) fn notify_added(&mut self, addr: Address) { if !self.enabled { return; } self.add_set.add(addr); }
@@ -35,9 +35,9 @@ impl AnalysisSchedulerState {
     pub(crate) fn run_cancelled(&mut self) { self.get_added(); self.get_removed(); self.scheduled = false; }
 }
 
-pub(crate) struct AnalysisTaskList { pub(crate) analyzer_type: AnalyzerType, pub(crate) schedulers: Vec<AnalysisSchedulerState> }
+pub(crate) struct AnalysisTaskList { pub(crate) _analyzer_type: AnalyzerType, pub(crate) schedulers: Vec<AnalysisSchedulerState> }
 impl AnalysisTaskList {
-    pub(crate) fn new(analyzer_type: AnalyzerType) -> Self { Self { analyzer_type, schedulers: Vec::new() } }
+    pub(crate) fn new(analyzer_type: AnalyzerType) -> Self { Self { _analyzer_type: analyzer_type, schedulers: Vec::new() } }
     pub(crate) fn add_analyzer(&mut self, analyzer: Box<dyn Analyzer>, program: &Program) { assert!(!analyzer.name().contains('.'), "Analyzer name may not contain a period: {}", analyzer.name()); self.schedulers.push(AnalysisSchedulerState::new(analyzer, program)); }
     pub(crate) fn notify_added(&mut self, addr: Address) { for s in &mut self.schedulers { s.notify_added(addr); } }
     pub(crate) fn notify_added_set(&mut self, set: &AddressSet) { for s in &mut self.schedulers { s.notify_added_set(set); } }

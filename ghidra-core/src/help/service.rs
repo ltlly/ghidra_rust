@@ -1,7 +1,6 @@
 // Port of help.HelpService, help.Help, docking.DefaultHelpService
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 /// A help location: a module name, help topic path, and optional anchor.

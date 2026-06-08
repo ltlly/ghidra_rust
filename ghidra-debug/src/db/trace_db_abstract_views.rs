@@ -514,6 +514,7 @@ mod tests {
             }
         }
 
+        #[allow(dead_code)]
         fn data(min: u64, max: u64, snap: i64) -> Self {
             Self {
                 is_data: true,

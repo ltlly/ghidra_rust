@@ -9,7 +9,7 @@
 //! - `ghidra.app.plugin.core.data.DataTypeSettingsDialog`
 //! - `ghidra.app.plugin.core.data.AbstractSettingsDialog`
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use super::settings::DataSetting;
 

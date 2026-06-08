@@ -14,7 +14,6 @@
 //! - `ExecutableCategoryBSimFilterType` -- filter by executable category
 //! - `FunctionTagBSimFilterType` -- filter by function tags
 
-use std::collections::HashMap;
 use std::fmt;
 
 // ============================================================================

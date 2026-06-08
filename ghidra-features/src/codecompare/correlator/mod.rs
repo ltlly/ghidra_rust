@@ -7,11 +7,19 @@
 //! function to addresses in the destination function. This is used to
 //! synchronize the two sides of a code comparison view.
 //!
+//! # Submodules
+//!
+//! - [`debug_utils`] -- debugging and visualization utilities
+//!
 //! # Key types
 //!
 //! - [`AddressCorrelator`] -- trait for address mapping implementations
 //! - [`CodeCompareCorrelator`] -- the main cross-arch correlator
 //! - [`CorrelationKind`] -- classification of how a correlation was determined
+
+pub mod address_correlation;
+pub mod address_correlator;
+pub mod debug_utils;
 
 use std::collections::BTreeMap;
 

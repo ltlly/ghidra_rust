@@ -4,7 +4,7 @@
 //! coordinates symbol selection, filtering, and navigation.
 
 use super::filter::SymbolFilter;
-use super::model::{SymbolRowObject, SymbolTableModel, SymbolTableKind};
+use super::model::{SymbolRowObject, SymbolTableModel};
 use super::provider::SymbolTableConfig;
 
 /// The symbol table plugin.
@@ -197,6 +197,7 @@ impl Default for SymbolTablePlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::symtable::SymbolTableKind;
 
     fn make_row(name: &str, addr: u64) -> SymbolRowObject {
         SymbolRowObject::new(name, addr, SymbolTableKind::Function, "Global")

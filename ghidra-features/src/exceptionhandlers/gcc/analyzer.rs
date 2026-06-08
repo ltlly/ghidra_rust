@@ -7,7 +7,6 @@
 //! and `.gcc_except_table` sections.
 
 use super::{RegionDescriptor, LsdaCallSiteRecord, LsdaActionRecord};
-use log::{info, warn};
 
 /// The analyzer name.
 pub const GCC_EXCEPTION_ANALYZER_NAME: &str = "GCC Exception Handlers";

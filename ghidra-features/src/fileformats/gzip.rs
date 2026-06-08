@@ -7,14 +7,10 @@
 //! - <https://datatracker.ietf.org/doc/html/rfc1952>
 
 use nom::{
-    bytes::complete::{tag, take, take_while},
-    combinator::{cond, map, opt},
-    multi::many0,
+    bytes::complete::{tag, take},
     number::complete::{le_u16, le_u32, le_u8},
-    sequence::tuple,
     IResult,
 };
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

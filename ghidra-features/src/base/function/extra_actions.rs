@@ -16,7 +16,7 @@
 use ghidra_core::addr::Address;
 use serde::{Deserialize, Serialize};
 
-use super::actions::{ActionContext, KeyBindingData, ListingContext, MenuData};
+use super::actions::{ActionContext, ListingContext, MenuData};
 
 // ---------------------------------------------------------------------------
 // CreateExternalFunctionAction

@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::protocol::{ExeSpecifier, FilterAtom, QueryResponseRecord};
+use super::protocol::ExeSpecifier;
 use super::description::{BSimFunctionDescription, SimilarityMetric, VectorResult};
 
 /// Error response from the BSim server.

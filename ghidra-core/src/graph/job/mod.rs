@@ -43,7 +43,7 @@ pub trait GraphJobListener: Debug + Send + Sync {
 #[derive(Debug)]
 pub struct GraphJobRunner {
     jobs: Mutex<VecDeque<Box<dyn GraphJob>>>,
-    running: Mutex<bool>,
+    _running: Mutex<bool>,
     listener: Mutex<Option<Arc<dyn GraphJobListener>>>,
 }
 
@@ -52,7 +52,7 @@ impl GraphJobRunner {
     pub fn new() -> Self {
         Self {
             jobs: Mutex::new(VecDeque::new()),
-            running: Mutex::new(false),
+            _running: Mutex::new(false),
             listener: Mutex::new(None),
         }
     }

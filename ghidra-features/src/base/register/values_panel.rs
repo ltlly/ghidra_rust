@@ -14,11 +14,10 @@
 
 use ghidra_core::addr::{Address, AddressSet};
 use ghidra_core::program::lang::Register;
-use ghidra_core::program::listing::ProgramContext;
 
-use super::commands::{CompoundRegisterCmd, RegisterCommand, SetRegisterValueCmd};
+use super::commands::{CompoundRegisterCmd, SetRegisterValueCmd};
 use super::value_range::{
-    merge_adjacent_ranges, RegisterValueColumn, RegisterValueRange,
+    RegisterValueColumn, RegisterValueRange,
 };
 
 /// Sort direction for the register values table.

@@ -75,7 +75,7 @@ pub trait ClangOpTokenExt {
     fn precedence(&self) -> Option<u8> {
         match self.op_text() {
             Some("()" | "[]" | "." | "->") => Some(1),
-            Some("++" | "--" | "!" | "~" | "sizeof" | "&" | "*" | "(cast)") => Some(2),
+            Some("++" | "--" | "!" | "~" | "sizeof" | "(cast)") => Some(2),
             Some("*" | "/" | "%") => Some(3),
             Some("+" | "-") => Some(4),
             Some("<<" | ">>" | ">>>") => Some(5),

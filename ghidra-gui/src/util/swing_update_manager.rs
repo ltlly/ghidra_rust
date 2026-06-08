@@ -9,7 +9,6 @@
 //! Swing's event dispatch thread.
 
 use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // ============================================================================
@@ -416,7 +415,7 @@ impl Default for TaskQueue {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn update_manager_basic() {

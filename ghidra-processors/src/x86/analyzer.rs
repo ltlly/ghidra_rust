@@ -760,7 +760,7 @@ pub struct X86Reference {
 /// Collect all data and code cross-references from a set of instructions.
 pub fn collect_references(
     instructions: &[DecodedInstruction],
-    image_base: u64,
+    _image_base: u64,
 ) -> Vec<X86Reference> {
     let mut refs = Vec::new();
 
@@ -883,7 +883,7 @@ pub fn find_string_references(
 mod tests {
     use super::*;
 
-    fn make_test_image(data: Vec<u8>, is_64bit: bool) -> X86BinaryImage {
+    fn make_test_image(data: Vec<u8>, _is_64bit: bool) -> X86BinaryImage {
         let mut image = X86BinaryImage::load(data.clone(), 0x401000);
         // Add a single executable section covering the whole image
         image.sections.push(crate::x86::loader::Section {
@@ -968,8 +968,8 @@ mod tests {
     #[test]
     fn test_jump_table_basic() {
         // A simple indirect jump pattern
-        let is_64bit = true;
-        let ptr_size = 8u8;
+        let _is_64bit = true;
+        let _ptr_size = 8u8;
 
         // Table at 0x402000: two pointers
         let mut data = vec![0u8; 0x2000];
@@ -978,7 +978,7 @@ mod tests {
         data[0x1000..0x1008].copy_from_slice(&case1.to_le_bytes());
         data[0x1008..0x1010].copy_from_slice(&case2.to_le_bytes());
 
-        let image = make_test_image(data, is_64bit);
+        let _image = make_test_image(data, _is_64bit);
 
         // We don't test full resolution here, just the detection of the pattern
         // from instructions alone.

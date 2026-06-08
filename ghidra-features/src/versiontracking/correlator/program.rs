@@ -5,7 +5,7 @@ use ghidra_core::program::Program;
 use crate::versiontracking::error::VtResult;
 use crate::versiontracking::match_set::VtMatchSet;
 use crate::versiontracking::options::VtOptions;
-use crate::versiontracking::types::{VtAssociationType, VtProgramCorrelatorAddressRestrictionPreference, VtScore};
+use crate::versiontracking::types::VtProgramCorrelatorAddressRestrictionPreference;
 
 pub trait VtProgramCorrelator: Send + Sync {
     fn correlate(&self, session: &mut crate::versiontracking::session::VtSession) -> VtResult<VtMatchSet>;
@@ -34,7 +34,7 @@ impl VtProgramCorrelatorFactory for ExactMatchBytesCorrelatorFactory {
     fn description(&self) -> &str { "Compares code by hashing bytes, looking for identical functions." }
     fn priority(&self) -> i32 { 20 }
     fn create_default_options(&self) -> VtOptions { let mut opts = VtOptions::new(Self::NAME); opts.set_int(Self::FUNCTION_MINIMUM_SIZE, Self::FUNCTION_MINIMUM_SIZE_DEFAULT); opts }
-    fn create_correlator(&self, sp: &Program, sa: &[Address], dp: &Program, da: &[Address], opts: &VtOptions) -> Box<dyn VtProgramCorrelator> {
+    fn create_correlator(&self, _sp: &Program, sa: &[Address], _dp: &Program, da: &[Address], opts: &VtOptions) -> Box<dyn VtProgramCorrelator> {
         Box::new(StubCorrelator { name: Self::NAME.to_string(), options: opts.clone(), source_address_set: sa.to_vec(), dest_address_set: da.to_vec() })
     }
 }

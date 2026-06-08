@@ -385,8 +385,8 @@ mod tests {
     fn test_composite_listener_dispatch() {
         let mut composite = CompositeTraceRmiServiceListener::new();
 
-        let rec1 = std::sync::Arc::new(RecordingServiceListener::new());
-        let rec2 = std::sync::Arc::new(RecordingServiceListener::new());
+        let _rec1 = std::sync::Arc::new(RecordingServiceListener::new());
+        let _rec2 = std::sync::Arc::new(RecordingServiceListener::new());
 
         composite.add_listener(Box::new(RecordingServiceListener::new()));
 

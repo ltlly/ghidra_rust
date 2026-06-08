@@ -35,7 +35,7 @@ pub mod mappers;
 /// Ported from `ghidra.app.plugin.core.datawindow.DataWindowFilterDialog`.
 pub mod filter_dialog;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 /// Display name for the data value column.
 pub const DATA_VALUE_COLUMN: &str = "Data";

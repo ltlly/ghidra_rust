@@ -28,7 +28,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::archive_ops::{ArchiveOperation, ArchiveTransaction, ConflictHandlerMode};
+use super::archive_ops::{ArchiveOperation, ConflictHandlerMode};
 
 // ---------------------------------------------------------------------------
 // SaveAsAction

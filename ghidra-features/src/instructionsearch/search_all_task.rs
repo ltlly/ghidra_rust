@@ -8,7 +8,7 @@
 
 use ghidra_core::Address;
 
-use super::{SearchDirection, SearchOptions, SearchResult};
+use super::{SearchOptions, SearchResult};
 
 /// Status of the search task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -120,7 +120,7 @@ impl BytePatternSearchTask {
         }
 
         let mut found = 0;
-        let start = if self.options.search_forward {
+        let _start = if self.options.search_forward {
             0
         } else {
             data.len().saturating_sub(pattern_len)

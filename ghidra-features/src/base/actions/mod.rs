@@ -397,7 +397,7 @@ impl SelectAllAction {
 #[derive(Debug, Clone)]
 pub struct ToggleConnectAction {
     name: String,
-    owner: String,
+    _owner: String,
 }
 
 impl ToggleConnectAction {
@@ -405,7 +405,7 @@ impl ToggleConnectAction {
     pub fn new(name: impl Into<String>, owner: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            owner: owner.into(),
+            _owner: owner.into(),
         }
     }
 
@@ -497,7 +497,7 @@ impl UndoAction {
 
     /// Creates the action with menu data for Edit > Undo.
     pub fn with_menu(owner: impl Into<String>) -> Self {
-        let mut action = Self::new(owner);
+        let action = Self::new(owner);
         action
     }
 }

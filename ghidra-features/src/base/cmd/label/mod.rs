@@ -2,7 +2,7 @@
 //!
 //! Ported from `ghidra.app.cmd.label`.
 
-use std::fmt;
+#![allow(dead_code)]
 
 /// Source type for labels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

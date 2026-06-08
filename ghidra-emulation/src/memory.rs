@@ -14,7 +14,7 @@
 
 use ghidra_core::addr::Address;
 use ghidra_core::program::program::MemoryPermissions;
-use std::collections::HashMap;
+
 
 // ---------------------------------------------------------------------------
 // MemoryFaultHandler
@@ -439,7 +439,7 @@ impl MemorySegment {
 trait MemoryPermissionsExt {
     fn readable(&self) -> bool;
     fn writable(&self) -> bool;
-    fn executable(&self) -> bool;
+    fn _executable(&self) -> bool;
 }
 
 impl MemoryPermissionsExt for MemoryPermissions {
@@ -457,7 +457,7 @@ impl MemoryPermissionsExt for MemoryPermissions {
         matches!(self, MemoryPermissions::RW | MemoryPermissions::RWX)
     }
 
-    fn executable(&self) -> bool {
+    fn _executable(&self) -> bool {
         matches!(self, MemoryPermissions::RX | MemoryPermissions::RWX)
     }
 }

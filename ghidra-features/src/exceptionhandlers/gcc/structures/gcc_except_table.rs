@@ -133,7 +133,7 @@ impl LsdaTable {
     pub fn parse(data: &[u8], function_start: u64) -> Option<Self> {
         let (header, mut offset) = LsdaHeader::parse(data)?;
 
-        let lp_start = header.lp_start.unwrap_or(function_start);
+        let _lp_start = header.lp_start.unwrap_or(function_start);
 
         // Parse call site table
         let call_site_end = offset + header.call_site_table_length as usize;
@@ -162,7 +162,7 @@ impl LsdaTable {
 
         // Parse action table
         let action_table_start = call_site_end;
-        let action_decoder = StandardDwarfEhDecoder::from_encoding(header.call_site_encoding);
+        let _action_decoder = StandardDwarfEhDecoder::from_encoding(header.call_site_encoding);
         let mut action_records = Vec::new();
         let mut action_offset = action_table_start;
 

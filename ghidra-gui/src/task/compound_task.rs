@@ -243,7 +243,7 @@ impl SwingUpdateManager {
 #[derive(Debug)]
 pub struct BufferedSwingRunner {
     manager: SwingUpdateManager,
-    callback_name: String,
+    _callback_name: String,
 }
 
 impl BufferedSwingRunner {
@@ -251,7 +251,7 @@ impl BufferedSwingRunner {
     pub fn new(min_delay: Duration) -> Self {
         Self {
             manager: SwingUpdateManager::new(min_delay),
-            callback_name: "BufferedSwingRunner".to_string(),
+            _callback_name: "BufferedSwingRunner".to_string(),
         }
     }
 

@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerTimePanel::new(0, 4, true);
+        let _obj = DebuggerTimePanel::new(0, 4, true);
         assert!(true);
     }
 

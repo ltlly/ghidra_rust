@@ -11,7 +11,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use super::traits::{GDirectedGraph, GEdge, GImplicitDirectedGraph};
+use super::traits::{GDirectedGraph, GEdge};
 
 /// Returns all source vertices (those with no incoming edges).
 pub fn get_sources<V, E>(g: &dyn GDirectedGraph<V, E>) -> HashSet<V>

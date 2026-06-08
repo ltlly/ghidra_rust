@@ -749,7 +749,7 @@ mod tests {
 
     #[test]
     fn test_plugin_get_equate_at() {
-        let mut plugin = EquatePlugin::new();
+        let plugin = EquatePlugin::new();
         let mut table = make_table();
         table.create_equate("MY_CONST", 42).unwrap();
         table.add_reference("MY_CONST", Address::new(0x1000), 0);
@@ -761,7 +761,7 @@ mod tests {
 
     #[test]
     fn test_plugin_get_equates_at() {
-        let mut plugin = EquatePlugin::new();
+        let plugin = EquatePlugin::new();
         let mut table = make_table();
         table.create_equate("A", 1).unwrap();
         table.create_equate("B", 2).unwrap();
@@ -774,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_plugin_get_all_equates() {
-        let mut plugin = EquatePlugin::new();
+        let plugin = EquatePlugin::new();
         let mut table = make_table();
         table.create_equate("A", 1).unwrap();
         table.create_equate("B", 2).unwrap();

@@ -53,5 +53,6 @@ pub mod symboltree;
 pub mod task;
 pub mod theme;
 pub mod util;
+pub mod widgets;
 
 pub use app::GhidraApp;

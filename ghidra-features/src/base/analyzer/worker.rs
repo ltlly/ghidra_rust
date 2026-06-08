@@ -24,7 +24,6 @@ use std::time::Duration;
 
 use super::core::{AddressSet, CancelledError, MessageLog, Program, TaskMonitor};
 use super::priority::AnalysisPriority;
-use super::r#trait::Analyzer;
 use super::manager::AutoAnalysisManager;
 
 // ---------------------------------------------------------------------------

@@ -9,8 +9,6 @@
 //!   lets users pick from existing symbols at a target address
 //! - [`OperandLabelContext`] -- context for the set-operand-label action
 
-use std::collections::BTreeMap;
-
 use ghidra_core::addr::Address;
 use ghidra_core::symbol::{SourceType, SymbolType};
 
@@ -45,11 +43,7 @@ pub struct OperandLabelContext {
 
 impl OperandLabelContext {
     /// Creates a new operand label context.
-    pub fn new(
-        address: Address,
-        operand_index: i32,
-        target_address: Address,
-    ) -> Self {
+    pub fn new(address: Address, operand_index: i32, target_address: Address) -> Self {
         Self {
             address,
             operand_index,
@@ -242,9 +236,7 @@ impl SymbolChooserModel {
                 .enumerate()
                 .filter(|(_, e)| {
                     e.name.to_lowercase().contains(&filter_lower)
-                        || e.qualified_name()
-                            .to_lowercase()
-                            .contains(&filter_lower)
+                        || e.qualified_name().to_lowercase().contains(&filter_lower)
                 })
                 .map(|(i, _)| i)
                 .collect();
@@ -320,17 +312,14 @@ pub fn validate_label_name(name: &str) -> Result<(), String> {
     }
 
     if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-        return Err(
-            "Label can only contain letters, digits, and underscores.".to_string(),
-        );
+        return Err("Label can only contain letters, digits, and underscores.".to_string());
     }
 
     let reserved = [
-        "if", "else", "while", "for", "return", "break", "continue",
-        "switch", "case", "default", "do", "goto", "const", "static",
-        "extern", "register", "volatile", "typedef", "struct", "union",
-        "enum", "void", "char", "short", "int", "long", "float", "double",
-        "signed", "unsigned",
+        "if", "else", "while", "for", "return", "break", "continue", "switch", "case", "default",
+        "do", "goto", "const", "static", "extern", "register", "volatile", "typedef", "struct",
+        "union", "enum", "void", "char", "short", "int", "long", "float", "double", "signed",
+        "unsigned",
     ];
 
     if reserved.contains(&name) {
@@ -385,7 +374,7 @@ mod tests {
 
     #[test]
     fn test_set_operand_label_enabled() {
-        let mut ctx = LabelActionContext::on_operand(addr(0x1000), Some(addr(0x2000)), 0);
+        let ctx = LabelActionContext::on_operand(addr(0x1000), Some(addr(0x2000)), 0);
         assert!(is_set_operand_label_enabled(&ctx));
     }
 

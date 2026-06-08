@@ -111,7 +111,7 @@ mod tests {
 
     #[test]
     fn test_markers_basic() {
-        let mut markers = SearchMarkers::new("test search");
+        let markers = SearchMarkers::new("test search");
         assert_eq!(markers.title(), "test search");
         assert!(markers.is_empty());
     }

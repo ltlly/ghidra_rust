@@ -127,7 +127,7 @@ static NAME_TO_COLOR: LazyLock<HashMap<String, RgbaColor>> = LazyLock::new(|| {
 });
 
 /// Lazily-initialized color-to-name map (rgb -> name).
-static COLOR_TO_NAME: LazyLock<HashMap<u32, String>> = LazyLock::new(|| {
+static _COLOR_TO_NAME: LazyLock<HashMap<u32, String>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     for &(name, rgb) in WEB_COLORS_DATA {
         m.entry(rgb).or_insert_with(|| name.to_string());

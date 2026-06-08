@@ -5,7 +5,6 @@
 //! Provides selection of address ranges based on the currently
 //! selected nodes in the program tree view.
 
-use serde::{Deserialize, Serialize};
 
 /// Plugin for selecting addresses from the program tree.
 #[derive(Debug)]

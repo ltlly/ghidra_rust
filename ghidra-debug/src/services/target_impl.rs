@@ -322,7 +322,7 @@ mod tests {
 
     #[test]
     fn test_abstract_target() {
-        let mut target = AbstractTarget::new(1, "gdb", "GDB Session");
+        let target = AbstractTarget::new(1, "gdb", "GDB Session");
         assert_eq!(target.key, 1);
         assert_eq!(target.target_type, "gdb");
         assert_eq!(target.state, TargetExecutionState::NotStarted);

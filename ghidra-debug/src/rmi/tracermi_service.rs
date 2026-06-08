@@ -295,7 +295,7 @@ mod tests {
     fn test_service_state_connections() {
         let mut state = TraceRmiServiceState::new();
         let c1 = state.add_connection(ConnectMode::Connect, None, None);
-        let c2 = state.add_connection(ConnectMode::Server, None, None);
+        let _c2 = state.add_connection(ConnectMode::Server, None, None);
 
         assert_eq!(state.active_connections().len(), 2);
         assert!(state.get_connection(&c1).is_some());

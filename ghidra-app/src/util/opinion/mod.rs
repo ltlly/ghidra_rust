@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::util::importer::MessageLog;
-use crate::util::{GhidraOption, OptionValue};
+use crate::util::GhidraOption;
 
 // ===================================================================
 // LoaderTier  (ghidra.app.util.opinion.LoaderTier)
@@ -504,7 +504,7 @@ mod tests {
     fn load_results_has_errors() {
         let mut results = LoadResults::new();
         let spec = LoadSpec::new("ELF", "x86", 64, false);
-        let mut loaded = Loaded::new("prog", spec, 0x400000);
+        let loaded = Loaded::new("prog", spec, 0x400000);
         loaded.messages.error("something went wrong");
         results.push(loaded);
         assert!(results.has_errors());

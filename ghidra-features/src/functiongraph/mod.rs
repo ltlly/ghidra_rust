@@ -356,7 +356,7 @@ impl FunctionGraph {
         }
 
         // ---- Position in Euclidean space ----
-        let is_horizontal = matches!(
+        let _is_horizontal = matches!(
             self.layout.direction,
             LayoutDirection::LeftToRight | LayoutDirection::RightToLeft
         );

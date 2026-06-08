@@ -8,7 +8,7 @@
 //! the data-type manager plugin.
 
 use ghidra_core::data::{
-    BuiltInDataTypeManager, CategoryPath, DataType, DataTypeManager, DataTypePath,
+    BuiltInDataTypeManager, CategoryPath, DataType, DataTypeManager,
     SourceArchive, StandaloneDataTypeManager, UniversalID,
 };
 use std::collections::HashSet;

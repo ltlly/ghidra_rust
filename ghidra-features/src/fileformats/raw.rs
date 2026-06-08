@@ -44,7 +44,7 @@ pub enum Architecture {
     X86,
     X86_64,
     ARM,
-    ARM_Thumb,
+    ArmThumb,
     AArch64,
     PowerPC,
     PowerPC64,
@@ -81,7 +81,7 @@ impl Architecture {
             "arm" | "armle" | "arm_le" | "armeb" | "arm_be" | "armv7" | "armv7le" | "arm32" => {
                 Some(Architecture::ARM)
             }
-            "thumb" | "thumb_le" | "thumb_be" | "thumb2" => Some(Architecture::ARM_Thumb),
+            "thumb" | "thumb_le" | "thumb_be" | "thumb2" => Some(Architecture::ArmThumb),
             "aarch64" | "arm64" | "armv8" | "armv8-a" | "arm64e" => Some(Architecture::AArch64),
             "ppc" | "powerpc" | "ppc32" | "ppc_be" | "ppc_le" | "ppc750" => {
                 Some(Architecture::PowerPC)
@@ -107,7 +107,7 @@ impl Architecture {
     pub fn default_endian(&self) -> Endian {
         match self {
             Architecture::X86 | Architecture::X86_64 => Endian::Little,
-            Architecture::ARM | Architecture::ARM_Thumb => Endian::Little,
+            Architecture::ARM | Architecture::ArmThumb => Endian::Little,
             Architecture::AArch64 => Endian::Little,
             Architecture::PowerPC | Architecture::PowerPC64 => Endian::Big,
             Architecture::MIPS | Architecture::MIPS64 => Endian::Big,
@@ -124,7 +124,7 @@ impl Architecture {
             Architecture::X86 => 4,
             Architecture::X86_64 => 8,
             Architecture::ARM => 4,
-            Architecture::ARM_Thumb => 4, // Thumb uses 2-byte instructions but 4-byte addressing
+            Architecture::ArmThumb => 4, // Thumb uses 2-byte instructions but 4-byte addressing
             Architecture::AArch64 => 8,
             Architecture::PowerPC => 4,
             Architecture::PowerPC64 => 8,
@@ -145,7 +145,7 @@ impl fmt::Display for Architecture {
             Architecture::X86 => write!(f, "x86"),
             Architecture::X86_64 => write!(f, "x86-64"),
             Architecture::ARM => write!(f, "ARM"),
-            Architecture::ARM_Thumb => write!(f, "ARM Thumb"),
+            Architecture::ArmThumb => write!(f, "ARM Thumb"),
             Architecture::AArch64 => write!(f, "AArch64"),
             Architecture::PowerPC => write!(f, "PowerPC"),
             Architecture::PowerPC64 => write!(f, "PowerPC-64"),
@@ -452,7 +452,7 @@ impl crate::BinaryLoader for RawBinaryLoader {
         let lang = crate::base::analyzer::Language {
             processor: match &raw.arch {
                 Architecture::X86 | Architecture::X86_64 => "x86",
-                Architecture::ARM | Architecture::ARM_Thumb => "ARM",
+                Architecture::ARM | Architecture::ArmThumb => "ARM",
                 Architecture::AArch64 => "AARCH64",
                 Architecture::PowerPC | Architecture::PowerPC64 => "PowerPC",
                 Architecture::MIPS | Architecture::MIPS64 => "MIPS",
@@ -517,7 +517,7 @@ mod tests {
     fn test_load_raw_arm_thumb() {
         let data = vec![0x70, 0x47]; // bx lr (Thumb)
         let prog = load_raw(&data, "thumb", 0x08000000).expect("load raw");
-        assert_eq!(prog.arch, Architecture::ARM_Thumb);
+        assert_eq!(prog.arch, Architecture::ArmThumb);
         assert_eq!(prog.endian, Endian::Little);
     }
 

@@ -6,7 +6,6 @@
 //! that forms the current view.  It supports selecting nodes by
 //! program location and notifying listeners of view changes.
 
-use std::collections::HashSet;
 
 use ghidra_core::addr::AddressSet;
 use ghidra_core::Address;
@@ -317,7 +316,7 @@ mod tests {
 
     #[test]
     fn test_view_address_set() {
-        let mut vp = make_view_provider();
+        let vp = make_view_provider();
         // Default view is root, so all fragments
         let ranges = vp.tree().compute_view_address_ranges();
         assert_eq!(ranges.len(), 3);

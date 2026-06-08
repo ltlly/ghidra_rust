@@ -21,16 +21,16 @@ mod tests {
     use std::sync::Arc;
 
     use crate::api::platform_mapper::{DisassemblyResult, RegisterMapping};
-    use crate::api::static_mapping::{StaticMappingEntry, StaticMappingChangeListener};
+    use crate::api::static_mapping::StaticMappingEntry;
     use crate::api::trace_rmi_acceptor::TraceRmiLaunchOffer;
     use crate::db::trace_db_class_symbol::{
-        NamespaceKind, SymbolSource, TraceClassSymbol, TraceClassSymbolView,
+        NamespaceKind, TraceClassSymbol, TraceClassSymbolView,
         TraceLabelSymbol, TraceLabelSymbolView,
     };
     use crate::db::trace_db_equate::{DBTraceEquateManager, TraceEquateReference};
     use crate::db::trace_db_fragment::{
         CallingConvention, DBTraceProgramViewFunctionManager,
-        DBTraceProgramViewFragmentManager, FunctionType, ProgramViewFunction,
+        DBTraceProgramViewFragmentManager, FunctionType,
     };
     use crate::db::trace_db_link_content::{ContentLink, DBTraceLinkContentHandler, LinkType};
     use crate::db::trace_db_mem_buffer::{DBTraceEmptyMemBuffer, DBTraceMemBuffer};
@@ -203,7 +203,7 @@ mod tests {
         // Create equates in different spaces
         let ram_space = mgr.get_or_create_space("ram");
         let flag_id = ram_space.create_equate("FLAG_READ", 0x01);
-        let write_id = ram_space.create_equate("FLAG_WRITE", 0x02);
+        let _write_id = ram_space.create_equate("FLAG_WRITE", 0x02);
 
         ram_space.add_reference(TraceEquateReference::new(
             flag_id,
@@ -293,7 +293,7 @@ mod tests {
         let mut mgr = DBTraceProgramViewFragmentManager::new("Program");
 
         let root = mgr.root_id();
-        let text = mgr.create_fragment(".text", "ram", 0x400000, 0x401000, root);
+        let _text = mgr.create_fragment(".text", "ram", 0x400000, 0x401000, root);
         let data = mgr.create_fragment(".data", "ram", 0x600000, 0x601000, root);
         let _bss = mgr.create_fragment(".bss", "ram", 0x601000, 0x602000, root);
 

@@ -4,7 +4,7 @@
 
 use crate::actions::commands::{enqueue, ActionCommand, CommandQueue};
 use crate::docking::{
-    ActionCallback, ActionContext, ActionType, DockingAction, Key, KeyBinding, Modifiers,
+    ActionCallback, DockingAction, Key, KeyBinding, Modifiers,
 };
 
 /// Create all Edit-menu docking actions.
@@ -145,6 +145,7 @@ pub fn replace_action(queue: &CommandQueue) -> DockingAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::docking::action::ActionContext;
 
     fn action_names(actions: &[DockingAction]) -> Vec<&str> {
         actions.iter().map(|a| a.name.as_str()).collect()

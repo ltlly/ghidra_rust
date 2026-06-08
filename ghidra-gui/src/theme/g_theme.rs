@@ -2,7 +2,6 @@
 //!
 //! Ports `generic.theme.GTheme`.
 
-use std::path::Path;
 
 use super::g_theme_value_map::GThemeValueMap;
 use super::laf_type::LafType;

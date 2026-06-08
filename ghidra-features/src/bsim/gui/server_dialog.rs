@@ -8,7 +8,7 @@
 //! - Change passwords
 //! - View server connection status
 
-use super::search_plugin::{BSimDatabaseInfo, BSimServerEntry, BSimServerManager};
+use super::search_plugin::{BSimServerEntry, BSimServerManager};
 use super::{BSimServerInfo, ConnectionType};
 
 /// State for the BSim Server Manager dialog.

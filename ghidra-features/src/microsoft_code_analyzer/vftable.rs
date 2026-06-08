@@ -68,7 +68,7 @@ impl VfTable {
             return None;
         }
 
-        let meta_ptr = read_ptr(data, 0, ptr_size);
+        let _meta_ptr = read_ptr(data, 0, ptr_size);
         let vf_start = ptr_size;
         let remaining = data.len() - vf_start;
         let count = (remaining / entry_size).min(max_entries);

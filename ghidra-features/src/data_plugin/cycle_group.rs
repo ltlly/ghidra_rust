@@ -888,10 +888,10 @@ mod tests {
 
     #[test]
     fn test_create_structure_dialog_validation() {
-        let mut dialog = CreateStructureDialog::new("");
+        let dialog = CreateStructureDialog::new("");
         assert!(dialog.validate().is_err()); // empty name
 
-        let mut dialog = CreateStructureDialog::new("S");
+        let dialog = CreateStructureDialog::new("S");
         assert!(dialog.validate().is_err()); // no components
 
         let mut dialog = CreateStructureDialog::new("S");

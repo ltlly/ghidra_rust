@@ -7,7 +7,6 @@
 
 use ghidra_core::addr::Address;
 use ghidra_core::symbol::{Symbol, SymbolType};
-use serde::{Deserialize, Serialize};
 
 use super::actions::*;
 use super::variable::*;

@@ -2,7 +2,6 @@
 //!
 //! Ports `ghidra.graph.viewer.renderer.VisualVertexSatelliteRenderer`.
 
-use crate::graph::service::VertexShape;
 use crate::graph::viewer::Rect2D;
 
 /// Renders vertices in the satellite (overview/minimap) view.

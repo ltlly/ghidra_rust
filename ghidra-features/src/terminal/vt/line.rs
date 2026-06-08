@@ -2,7 +2,7 @@
 //!
 //! Ported from `ghidra.app.plugin.core.terminal.vt.VtLine`.
 
-use super::attributes::{AnsiColor, VtAttributes};
+use super::attributes::VtAttributes;
 
 /// A character cell in a terminal line.
 #[derive(Debug, Clone, PartialEq, Eq)]

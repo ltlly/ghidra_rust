@@ -59,7 +59,7 @@ pub struct ContainingQueryCache<T: Clone + std::fmt::Debug> {
     /// Breadth of address range to cache around queries.
     address_breadth: u64,
     /// Maximum number of point entries to cache.
-    max_points: usize,
+    _max_points: usize,
     /// Point cache: maps (snap, offset) to the value found there.
     point_cache: HashMap<CachePointKey, Option<T>>,
     /// Range cache: entries loaded for the current query window.
@@ -76,7 +76,7 @@ impl<T: Clone + std::fmt::Debug> ContainingQueryCache<T> {
         Self {
             snap_breadth,
             address_breadth,
-            max_points,
+            _max_points: max_points,
             point_cache: HashMap::new(),
             range_cache: Vec::new(),
             cached_snap_range: None,

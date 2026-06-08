@@ -6,7 +6,7 @@
 //! the program tree's module/fragment structure.  It delegates reordering
 //! operations to [`ReorderManager`] and handles move/copy/merge of groups.
 
-use super::node::{NodeKind, ProgramNode};
+use super::node::ProgramNode;
 use super::reorder_manager::ReorderManager;
 use super::tree::ProgramTree;
 
@@ -176,7 +176,7 @@ impl DnDMoveManager {
 
     fn check_dest_fragment(
         &self,
-        dest_node: &ProgramNode,
+        _dest_node: &ProgramNode,
         drop_node: &ProgramNode,
         drop_action: DropAction,
     ) -> bool {

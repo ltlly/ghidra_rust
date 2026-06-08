@@ -195,6 +195,20 @@ impl DecompiledLine {
     }
 }
 
+impl Default for DecompiledLine {
+    fn default() -> Self {
+        Self {
+            line_number: 0,
+            indent_level: 0,
+            address: None,
+            function_entry: None,
+            tokens: Vec::new(),
+            has_breakpoint: false,
+            visible: true,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // DecompiledFunction
 // ---------------------------------------------------------------------------

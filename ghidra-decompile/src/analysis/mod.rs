@@ -166,7 +166,7 @@ impl AnalysisPipeline {
     ///
     /// Requires stage 1 (CFG) to have been completed first.
     pub fn run_dataflow(&mut self) -> GhidraResult<()> {
-        let cfg = self.cfg.as_ref()
+        let _cfg = self.cfg.as_ref()
             .ok_or_else(|| ghidra_core::error::GhidraError::InvalidState(
                 "CFG must be built before data-flow analysis".into()
             ))?;
@@ -305,6 +305,7 @@ mod tests {
         Varnode::unique(id, size)
     }
 
+    #[allow(dead_code)]
     fn make_vn_reg(offset: u64, size: u32) -> Varnode {
         Varnode::register("reg", offset, size)
     }

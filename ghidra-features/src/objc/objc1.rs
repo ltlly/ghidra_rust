@@ -22,7 +22,7 @@
 //! - [`Objc1MetaClass`] -- a metaclass definition
 //! - [`Objc1TypeMetadata`] -- the top-level metadata parser
 
-use super::{ObjcMethod, ObjcMethodList, ObjcMethodType, ObjcState, ObjcTypeMetadataStructure};
+use super::{ObjcMethod, ObjcMethodList, ObjcMethodType, ObjcState};
 
 // ============================================================================
 // Objc1Constants
@@ -367,7 +367,7 @@ pub struct Objc1Class {
 
 impl Objc1Class {
     /// Parse a class from a data buffer.
-    pub fn parse(data: &[u8], offset: usize, state: &ObjcState) -> Option<Self> {
+    pub fn parse(data: &[u8], offset: usize, _state: &ObjcState) -> Option<Self> {
         if offset + 24 > data.len() {
             return None;
         }

@@ -137,11 +137,11 @@ pub enum AllowedDataTypes {
     /// Only enums.
     ENUMS,
     /// Only function definitions.
-    FUNCTION_DEFS,
+    FunctionDefs,
     /// Only typedefs.
     TYPEDEFS,
     /// Only composite and pointer types.
-    COMPOSITE_AND_POINTER,
+    CompositeAndPointer,
 }
 
 impl fmt::Display for AllowedDataTypes {
@@ -153,9 +153,9 @@ impl fmt::Display for AllowedDataTypes {
             Self::SCALARS => write!(f, "Scalars"),
             Self::COMPOSITES => write!(f, "Composites"),
             Self::ENUMS => write!(f, "Enums"),
-            Self::FUNCTION_DEFS => write!(f, "Function Definitions"),
+            Self::FunctionDefs => write!(f, "Function Definitions"),
             Self::TYPEDEFS => write!(f, "Typedefs"),
-            Self::COMPOSITE_AND_POINTER => write!(f, "Composite and Pointer"),
+            Self::CompositeAndPointer => write!(f, "Composite and Pointer"),
         }
     }
 }

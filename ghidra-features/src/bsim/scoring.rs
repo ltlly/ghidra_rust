@@ -13,7 +13,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::description::{DescriptionManager, ExecutableRecord, FunctionDescription, RowKey};
+use super::description::{DescriptionManager, ExecutableRecord, FunctionDescription};
 
 // ============================================================================
 // FunctionPair
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn executable_scorer_single_basic() {
-        let mut scorer = ExecutableScorerSingle::new(0);
+        let scorer = ExecutableScorerSingle::new(0);
         assert_eq!(scorer.get_score(1), 0.0);
     }
 

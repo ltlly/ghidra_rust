@@ -193,7 +193,7 @@ impl AuthenticationModule for PkiAuthentication {
         &self,
         user_mgr: &UserManager,
         username: &str,
-        password: &str,
+        _password: &str,
     ) -> Result<String, ServerError> {
         // In the full implementation, the certificate subject DN would be used
         // to look up the user.  Here we just validate the user exists.

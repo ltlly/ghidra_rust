@@ -7,7 +7,6 @@
 //! component reordering logic.
 
 use super::composite_model::{CompositeEditorModel, ViewComponent};
-use super::selection::EditorSelection;
 
 // ---------------------------------------------------------------------------
 // StructureEditorModel

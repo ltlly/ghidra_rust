@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_link_content_handler() {
-        let mut handler = LinkContentHandler::new("linked_trace", "tcp://localhost:1234");
+        let handler = LinkContentHandler::new("linked_trace", "tcp://localhost:1234");
         assert_eq!(handler.metadata.content_type, TraceContentType::Link);
         assert_eq!(handler.link_url, "tcp://localhost:1234");
         assert!(!handler.is_available);

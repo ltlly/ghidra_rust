@@ -64,7 +64,7 @@ impl ClangDecompilerHighlighter {
     pub fn get_token_color(
         &self,
         node_id: ClangNodeId,
-        text: &str,
+        _text: &str,
         syntax_type: SyntaxType,
         is_matching_token: bool,
     ) -> String {

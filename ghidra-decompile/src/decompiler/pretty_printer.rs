@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! PrettyPrinter: converts a ClangNode tree into readable C code.
 //!
 //! Port of Ghidra's `ghidra.app.decompiler.PrettyPrinter`.
@@ -30,7 +31,7 @@ pub struct PrettyPrinter {
     /// Flattened lines.
     lines: Vec<ClangLine>,
     /// Name transformer.
-    transformer: NameTransformer,
+    _transformer: NameTransformer,
 }
 
 impl PrettyPrinter {
@@ -46,7 +47,7 @@ impl PrettyPrinter {
             root_id,
             arena,
             lines: Vec::new(),
-            transformer,
+            _transformer: transformer,
         };
         printer.flatten_lines();
         printer.pad_empty_lines();

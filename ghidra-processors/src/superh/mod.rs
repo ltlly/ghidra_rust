@@ -119,7 +119,7 @@ fn build_registers() -> RegisterBank {
     // Double-precision aliases: DR0 = FR0|FR1, DR2 = FR2|FR3, ..., DR14 = FR14|FR15
     for i in 0..8u32 {
         let fr_even = i * 2;
-        let fr_odd = fr_even + 1;
+        let _fr_odd = fr_even + 1;
         bank.add(Register::new(
             &format!("DR{}", fr_even),
             64,

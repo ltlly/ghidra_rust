@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::bsim::{BSimMetadata, BSimSignature};
+use crate::bsim::BSimSignature;
 
 /// Result of a signature ingestion operation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +138,7 @@ impl SignatureIngestionPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bsim::BSimMetadata;
 
     #[test]
     fn ingest_result_new() {

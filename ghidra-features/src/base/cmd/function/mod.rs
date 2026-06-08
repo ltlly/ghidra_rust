@@ -3,6 +3,8 @@
 //! Ported from `ghidra.app.cmd.function`. Covers creation, deletion,
 //! renaming, tag management, stack analysis, and variable operations.
 
+#![allow(dead_code)]
+
 /// Source type for function names / parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceType {

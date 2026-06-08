@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerWatchesPanel::new(4, true);
+        let _obj = DebuggerWatchesPanel::new(4, true);
         assert!(true);
     }
 

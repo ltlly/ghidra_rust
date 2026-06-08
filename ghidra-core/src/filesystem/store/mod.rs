@@ -13,7 +13,7 @@ pub mod remote;
 
 use std::collections::HashMap;
 use std::fmt;
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -283,7 +283,7 @@ impl ItemCheckoutStatus {
 
     /// Build a project path string suitable for checkout requests.
     pub fn make_project_path(project_path: &str, is_transient: bool) -> String {
-        let hostname = whoami::hostname();
+        let hostname = whoami::fallible::hostname().unwrap_or_default();
         let prefix = format!("{}::", hostname);
         if is_transient {
             format!("{}<Transient>", prefix)
@@ -991,7 +991,7 @@ impl FileIDFactory {
 
         // Get some uniqueness from hostname + PID
         let pid = std::process::id();
-        let host = whoami::hostname();
+        let host = whoami::fallible::hostname().unwrap_or_default();
 
         // Try to get a socket port for uniqueness (like the Java version)
         let port = std::net::TcpListener::bind("127.0.0.1:0")

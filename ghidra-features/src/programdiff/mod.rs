@@ -1,6 +1,7 @@
 //! Program difference (diff) framework.
 //!
-//! Ported from Ghidra's `ghidra.program.diff` Java package.
+//! Ported from Ghidra's `ghidra.program.diff` and
+//! `ghidra.app.plugin.core.diff` Java packages.
 //!
 //! This module provides the ability to compare two programs at various
 //! levels of granularity (bytes, code units, symbols, functions, etc.)
@@ -10,7 +11,26 @@
 //!
 //! - [`ProgramDiffFilter`] -- controls which program aspects to compare
 //! - [`DiffResult`] -- a single difference between two programs
-//! - [`ProgramDiffer`] -- the main comparison engine
+//! - [`DiffController`] -- manages diff state, navigation, and apply/ignore
+//! - [`ProgramMergeFilter`] -- controls how differences are applied
+//! - [`ProgramMemoryComparator`] -- compares memory layouts of two programs
+//! - [`DiffService`] -- service interface for launching diffs
+//!
+//! # Submodules
+//!
+//! - [`diff_controller`] -- diff controller and address set types
+//! - [`diff_service`] -- diff service interface
+//! - [`merge_filter`] -- merge filter and merge action types
+//! - [`apply_settings`] -- diff apply settings and option management
+//! - [`diff_actions`] -- bulk diff actions (ignore all, merge all, replace all)
+//! - [`memory_comparator`] -- program memory layout comparison
+
+pub mod diff_controller;
+pub mod diff_service;
+pub mod merge_filter;
+pub mod apply_settings;
+pub mod diff_actions;
+pub mod memory_comparator;
 
 use std::collections::BTreeMap;
 

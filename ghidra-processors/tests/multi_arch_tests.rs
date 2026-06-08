@@ -8,7 +8,7 @@ use ghidra_processors::arm::registers::{ArmRegisterBank, CpsrFlagBit, ProcessorM
 use ghidra_processors::aarch64::registers::{Aarch64RegisterBank, PstateField};
 use ghidra_processors::mips::{
     MipsRegisterBank, MipsVariant, MipsMnemonic, MipsInstructionCategory,
-    StatusField, CauseField, ExceptionCode, Cp0Register, MIPS_GPR_ABI_NAMES,
+    StatusField, CauseField, ExceptionCode, Cp0Register,
 };
 
 // ============================================================================
@@ -376,16 +376,16 @@ fn test_mips_mnemonic_categories() {
     assert!(matches!(MipsMnemonic::TLBWI.category(), MipsInstructionCategory::System));
 
     // FPU
-    assert!(matches!(MipsMnemonic::ADD_S.category(), MipsInstructionCategory::Fpu));
-    assert!(matches!(MipsMnemonic::MOV_D.category(), MipsInstructionCategory::Fpu));
-    assert!(matches!(MipsMnemonic::CVT_S_W.category(), MipsInstructionCategory::Fpu));
+    assert!(matches!(MipsMnemonic::AddS.category(), MipsInstructionCategory::Fpu));
+    assert!(matches!(MipsMnemonic::MovD.category(), MipsInstructionCategory::Fpu));
+    assert!(matches!(MipsMnemonic::CvtSW.category(), MipsInstructionCategory::Fpu));
 
     // SIMD (MSA)
-    assert!(matches!(MipsMnemonic::ADDV_B.category(), MipsInstructionCategory::Simd));
-    assert!(matches!(MipsMnemonic::LD_B.category(), MipsInstructionCategory::Simd));
+    assert!(matches!(MipsMnemonic::AddvB.category(), MipsInstructionCategory::Simd));
+    assert!(matches!(MipsMnemonic::LdB.category(), MipsInstructionCategory::Simd));
 
     // DSP
-    assert!(matches!(MipsMnemonic::ABSQ_S_PH.category(), MipsInstructionCategory::Dsp));
+    assert!(matches!(MipsMnemonic::AbsqSPh.category(), MipsInstructionCategory::Dsp));
 
     // Virtualization
     assert!(matches!(MipsMnemonic::HYPCALL.category(), MipsInstructionCategory::Virtualization));
@@ -394,11 +394,11 @@ fn test_mips_mnemonic_categories() {
 #[test]
 fn test_mips_mnemonic_display_names() {
     assert_eq!(MipsMnemonic::ADD.as_str(), "ADD");
-    assert_eq!(MipsMnemonic::ADD_S.as_str(), "ADD.S");
+    assert_eq!(MipsMnemonic::AddS.as_str(), "ADD.S");
     assert_eq!(MipsMnemonic::LW.as_str(), "LW");
-    assert_eq!(MipsMnemonic::JR_HB.as_str(), "JR.HB");
+    assert_eq!(MipsMnemonic::JrHb.as_str(), "JR.HB");
     assert_eq!(MipsMnemonic::SYSCALL.as_str(), "SYSCALL");
-    assert_eq!(MipsMnemonic::LD_B.as_str(), "LD.B");
+    assert_eq!(MipsMnemonic::LdB.as_str(), "LD.B");
 }
 
 #[test]

@@ -4,7 +4,6 @@
 //! [`CommandQueue`]. The application loop drains the queue each frame and
 //! carries out the corresponding work.
 
-use ghidra_core::addr::Address;
 use std::sync::{Arc, Mutex};
 
 // ── ActionCommand ────────────────────────────────────────────────────────────

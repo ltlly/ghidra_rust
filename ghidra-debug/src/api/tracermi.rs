@@ -774,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_trace_rmi_acceptor() {
-        let mut acceptor = TraceRmiAcceptor::new("127.0.0.1:0", 0);
+        let acceptor = TraceRmiAcceptor::new("127.0.0.1:0", 0);
         assert!(acceptor.is_running() || !acceptor.is_running()); // just tests it exists
         assert_eq!(acceptor.address(), "127.0.0.1:0");
     }

@@ -32,6 +32,7 @@
 //! - **`pcode`**: Pcode trace execution and data access.
 //!   Ported from `Framework-TraceModeling/ghidra.pcode.exec.trace`.
 
+pub mod agents;
 pub mod api;
 pub mod db;
 mod debug_comprehensive_port_tests;
@@ -52,6 +53,7 @@ mod debug_new_calltree_panels_test;
 mod debug_new_comprehensive_tests;
 mod debug_remaining_modules_final_test;
 mod debug_remaining_final_test;
+mod debug_remaining_modules_new_test;
 pub mod framework;
 pub mod isf;
 pub mod jdi;

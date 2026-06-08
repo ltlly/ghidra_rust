@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Extended decompiler hover providers.
 //!
 //! Ports Ghidra's concrete decompiler hover service implementations:
@@ -98,7 +99,7 @@ impl DecompilerHoverProviderManager {
 #[derive(Debug, Clone, Default)]
 pub struct DecompilerCallbackHandlerAdapter {
     /// The callback handler name.
-    name: String,
+    _name: String,
     /// Whether the adapter is active.
     active: bool,
 }
@@ -107,7 +108,7 @@ impl DecompilerCallbackHandlerAdapter {
     /// Create a new adapter.
     pub fn new(name: impl Into<String>) -> Self {
         Self {
-            name: name.into(),
+            _name: name.into(),
             active: true,
         }
     }

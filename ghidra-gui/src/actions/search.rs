@@ -6,7 +6,7 @@
 
 use crate::actions::commands::{enqueue, ActionCommand, CommandQueue};
 use crate::docking::{
-    ActionCallback, ActionContext, ActionType, DockingAction, Key, KeyBinding, Modifiers,
+    ActionCallback, DockingAction, Key, KeyBinding,
 };
 
 /// Create all Search-menu docking actions.

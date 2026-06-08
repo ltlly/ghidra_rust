@@ -16,7 +16,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::time::SystemTime;
 
 use super::{ProjectLocator, ProjectResult};
 
@@ -1074,7 +1073,7 @@ pub trait ProjectData2: Send + Sync + fmt::Debug {
 pub struct ToolAssociationInfo {
     content_type: String,
     associated_tool_name: Option<String>,
-    current_template_name: String,
+    _current_template_name: String,
     default_template_name: String,
 }
 
@@ -1089,7 +1088,7 @@ impl ToolAssociationInfo {
         Self {
             content_type: content_type.into(),
             associated_tool_name,
-            current_template_name: current_template_name.into(),
+            _current_template_name: current_template_name.into(),
             default_template_name: default_template_name.into(),
         }
     }

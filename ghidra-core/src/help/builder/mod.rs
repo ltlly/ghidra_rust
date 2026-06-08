@@ -13,9 +13,9 @@ use crate::help::validator::JavaHelpValidator;
 const TOC_OUTPUT_FILE_APPENDIX: &str = "_TOC.xml";
 const MAP_OUTPUT_FILE_APPENDIX: &str = "_map.xml";
 const HELP_SET_OUTPUT_FILE_APPENDIX: &str = "_HelpSet.hs";
-const HELP_SEARCH_DIRECTORY_APPENDIX: &str = "_JavaHelpSearch";
+const _HELP_SEARCH_DIRECTORY_APPENDIX: &str = "_JavaHelpSearch";
 
-const HELP_TOPICS_ROOT_PATH: &str = "help/topics";
+const _HELP_TOPICS_ROOT_PATH: &str = "help/topics";
 
 // ---------------------------------------------------------------------------
 // GHelpBuilder -- the main build orchestrator
@@ -213,7 +213,7 @@ impl GHelpBuilder {
     fn build_java_help_files(
         &self,
         collection: &mut HelpModuleCollection,
-        link_database: &LinkDatabase,
+        _link_database: &LinkDatabase,
     ) -> Result<(), String> {
         let output_dir = &self.config.output_directory;
         fs::create_dir_all(output_dir)
@@ -377,7 +377,7 @@ impl JavaHelpSetBuilder {
 
 /// Utility functions for the help build system.
 pub mod build_utils {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     use regex::Regex;
     use std::sync::LazyLock;

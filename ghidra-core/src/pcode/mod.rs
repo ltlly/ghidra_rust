@@ -20,6 +20,7 @@ pub mod high;
 pub mod block;
 pub mod codec;
 pub mod dynamic_hash;
+pub mod inject;
 
 // Re-exports
 pub use varnode::{Varnode, VarnodeAST};
@@ -41,3 +42,4 @@ pub use codec::{
     Decoder, Encoder, DecoderException, ElementId, AttributeId,
 };
 pub use dynamic_hash::DynamicHash;
+pub use inject::InjectContext;

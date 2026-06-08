@@ -5,7 +5,6 @@
 //! identification, and calling convention analysis.
 
 use super::DecompInterface;
-use super::decompile_options::DecompileOptions;
 
 /// A decompiler-based analysis command.
 ///

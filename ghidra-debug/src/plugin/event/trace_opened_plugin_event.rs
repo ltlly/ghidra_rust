@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceOpenedPluginEvent::new("test".to_string(), 0);
+        let _obj = TraceOpenedPluginEvent::new("test".to_string(), 0);
         assert!(true);
     }
 

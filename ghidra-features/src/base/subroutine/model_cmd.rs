@@ -9,8 +9,9 @@
 //! tree.  Here the logic is modelled as a pure computation over
 //! [`CodeBlock`]s so it can be reused in non-GUI contexts.
 
-use crate::base::analyzer::core::{Address, AddressRange, AddressSet, CancelledError};
-use super::block_model::{CodeBlock, CodeBlockModel, SubroutineBlockModel, TaskMonitor};
+use crate::base::analyzer::core::{AddressRange, AddressSet, CancelledError};
+#[allow(unused_imports)]
+use super::block_model::{CodeBlockModel, SubroutineBlockModel, TaskMonitor};
 
 /// Suffix appended to newly created module/fragment names.
 pub const NEW_MODULE_SUFFIX: &str = " [Subroutines]";
@@ -169,6 +170,8 @@ impl SubroutineModelCmd {
 mod tests {
     use super::*;
     use super::super::block_model::DummyMonitor;
+    use crate::base::subroutine::CodeBlock;
+    use crate::Address;
 
     /// Test subroutine block model.
     struct TestSubModel {

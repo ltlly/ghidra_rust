@@ -86,7 +86,7 @@ impl ScalarOperandAnalyzer {
     }
 
     /// Check if a scalar value matches a relocation table entry.
-    pub fn check_relocation(value: u64, bit_length: u32, reloc_offset: u64, memory_value: u64) -> bool {
+    pub fn check_relocation(value: u64, bit_length: u32, _reloc_offset: u64, memory_value: u64) -> bool {
         match bit_length {
             8 => (memory_value & 0xFF) == (value & 0xFF),
             16 => (memory_value & 0xFFFF) == (value & 0xFFFF),

@@ -2,7 +2,7 @@
 //!
 //! Ported from the command classes in Ghidra's `ghidra.app.plugin.core.register`.
 
-use ghidra_core::addr::{Address, AddressRange, AddressSet};
+use ghidra_core::addr::Address;
 
 /// A command that can be applied to register context.
 ///

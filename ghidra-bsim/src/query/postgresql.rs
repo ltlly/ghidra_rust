@@ -6,7 +6,7 @@
 use super::description::{BSimExecutableInfo, BSimFunctionDescription, BSimResultSet, SimilarityMetric};
 use super::function_database::{FunctionDatabase, StubFunctionDatabase};
 use super::server_config::ServerConfig;
-use super::{BSimError, BSimResult};
+use super::BSimResult;
 
 /// PostgreSQL connection manager for BSim.
 ///

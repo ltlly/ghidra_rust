@@ -73,7 +73,7 @@ use std::fmt;
 use nom::{
     bytes::complete::take,
     number::complete::le_u32,
-    IResult, Parser,
+    IResult,
 };
 
 // ===========================================================================
@@ -568,7 +568,7 @@ fn parse_nro_inner(data: &[u8]) -> NsoResult<NsoFile> {
     }
 
     // Parse NRO-specific extensions
-    let mut flags = header.flags & NRO_FLAG_KNOWN_MASK;
+    let flags = header.flags & NRO_FLAG_KNOWN_MASK;
     let module_name = parse_nro_module_name(data, header.nro_size, flags);
     let asset_header = if flags & NRO_FLAG_HAS_ASSET_HEADER != 0 {
         parse_nro_asset_header(data, header.nro_size)

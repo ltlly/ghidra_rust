@@ -580,7 +580,7 @@ mod tests {
     #[test]
     fn test_project_save_program() {
         let mut project = GhidraProject::create("/tmp", "SaveTest", true);
-        project.open_program("/", "test.exe", false);
+        let _ = project.open_program("/", "test.exe", false);
 
         assert!(project.save_program("test.exe", true));
         assert!(!project.save_program("nonexistent.exe", true));
@@ -589,8 +589,8 @@ mod tests {
     #[test]
     fn test_project_save_all() {
         let mut project = GhidraProject::create("/tmp", "SaveAllTest", true);
-        project.open_program("/", "a.exe", false);
-        project.open_program("/", "b.exe", false);
+        let _ = project.open_program("/", "a.exe", false);
+        let _ = project.open_program("/", "b.exe", false);
 
         project.save_all();
         assert_eq!(project.open_program_count(), 2);
@@ -599,8 +599,8 @@ mod tests {
     #[test]
     fn test_project_list_programs() {
         let mut project = GhidraProject::create("/tmp", "ListTest", true);
-        project.open_program("/", "alpha.exe", false);
-        project.open_program("/", "beta.exe", false);
+        let _ = project.open_program("/", "alpha.exe", false);
+        let _ = project.open_program("/", "beta.exe", false);
 
         let names = project.open_program_names();
         assert_eq!(names.len(), 2);

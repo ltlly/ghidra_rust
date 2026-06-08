@@ -22,15 +22,29 @@
 pub mod authentication;
 pub mod block_stream;
 pub mod command_processor;
+pub mod command_watcher;
+pub mod inet_name_lookup;
+pub mod remote_exception_util;
+pub mod remote_logging_util;
 pub mod repository;
 pub mod repository_manager;
 pub mod server_admin;
+pub mod server_port_factory;
+pub mod ssl_server_socket;
+pub mod token_generator;
 pub mod user_manager;
 
 // Re-export the most commonly used types at the crate level.
 pub use authentication::{AuthMode, AuthenticationModule, PasswordFileAuthentication};
 pub use block_stream::BlockStreamServer;
+pub use command_watcher::CommandWatcher;
+pub use inet_name_lookup as InetNameLookup;
+pub use remote_exception_util as RemoteExceptionUtil;
+pub use remote_logging_util as RemoteLoggingUtil;
 pub use repository::{Repository, RepositoryChangeEvent};
+pub use server_port_factory as ServerPortFactory;
+pub use ssl_server_socket::{GhidraSslServerSocket, TlsConfig, TlsStream};
+pub use token_generator::TokenGenerator;
 pub use user_manager::{Permission, User};
 pub use repository_manager::RepositoryManager;
 pub use user_manager::UserManager;

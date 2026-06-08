@@ -234,7 +234,7 @@ impl Ord for Img {
 // Helper functions
 // ---------------------------------------------------------------------------
 
-const HELP_TOPICS_ROOT: &str = "help/topics";
+const _HELP_TOPICS_ROOT: &str = "help/topics";
 pub(crate) const HELP_SHARED_PREFIX: &str = "help/shared/";
 
 /// Returns true if the given string represents a remote resource.

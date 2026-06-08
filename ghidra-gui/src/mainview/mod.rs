@@ -41,7 +41,7 @@ pub fn render_toolbar(
     toolbar: &mut ToolbarState,
     can_go_back: bool,
     can_go_forward: bool,
-    current_address: &str,
+    _current_address: &str,
     ui: &mut Ui,
 ) -> ToolbarAction {
     let mut action = ToolbarAction::None;

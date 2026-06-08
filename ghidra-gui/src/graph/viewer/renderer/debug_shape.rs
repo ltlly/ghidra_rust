@@ -2,7 +2,7 @@
 //!
 //! Ports `ghidra.graph.viewer.renderer.DebugShape`.
 
-use super::paintable_shape::{PaintableShape, PaintableShapeKind};
+use super::paintable_shape::PaintableShape;
 use crate::graph::viewer::{Point2D, Rect2D};
 
 /// Debug visualization helper for graph rendering.

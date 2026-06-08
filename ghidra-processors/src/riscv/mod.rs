@@ -539,11 +539,11 @@ const CSR_FCSR: u16 = 0x003;
 const CSR_CYCLE: u16 = 0xC00;
 const CSR_TIME: u16 = 0xC01;
 const CSR_INSTRET: u16 = 0xC02;
-const CSR_HPMCOUNTER3: u16 = 0xC03;
-const CSR_HPMCOUNTER31: u16 = 0xC1F;
-const CSR_CYCLEH: u16 = 0xC80;
-const CSR_TIMEH: u16 = 0xC81;
-const CSR_INSTRETH: u16 = 0xC82;
+#[allow(dead_code)] const CSR_HPMCOUNTER3: u16 = 0xC03;
+#[allow(dead_code)] const CSR_HPMCOUNTER31: u16 = 0xC1F;
+#[allow(dead_code)] const CSR_CYCLEH: u16 = 0xC80;
+#[allow(dead_code)] const CSR_TIMEH: u16 = 0xC81;
+#[allow(dead_code)] const CSR_INSTRETH: u16 = 0xC82;
 
 const CSR_SSTATUS: u16 = 0x100;
 const CSR_SEDELEG: u16 = 0x102;
@@ -551,14 +551,14 @@ const CSR_SIDELEG: u16 = 0x103;
 const CSR_SIE: u16 = 0x104;
 const CSR_STVEC: u16 = 0x105;
 const CSR_SCOUNTEREN: u16 = 0x106;
-const CSR_SENVCFG: u16 = 0x10A;
+#[allow(dead_code)] const CSR_SENVCFG: u16 = 0x10A;
 const CSR_SSCRATCH: u16 = 0x140;
 const CSR_SEPC: u16 = 0x141;
 const CSR_SCAUSE: u16 = 0x142;
 const CSR_STVAL: u16 = 0x143;
 const CSR_SIP: u16 = 0x144;
 const CSR_SATP: u16 = 0x180;
-const CSR_SCONTEXT: u16 = 0x5A8;
+#[allow(dead_code)] const CSR_SCONTEXT: u16 = 0x5A8;
 
 const CSR_VSSTATUS: u16 = 0x200;
 const CSR_VSIE: u16 = 0x204;
@@ -577,7 +577,7 @@ const CSR_MIDELEG: u16 = 0x303;
 const CSR_MIE: u16 = 0x304;
 const CSR_MTVEC: u16 = 0x305;
 const CSR_MCOUNTEREN: u16 = 0x306;
-const CSR_MSTATUSH: u16 = 0x310;
+#[allow(dead_code)] const CSR_MSTATUSH: u16 = 0x310;
 const CSR_MSCRATCH: u16 = 0x340;
 const CSR_MEPC: u16 = 0x341;
 const CSR_MCAUSE: u16 = 0x342;
@@ -586,16 +586,16 @@ const CSR_MIP: u16 = 0x344;
 const CSR_MTINST: u16 = 0x34A;
 const CSR_MTVAL2: u16 = 0x34B;
 const CSR_MENVCFG: u16 = 0x30A;
-const CSR_MENVCFGH: u16 = 0x31A;
+#[allow(dead_code)] const CSR_MENVCFGH: u16 = 0x31A;
 const CSR_MSECCFG: u16 = 0x747;
-const CSR_MSECCFGH: u16 = 0x757;
+#[allow(dead_code)] const CSR_MSECCFGH: u16 = 0x757;
 const CSR_MCYCLE: u16 = 0xB00;
 const CSR_MINSTRET: u16 = 0xB02;
-const CSR_MCYCLEH: u16 = 0xB80;
-const CSR_MINSTRETH: u16 = 0xB82;
+#[allow(dead_code)] const CSR_MCYCLEH: u16 = 0xB80;
+#[allow(dead_code)] const CSR_MINSTRETH: u16 = 0xB82;
 const CSR_MCOUNTINHIBIT: u16 = 0x320;
 const CSR_MHARTID: u16 = 0xF14;
-const CSR_MCONFIGPTR: u16 = 0xF15;
+#[allow(dead_code)] const CSR_MCONFIGPTR: u16 = 0xF15;
 const CSR_MARCHID: u16 = 0xF12;
 const CSR_MIMPID: u16 = 0xF13;
 const CSR_MVENDORID: u16 = 0xF11;
@@ -611,9 +611,9 @@ const CSR_HIP: u16 = 0x644;
 const CSR_HVIP: u16 = 0x645;
 const CSR_HTINST: u16 = 0x64A;
 const CSR_HGATP: u16 = 0x680;
-const CSR_HCONTEXT: u16 = 0x6A8;
+#[allow(dead_code)] const CSR_HCONTEXT: u16 = 0x6A8;
 const CSR_HENVCFG: u16 = 0x60A;
-const CSR_HENVCFGH: u16 = 0x61A;
+#[allow(dead_code)] const CSR_HENVCFGH: u16 = 0x61A;
 
 // ============================================================================
 // RISC-V Register Bank
@@ -1134,6 +1134,7 @@ impl Default for RiscVRegisterBank {
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum RiscVMnemonic {
     // ======================================================================
     // RV32I / RV64I Base Integer (49 unique mnemonics)

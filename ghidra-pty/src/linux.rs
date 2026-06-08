@@ -26,7 +26,7 @@ pub struct LinuxPtyFactory;
 
 impl PtyFactory for LinuxPtyFactory {
     fn openpty(&self, cols: u16, rows: u16) -> io::Result<Box<dyn Pty>> {
-        let mut pty = UnixPty::open()?;
+        let pty = UnixPty::open()?;
 
         // Set the window size if non-zero dimensions are requested
         if cols > 0 && rows > 0 {

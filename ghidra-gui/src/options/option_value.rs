@@ -4,7 +4,6 @@
 //! Rust enum that covers all supported value types.
 
 use std::path::PathBuf;
-use std::time::SystemTime;
 
 use super::option_type::OptionType;
 use crate::gui_util::web_colors::RgbaColor;

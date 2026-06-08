@@ -4,7 +4,7 @@
 //! This provides the Android-specific DEX structures that complement
 //! the existing dex.rs module.
 
-use nom::{bytes::complete::take, number::complete::{le_u16, le_u32, le_u8}, IResult};
+use nom::{number::complete::{le_u16, le_u32}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

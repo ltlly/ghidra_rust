@@ -16,7 +16,7 @@ use std::fmt;
 use std::hash::Hash;
 
 use super::{
-    DefaultDirectedGraph, DefaultGEdge, GDirectedGraph, GEdge,
+    DefaultDirectedGraph, GDirectedGraph, GEdge,
 };
 
 // ============================================================================
@@ -405,6 +405,7 @@ impl GraphFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::DefaultGEdge;
 
     type TestEdge = DefaultGEdge<i32>;
     type TestGraph = DefaultDirectedGraph<i32, TestEdge>;

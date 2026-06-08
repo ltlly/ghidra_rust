@@ -15,10 +15,9 @@ use ghidra_core::program::lang::{Language, LanguageID};
 use ghidra_core::program::program::MemoryPermissions;
 use ghidra_decompile::pcode::{OpCode, PcodeOperation, Varnode};
 use ghidra_emulation::{
-    BreakpointKind, BreakpointManager, EmulatedMemory, EmulationResult, Emulator, EmulatorState,
+    BreakpointKind, BreakpointManager, Emulator, EmulatorState,
     MemorySegment, StopReason,
 };
-use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,6 +48,7 @@ fn make_const_vn(value: u64, size: u32) -> Varnode {
     Varnode::constant(value, size)
 }
 
+#[allow(dead_code)]
 fn make_ram_vn(offset: u64, size: u32) -> Varnode {
     Varnode::ram(offset, size)
 }

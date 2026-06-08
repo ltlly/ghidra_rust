@@ -27,7 +27,7 @@ where
     dominator_map: HashMap<V, V>,         // node -> immediate dominator
     dominated_map: HashMap<V, Vec<V>>,    // idom -> list of dominated nodes
     root: V,
-    navigator: GraphNavigator,
+    _navigator: GraphNavigator,
     _phantom: std::marker::PhantomData<E>,
 }
 
@@ -148,7 +148,7 @@ where
             dominator_map,
             dominated_map,
             root,
-            navigator,
+            _navigator: navigator,
             _phantom: std::marker::PhantomData,
         }
     }

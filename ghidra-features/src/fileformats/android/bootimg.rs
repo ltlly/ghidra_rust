@@ -6,7 +6,6 @@
 //! - Android boot image format: <https://source.android.com/docs/core/architecture/boot-image-format>
 //! - Android boot image header v0-v4
 
-use nom::{bytes::complete::take, number::complete::{le_u32, le_u64}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

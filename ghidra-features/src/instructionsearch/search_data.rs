@@ -7,7 +7,6 @@
 
 use super::model::{InstructionMetadata, MaskContainer, MaskSettings, OperandMetadata};
 use super::utils::InstructionSearchUtils;
-use ghidra_core::Address;
 
 /// Represents the state of the instruction search data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,6 +287,7 @@ impl Default for InstructionSearchData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
     use crate::instructionsearch::model::MaskContainer;
 
     fn make_instr(address: u64, mnemonic: &str, bytes: &[u8]) -> InstructionMetadata {

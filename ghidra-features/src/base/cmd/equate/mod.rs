@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.equate`.
 
+#![allow(dead_code)]
+
 /// Command to set an equate at an operand.
 #[derive(Debug)]
 pub struct SetEquateCmd {

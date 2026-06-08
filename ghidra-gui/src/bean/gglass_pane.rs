@@ -194,7 +194,7 @@ mod tests {
     fn glass_pane_add_remove_painter() {
         let mut gp = GGlassPane::new();
         let id1 = gp.add_painter("drag feedback", 10);
-        let id2 = gp.add_painter("progress overlay", 20);
+        let _id2 = gp.add_painter("progress overlay", 20);
         assert_eq!(gp.painter_count(), 2);
 
         assert!(gp.remove_painter(id1));

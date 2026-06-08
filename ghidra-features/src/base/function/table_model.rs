@@ -7,7 +7,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::super::super::gotoquery::ProgramLocation;
 
 // ---------------------------------------------------------------------------
 // FunctionTableColumn -- column descriptors for function table views

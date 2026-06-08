@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = ActionContextProvider::new("test".to_string(), true);
+        let _obj = ActionContextProvider::new("test".to_string(), true);
         assert!(true);
     }
 

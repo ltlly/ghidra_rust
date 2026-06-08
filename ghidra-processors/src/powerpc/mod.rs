@@ -153,6 +153,7 @@ pub const CR_FIELD_NAMES: [&str; 8] = ["CR0", "CR1", "CR2", "CR3", "CR4", "CR5",
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum MsrField {
     SF = 0,
     ISF = 1,
@@ -231,6 +232,7 @@ impl MsrField {
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum FpscrField {
     FX = 31, FEX = 30, VX = 29, OX = 28,
     UX = 27, ZX = 26, XX = 25, VXSNAN = 24,
@@ -557,6 +559,7 @@ impl Default for PowerPcRegisterBank {
 
 /// Complete PowerPC instruction mnemonic enumeration (250+ mnemonics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum PowerPcMnemonic {
     // ------------------------------------------------------------------
     // Integer Arithmetic
@@ -1197,7 +1200,7 @@ impl PowerPcMnemonic {
             WAIT => "WAIT", DOZE => "DOZE", NAP => "NAP", SLEEP => "SLEEP",
             RVWINKLE => "RVWINKLE",
             DCCCI => "DCCCI", ICCCI => "ICCCI",
-            TLBIEL => "TLBIEL", TLBIL => "TLBIL",
+            TLBIL => "TLBIL",
             MSGSND => "MSGSND", MSGSNDP => "MSGSNDP", MSGCLR => "MSGCLR",
             MSGSYNC => "MSGSYNC",
             CP_ABORT => "CP_ABORT", CP_COPY => "CP_COPY", CP_PASTE => "CP_PASTE",

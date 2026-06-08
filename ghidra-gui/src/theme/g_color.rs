@@ -21,7 +21,7 @@ fn register_gcolor(r: Weak<RwLock<GColorInner>>) {
 struct GColorInner {
     id: String,
     delegate: RgbaColor,
-    alpha_override: Option<u8>,
+    _alpha_override: Option<u8>,
 }
 
 /// A color whose value is dynamically resolved from the active theme.
@@ -36,7 +36,7 @@ impl GColor {
         let inner = Arc::new(RwLock::new(GColorInner {
             id: id.into(),
             delegate: MISSING_COLOR_RGB,
-            alpha_override: None,
+            _alpha_override: None,
         }));
         let gc = Self { inner };
         register_gcolor(Arc::downgrade(&gc.inner));
@@ -48,7 +48,7 @@ impl GColor {
         let inner = Arc::new(RwLock::new(GColorInner {
             id: id.into(),
             delegate: value,
-            alpha_override: None,
+            _alpha_override: None,
         }));
         let gc = Self { inner };
         register_gcolor(Arc::downgrade(&gc.inner));
@@ -70,7 +70,7 @@ impl GColor {
         let inner = Arc::new(RwLock::new(GColorInner {
             id: self.id(),
             delegate: RgbaColor::new(base.r, base.g, base.b),
-            alpha_override: Some(alpha),
+            _alpha_override: Some(alpha),
         }));
         let gc = Self { inner };
         register_gcolor(Arc::downgrade(&gc.inner));

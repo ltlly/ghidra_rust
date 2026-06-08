@@ -9,7 +9,7 @@ use std::collections::HashMap;
 
 use super::description::{
     CategoryRecord, DatabaseInformation, DescriptionManager, ExecutableRecord,
-    FunctionDescription, RowKey, SignatureRecord, VectorResult,
+    FunctionDescription, VectorResult,
 };
 use super::FeatureVector;
 

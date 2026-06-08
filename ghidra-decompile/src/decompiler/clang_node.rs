@@ -4,7 +4,6 @@
 //! These represent the structured C code output from the decompiler as a tree
 //! of tokens and groups.
 
-use std::fmt;
 
 use ghidra_core::addr::Address;
 

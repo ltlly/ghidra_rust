@@ -10,8 +10,8 @@
 use ghidra_processors::x86::{
     registers::{FlagBit, Register, X86RegisterBank},
     instructions::{
-        ConditionCode, DecodedInstruction, EVEX, InstructionCategory, MemoryOperand,
-        ModRM, Operand, PrefixInfo, REX, SIB, SegmentRegister, VEX, X86Mnemonic,
+        ConditionCode, InstructionCategory, MemoryOperand,
+        ModRM, REX, SIB, X86Mnemonic,
     },
 };
 

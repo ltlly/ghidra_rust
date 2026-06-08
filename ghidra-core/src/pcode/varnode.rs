@@ -4,7 +4,6 @@
 //! `ghidra.program.model.pcode.VarnodeAST`.
 
 use crate::addr::Address;
-use crate::pcode::pcodeop::PcodeOpAST;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 

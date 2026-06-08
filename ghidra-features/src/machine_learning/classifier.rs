@@ -6,7 +6,7 @@
 //! Uses a trained random forest ensemble to classify addresses as
 //! potential function starts.
 
-use super::training::{FeatureVector, RandomForestModel};
+use super::training::RandomForestModel;
 
 /// Classifies addresses as potential function starts using a trained
 /// random forest model.

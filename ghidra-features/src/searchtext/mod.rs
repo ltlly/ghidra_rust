@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn test_search_text_plugin_basic() {
-        let mut plugin = SearchTextPlugin::new();
+        let plugin = SearchTextPlugin::new();
         assert_eq!(plugin.name(), "SearchTextPlugin");
         assert_eq!(plugin.search_limit(), 500);
         assert!(plugin.do_highlight());
@@ -753,7 +753,7 @@ mod tests {
 
     #[test]
     fn test_listing_display_search_table_model() {
-        let mut model = ListingDisplaySearchTableModel::new();
+        let model = ListingDisplaySearchTableModel::new();
         assert_eq!(model.name(), "Listing Display Search");
         assert_eq!(model.row_count(), 0);
     }

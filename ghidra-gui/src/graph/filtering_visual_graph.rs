@@ -5,10 +5,10 @@
 //! Queries are forwarded to the underlying graph, but results are filtered to exclude
 //! hidden elements.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::hash::Hash;
 
-use super::{DefaultGEdge, GDirectedGraph, GEdge, GraphPath};
+use super::{GDirectedGraph, GEdge};
 
 /// A directed graph wrapper that supports filtering (hiding) vertices and edges.
 ///

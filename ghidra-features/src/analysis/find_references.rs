@@ -8,7 +8,6 @@
 //! were not discovered by automatic analysis, and displaying results in
 //! a table model.
 
-use std::collections::HashMap;
 
 use crate::base::analyzer::{Address, AddressSet, Program, TaskMonitor};
 
@@ -75,7 +74,7 @@ impl FindPossibleReferencesPlugin {
         search_set: &AddressSet,
         monitor: &dyn TaskMonitor,
     ) -> Vec<ReferenceCandidate> {
-        let mut candidates = Vec::new();
+        let candidates = Vec::new();
 
         for addr in search_set.get_addresses(true) {
             if candidates.len() >= self.max_results {

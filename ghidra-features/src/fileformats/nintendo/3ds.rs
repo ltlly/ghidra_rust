@@ -715,7 +715,7 @@ fn parse_exefs_header(data: &[u8]) -> Vec<ExefsFile> {
             continue;
         }
 
-        let mut hash = [0u8; 32];
+        let hash = [0u8; 32];
         // Hash follows in the hashes region, but we skip it for now
 
         files.push(ExefsFile {

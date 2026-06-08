@@ -3,7 +3,7 @@
 //! Port of `ghidra.util.Msg`, `ErrorLogger`, `ErrorDisplay`,
 //! `DefaultErrorLogger`, and `ConsoleErrorDisplay`.
 
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 
 /// Log level for messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

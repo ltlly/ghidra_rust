@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! SLEIGH `.slaspec` to `.sla` binary compiler.
 //!
 //! # Overview
@@ -641,7 +642,7 @@ pub struct SlaCompiler {
     /// Next available unique temporary index.
     next_unique: u64,
     /// Accumulated decision tree node count.
-    node_count: u32,
+    _node_count: u32,
 }
 
 impl SlaCompiler {
@@ -656,7 +657,7 @@ impl SlaCompiler {
             context_index: HashMap::new(),
             table_index: HashMap::new(),
             next_unique: 0,
-            node_count: 0,
+            _node_count: 0,
         }
     }
 
@@ -1360,7 +1361,6 @@ impl SlaCompiler {
                     parser::SpaceType::RamSpace => 1u32,
                     parser::SpaceType::ConstantSpace => 2u32,
                     parser::SpaceType::UniqueSpace => 3u32,
-                    _ => unreachable!(),
                 };
                 // The default was not added (the space is in the spec), so push it.
                 spaces.push(SerializedSpace {
@@ -1929,6 +1929,7 @@ impl SlaCompiler {
     ///
     /// Used when the destination is known (e.g., from `compile_expression_to_varnode`)
     /// but the source is a complex expression tree.
+    #[allow(dead_code)]
     fn compile_expression_to(
         &self,
         _dest: &Expression,

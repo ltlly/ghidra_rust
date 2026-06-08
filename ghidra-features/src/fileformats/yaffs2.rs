@@ -5,8 +5,6 @@
 //! References:
 //! - <https://yaffs.net/documents/yaffs-direct-user-guide>
 
-use nom::number::complete::{le_u32, le_u16, le_u8};
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

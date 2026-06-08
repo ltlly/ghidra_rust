@@ -43,7 +43,7 @@ pub struct TraceRegisterContextManagerImpl {
     /// Thread-scoped context spaces keyed by thread key.
     thread_spaces: std::collections::BTreeMap<i64, TraceRegisterContextSpace>,
     /// Default language id for new spaces.
-    default_language: String,
+    _default_language: String,
 }
 
 impl TraceRegisterContextManagerImpl {
@@ -52,7 +52,7 @@ impl TraceRegisterContextManagerImpl {
         Self {
             spaces: std::collections::BTreeMap::new(),
             thread_spaces: std::collections::BTreeMap::new(),
-            default_language: default_language.into(),
+            _default_language: default_language.into(),
         }
     }
 
@@ -87,7 +87,7 @@ mod tests {
         let mgr = TraceRegisterContextManagerImpl::new("x86:LE:64:default");
         assert_eq!(mgr.space_count(), 0);
         assert_eq!(mgr.thread_space_count(), 0);
-        assert_eq!(mgr.default_language, "x86:LE:64:default");
+        assert_eq!(mgr._default_language, "x86:LE:64:default");
     }
 
     #[test]

@@ -36,7 +36,7 @@ impl ColorUtils {
     /// Derive a color by blending toward a target hue while preserving
     /// brightness.
     pub fn derive_color(base: RgbaColor, target_hue: f32, saturation_scale: f32) -> RgbaColor {
-        let (h, s, b) = base.to_hsb();
+        let (_h, s, b) = base.to_hsb();
         let new_h = target_hue;
         let new_s = (s * saturation_scale).clamp(0.0, 1.0);
         hsb_to_rgba(new_h, new_s, b)

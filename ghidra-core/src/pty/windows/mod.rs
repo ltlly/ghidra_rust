@@ -15,7 +15,7 @@ const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 25;
 
 /// PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE value for CreateProcess.
-const PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: u32 = 0x20016;
+const _PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE: u32 = 0x20016;
 
 /// A wrapper around a Windows HANDLE.
 ///
@@ -121,8 +121,8 @@ impl PseudoConsoleHandle {
 
 /// One end of a ConPTY connection.
 pub struct ConPtyEndpoint {
-    input: Handle,
-    output: Handle,
+    _input: Handle,
+    _output: Handle,
     pseudo_console: PseudoConsoleHandle,
 }
 
@@ -130,8 +130,8 @@ impl ConPtyEndpoint {
     /// Create a new ConPTY endpoint.
     pub fn new(input: Handle, output: Handle, pseudo_console: PseudoConsoleHandle) -> Self {
         Self {
-            input,
-            output,
+            _input: input,
+            _output: output,
             pseudo_console,
         }
     }
@@ -225,8 +225,8 @@ impl PtyChild for ConPtyChild {
 
 /// A Windows ConPTY pseudo-terminal.
 pub struct ConPty {
-    pipe_to_child: Pipe,
-    pipe_from_child: Pipe,
+    _pipe_to_child: Pipe,
+    _pipe_from_child: Pipe,
     pseudo_console: PseudoConsoleHandle,
     closed: bool,
     parent: ConPtyParent,
@@ -309,6 +309,7 @@ enum AnsiMode {
     Chars,
     Esc,
     Csi,
+    #[allow(dead_code)]
     CsiParam,
     CsiQ,
     Osc,

@@ -4,13 +4,10 @@
 //! Provides the data type manager hierarchy that stores, resolves, and
 //! manages data types in the Ghidra database.
 
-use crate::database::db::{Database, DbResult};
-use crate::database::manager_db::{ManagerDB, OpenMode, ProgramContext};
 use crate::database::program_change_set::DataTypeArchiveDBChangeSet;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicI64, Ordering};
-use std::sync::{Arc, RwLock};
 
 // ============================================================================
 // DataTypeId — unique data type identifier

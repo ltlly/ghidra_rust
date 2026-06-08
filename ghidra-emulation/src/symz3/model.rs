@@ -110,7 +110,7 @@ impl SymValueZ3 {
     /// The predicate is stored as the boolean expression, and the resulting
     /// bit-vector is `ite(predicate, 1, 0)`.
     pub fn ite_from_predicate(predicate_expr: &str, size_bits: u32) -> Self {
-        let bv = format!(
+        let _bv = format!(
             "V:(ite {predicate_expr} #b{} #b{})",
             "1".repeat(size_bits as usize).chars().take(size_bits as usize).collect::<String>(),
             "0".repeat(size_bits as usize).chars().take(size_bits as usize).collect::<String>()

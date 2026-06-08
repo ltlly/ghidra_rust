@@ -8,7 +8,6 @@
 //! - `.gcc_except_table` LSDA structures
 //! - The `GccExceptionAnalyzer` that marks up try/catch regions
 
-use crate::base::analyzer::{Address, Program};
 use thiserror::Error;
 
 pub mod analyzer;

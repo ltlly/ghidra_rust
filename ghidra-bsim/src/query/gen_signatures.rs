@@ -6,7 +6,6 @@
 //! to a database or file.  Used by the `GenSignatures` headless analyzer and
 //! the `BulkSignatures` batch pipeline.
 
-use std::collections::HashMap;
 
 use super::description::{BSimExecutableInfo, BSimFunctionDescription, FunctionSignatureInfo};
 use super::function_database::FunctionDatabase;
@@ -203,7 +202,7 @@ impl SignatureGenerator {
     pub fn generate_and_write(
         &self,
         db: &mut dyn FunctionDatabase,
-        executable: &BSimExecutableInfo,
+        _executable: &BSimExecutableInfo,
         functions: &[(u64, String, Vec<String>, Vec<u8>)], // (entry, name, mnemonics, bytes)
     ) -> BSimResult<SignatureGenSummary> {
         let mut summary = SignatureGenSummary::default();

@@ -141,7 +141,6 @@ impl LatticeElement for PcodePowersetInterval {
                 a.iter()
                     .all(|iv| b.iter().any(|other_iv| other_iv.includes(iv)))
             }
-            _ => false,
         }
     }
 }

@@ -3,9 +3,6 @@
 //! Ports `ghidra.framework.options.OptionsEditor` and
 //! `ghidra.framework.options.CustomOptionsEditor`.
 
-use super::editor_state::EditorState;
-use super::options_trait::Options;
-use super::editor_state_factory::EditorStateFactory;
 
 /// Callback type for when options change.
 pub type OptionsChangeCallback = Box<dyn Fn() + Send + Sync>;

@@ -2,10 +2,8 @@
 //!
 //! Ported from `ghidra.features.base.memsearch.gui.SearchGuiModel`.
 
-use crate::memsearch::bytesource::SearchRegion;
 use crate::memsearch::combiner::Combiner;
 use crate::memsearch::gui::SearchSettings;
-use crate::memsearch::matcher::UserInputByteMatcher;
 
 /// Maintains the state of all settings and controls for the memory search window.
 ///

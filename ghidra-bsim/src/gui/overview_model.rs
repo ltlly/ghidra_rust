@@ -9,7 +9,6 @@
 //! These types provide a table-model view of BSim database executables,
 //! their metadata, and associated function counts.
 
-use std::collections::HashMap;
 
 use ghidra_core::addr::Address;
 

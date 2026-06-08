@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::description::{ExecutableRecord, FunctionDescription, RowKey};
+use super::description::{ExecutableRecord, FunctionDescription};
 
 // ============================================================================
 // BSimResultStatus

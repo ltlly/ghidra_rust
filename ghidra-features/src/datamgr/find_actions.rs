@@ -17,7 +17,6 @@
 //! | `ApplyFunctionDataTypesAction` | `ApplyFunctionDataTypesAction` |
 //! | `ApplyEnumsAsLabelsAction` | `ApplyEnumsAsLabelsAction` |
 
-use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
 // Structure offset match

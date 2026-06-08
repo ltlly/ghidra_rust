@@ -166,7 +166,7 @@ impl DwarfEhDecoder for StandardDwarfEhDecoder {
         current_offset: u64,
         pointer_size: usize,
     ) -> Option<(u64, usize)> {
-        let (mut value, consumed) = match self.format {
+        let (value, consumed) = match self.format {
             DwarfEhDataDecodeFormat::Absptr => {
                 // Read a full pointer-sized value
                 match pointer_size {

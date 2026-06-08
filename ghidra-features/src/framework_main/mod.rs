@@ -68,9 +68,9 @@ pub enum DataTreeDialogType {
     /// Open dialog (select a file to open).
     OPEN,
     /// Choose folder dialog.
-    CHOOSE_FOLDER,
+    ChooseFolder,
     /// Choose file dialog.
-    CHOOSE_FILE,
+    ChooseFile,
 }
 
 impl fmt::Display for DataTreeDialogType {
@@ -78,8 +78,8 @@ impl fmt::Display for DataTreeDialogType {
         match self {
             Self::SAVE => write!(f, "Save"),
             Self::OPEN => write!(f, "Open"),
-            Self::CHOOSE_FOLDER => write!(f, "Choose Folder"),
-            Self::CHOOSE_FILE => write!(f, "Choose File"),
+            Self::ChooseFolder => write!(f, "Choose Folder"),
+            Self::ChooseFile => write!(f, "Choose File"),
         }
     }
 }
@@ -126,7 +126,7 @@ impl DataTreeDialog {
     pub fn choose_folder(title: &str) -> Self {
         Self {
             title: title.to_string(),
-            dialog_type: DataTreeDialogType::CHOOSE_FOLDER,
+            dialog_type: DataTreeDialogType::ChooseFolder,
             allow_new_folders: true,
             file_type_filter: None,
         }
@@ -247,8 +247,8 @@ mod tests {
     fn test_dialog_type_display() {
         assert_eq!(DataTreeDialogType::SAVE.to_string(), "Save");
         assert_eq!(DataTreeDialogType::OPEN.to_string(), "Open");
-        assert_eq!(DataTreeDialogType::CHOOSE_FOLDER.to_string(), "Choose Folder");
-        assert_eq!(DataTreeDialogType::CHOOSE_FILE.to_string(), "Choose File");
+        assert_eq!(DataTreeDialogType::ChooseFolder.to_string(), "Choose Folder");
+        assert_eq!(DataTreeDialogType::ChooseFile.to_string(), "Choose File");
     }
 
     #[test]
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_flavor_handler_service() {
-        let mut service = GhidraDataFlavorHandlerService::new();
+        let service = GhidraDataFlavorHandlerService::new();
         assert_eq!(service.handler_count(), 0);
         assert!(service.find_handler("text/plain").is_none());
     }

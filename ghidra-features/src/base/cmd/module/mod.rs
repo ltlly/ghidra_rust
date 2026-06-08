@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.module`.
 
+#![allow(dead_code)]
+
 /// Command to create the default program tree.
 #[derive(Debug)]
 pub struct CreateDefaultTreeCmd {

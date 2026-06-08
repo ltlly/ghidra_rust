@@ -357,7 +357,7 @@ mod new_comprehensive_tests {
     }
 
     mod cross_module_integration {
-        use crate::api::breakpoint::LogicalBreakpoint;
+        
         use crate::api::control_mode::ControlMode;
         use crate::api::tracemgr::DebuggerCoordinates;
         use crate::api::coordinates_enhanced::*;

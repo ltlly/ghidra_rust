@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = CopyActionSupport::new(vec![]);
+        let _obj = CopyActionSupport::new(vec![]);
         assert!(true);
     }
 

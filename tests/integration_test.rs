@@ -17,12 +17,12 @@ use ghidra_core::symbol::{Symbol, SymbolType};
 use ghidra_decompile::pcode::{OpCode, PcodeOperation, Varnode};
 use ghidra_decompile::sleigh::pcode::{PcodeOp as SleighPcodeOp, OpCode as SleighOpCode, Varnode as SleighVarnode};
 use ghidra_decompile::sleigh::construct::{
-    ConstructTpl, Constructor, ContextOp, OperandVal, PatternEquation, TokenField,
+    ConstructTpl, Constructor, PatternEquation,
 };
-use ghidra_decompile::sleigh::context::{ContextBit, ContextDatabase, ContextField};
+use ghidra_decompile::sleigh::context::{ContextBit, ContextDatabase};
 
 use ghidra_features::base::analyzer::{
-    AnalysisPriority, AnalyzerType, BasicTaskMonitor,
+    AnalysisPriority, BasicTaskMonitor,
     Language as AnalyzerLanguage, Program as AnalyzerProgram,
 };
 
@@ -33,7 +33,7 @@ use ghidra_emulation::{Emulator, RegisterDefinition};
 // ---------------------------------------------------------------------------
 
 fn test_emu_language() -> Language {
-    use ghidra_core::addr::{AddressFactory, AddrSpaceType, AddressSpace};
+    use ghidra_core::addr::AddressFactory;
     Language::new(
         ghidra_core::program::lang::LanguageID::new("x86", "LE", 64, "default"),
         "x86:LE:64:default",
@@ -433,7 +433,7 @@ fn test_integration_completeness() {
     let priority = AnalysisPriority::CODE_ANALYSIS;
 
     let lang = test_emu_language();
-    let emu = Emulator::new(&lang);
+    let _emu = Emulator::new(&lang);
 
     assert_eq!(range.len(), 0x100);
     assert_eq!(dt.size, 4);

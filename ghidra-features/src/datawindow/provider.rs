@@ -4,9 +4,6 @@
 //!
 //! Provides a window that shows the data items at and around the
 //! current address, with options to create new data, convert between
-/// types, and edit existing data.
-
-use std::collections::BTreeMap;
 
 /// Actions available in the data window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

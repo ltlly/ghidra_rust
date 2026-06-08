@@ -13,12 +13,10 @@
 //! Java plugin class, since there is no Swing toolkit.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
 
 use crate::base::analyzer::{
-    Address, AddressRange, AddressSet, AnalysisOption, AnalysisOptionValue, AnalysisPriority,
-    AnalysisWorker, Analyzer, AnalyzerType, AutoAnalysisManager, CancelledError, MessageLog,
-    Program, TaskMonitor, BasicTaskMonitor,
+    Analyzer, AnalyzerType, AutoAnalysisManager,
+    Program,
 };
 use super::analysis_options::AnalysisOptionsDialog;
 
@@ -167,7 +165,7 @@ impl AutoAnalysisPlugin {
     ///
     /// This registers the program with the [`AutoAnalysisManager`] and
     /// sets up analysis options.
-    pub fn program_opened(&mut self, program: &mut Program) {
+    pub fn program_opened(&mut self, _program: &mut Program) {
         // Register options editor and help location
     }
 
@@ -196,7 +194,7 @@ impl AutoAnalysisPlugin {
     }
 
     /// Run the analysis callback -- analyze the given program.
-    pub fn analyze_callback(&self, program: &mut Program) {
+    pub fn analyze_callback(&self, _program: &mut Program) {
         // In a headed environment, this would show the options dialog first
         // and then start analysis in a background task.
         // In headless mode, analysis runs directly.
@@ -205,7 +203,7 @@ impl AutoAnalysisPlugin {
     /// Called when analysis ends.
     ///
     /// Reports any warnings or errors from the analysis message log.
-    pub fn analysis_ended(&self, manager: &mut AutoAnalysisManager, is_cancelled: bool) {
+    pub fn analysis_ended(&self, manager: &mut AutoAnalysisManager, _is_cancelled: bool) {
         let log = manager.get_message_log();
         if !log.is_empty() {
             log::warn!("Auto Analysis Summary: {} messages", log.len());

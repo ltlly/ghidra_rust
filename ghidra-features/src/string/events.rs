@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use super::{FoundString, StringEncoding};
+use super::StringEncoding;
 
 // ---------------------------------------------------------------------------
 // String event types
@@ -230,7 +230,7 @@ impl ManualStringTranslationService {
 }
 
 impl StringTranslationService for ManualStringTranslationService {
-    fn translate(&self, text: &str, _source_lang: &str, _target_lang: &str) -> Option<String> {
+    fn translate(&self, _text: &str, _source_lang: &str, _target_lang: &str) -> Option<String> {
         // Manual service can't auto-translate; return None
         // In practice, translations are set via set_translation()
         self.translations

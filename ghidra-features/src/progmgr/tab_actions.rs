@@ -12,7 +12,6 @@
 //! - [`MultiTabPlugin`] -- manages multiple program tabs
 //! - [`ProgramTabActionContext`] -- context carrying the active program tab
 
-use std::fmt;
 
 // ---------------------------------------------------------------------------
 // ProgramTabActionContext

@@ -266,6 +266,7 @@ impl AddressingMode {
 /// Covers the A64 ISA across ARMv8.x and ARMv9.x, organized by functional
 /// category. Includes data processing, load/store, branch, exception,
 /// system, SIMD/FP, and cryptographic instructions.
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Aarch64Mnemonic {
     // Data Processing -- Immediate

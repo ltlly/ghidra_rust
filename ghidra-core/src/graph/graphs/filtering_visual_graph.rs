@@ -3,11 +3,9 @@
 //! Port of `ghidra.graph.graphs.FilteringVisualGraph`.
 
 use std::collections::HashSet;
-use std::fmt::Debug;
-use std::hash::Hash;
 
 use super::default_visual_graph::DefaultVisualGraph;
-use crate::graph::traits::{GDirectedGraph, GEdge};
+use crate::graph::traits::GDirectedGraph;
 use crate::graph::visual_graph::{VisualEdge, VisualVertex};
 
 /// A visual graph that can filter vertices and edges from display

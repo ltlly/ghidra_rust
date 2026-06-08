@@ -26,6 +26,11 @@
 pub mod objc1;
 pub mod objc2;
 pub mod analyzer;
+pub mod type_encodings;
+pub mod source_language_spec;
+pub mod method_resolver;
+pub mod objc2_protocol_full;
+pub mod objc_binary_utils;
 
 use std::collections::HashSet;
 use std::fmt;

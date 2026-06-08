@@ -143,7 +143,7 @@ pub trait Options: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     // The trait is not directly testable without a concrete implementation;
     // tests are in tool_options/tests.

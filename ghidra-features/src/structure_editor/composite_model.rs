@@ -6,11 +6,6 @@
 //! history, and column layout.
 
 use std::collections::VecDeque;
-use std::sync::Arc;
-
-use ghidra_core::data::{
-    DataType, DataTypeComponent, StructureDataType, UnionDataType,
-};
 
 use super::selection::EditorSelection;
 

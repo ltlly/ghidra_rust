@@ -8,9 +8,9 @@
 //! - Snapshot/disconnected copies of the tree
 //! - Inline editing of node names
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
-use super::{ExternalLocation, SymbolCategory, SymbolDragDropAction, SymbolNode, SymbolType};
+use super::{ExternalLocation, SymbolCategory, SymbolDragDropAction, SymbolType};
 
 // ---------------------------------------------------------------------------
 // GTreeNode -- generic tree node with parent/child relationships

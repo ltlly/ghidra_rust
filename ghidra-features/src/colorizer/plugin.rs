@@ -5,7 +5,7 @@
 //! `SetColorCommand`, `ClearColorCommand`,
 //! `NextColorRangeAction`, `PreviousColorRangeAction`.
 
-use super::{ColorEntry, ColorRange, ColorizerModel, ColorizerMode};
+use super::{ColorEntry, ColorizerModel, ColorizerMode};
 use ghidra_core::Address;
 
 // ---------------------------------------------------------------------------

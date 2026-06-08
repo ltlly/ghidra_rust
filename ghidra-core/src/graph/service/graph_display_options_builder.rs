@@ -19,8 +19,8 @@ pub struct GraphDisplayOptionsBuilder {
     edge_color: GraphColor,
     label_position: GraphLabelPosition,
     font_size: u32,
-    vertex_selection_color: GraphColor,
-    edge_selection_color: GraphColor,
+    _vertex_selection_color: GraphColor,
+    _edge_selection_color: GraphColor,
     max_node_count: usize,
     animate_layout: bool,
 }
@@ -36,8 +36,8 @@ impl GraphDisplayOptionsBuilder {
             edge_color: GraphColor::new(128, 128, 128),
             label_position: GraphLabelPosition::default(),
             font_size: 12,
-            vertex_selection_color: GraphColor::new(100, 150, 255),
-            edge_selection_color: GraphColor::new(255, 100, 100),
+            _vertex_selection_color: GraphColor::new(100, 150, 255),
+            _edge_selection_color: GraphColor::new(255, 100, 100),
             max_node_count: 5000,
             animate_layout: true,
         }

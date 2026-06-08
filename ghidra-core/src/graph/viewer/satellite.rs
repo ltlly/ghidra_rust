@@ -5,7 +5,6 @@
 //! view renders a miniature overview of the entire graph, with a visible
 //! viewport rectangle that the user can drag to navigate.
 
-use super::graph_component::GraphComponent;
 use super::visual_types::{Point2d, Rect2d};
 
 // ============================================================================

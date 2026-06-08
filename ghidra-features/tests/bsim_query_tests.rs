@@ -139,7 +139,7 @@ fn test_pair_input_and_note() {
 #[test]
 fn test_response_types() {
     use query::protocol::*;
-    use description::{ExecutableRecord, FunctionDescription};
+    use description::ExecutableRecord;
 
     // ResponseName
     let mut r = ResponseName::new();

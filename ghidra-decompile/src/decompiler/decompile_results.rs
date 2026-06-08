@@ -174,8 +174,8 @@ mod tests {
 
     #[test]
     fn test_success_result() {
-        let arena = ClangNodeArena::new();
-        let root = 0; // placeholder
+        let _arena = ClangNodeArena::new();
+        let _root = 0; // placeholder
         let mut arena_with_root = ClangNodeArena::new();
         let root_id = arena_with_root.alloc(super::super::clang_node::ClangNodeKind::TokenGroup(
             super::super::clang_node::ClangTokenGroupData::default(),

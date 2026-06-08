@@ -10,21 +10,37 @@
 //! |--------------------------|-------------------------------|
 //! | `FunctionEditorModel`    | `FunctionEditorModel`         |
 //! | `FunctionData`           | `FunctionData`                |
+//! | `FunctionDataView`       | `FunctionDataView`            |
 //! | `FunctionVariableData`   | `FunctionVariableData`        |
 //! | `ParamInfo`              | `ParamInfo`                   |
 //! | `VarnodeType`            | `VarnodeType`                 |
 //! | `VarnodeInfo`            | `VarnodeInfo`                 |
 //! | `ModelChangeListener`    | `ModelChangeListener`         |
 //! | `ParameterTableModel`    | `ParameterTableModel`         |
+//! | `StorageAddressModel`    | `StorageAddressModel`         |
+//! | `VarnodeTableModel`      | `VarnodeTableModel`           |
+//! | `FunctionSignatureTextField` | `FunctionSignatureTextField` |
+//! | `RegisterDropDownModel`  | `RegisterDropDownSelectionDataModel` |
+//! | `FunctionEditorDialogModel` | `FunctionEditorDialog`     |
+//! | `CellEditors`            | Various cell editor models    |
 
 pub mod storage_model;
 pub mod varnode_table;
+pub mod function_data_view;
+pub mod signature_field;
+pub mod register_dropdown;
+pub mod dialog_model;
+pub mod cell_editors;
 
 pub use storage_model::StorageAddressModel;
+pub use function_data_view::FunctionDataView;
+pub use signature_field::{ColorField, SignatureRegionKind, compute_signature_colors, parse_signature, SignatureParts};
+pub use register_dropdown::{RegisterDescriptor, RegisterDropDownModel, SearchMode};
+pub use dialog_model::{FunctionEditorDialogModel, FunctionEditorDialogConfig, EditTargetKind, FunctionEditResult};
+pub use cell_editors::{ParameterDataTypeCellEditorModel, VarnodeTypeCellEditorModel, VarnodeSizeCellEditorModel, VarnodeLocationRendererModel, VarnodeLocationCellEditorModel};
 
 use std::fmt;
 
-use ghidra_core::addr::Address;
 
 // ---------------------------------------------------------------------------
 // VarnodeType
@@ -465,6 +481,11 @@ impl ParamInfo {
         self.is_forced_indirect = forced;
     }
 
+    /// Sets the ordinal (parameter index).
+    pub fn set_ordinal(&mut self, ordinal: i32) {
+        self.ordinal = ordinal;
+    }
+
     /// Creates a deep copy of this parameter info.
     pub fn copy(&self) -> Self {
         self.clone()
@@ -521,7 +542,7 @@ impl fmt::Display for ParamInfo {
 /// Complete data about a function for the editor.
 ///
 /// Ported from `FunctionData.java`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunctionData {
     /// The function name.
     name: String,
@@ -1253,7 +1274,7 @@ mod tests {
 
     #[test]
     fn test_function_data() {
-        let mut fd = FunctionData::new("main", "int", "__cdecl");
+        let fd = FunctionData::new("main", "int", "__cdecl");
         assert_eq!(fd.name(), "main");
         assert_eq!(fd.return_type(), "int");
         assert_eq!(fd.calling_convention(), "__cdecl");

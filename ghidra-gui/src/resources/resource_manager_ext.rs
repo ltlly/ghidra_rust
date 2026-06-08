@@ -4,8 +4,8 @@
 //! composition for the GUI framework.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
-use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::path::PathBuf;
 
 /// Well-known resource paths in Ghidra.
 pub mod well_known {
@@ -268,7 +268,7 @@ mod tests {
     #[test]
     fn test_resource_manager_singleton() {
         let rm = ResourceManager::instance();
-        assert!(rm.icon_count() >= 0);
+        let _ = rm.icon_count();
     }
 
     #[test]

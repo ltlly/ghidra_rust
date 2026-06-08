@@ -487,14 +487,14 @@ mod tests {
 
     #[test]
     fn test_auto_rename_plugin_rename_function() {
-        let mut plugin = AutoRenamePlugin::new();
+        let plugin = AutoRenamePlugin::new();
         let result = plugin.try_rename_function("sub_401000", "main");
         assert_eq!(result, Some("main".to_string()));
     }
 
     #[test]
     fn test_auto_rename_plugin_skip_special_names() {
-        let mut plugin = AutoRenamePlugin::new();
+        let plugin = AutoRenamePlugin::new();
         // Should not rename well-known names
         let result = plugin.try_rename_function("main", "new_name");
         assert!(result.is_none());
@@ -519,7 +519,7 @@ mod tests {
 
     #[test]
     fn test_module_sort_plugin_sort_by_name() {
-        let mut plugin = ModuleSortPlugin::new();
+        let plugin = ModuleSortPlugin::new();
         let mut modules = vec![
             ModuleInfo::new("zebra", 3, Some(1)),
             ModuleInfo::new("alpha", 1, Some(1)),

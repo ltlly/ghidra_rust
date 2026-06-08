@@ -5,6 +5,37 @@
 //! consumers (other plugins). Each trait corresponds to a Java interface
 //! annotated with `@ServiceInfo`.
 
+// -- Sub-modules ported from individual Java files -------------------------
+
+/// GoTo query data with wildcard support.
+/// Ported from `ghidra.app.services.QueryData`.
+pub mod query_data;
+
+/// String validity scoring for auto-analysis string detection.
+/// Ported from `ghidra.app.services.StringValidityScore` and
+/// `ghidra.app.services.StringValidatorQuery`.
+pub mod string_validity;
+
+/// Field matcher for data-type component lookups.
+/// Ported from `ghidra.app.services.FieldMatcher`.
+pub mod field_matcher;
+
+/// Pluggable service registry for the plugin framework.
+/// Ported from `ghidra.framework.PluggableServiceRegistry`.
+pub mod service_registry;
+
+// Re-export sub-module types for convenience.
+pub use query_data::QueryData as FullQueryData;
+pub use string_validity::{
+    compute_default_score, StringCharInfo, StringValidityScore as FullStringValidityScore,
+    StringValidatorQuery as FullStringValidatorQuery,
+};
+pub use field_matcher::{
+    resolve_field_name_from_components, DataType as FieldMatcherDataType,
+    DataTypeComponent as FieldMatcherComponent, FieldMatcher, SortedRangeList,
+};
+pub use service_registry::{PluggableServiceRegistry, ServiceRegistryError};
+
 use std::fmt;
 use std::sync::Arc;
 

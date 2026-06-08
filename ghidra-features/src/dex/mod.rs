@@ -18,9 +18,7 @@
 // =============================================================================
 
 use nom::bytes::complete::take;
-use nom::combinator::{cond, map, verify};
-use nom::multi::{count, many0};
-use nom::number::complete::{le_u16, le_u32, le_u64, le_u8};
+use nom::number::complete::{le_u32, le_u8};
 use nom::sequence::tuple;
 use nom::IResult;
 use std::fmt;
@@ -692,18 +690,6 @@ fn parse_mutf8(input: &[u8]) -> IResult<&[u8], String> {
                 }
                 pos += 2;
             }
-            0xE0..=0xEF => {
-                if pos + 2 >= data.len() {
-                    break;
-                }
-                let b1 = data[pos + 1];
-                let b2 = data[pos + 2];
-                let cp = ((b as u32 & 0x0F) << 12)
-                    | ((b1 as u32 & 0x3F) << 6)
-                    | (b2 as u32 & 0x3F);
-                result.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
-                pos += 3;
-            }
             0xED => {
                 // Surrogate pair encoding for supplementary characters (CESU-8)
                 if pos + 5 >= data.len() {
@@ -727,6 +713,18 @@ fn parse_mutf8(input: &[u8]) -> IResult<&[u8], String> {
                 let cp = 0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00);
                 result.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
                 pos += 6;
+            }
+            0xE0..=0xEF => {
+                if pos + 2 >= data.len() {
+                    break;
+                }
+                let b1 = data[pos + 1];
+                let b2 = data[pos + 2];
+                let cp = ((b as u32 & 0x0F) << 12)
+                    | ((b1 as u32 & 0x3F) << 6)
+                    | (b2 as u32 & 0x3F);
+                result.push(char::from_u32(cp).unwrap_or('\u{FFFD}'));
+                pos += 3;
             }
             _ => {
                 // Invalid lead byte, skip
@@ -909,7 +907,7 @@ fn parse_encoded_annotation(input: &[u8]) -> IResult<&[u8], DexAnnotation> {
 
     let mut rest = input;
     for _ in 0..size {
-        let (input, name_idx) = read_uleb128(rest)?;
+        let (input, _name_idx) = read_uleb128(rest)?;
         let (input, value) = parse_encoded_value(input)?;
         elements.push(AnnotationElement {
             name: String::new(), // resolved later from string_ids
@@ -1018,7 +1016,7 @@ pub fn parse_dex(data: &[u8]) -> Result<DexFile, DexError> {
 }
 
 /// Parse all string_data_items.
-fn parse_strings(data: &[u8], header: &DexHeader, strings: &[String]) -> Result<Vec<String>, DexError> {
+fn parse_strings(data: &[u8], header: &DexHeader, _strings: &[String]) -> Result<Vec<String>, DexError> {
     // The string_ids table just contains offsets into string_data items.
     // We parse each string_data_item and collect the strings.
     // But we have a bootstrapping problem: strings are needed for types, but we
@@ -1464,7 +1462,7 @@ fn parse_class_data(
     }
 
     // Resolve static fields
-    for &(idx, flags) in &parsed_fields[..static_fields_size as usize] {
+    for &(idx, _flags) in &parsed_fields[..static_fields_size as usize] {
         let mut field = fields.get(idx as usize).cloned().unwrap_or_else(|| DexField {
             class_idx: 0,
             class: String::new(),
@@ -1478,7 +1476,7 @@ fn parse_class_data(
     }
 
     // Resolve instance fields
-    for &(idx, flags) in &parsed_fields[static_fields_size as usize..] {
+    for &(idx, _flags) in &parsed_fields[static_fields_size as usize..] {
         let mut field = fields.get(idx as usize).cloned().unwrap_or_else(|| DexField {
             class_idx: 0,
             class: String::new(),

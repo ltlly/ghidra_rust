@@ -7,7 +7,6 @@
 //! - <https://ext4.wiki.kernel.org/index.php/Ext4_Disk_Layout>
 
 use nom::{bytes::complete::take, number::complete::{le_u16, le_u32, le_u64, le_u8}, IResult};
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

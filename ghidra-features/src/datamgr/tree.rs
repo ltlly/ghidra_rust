@@ -8,8 +8,7 @@
 //! [`CategoryNode`]s and [`DataTypeNode`]s.
 
 use ghidra_core::data::{
-    CategoryPath, DataType, DataTypeManager, DataTypePath,
-    SourceArchive, UniversalID,
+    CategoryPath, DataTypePath, UniversalID,
 };
 use std::fmt;
 

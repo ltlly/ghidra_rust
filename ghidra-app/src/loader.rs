@@ -26,11 +26,10 @@
 use ghidra_core::addr::{Address, AddressRange};
 use ghidra_core::listing::{InstructionMnemonic, ListingRow};
 use ghidra_core::program::{
-    Comment, CommentKind, ListingData, MemoryBlock, MemoryPermissions, Program, SymbolTable,
+    MemoryBlock, MemoryPermissions, Program,
 };
-use ghidra_core::symbol::{Symbol, SymbolKind};
+use ghidra_core::symbol::{Symbol, SymbolType};
 use std::fs;
-use std::io;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
@@ -157,7 +156,7 @@ pub fn analyze_program(program: &Program, timeout_secs: u64) -> anyhow::Result<(
     let fn_count = program
         .symbol_table
         .iter()
-        .filter(|s| s.kind() == SymbolKind::Function)
+        .filter(|s| s.kind() == SymbolType::Function)
         .count();
 
     log::info!(
@@ -307,7 +306,7 @@ fn load_elf(name: &str, data: &[u8], base: u64) -> anyhow::Result<Program> {
 
     // Parse section headers for symbol names
     let shentsize = if is_64bit { 64usize } else { 40usize };
-    let shstrtab_off = if shnum > 0 && shoff > 0 {
+    let _shstrtab_off = if shnum > 0 && shoff > 0 {
         // Read shstrndx
         let shstrndx = if is_64bit {
             read_u16(data, 62, is_le) as usize
@@ -557,7 +556,7 @@ fn load_macho(name: &str, data: &[u8]) -> anyhow::Result<Program> {
     let is_64bit = matches!(magic, 0xfeedfacf | 0xcffaedfe);
     let is_le = matches!(magic, 0xfeedface | 0xfeedfacf);
 
-    let cputype = read_u32(data, 4, is_le);
+    let _cputype = read_u32(data, 4, is_le);
     let _cpusubtype = read_u32(data, 8, is_le);
     let filetype = read_u32(data, 12, is_le);
     let ncmds = read_u32(data, 16, is_le) as usize;
@@ -633,7 +632,7 @@ fn parse_macho_segment(
     offset: usize,
     _cmdsize: usize,
     is_le: bool,
-    image_base: u64,
+    _image_base: u64,
     is_64bit: bool,
 ) {
     let segname = read_fixed_string(data, offset + 8, 16);
@@ -808,8 +807,6 @@ fn decode_x86_instruction(bytes: &[u8], _remaining: usize, _addr: u64) -> (&'sta
             let target = if bytes.len() > 1 { bytes[1] as i8 } else { 0 };
             (cc, format!("0x{:x}", target), 2)
         }
-        0x74 => ("je", format_rel8(bytes), 2),                 // JE rel8
-        0x75 => ("jne", format_rel8(bytes), 2),                // JNE rel8
         0x80 => {
             // Group 1 r/m8, imm8
             if bytes.len() < 3 {

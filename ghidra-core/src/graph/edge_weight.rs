@@ -2,8 +2,6 @@
 //!
 //! Port of `ghidra.graph.GEdgeWeightMetric<E>`.
 
-use super::traits::GWeightedEdge;
-
 /// A function object that computes a weight for a given edge.
 ///
 /// Mirrors `ghidra.graph.GEdgeWeightMetric<E>`.

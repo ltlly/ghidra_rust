@@ -13,7 +13,7 @@ use ghidra_core::addr::Address;
 use std::collections::{HashMap, HashSet};
 
 /// Maximum number of bytes storable in the view.
-const MAX_BYTES: usize = 1_048_576; // 1 MiB
+const _MAX_BYTES: usize = 1_048_576; // 1 MiB
 
 // =============================================================================
 // BytesView

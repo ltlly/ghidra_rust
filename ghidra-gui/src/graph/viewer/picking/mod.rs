@@ -10,7 +10,6 @@
 use std::collections::HashSet;
 
 use crate::graph::viewer::{Point2D, Rect2D, VisualEdge, VisualGraph, VisualVertex};
-use crate::graph::viewer::shape::ShapePath;
 
 /// Result of a pick (hit-test) operation.
 #[derive(Debug, Clone)]

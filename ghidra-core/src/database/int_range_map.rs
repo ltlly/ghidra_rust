@@ -6,7 +6,7 @@
 //! Used for context register values, property maps, and other range-indexed
 //! integer metadata.
 
-use crate::addr::{Address, AddressSet, AddressSpace};
+use crate::addr::{Address, AddressSet};
 use crate::database::db::{Database, DbResult, Field, FieldType, FieldValue, Schema};
 use std::collections::BTreeMap;
 use std::fmt;

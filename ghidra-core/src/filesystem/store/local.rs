@@ -315,7 +315,7 @@ impl LockFile {
                 let owner_info = format!(
                     "{}@{}",
                     whoami::username(),
-                    whoami::hostname()
+                    whoami::fallible::hostname().unwrap_or_default()
                 );
                 let _ = file.write_all(owner_info.as_bytes());
                 self.lock_count = 1;
@@ -1671,7 +1671,7 @@ impl LocalFileSystemStoreImpl {
 
         let event_manager = FileSystemEventManager::new(async_dispatch);
 
-        let mut fs = Self {
+        let fs = Self {
             root,
             is_versioned,
             read_only,
@@ -1810,7 +1810,6 @@ impl FileSystemStore for LocalFileSystemStoreImpl {
     }
 
     fn item_count(&self) -> StoreResult<i32> {
-        let mut count = 0i32;
         fn count_items(dir: &Path) -> io::Result<i32> {
             let mut c = 0i32;
             if dir.exists() {
@@ -1828,7 +1827,7 @@ impl FileSystemStore for LocalFileSystemStoreImpl {
             }
             Ok(c)
         }
-        count = count_items(&self.root)?;
+        let count = count_items(&self.root)?;
         Ok(count)
     }
 

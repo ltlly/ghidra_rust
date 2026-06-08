@@ -2,14 +2,6 @@
 //!
 //! Ports `ghidra.framework.options.SubOptions`.
 
-use std::path::PathBuf;
-
-use crate::gui_util::help_location::HelpLocation;
-use crate::gui_util::web_colors::RgbaColor;
-use super::action_trigger::ActionTrigger;
-use super::option_type::OptionType;
-use super::option_value::{FontDescriptor, KeyStroke, OptionValue};
-use super::options_trait::{Options, DELIMITER_STR};
 
 /// A scoped view into a parent `ToolOptions` that prepends a prefix to all
 /// option names.

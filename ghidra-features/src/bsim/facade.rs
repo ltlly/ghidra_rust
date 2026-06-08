@@ -11,9 +11,9 @@
 use serde::{Deserialize, Serialize};
 
 use super::client::{BSimError, BSimResult, Configuration, ConnectionType, FunctionDatabase};
-use super::description::{DatabaseInformation, DescriptionManager, ExecutableRecord, FunctionDescription};
+use super::description::{DatabaseInformation, ExecutableRecord, FunctionDescription};
 use super::protocol::{
-    BSimQueryType, BSimResponseType, FunctionEntry, QueryNearest, ResponseNearest, SimilarityResult,
+    BSimQueryType, BSimResponseType, FunctionEntry, QueryNearest, SimilarityResult,
 };
 
 // ============================================================================

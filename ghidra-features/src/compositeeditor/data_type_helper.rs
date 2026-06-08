@@ -76,7 +76,7 @@ impl DataTypeDesc {
         match self {
             Self::Primitive(name) => name,
             Self::TypeDef { name, .. } => name,
-            Self::Array { element, length } => {
+            Self::Array { element, length: _ } => {
                 // Simplified: in reality this would format as "type[length]"
                 element.display_name()
             }

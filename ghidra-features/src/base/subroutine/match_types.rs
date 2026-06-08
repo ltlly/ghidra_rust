@@ -7,8 +7,8 @@
 //!   between two programs, holding references to both programs' block
 //!   models for convenient length queries.
 
-use crate::base::analyzer::core::{Address, AddressSet, CancelledError};
-use super::block_model::{CodeBlock, CodeBlockModel, TaskMonitor};
+use crate::base::analyzer::core::{Address, CancelledError};
+use super::block_model::{CodeBlockModel, TaskMonitor};
 
 // ============================================================================
 // SubroutineMatch
@@ -236,6 +236,8 @@ impl std::fmt::Debug for SubroutineMatchSet {
 mod tests {
     use super::*;
     use crate::base::analyzer::core::AddressRange;
+    use crate::base::subroutine::CodeBlock;
+    use crate::AddressSet;
 
     // -- SubroutineMatch tests --
 

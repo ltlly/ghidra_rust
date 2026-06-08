@@ -204,7 +204,7 @@ mod tests {
 
         let mut name = [b' '; 16];
         name[..5].copy_from_slice(b"test/");
-        let mut hdr = make_member_header(&name, 4);
+        let hdr = make_member_header(&name, 4);
         data.extend_from_slice(&hdr);
         data.extend_from_slice(b"test"); // 4 bytes of data
 

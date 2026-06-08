@@ -249,7 +249,7 @@ impl ExpressionSimplifier {
             // -- SUBPIECE (truncation) --
             OpCode::SUBPIECE if consts.len() >= 2 => {
                 let low_byte = consts[1];
-                let out_size = 4u64; // default
+                let _out_size = 4u64; // default
                 if low_byte * 8 < 64 {
                     let shift = (low_byte * 8) as u32;
                     Some(consts[0] >> shift)

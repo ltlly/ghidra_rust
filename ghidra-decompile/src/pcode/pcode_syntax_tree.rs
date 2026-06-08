@@ -4,8 +4,8 @@
 //! is the coherent graph structure holding Varnodes and PcodeOps, and
 //! provides the factory interface for creating them.
 
-use super::blocks::{BlockMap, PcodeBlock, PcodeBlockBasic};
-use super::high_level::{HighSymbol, LocalSymbolMap, GlobalSymbolMap};
+use super::blocks::PcodeBlockBasic;
+use super::high_level::HighSymbol;
 use super::operation::{PcodeOperation, Varnode};
 use super::opcodes::OpCode;
 use super::sequence::SequenceNumber;

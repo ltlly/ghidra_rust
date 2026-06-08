@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.disassemble`.
 
+#![allow(dead_code)]
+
 /// Flow override types for branches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowOverride {

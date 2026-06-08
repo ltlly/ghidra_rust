@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DisassemblyInject::new("test".to_string(), 4, true);
+        let _obj = DisassemblyInject::new("test".to_string(), 4, true);
         assert!(true);
     }
 

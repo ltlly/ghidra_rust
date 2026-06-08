@@ -333,7 +333,7 @@ pub fn build_cfg(sequences: &[PcodeSequence]) -> GhidraResult<ControlFlowGraph> 
             op_to_block.insert(i, blk_idx);
         }
 
-        let mut bb = BasicBlock::with_ops(blk_idx, ops, start_addr, end_addr);
+        let bb = BasicBlock::with_ops(blk_idx, ops, start_addr, end_addr);
         blocks.push(bb);
     }
 
@@ -524,7 +524,7 @@ fn find_leaders(ops: &[PcodeOperation]) -> Vec<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghidra_core::addr::AddressSpace;
+    
 
     fn test_addr(offset: u64) -> Address {
         Address::new(offset)

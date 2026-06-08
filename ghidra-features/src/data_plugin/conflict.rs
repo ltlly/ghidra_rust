@@ -72,7 +72,7 @@ impl DataConflictResolver {
         existing_start: Option<Address>,
         existing_end: Option<Address>,
         new_start: Address,
-        new_end: Address,
+        _new_end: Address,
         data_type_name: &str,
     ) -> Option<ConflictInfo> {
         let e_start = existing_start?;
@@ -98,7 +98,7 @@ impl DataConflictResolver {
         instruction_address: Option<Address>,
         instruction_end: Option<Address>,
         new_start: Address,
-        new_end: Address,
+        _new_end: Address,
         instruction_name: &str,
     ) -> Option<ConflictInfo> {
         let i_addr = instruction_address?;

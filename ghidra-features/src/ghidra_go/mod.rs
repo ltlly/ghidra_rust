@@ -124,7 +124,7 @@ impl GhidraGoIpc {
     /// the lock could not be acquired.
     pub fn do_locked_action<F, T>(
         lock_path: &Path,
-        wait: bool,
+        _wait: bool,
         action: F,
     ) -> Result<T, GhidraGoException>
     where

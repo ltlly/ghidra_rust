@@ -5,7 +5,7 @@
 use ghidra_core::Address;
 
 use super::options::CallTreeOptions;
-use super::table::{CallTreeTableModel, CallTreeNode};
+use super::table::CallTreeTableModel;
 
 /// Configuration for the call tree display.
 #[derive(Debug, Clone)]
@@ -111,6 +111,7 @@ impl Default for CallTreeProvider {
 mod tests {
     use super::*;
     use super::super::plugin::FunctionInfo;
+    use crate::calltree::table::CallTreeNode;
 
     #[test]
     fn test_call_tree_config_default() {
@@ -147,7 +148,7 @@ mod tests {
     fn test_provider_call_tree_options() {
         let mut provider = CallTreeProvider::new();
         assert_eq!(provider.call_tree_options().max_depth, 10);
-        let mut opts = CallTreeOptions::large_binary();
+        let opts = CallTreeOptions::large_binary();
         provider.set_call_tree_options(opts.clone());
         assert_eq!(provider.call_tree_options().max_depth, 3);
     }

@@ -211,7 +211,7 @@ impl ColumnLayout {
     pub fn compute(
         &self,
         container_width: u32,
-        container_height: u32,
+        _container_height: u32,
         num_items: usize,
         preferred_heights: &[u32],
     ) -> Vec<LayoutRect> {
@@ -293,7 +293,7 @@ impl HorizontalLayout {
     /// Compute positions for items laid out horizontally.
     pub fn compute(
         &self,
-        container_width: u32,
+        _container_width: u32,
         container_height: u32,
         preferred_widths: &[u32],
         preferred_heights: &[u32],
@@ -996,9 +996,9 @@ impl RightSidedSquishyBuddyLayout {
         container_width: u32,
         container_height: u32,
         comp1_pref_width: u32,
-        comp1_pref_height: u32,
+        _comp1_pref_height: u32,
         comp2_pref_width: u32,
-        comp2_pref_height: u32,
+        _comp2_pref_height: u32,
     ) -> (LayoutRect, LayoutRect) {
         let comp1_width = comp1_pref_width;
         let remaining = container_width.saturating_sub(comp1_width).saturating_sub(self.h_gap);
@@ -1292,7 +1292,7 @@ mod tests {
     #[test]
     fn right_sided_squishy_buddy_right_align() {
         let layout = RightSidedSquishyBuddyLayout::right_aligned(8);
-        let (c1, c2) = layout.compute(400, 30, 100, 30, 100, 30);
+        let (c1, _c2) = layout.compute(400, 30, 100, 30, 100, 30);
         assert_eq!(c1.width, 100);
         // There's leftover space (400 - 100 - 8 - 100 = 192), both shift right
         assert!(c1.x > 0);

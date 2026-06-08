@@ -8,7 +8,7 @@
 //! be used as function-start identification patterns.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 // ---------------------------------------------------------------------------
 // SequenceItem -- a single item in a sequence

@@ -4,7 +4,7 @@
 //! Provides functionality for finding strings in raw memory by scanning
 //! for common patterns (null-terminated ASCII, UTF-16, etc.).
 
-use super::{DefinedStringInfo, StringEncodingError};
+use super::DefinedStringInfo;
 
 /// Minimum string length to consider when scanning.
 pub const DEFAULT_MIN_LENGTH: usize = 5;

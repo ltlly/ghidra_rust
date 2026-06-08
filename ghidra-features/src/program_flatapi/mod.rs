@@ -42,7 +42,7 @@ impl FlatProgramAPI {
     }
 
     /// Get the bytes at the given address.
-    pub fn get_bytes(&self, address: u64, length: usize) -> Vec<u8> {
+    pub fn get_bytes(&self, _address: u64, length: usize) -> Vec<u8> {
         // Placeholder: in real implementation this reads from program memory
         vec![0u8; length]
     }

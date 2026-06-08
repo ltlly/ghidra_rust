@@ -203,13 +203,11 @@ impl LatticeElement for Pentagon {
             (_, Self::Bottom) => false,
             (_, Self::Top) => true,
             (Self::Top, _) => false,
-            (Self::Element { .. }, Self::Top) => true,
             (Self::Element { .. }, Self::Element { .. }) => {
                 // Simplified: element <= element if self provides at least as much info
                 // A full implementation would check each component
                 true
             }
-            _ => false,
         }
     }
 }

@@ -1685,7 +1685,7 @@ mod tests {
             else_branch: None,
         };
 
-        let tokens = pp.print_function(&func, &body);
+        let _tokens = pp.print_function(&func, &body);
         let text = pp.to_string();
         assert!(text.contains("if"));
         assert!(text.contains("x != 0"));

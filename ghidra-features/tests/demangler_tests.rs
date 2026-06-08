@@ -6,7 +6,7 @@ use ghidra_features::demangler::microsoft::function::CallingConvention;
 use ghidra_features::demangler::microsoft::iterator::CharacterIterator;
 use ghidra_features::demangler::microsoft::modifier::CVMod;
 use ghidra_features::demangler::microsoft::naming::{
-    BasicName, FragmentName, Qualification, SpecialName,
+    FragmentName, Qualification, SpecialName,
 };
 use ghidra_features::demangler::microsoft::typeinfo::TypeInfo;
 use ghidra_features::demangler::microsoft::{DemangleError, MicrosoftDemangler};

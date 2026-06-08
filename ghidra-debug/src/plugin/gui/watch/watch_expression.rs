@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = WatchExpression::new("test".to_string(), None, None);
+        let _obj = WatchExpression::new("test".to_string(), None, None);
         assert!(true);
     }
 

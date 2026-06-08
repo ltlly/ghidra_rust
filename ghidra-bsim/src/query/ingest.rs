@@ -6,7 +6,7 @@
 
 use super::description::{BSimExecutableInfo, BSimFunctionDescription, FunctionSignatureInfo};
 use super::function_database::FunctionDatabase;
-use super::{BSimError, BSimResult};
+use super::BSimResult;
 
 /// Configuration for the ingestion pipeline.
 #[derive(Debug, Clone)]
@@ -105,7 +105,7 @@ impl IngestionPipeline {
     pub fn generate_signature(
         &self,
         function_bytes: &[u8],
-        entry_point: u64,
+        _entry_point: u64,
     ) -> FunctionSignatureInfo {
         let mut sig = FunctionSignatureInfo::new();
 

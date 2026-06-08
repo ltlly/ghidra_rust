@@ -46,7 +46,7 @@ pub use editor::*;
 pub use reference::*;
 pub use dnd::*;
 
-use ghidra_core::{Address, SymbolKind, SymbolType, SourceType};
+use ghidra_core::{Address, SymbolType, SourceType};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ pub struct SymbolDisplayInfo {
     /// Symbol type.
     pub symbol_type: SymbolType,
     /// Symbol kind.
-    pub kind: SymbolKind,
+    pub kind: SymbolType,
     /// Source of the symbol.
     pub source: SourceType,
     /// Namespace path.

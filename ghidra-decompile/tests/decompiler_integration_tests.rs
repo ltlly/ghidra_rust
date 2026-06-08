@@ -48,7 +48,7 @@ fn test_decomp_interface_new() {
 
 #[test]
 fn test_decompile_results_types() {
-    let arena = ClangNodeArena::new();
+    let _arena = ClangNodeArena::new();
     let mut arena2 = ClangNodeArena::new();
     let root = arena2.alloc(ClangNodeKind::TokenGroup(ClangTokenGroupData::default()));
     let results = DecompileResults::success(0x1000, Some("main".to_string()), root, arena2);

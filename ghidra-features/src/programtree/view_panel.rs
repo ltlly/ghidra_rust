@@ -171,7 +171,7 @@ mod tests {
 
     #[test]
     fn test_view_panel_basic() {
-        let mut panel = ViewPanel::new("tree1");
+        let panel = ViewPanel::new("tree1");
         assert_eq!(panel.tree_name(), "tree1");
         assert!(!panel.has_focus());
         assert!(panel.root().is_none());

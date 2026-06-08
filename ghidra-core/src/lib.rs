@@ -18,6 +18,7 @@ pub mod mem;
 pub mod pcode;
 pub mod program;
 pub mod project;
+pub mod scalar;
 pub mod symbol;
 pub mod util;
 pub mod utility;
@@ -25,6 +26,7 @@ pub mod utility;
 // Re-exports for key types used across the workspace.
 pub use addr::{AddrSpaceType, Address, AddressFactory, AddressRange, AddressSet, AddressSpace};
 pub use data::{DataType, DataTypePath, DataTypeTreeNode};
+#[allow(deprecated)]
 pub use symbol::{
     AddressLabelPair, ClassSymbol, DataRefType, EntryPointReference, EquateApi,
     EquateReference, ExportSymbol, ExternalLocation, ExternalLocationImpl,

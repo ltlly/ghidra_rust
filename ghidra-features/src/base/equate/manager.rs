@@ -5,7 +5,7 @@
 //! Provides the high-level logic for creating, renaming, removing, and
 //! querying equates (named constants) attached to instruction/data operands.
 
-use super::{EquateReference, EquateValue, Scalar};
+use super::{EquateValue, Scalar};
 use ghidra_core::Address;
 use std::collections::HashMap;
 

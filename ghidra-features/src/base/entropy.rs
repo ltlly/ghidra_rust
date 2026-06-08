@@ -18,7 +18,6 @@
 //! assert!(entropy.get_value(0) > 200);
 //! ```
 
-use std::collections::HashMap;
 
 /// Default chunk size (bytes) used for entropy analysis.
 pub const DEFAULT_CHUNK_SIZE: usize = 256;
@@ -186,7 +185,7 @@ fn build_log_table(chunk_size: usize) -> Vec<f64> {
 }
 
 /// Build a byte histogram for a chunk of data and compute quantized entropy.
-fn quantize_chunk(chunk: &[u8], log_table: &[f64], chunk_size: usize) -> i32 {
+fn quantize_chunk(chunk: &[u8], log_table: &[f64], _chunk_size: usize) -> i32 {
     if chunk.is_empty() {
         return -1;
     }

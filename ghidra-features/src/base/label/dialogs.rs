@@ -7,11 +7,9 @@
 //! - [`LabelHistoryTask`] -- background task that queries label history
 //! - [`SymbolChooserDialog`] -- dialog for selecting symbols/labels
 
-use std::collections::HashMap;
-
 use ghidra_core::addr::Address;
 
-use super::history::{LabelHistoryAction, LabelHistoryEntry, LabelHistoryTableModel};
+use super::history::{LabelHistoryEntry, LabelHistoryTableModel};
 
 // ---------------------------------------------------------------------------
 // EditExternalLabelAction
@@ -475,8 +473,9 @@ impl SymbolChooserDialog {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::history::LabelHistoryTableModel;
+    use super::*;
+    use crate::base::label::LabelHistoryAction;
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

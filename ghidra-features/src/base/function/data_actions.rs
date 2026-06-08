@@ -6,7 +6,7 @@
 //! `EditStructureAction`, `AddVarArgsAction`, and `DeleteVarArgsAction` Java
 //! classes in `ghidra.app.plugin.core.function`.
 
-use crate::base::function::actions::{ActionContext, KeyBindingData, ListingContext, MenuData};
+use crate::base::function::actions::{ActionContext, KeyBindingData, MenuData};
 
 // ---------------------------------------------------------------------------
 // DataTypeDescriptor -- lightweight data-type representation
@@ -1081,6 +1081,7 @@ impl VariableCommentDialogModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::function::ListingContext;
 
     // -- DataTypeDescriptor --
 

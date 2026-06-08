@@ -6,7 +6,6 @@
 //! multi-entry sub-model).
 
 use crate::base::analyzer::core::{Address, AddressRange, AddressSet, CancelledError};
-use std::sync::Arc;
 
 // ============================================================================
 // FlowType -- lightweight copy for block references

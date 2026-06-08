@@ -13,9 +13,8 @@
 //! - [`ViewStringsColumnConstraint`] -- Column constraints for filtering
 //! - [`FoundStringIterator`] -- Iterator over strings found in memory
 
-use std::collections::HashMap;
 
-use super::{DefinedStringInfo, StringConstraint, StringEncodingError};
+use super::{DefinedStringInfo, StringConstraint};
 
 // ---------------------------------------------------------------------------
 // ViewStringsPlugin

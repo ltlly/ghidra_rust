@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::fs;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -205,7 +205,7 @@ impl UserManager {
         let user_file = root_dir.join(Self::USER_PASSWORD_FILE);
         let ssh_dir = root_dir.join(format!("{HIDDEN_DIR_PREFIX}ssh"));
 
-        let mut mgr = Self {
+        let mgr = Self {
             root_dir,
             user_file,
             ssh_dir,

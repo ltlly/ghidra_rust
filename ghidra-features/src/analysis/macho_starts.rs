@@ -7,7 +7,7 @@
 //! boundaries in macOS/iOS binaries.
 
 use crate::base::analyzer::{
-    AbstractAnalyzer, Address, AddressRange, AddressSet, AnalysisPriority, Analyzer, AnalyzerType,
+    AbstractAnalyzer, AddressSet, AnalysisPriority, Analyzer, AnalyzerType,
     CancelledError, MessageLog, Program, TaskMonitor,
 };
 

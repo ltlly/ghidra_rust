@@ -12,7 +12,7 @@ mod tests {
     };
     use crate::model::schedule::sequence::StepEnum;
     use crate::model::schedule::tick_step::StepType;
-    use crate::model::schedule::stepper::{InstructionStepper, PcodeStepper, instruction_stepper, pcode_stepper};
+    use crate::model::schedule::stepper::{InstructionStepper, PcodeStepper};
 
     // === TraceSchedule integration tests ===
 

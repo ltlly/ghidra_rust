@@ -31,7 +31,6 @@ use std::fmt;
 
 use nom::{
     bytes::complete::take,
-    combinator::verify,
     number::complete::{be_u16, be_u32},
     sequence::tuple,
     IResult,
@@ -680,7 +679,7 @@ fn populate_segment_data(rpx: &mut RpxFile, data: &[u8]) -> Result<(), RpxError>
 }
 
 /// Parse RPL-specific info (exports, imports) from Cafe OS segments.
-fn parse_rpl_info(rpx: &mut RpxFile, data: &[u8]) {
+fn parse_rpl_info(rpx: &mut RpxFile, _data: &[u8]) {
     let rpl_info_segments: Vec<Vec<u8>> = rpx
         .segments
         .iter()

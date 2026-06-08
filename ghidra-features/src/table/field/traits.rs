@@ -5,7 +5,6 @@
 //! - `ProgramLocationTableColumn` -- column that can produce a `ProgramLocation`.
 //! - Extension-point marker traits for discoverable columns.
 
-use ghidra_core::addr::Address;
 
 use super::super::mapper::ProgramLocation;
 
@@ -289,7 +288,7 @@ pub trait ProgramBasedDynamicTableColumn<ROW>: Send + Sync {
     fn column_name(&self) -> &str;
 
     /// Returns the column display name, optionally incorporating settings.
-    fn column_display_name(&self, settings: &Settings) -> String {
+    fn column_display_name(&self, _settings: &Settings) -> String {
         self.column_name().to_string()
     }
 

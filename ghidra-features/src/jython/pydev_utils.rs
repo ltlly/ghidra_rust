@@ -4,7 +4,7 @@
 //!
 //! Provides utility functions for PyDev remote debugger integration.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// The default PyDev remote debugger port.
 pub const PYDEV_REMOTE_DEBUGGER_PORT: u16 = 5678;

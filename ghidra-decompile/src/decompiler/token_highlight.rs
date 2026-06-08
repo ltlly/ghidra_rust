@@ -13,7 +13,6 @@ use std::collections::HashMap;
 
 use ghidra_core::addr::Address;
 
-use super::clang_node::SyntaxType;
 
 /// A highlight applied to a specific token or address range.
 ///

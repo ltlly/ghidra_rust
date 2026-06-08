@@ -18,9 +18,6 @@
 //! - Native library inventory by ABI
 //! - Signature detection
 
-use nom::bytes::complete::take;
-use nom::number::complete::{le_u16, le_u32};
-use nom::IResult;
 use std::collections::HashMap;
 use std::io::Read;
 

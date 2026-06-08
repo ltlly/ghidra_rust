@@ -10,7 +10,6 @@
 //! - Popup action resolution for listing context menus
 
 use ghidra_core::addr::Address;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 // ---------------------------------------------------------------------------

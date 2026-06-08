@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::sync::Arc;
 
-use super::action::{ActionCallback, DockingAction};
+use super::action::DockingAction;
 use super::component::ComponentProvider;
 
 // ---------------------------------------------------------------------------

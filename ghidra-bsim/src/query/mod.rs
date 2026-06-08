@@ -54,7 +54,6 @@ pub mod row_key_sql;
 pub mod query_database_exception;
 pub mod b_sim_client_factory;
 
-use std::fmt;
 
 /// Error type for BSim query operations.
 #[derive(Debug, thiserror::Error)]

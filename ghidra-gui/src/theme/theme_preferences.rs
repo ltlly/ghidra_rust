@@ -3,11 +3,6 @@
 //! Port of `generic.theme.ThemePreferences`. Reads and writes the
 //! current theme identifier to/from the application preferences store.
 
-use super::g_theme::GTheme;
-use super::discoverable_theme::DiscoverableGTheme;
-use super::theme_manager::ThemeManager;
-use super::theme_reader::ThemeReader;
-
 /// Key used to store the theme preference.
 const THEME_PREFERENCE_KEY: &str = "Theme";
 

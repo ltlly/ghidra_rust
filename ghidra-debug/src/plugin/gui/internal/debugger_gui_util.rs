@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerGuiUtil::new(true);
+        let _obj = DebuggerGuiUtil::new(true);
         assert!(true);
     }
 

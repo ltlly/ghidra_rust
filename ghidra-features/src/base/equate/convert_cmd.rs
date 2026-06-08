@@ -139,7 +139,7 @@ fn format_binary(value: u64, byte_width: u8) -> String {
     format!("{:0>width$b}", masked, width = bits as usize)
 }
 
-fn format_char(value: u64, byte_width: u8) -> String {
+fn format_char(value: u64, _byte_width: u8) -> String {
     let ch = (value & 0xFF) as u8;
     if ch.is_ascii_graphic() || ch == b' ' {
         format!("'{}'", ch as char)

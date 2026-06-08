@@ -13,7 +13,7 @@ use super::action_trigger::ActionTrigger;
 use super::option::OptionEntry;
 use super::option_type::OptionType;
 use super::option_value::{FontDescriptor, KeyStroke, OptionValue};
-use super::options_trait::{Options, OptionsChangeListener, DELIMITER, DELIMITER_STR};
+use super::options_trait::{Options, OptionsChangeListener, DELIMITER};
 
 /// A concrete hierarchical options store.
 ///
@@ -224,14 +224,20 @@ impl Options for ToolOptions {
         for full_name in names {
             let short = full_name.strip_prefix(&self.prefix).unwrap_or(&full_name);
             let short_owned = short.to_string();
-            if let Some(opt) = self.value_map.get_mut(&full_name) {
+            let changed = if let Some(opt) = self.value_map.get_mut(&full_name) {
                 if !opt.is_default() {
                     let old = opt.current_value().clone();
                     opt.restore_default();
                     let new = opt.current_value().clone();
-                    drop(opt); // release borrow
-                    self.notify_changed(&short_owned, &old, &new);
+                    Some((old, new))
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
+            if let Some((old, new)) = changed {
+                self.notify_changed(&short_owned, &old, &new);
             }
         }
     }

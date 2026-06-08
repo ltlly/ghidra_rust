@@ -38,7 +38,6 @@ use ghidra_core::data::types::{
     ArrayDataType, BuiltInDataType, BuiltInDataTypeWrapper, DataType,
     EnumDataType, FunctionDefinitionDataType, PointerDataType,
     StructureDataType, TypedefDataType, UnionDataType,
-    DataTypeComponent, CallingConvention, FunctionParameter,
 };
 
 /// Type alias for Arc<dyn DataType>.
@@ -1801,7 +1800,7 @@ pub fn parse_line_program_header(data: &[u8]) -> DwarfResult<(LineProgramHeader,
             let (length, _) = read_uleb128(&data[pos..])?;
             file_names.push(FileEntry { name, directory_index: dir_idx as u32, last_modified: mod_time, length });
         }
-        if pos < data.len() { pos += 1; }
+        if pos < data.len() { pos += 1; let _ = pos; }
     }
 
     Ok((LineProgramHeader { unit_length, version, header_length, min_insn_length,
@@ -1850,7 +1849,7 @@ pub fn execute_line_program(header: &LineProgramHeader, data: &[u8]) -> DwarfRes
                 }
                 dw_lne::SET_DISCRIMINATOR => {
                     let (val, c) = read_uleb128(&data[offset..])?;
-                    offset += c; state.discriminator = val;
+                    let _ = c; state.discriminator = val;
                 }
                 _ => {}
             }
@@ -1997,7 +1996,7 @@ pub fn parse_cie(data: &[u8]) -> DwarfResult<CieEntry> {
     let mut pointer_encoding = None;
     let mut lsda_encoding = None;
     let mut personality = None;
-    let mut fde_encoding = None;
+    let fde_encoding = None;
 
     let aug_bytes = augmentation.as_bytes();
     if aug_bytes.first() == Some(&b'z') {

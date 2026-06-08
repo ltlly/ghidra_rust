@@ -16,12 +16,12 @@
 
 use super::{
     token_color, token_is_bold, token_is_italic, token_is_underline, CTokenKind,
-    DecompilerNavigation, DecompilerViewState, FoldKind, SyntaxTheme, TextPosition, TextRange,
+    DecompilerNavigation, DecompilerViewState, SyntaxTheme, TextPosition, TextRange,
     TokenNavigation,
 };
 use egui::{
-    Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response, RichText,
-    ScrollArea, Sense, Stroke, TextStyle, Ui, Vec2,
+    Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, RichText,
+    ScrollArea, Sense, Stroke, Ui, Vec2,
 };
 use ghidra_core::addr::Address;
 
@@ -96,7 +96,7 @@ fn render_header(state: &mut DecompilerViewState, ui: &mut Ui) {
     );
 
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available.x, HEADER_HEIGHT), Sense::hover());
-    let mut header_ui = ui.child_ui(rect, *ui.layout(), None);
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(*ui.layout()));
 
     header_ui.horizontal(|ui| {
         // Function name
@@ -124,7 +124,7 @@ fn render_header(state: &mut DecompilerViewState, ui: &mut Ui) {
             if ui
                 .add(
                     egui::DragValue::new(&mut state.font_size)
-                        .clamp_range(8.0..=24.0)
+                        .range(8.0..=24.0)
                         .speed(0.5)
                         .fixed_decimals(0),
                 )
@@ -223,8 +223,8 @@ fn render_code_area(state: &mut DecompilerViewState, ui: &mut Ui) {
 
     // Allocate the scroll area
     let scroll_id = ui.make_persistent_id("decompiler_scroll");
-    let mut scroll_area = ScrollArea::vertical()
-        .id_source(scroll_id)
+    let scroll_area = ScrollArea::vertical()
+        .id_salt(scroll_id)
         .auto_shrink([false; 2])
         .drag_to_scroll(true);
 
@@ -280,7 +280,7 @@ fn render_code_area(state: &mut DecompilerViewState, ui: &mut Ui) {
 fn render_code_line(
     state: &mut DecompilerViewState,
     line_idx: usize,
-    vis_idx: usize,
+    _vis_idx: usize,
     y_pos: f32,
     ui: &mut Ui,
 ) {
@@ -502,7 +502,7 @@ fn render_tokens(
     line_idx: usize,
     code_x: f32,
     y_top: f32,
-    max_width: f32,
+    _max_width: f32,
     ui: &mut Ui,
 ) {
     let theme = state.syntax_theme.clone();
@@ -1212,14 +1212,14 @@ fn col_from_x(x: f32, tokens: &[super::CToken], font_size: f32) -> usize {
 }
 
 /// Get the width of a rendered token in pixels.
-fn token_pixel_width(token: &super::CToken, font_size: f32) -> f32 {
+fn _token_pixel_width(token: &super::CToken, font_size: f32) -> f32 {
     let char_width = estimate_char_width(font_size);
     token.text.len() as f32 * char_width
 }
 
 /// Compute the total width of a line in pixels.
-fn line_pixel_width(tokens: &[super::CToken], font_size: f32) -> f32 {
-    tokens.iter().map(|t| token_pixel_width(t, font_size)).sum()
+fn _line_pixel_width(tokens: &[super::CToken], font_size: f32) -> f32 {
+    tokens.iter().map(|t| _token_pixel_width(t, font_size)).sum()
 }
 
 // ============================================================================
@@ -1229,7 +1229,7 @@ fn line_pixel_width(tokens: &[super::CToken], font_size: f32) -> f32 {
 /// Return sorted list of (source_line, address) for all currently visible
 /// lines.  Used by the application for scroll synchronization with the
 /// listing view.
-pub fn visible_line_addresses(state: &DecompilerViewState) -> Vec<(usize, Address)> {
+pub fn _visible_line_addresses(state: &DecompilerViewState) -> Vec<(usize, Address)> {
     let mut results = Vec::new();
     for line in 0..state.tokens.len() {
         if state.is_line_visible(line) {
@@ -1267,7 +1267,7 @@ mod tests {
             CToken::new(CTokenKind::Identifier, "x", 0, 4),
             CToken::new(CTokenKind::Punctuation, ")", 0, 5),
         ];
-        let width = line_pixel_width(&tokens, 12.0);
+        let width = _line_pixel_width(&tokens, 12.0);
         assert!(width > 0.0);
     }
 }

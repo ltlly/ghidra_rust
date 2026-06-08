@@ -513,7 +513,7 @@ impl From<f64> for FieldValue {
 /// ```rust
 /// # use ghidra_core::database::{Field, FieldType};
 /// let f = Field::new("id", FieldType::Int).primary_key().not_null();
-/// assert_eq!(f.to_sql_def(), "id INTEGER PRIMARY KEY NOT NULL");
+/// assert_eq!(f.to_sql_def(), "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL");
 /// ```
 #[derive(Debug, Clone)]
 pub struct Field {
@@ -1314,14 +1314,14 @@ impl Database {
     // ------------------------------------------------------------------
 
     /// Acquire a shared (read) lock on the underlying connection.
-    pub fn read(&self) -> DbResult<RwLockReadGuard<SqliteConnection>> {
+    pub fn read(&self) -> DbResult<RwLockReadGuard<'_, SqliteConnection>> {
         self.conn
             .read()
             .map_err(|e| DbError::Lock(format!("Failed to acquire read lock: {}", e)))
     }
 
     /// Acquire an exclusive (write) lock on the underlying connection.
-    pub fn write(&self) -> DbResult<RwLockWriteGuard<SqliteConnection>> {
+    pub fn write(&self) -> DbResult<RwLockWriteGuard<'_, SqliteConnection>> {
         self.conn
             .write()
             .map_err(|e| DbError::Lock(format!("Failed to acquire write lock: {}", e)))
@@ -1329,7 +1329,7 @@ impl Database {
 
     /// Get a write-locked reference to the underlying connection.
     /// This is a convenience shorthand used by downstream crates.
-    pub fn conn(&self) -> RwLockWriteGuard<SqliteConnection> {
+    pub fn conn(&self) -> RwLockWriteGuard<'_, SqliteConnection> {
         self.conn.write().expect("Database: failed to acquire write lock")
     }
 

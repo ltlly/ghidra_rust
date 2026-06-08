@@ -6,7 +6,6 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::base::references::commands::ReferenceCommand;
 use crate::base::references::edit_model::EditReferencesModel;
 use crate::base::references::dialog::InstructionPanel;
 

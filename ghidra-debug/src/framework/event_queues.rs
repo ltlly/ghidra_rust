@@ -200,7 +200,7 @@ impl Default for DomainObjectEventQueues {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use std::collections::BTreeSet;
+    
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]

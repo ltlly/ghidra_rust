@@ -4,7 +4,7 @@
 //! - [`AbstractVisualVertexRenderer`] -- base class for vertex renderers.
 //! - [`DockingVisualVertex`] -- vertex with docking panel support.
 
-use super::super::{Point2D, Rect2D, VisualVertex};
+use super::super::{Rect2D, VisualVertex};
 use super::super::renderer::RenderCommand;
 use crate::graph::service::VertexShape;
 

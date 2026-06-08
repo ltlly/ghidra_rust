@@ -152,7 +152,7 @@ impl ReorderManager {
         tree: &mut ProgramTree,
         dest_node: &ProgramNode,
         drop_nodes: &[ProgramNode],
-        drop_action: DropAction,
+        _drop_action: DropAction,
         relative_mouse_pos: i32,
     ) -> Result<(), super::dnd_move_manager::DropError> {
         // This is a reorder operation -- move nodes within the tree.

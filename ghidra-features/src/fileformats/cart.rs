@@ -6,7 +6,6 @@
 //! References:
 //! - Apple's CaRT format used for provisioning profiles
 
-use nom::{bytes::complete::take, number::complete::{le_u16, le_u32, le_u64}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

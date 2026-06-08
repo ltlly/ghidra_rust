@@ -5,10 +5,9 @@
 //! Provides helper functions for bundle management, class loading,
 //! and the Ghidra plugin framework's OSGi-like operations.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::{BundleStatus, GhidraBundle};
+use super::GhidraBundle;
 
 /// The Ghidra extension directory name.
 pub const EXTENSION_DIR_NAME: &str = "Extensions";
@@ -107,6 +106,7 @@ pub fn extension_install_path(base_dir: &Path, extension_name: &str) -> PathBuf 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::osgi::BundleStatus;
 
     #[test]
     fn test_is_plugin_jar() {

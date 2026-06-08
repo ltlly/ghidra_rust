@@ -6,11 +6,10 @@
 //! Provides utilities for decompiling functions in parallel and generating
 //! BSim signatures from the decompiled output.
 
-use std::collections::HashMap;
 
-use super::description::{BSimFunctionDescription, FunctionSignatureInfo};
+use super::description::BSimFunctionDescription;
 use super::gen_signatures::SignatureGenerator;
-use super::{BSimError, BSimResult};
+use super::BSimResult;
 
 /// A single function to be decompiled for BSim signature generation.
 #[derive(Debug, Clone)]

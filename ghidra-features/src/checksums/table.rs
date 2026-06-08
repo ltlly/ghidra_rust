@@ -4,7 +4,7 @@
 //! `ComputeChecksumsPlugin`, `ComputeChecksumsProvider`, and
 //! `ComputeChecksumTask`.
 
-use super::{ChecksumAlgorithm, ChecksumRegistry, format_checksum};
+use super::{ChecksumRegistry, format_checksum};
 use super::commands::ChecksumResult;
 
 // ---------------------------------------------------------------------------

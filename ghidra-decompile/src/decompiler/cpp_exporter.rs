@@ -4,12 +4,9 @@
 //! Exports decompiled functions as compilable C/C++ source code,
 //! including type definitions, function prototypes, and function bodies.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
+use std::collections::{BTreeMap, HashMap};
 
-use super::clang_node::{ClangNodeArena, ClangNodeId, ClangNodeKind};
 use super::decompiled_function::DecompiledFunction;
-use super::pretty_printer::PrettyPrinter;
 use super::util::DataTypeDependencyOrderer;
 
 // ============================================================================

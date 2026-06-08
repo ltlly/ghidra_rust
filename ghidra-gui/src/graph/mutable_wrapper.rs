@@ -6,7 +6,6 @@
 //! without modifying the underlying delegate graph. Useful for
 //! algorithms that need temporary vertices (e.g., dominance algorithms).
 
-use std::collections::HashMap;
 use std::fmt;
 use std::hash::Hash;
 

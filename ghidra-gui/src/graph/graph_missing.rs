@@ -19,7 +19,6 @@
 //! - `ghidra.service.graph.*` (service types)
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt;
 
 // ============================================================================
 // GraphAlgorithms - convenience methods for graph algorithms
@@ -776,7 +775,7 @@ impl EdgeHoverAnimator {
 /// Ported from `ghidra.graph.job.TwinkleVertexAnimator`.
 #[derive(Debug, Clone)]
 pub struct TwinkleVertexAnimator {
-    animator: AbstractAnimator,
+    _animator: AbstractAnimator,
     target_vertex: usize,
     flash_count: usize,
 }
@@ -785,7 +784,7 @@ impl TwinkleVertexAnimator {
     /// Create a new twinkle animator for the given vertex.
     pub fn new(vertex: usize, flash_count: usize, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
+            _animator: AbstractAnimator::new(duration_ms),
             target_vertex: vertex,
             flash_count,
         }
@@ -811,7 +810,7 @@ impl TwinkleVertexAnimator {
 /// Ported from `ghidra.graph.job.EnsureAreaVisibleAnimatorFunctionGraphJob`.
 #[derive(Debug, Clone)]
 pub struct EnsureAreaVisibleAnimatorFunctionGraphJob {
-    animator: AbstractAnimator,
+    _animator: AbstractAnimator,
     target_x: f64,
     target_y: f64,
     target_width: f64,
@@ -822,7 +821,7 @@ impl EnsureAreaVisibleAnimatorFunctionGraphJob {
     /// Create a new area visibility job.
     pub fn new(x: f64, y: f64, width: f64, height: f64, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
+            _animator: AbstractAnimator::new(duration_ms),
             target_x: x,
             target_y: y,
             target_width: width,
@@ -841,7 +840,7 @@ impl EnsureAreaVisibleAnimatorFunctionGraphJob {
 /// Ported from `ghidra.graph.job.MoveVertexToCenterAnimatorFunctionGraphJob`.
 #[derive(Debug, Clone)]
 pub struct MoveVertexToCenterAnimatorFunctionGraphJob {
-    animator: AbstractAnimator,
+    _animator: AbstractAnimator,
     vertex: usize,
 }
 
@@ -849,7 +848,7 @@ impl MoveVertexToCenterAnimatorFunctionGraphJob {
     /// Create a new vertex-centering job.
     pub fn new(vertex: usize, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
+            _animator: AbstractAnimator::new(duration_ms),
             vertex,
         }
     }
@@ -865,7 +864,7 @@ impl MoveVertexToCenterAnimatorFunctionGraphJob {
 /// Ported from `ghidra.graph.job.MoveVertexToCenterTopAnimatorFunctionGraphJob`.
 #[derive(Debug, Clone)]
 pub struct MoveVertexToCenterTopAnimatorFunctionGraphJob {
-    animator: AbstractAnimator,
+    _animator: AbstractAnimator,
     vertex: usize,
 }
 
@@ -873,7 +872,7 @@ impl MoveVertexToCenterTopAnimatorFunctionGraphJob {
     /// Create a new vertex-center-top job.
     pub fn new(vertex: usize, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
+            _animator: AbstractAnimator::new(duration_ms),
             vertex,
         }
     }
@@ -889,18 +888,18 @@ impl MoveVertexToCenterTopAnimatorFunctionGraphJob {
 /// Ported from `ghidra.graph.job.MoveViewAnimatorFunctionGraphJob`.
 #[derive(Debug, Clone)]
 pub struct MoveViewAnimatorFunctionGraphJob {
-    animator: AbstractAnimator,
-    delta_x: f64,
-    delta_y: f64,
+    _animator: AbstractAnimator,
+    _delta_x: f64,
+    _delta_y: f64,
 }
 
 impl MoveViewAnimatorFunctionGraphJob {
     /// Create a new view-move job.
     pub fn new(dx: f64, dy: f64, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
-            delta_x: dx,
-            delta_y: dy,
+            _animator: AbstractAnimator::new(duration_ms),
+            _delta_x: dx,
+            _delta_y: dy,
         }
     }
 }
@@ -910,18 +909,18 @@ impl MoveViewAnimatorFunctionGraphJob {
 /// Ported from `ghidra.graph.job.MoveViewToLayoutSpacePointAnimatorFunctionGraphJob`.
 #[derive(Debug, Clone)]
 pub struct MoveViewToLayoutSpacePointAnimatorFunctionGraphJob {
-    animator: AbstractAnimator,
-    target_x: f64,
-    target_y: f64,
+    _animator: AbstractAnimator,
+    _target_x: f64,
+    _target_y: f64,
 }
 
 impl MoveViewToLayoutSpacePointAnimatorFunctionGraphJob {
     /// Create a new layout-space point move job.
     pub fn new(x: f64, y: f64, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
-            target_x: x,
-            target_y: y,
+            _animator: AbstractAnimator::new(duration_ms),
+            _target_x: x,
+            _target_y: y,
         }
     }
 }
@@ -931,18 +930,18 @@ impl MoveViewToLayoutSpacePointAnimatorFunctionGraphJob {
 /// Ported from `ghidra.graph.job.MoveViewToViewSpacePointAnimatorFunctionGraphJob`.
 #[derive(Debug, Clone)]
 pub struct MoveViewToViewSpacePointAnimatorFunctionGraphJob {
-    animator: AbstractAnimator,
-    target_x: f64,
-    target_y: f64,
+    _animator: AbstractAnimator,
+    _target_x: f64,
+    _target_y: f64,
 }
 
 impl MoveViewToViewSpacePointAnimatorFunctionGraphJob {
     /// Create a new view-space point move job.
     pub fn new(x: f64, y: f64, duration_ms: u64) -> Self {
         Self {
-            animator: AbstractAnimator::new(duration_ms),
-            target_x: x,
-            target_y: y,
+            _animator: AbstractAnimator::new(duration_ms),
+            _target_x: x,
+            _target_y: y,
         }
     }
 }
@@ -952,16 +951,16 @@ impl MoveViewToViewSpacePointAnimatorFunctionGraphJob {
 /// Ported from `ghidra.graph.job.RelayoutAndCenterVertexGraphJob`.
 #[derive(Debug, Clone)]
 pub struct RelayoutAndCenterVertexGraphJob {
-    vertex: usize,
-    animator: AbstractAnimator,
+    _vertex: usize,
+    _animator: AbstractAnimator,
 }
 
 impl RelayoutAndCenterVertexGraphJob {
     /// Create a new relayout-and-center job.
     pub fn new(vertex: usize, duration_ms: u64) -> Self {
         Self {
-            vertex,
-            animator: AbstractAnimator::new(duration_ms),
+            _vertex: vertex,
+            _animator: AbstractAnimator::new(duration_ms),
         }
     }
 }
@@ -971,16 +970,16 @@ impl RelayoutAndCenterVertexGraphJob {
 /// Ported from `ghidra.graph.job.RelayoutAndEnsureVisible`.
 #[derive(Debug, Clone)]
 pub struct RelayoutAndEnsureVisible {
-    vertex: usize,
-    animator: AbstractAnimator,
+    _vertex: usize,
+    _animator: AbstractAnimator,
 }
 
 impl RelayoutAndEnsureVisible {
     /// Create a new relayout-and-ensure-visible job.
     pub fn new(vertex: usize, duration_ms: u64) -> Self {
         Self {
-            vertex,
-            animator: AbstractAnimator::new(duration_ms),
+            _vertex: vertex,
+            _animator: AbstractAnimator::new(duration_ms),
         }
     }
 }
@@ -1497,14 +1496,14 @@ mod tests {
     #[test]
     fn test_move_view_jobs() {
         let job = MoveViewAnimatorFunctionGraphJob::new(10.0, 20.0, 300);
-        assert_eq!(job.delta_x, 10.0);
-        assert_eq!(job.delta_y, 20.0);
+        assert_eq!(job._delta_x, 10.0);
+        assert_eq!(job._delta_y, 20.0);
 
         let job2 = MoveViewToLayoutSpacePointAnimatorFunctionGraphJob::new(100.0, 200.0, 500);
-        assert_eq!(job2.target_x, 100.0);
+        assert_eq!(job2._target_x, 100.0);
 
         let job3 = MoveViewToViewSpacePointAnimatorFunctionGraphJob::new(50.0, 60.0, 500);
-        assert_eq!(job3.target_x, 50.0);
+        assert_eq!(job3._target_x, 50.0);
     }
 
     #[test]
@@ -1520,10 +1519,10 @@ mod tests {
     #[test]
     fn test_relayout_jobs() {
         let job = RelayoutAndCenterVertexGraphJob::new(5, 400);
-        assert_eq!(job.vertex, 5);
+        assert_eq!(job._vertex, 5);
 
         let job2 = RelayoutAndEnsureVisible::new(10, 500);
-        assert_eq!(job2.vertex, 10);
+        assert_eq!(job2._vertex, 10);
     }
 
     #[test]

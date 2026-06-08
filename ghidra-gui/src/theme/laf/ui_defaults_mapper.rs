@@ -94,7 +94,6 @@ impl UiDefaultsMapper {
             LafType::Windows => self.populate_windows_defaults(),
             LafType::WindowsClassic => self.populate_windows_classic_defaults(),
             LafType::Mac => self.populate_mac_defaults(),
-            _ => self.populate_generic_defaults(),
         }
     }
 
@@ -158,6 +157,7 @@ impl UiDefaultsMapper {
         self.add_mapping("font.default", "defaultFont");
     }
 
+    #[allow(dead_code)]
     fn populate_generic_defaults(&mut self) {
         self.add_mapping("color.fg.default", "foreground");
         self.add_mapping("color.bg.default", "background");

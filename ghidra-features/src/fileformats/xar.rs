@@ -5,7 +5,7 @@
 //! References:
 //! - XAR format: <https://github.com/mackyle/xar/wiki/xarformat>
 
-use nom::{bytes::complete::take, number::complete::{be_u16, be_u32, be_u64}, IResult};
+use nom::{number::complete::{be_u16, be_u32, be_u64}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

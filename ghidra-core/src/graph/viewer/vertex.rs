@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use super::visual_types::{Point2d, Rect2d, RgbaColor, VertexRendererConfig};
+use super::visual_types::{Point2d, Rect2d, RgbaColor};
 
 // ============================================================================
 // VertexShapeProvider -- provides the shape of a vertex for rendering

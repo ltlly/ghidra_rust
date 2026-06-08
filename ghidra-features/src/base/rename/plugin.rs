@@ -8,8 +8,8 @@
 //! - Validate rename operations before execution
 
 use super::cmd::{
-    validate_symbol_name, is_default_function_name, is_default_label_name, RenameAndMoveCmd,
-    RenameFunctionCmd, RenameLabelCmd, RenameNamespaceCmd, SetLabelPrimaryCmd, SetNamespaceCmd,
+    validate_symbol_name,
+    RenameFunctionCmd, RenameLabelCmd, RenameNamespaceCmd, SetLabelPrimaryCmd,
 };
 use ghidra_core::addr::Address;
 use ghidra_core::symbol::{SourceType, SymbolType};

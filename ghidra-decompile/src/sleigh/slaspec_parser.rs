@@ -2353,7 +2353,7 @@ mod tests {
         // a + b * c should parse as a + (b * c)
         let (_, expr) = parse_expression_inner("A + B * 2").unwrap();
         match expr {
-            Expression::BinaryOp { op, left, right } => {
+            Expression::BinaryOp { op, left: _, right } => {
                 assert_eq!(op, BinaryOperator::Add);
                 // right should be B * 2
                 match *right {

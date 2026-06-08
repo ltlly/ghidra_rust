@@ -67,7 +67,7 @@ impl AssemblyCompletion {
     }
 
     /// Create an instruction completion.
-    pub fn instruction(data: &[u8], display: impl Into<String>, preference: i32) -> Self {
+    pub fn instruction(_data: &[u8], display: impl Into<String>, preference: i32) -> Self {
         Self {
             text: String::new(), // Instructions have no insertion text
             display: display.into(),

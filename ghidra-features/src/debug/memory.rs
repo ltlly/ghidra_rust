@@ -573,7 +573,7 @@ mod tests {
         let at_snap = mgr.get_regions_at_snap(0);
         assert_eq!(at_snap.len(), 2);
 
-        let mut region_mut = mgr.get_region_mut(r2).unwrap();
+        let region_mut = mgr.get_region_mut(r2).unwrap();
         region_mut.remove(10);
         assert!(!mgr.get_region(r2).unwrap().is_valid(10));
     }

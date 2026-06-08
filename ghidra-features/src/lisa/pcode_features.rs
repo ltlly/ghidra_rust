@@ -34,8 +34,9 @@ impl PcodeFeatures {
     pub fn record_opcode(&mut self, opcode: &str) {
         self.opcodes.insert(opcode.to_string());
         match opcode {
-            "CALL" | "CALLIND" => self.has_calls = true,
-            "BRANCHIND" | "CALLIND" => self.has_indirect_branches = true,
+            "CALL" => self.has_calls = true,
+            "CALLIND" => { self.has_calls = true; self.has_indirect_branches = true; }
+            "BRANCHIND" => self.has_indirect_branches = true,
             "FLOAT_ADD" | "FLOAT_SUB" | "FLOAT_MULT" | "FLOAT_DIV" | "FLOAT_NEG"
             | "FLOAT_INT2FLOAT" | "FLOAT_FLOAT2FLOAT" | "FLOAT_TRUNC" => {
                 self.has_float_ops = true

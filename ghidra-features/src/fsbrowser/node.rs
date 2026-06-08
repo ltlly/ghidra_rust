@@ -4,9 +4,8 @@
 //! `FSBDirNode`, `FSBRootNode`.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 
-use super::{Fsrl, GFile, GFileSystem, FileSystemRef, RefdFile};
+use super::{Fsrl, GFile};
 
 // ---------------------------------------------------------------------------
 // NodeId -- unique identifier for a node in the tree

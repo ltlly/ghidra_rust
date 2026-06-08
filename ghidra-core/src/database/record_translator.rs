@@ -5,7 +5,7 @@
 //! schemas, and [`TranslatedRecordIterator`] for wrapping an iterator with
 //! automatic translation.
 
-use crate::database::db::{DBRecord, DbResult, FieldValue, Schema};
+use crate::database::db::{DBRecord, DbResult, Schema};
 use crate::database::iterator::RecordIterator;
 
 /// A callback trait for translating records between schemas.
@@ -170,7 +170,7 @@ impl<I: RecordIterator> RecordIterator for ConvertedRecordIterator<I> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::db::{Field, FieldType};
+    use crate::database::db::{Field, FieldType, FieldValue};
     use crate::database::iterator::SqlRecordIterator;
 
     #[test]

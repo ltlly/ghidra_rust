@@ -12,7 +12,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::base::analyzer::{
-    AbstractAnalyzer, Address, AddressRange, AddressSet, AnalysisOption, AnalysisOptionValue,
+    AbstractAnalyzer, Address, AddressSet, AnalysisOption, AnalysisOptionValue,
     AnalysisPriority, Analyzer, AnalyzerType, CancelledError, MessageLog, Program, TaskMonitor,
 };
 
@@ -112,10 +112,10 @@ impl ConstantPropagationAnalyzer {
     /// the function's instruction flow.
     fn propagate_constants(
         &self,
-        program: &mut Program,
-        func_addr: &Address,
+        _program: &mut Program,
+        _func_addr: &Address,
         monitor: &dyn TaskMonitor,
-        log: &mut MessageLog,
+        _log: &mut MessageLog,
     ) -> Result<bool, CancelledError> {
         // In the full implementation, this would:
         // 1. Create a SymbolicPropagator for the function

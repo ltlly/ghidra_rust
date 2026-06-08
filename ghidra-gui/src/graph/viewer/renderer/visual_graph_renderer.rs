@@ -7,7 +7,6 @@
 //! This is necessary because the underlying graph library has no Z-order
 //! concept.
 
-use std::collections::HashMap;
 
 use super::{RenderCommand, RenderContext};
 use crate::graph::viewer::{Point2D, Rect2D, VisualEdge, VisualGraph, VisualVertex};

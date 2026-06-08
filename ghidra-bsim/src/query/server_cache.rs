@@ -8,7 +8,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use super::bsim_server_info::BSimServerInfo;
 use super::function_database::FunctionDatabase;
 use super::server_config::ServerConfig;
 use super::BSimResult;
@@ -96,7 +95,7 @@ pub struct BSimServerCache {
     /// Cached connections keyed by server name.
     connections: RwLock<HashMap<String, CachedConnection>>,
     /// Maximum number of idle connections to keep.
-    max_idle: usize,
+    _max_idle: usize,
     /// Maximum idle time before a connection is evicted (seconds).
     max_idle_secs: u64,
 }
@@ -106,7 +105,7 @@ impl BSimServerCache {
     pub fn new() -> Self {
         Self {
             connections: RwLock::new(HashMap::new()),
-            max_idle: 5,
+            _max_idle: 5,
             max_idle_secs: 300, // 5 minutes
         }
     }
@@ -115,7 +114,7 @@ impl BSimServerCache {
     pub fn with_limits(max_idle: usize, max_idle_secs: u64) -> Self {
         Self {
             connections: RwLock::new(HashMap::new()),
-            max_idle,
+            _max_idle: max_idle,
             max_idle_secs,
         }
     }
@@ -124,7 +123,7 @@ impl BSimServerCache {
     pub fn get_or_create(
         &self,
         server_name: &str,
-        config: &ServerConfig,
+        _config: &ServerConfig,
     ) -> BSimResult<()> {
         let mut conns = self.connections.write().unwrap();
 

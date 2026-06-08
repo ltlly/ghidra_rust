@@ -845,7 +845,7 @@ impl COutputFormatter {
     /// Format a label for a goto target.
     fn format_label(&self, name: &str, node: &StructuredNode, indent: usize) -> String {
         let mut out = String::new();
-        let prefix = self.indent_prefix(indent);
+        let _prefix = self.indent_prefix(indent);
         // Labels are typically at one level less indentation.
         let label_indent = if indent > 0 { indent - 1 } else { 0 };
         let label_prefix = self.indent_prefix(label_indent);

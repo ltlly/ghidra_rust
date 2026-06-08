@@ -6,12 +6,11 @@
 //! right-click context menus.
 
 use super::{
-    first_target_address, has_address_reference, is_flow_instruction, ColumnId, ColumnLayout,
+    first_target_address, has_address_reference, is_flow_instruction, ColumnId,
     ListingAction, ListingRow, ListingView, OperandRenderType, RowType, SyntaxTheme,
 };
 use egui::{
-    Align, Color32, CursorIcon, FontId, Id, Key, Modifiers, Pos2, Rect, Response, RichText,
-    ScrollArea, Sense, Stroke, TextStyle, Ui, Vec2,
+    Align, Color32, CursorIcon, Id, Key, Pos2, Rect, Response, RichText, Sense, Stroke, Ui, Vec2,
 };
 use ghidra_core::addr::Address;
 
@@ -106,7 +105,7 @@ fn render_header_bar(view: &mut ListingView, prog_name: &str, ui: &mut Ui) {
 // ============================================================================
 
 /// Render column headers with labels and draggable resize handles.
-fn render_column_headers(view: &mut ListingView, ui: &mut Ui, is_empty: bool) {
+fn render_column_headers(view: &mut ListingView, ui: &mut Ui, _is_empty: bool) {
     let theme = &view.syntax_theme;
     let available = ui.available_size_before_wrap();
 
@@ -124,7 +123,7 @@ fn render_column_headers(view: &mut ListingView, ui: &mut Ui, is_empty: bool) {
     // Allocate the header row
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available.x, HEADER_HEIGHT), Sense::hover());
 
-    let mut child_ui = ui.child_ui(rect, *ui.layout(), None);
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(*ui.layout()));
 
     let visible_cols: Vec<usize> = view
         .column_layout
@@ -149,7 +148,7 @@ fn render_column_headers(view: &mut ListingView, ui: &mut Ui, is_empty: bool) {
             child_ui.next_widget_position(),
             Vec2::new(width - SEPARATOR_PADDING, HEADER_HEIGHT),
         );
-        child_ui.allocate_ui_at_rect(cell_rect, |ui| {
+        child_ui.allocate_new_ui(egui::UiBuilder::new().max_rect(cell_rect), |ui| {
             ui.set_min_size(Vec2::new(width - SEPARATOR_PADDING, HEADER_HEIGHT));
             ui.with_layout(
                 egui::Layout::from_main_dir_and_cross_align(
@@ -328,12 +327,12 @@ fn paint_row_background(
 fn render_single_row(
     view: &ListingView,
     row: &ListingRow,
-    row_idx: usize,
+    _row_idx: usize,
     row_rect: Rect,
     ui: &mut Ui,
 ) {
     let theme = &view.syntax_theme;
-    let mut child_ui = ui.child_ui(row_rect, *ui.layout(), None);
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect).layout(*ui.layout()));
     child_ui.set_min_size(Vec2::new(row_rect.width(), ROW_HEIGHT));
 
     let visible_cols: Vec<&super::ColumnDef> = view
@@ -355,7 +354,7 @@ fn render_single_row(
             child_ui.next_widget_position(),
             Vec2::new(cell_width, ROW_HEIGHT),
         );
-        child_ui.allocate_ui_at_rect(cell_rect, |ui| {
+        child_ui.allocate_new_ui(egui::UiBuilder::new().max_rect(cell_rect), |ui| {
             ui.set_min_size(Vec2::new(cell_width - CELL_PADDING * 2.0, ROW_HEIGHT));
             render_cell_content(view, row, col.id, theme, ui);
         });
@@ -698,7 +697,7 @@ fn handle_row_context_menu(view: &mut ListingView, row: &ListingRow, response: &
     let has_label = row.label.is_some();
     let has_comment = row.comment.is_some() || view.comment_at(&row_addr).is_some();
     let is_instruction = row.is_instruction;
-    let has_function = is_instruction && !row_mnemonic.is_empty();
+    let _has_function = is_instruction && !row_mnemonic.is_empty();
     let has_bookmark = false; // Could track bookmarks in the view
 
     let xrefs_to: Vec<Address> = view.xrefs_to(&row_addr).to_vec();

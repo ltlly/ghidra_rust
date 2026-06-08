@@ -21,7 +21,7 @@ mod tests {
         TraceEventManager, TraceEventType, TraceLogEntry, TraceLogManager, TraceObjectChangeListener,
         ValueChangeEvent, ValueChangeKind,
     };
-    use crate::target::KeyPath;
+    
 
     // ========================================================================
     // Framework-TraceModeling: ghidra.trace.model.target supplementary types

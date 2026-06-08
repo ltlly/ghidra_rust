@@ -1,9 +1,11 @@
 //! Plugin component factories.
 //!
-//! Ported from Ghidra's `ghidra.app.factory` Java package.
+//! Ported from Ghidra's `ghidra.app.factory` and
+//! `ghidra.formats.gfilesystem.factory` Java packages.
 //!
 //! This module provides the factory interfaces and implementations
-//! for creating component providers within Ghidra's docking framework.
+//! for creating component providers within Ghidra's docking framework,
+//! tool state factories, and the GFileSystem factory/probe system.
 //! Plugins register factories with the tool, which uses them to
 //! instantiate new component providers on demand.
 //!
@@ -14,6 +16,16 @@
 //! - [`FormatType`] -- describes the visual format of a component
 //! - [`ComponentProviderDescription`] -- metadata about a provider
 //! - [`FactoryError`] -- errors during component creation
+//!
+//! # Sub-modules
+//!
+//! - [`tool_state_factory`] -- `ToolStateFactory` / `GhidraToolStateFactory`
+//! - [`gfilesystem_factory`] -- GFileSystem factory and probe interfaces
+//! - [`filesystem_info`] -- `FileSystemInfoRec` registry and dependency exceptions
+
+pub mod tool_state_factory;
+pub mod gfilesystem_factory;
+pub mod filesystem_info;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

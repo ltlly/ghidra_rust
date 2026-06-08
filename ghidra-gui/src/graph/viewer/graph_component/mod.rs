@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{Point2D, Rect2D, VisualEdge, VisualGraph, VisualVertex};
+use super::{Point2D, Rect2D, VisualGraph};
 
 // ============================================================================
 // PathHighlightMode
@@ -866,6 +866,7 @@ impl SatelliteListenerRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::{VisualVertex, VisualEdge};
 
     #[test]
     fn path_highlight_mode_default() {

@@ -20,7 +20,7 @@
 //! - [`ProgramLocationContextAction`] -- action on `ProgramLocationActionContext`
 //! - [`ProgramSymbolContextAction`] -- action on `ProgramSymbolActionContext`
 
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // Forward-compatible placeholder types

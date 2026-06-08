@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.refs`.
 
+#![allow(dead_code)]
+
 /// Reference types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefType {

@@ -6,8 +6,7 @@
 #[cfg(test)]
 mod primitive_schema_tests {
     use crate::model::{
-        AttributeSchema, MinimalSchemaContext, PrimitiveTraceObjectSchema, SchemaContext,
-        SchemaName, TraceObjectSchemaDef,
+        MinimalSchemaContext, PrimitiveTraceObjectSchema,
     };
 
     #[test]
@@ -512,7 +511,7 @@ mod trace_diff_plugin_tests {
 #[cfg(test)]
 mod remaining_framework_integration_tests {
     use crate::model::{
-        is_scratch, AttributeSchema, Lifespan, PrimitiveTraceObjectSchema,
+        AttributeSchema, Lifespan, PrimitiveTraceObjectSchema,
         SchemaName, SchemaContext, TraceExecutionState, TraceObjectSchemaDef,
     };
     use crate::model::target_schema::SchemaBuilder;

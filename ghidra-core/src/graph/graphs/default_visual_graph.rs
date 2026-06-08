@@ -3,13 +3,11 @@
 //! Port of `ghidra.graph.graphs.DefaultVisualGraph`.
 
 use std::collections::HashSet;
-use std::fmt::Debug;
-use std::hash::Hash;
 
 use crate::graph::event::VisualGraphChangeListener;
 use crate::graph::hash_graph::HashDirectedGraph;
-use crate::graph::traits::{GDirectedGraph, GEdge, GImplicitDirectedGraph};
-use crate::graph::visual_graph::{Point2D, VisualEdge, VisualVertex};
+use crate::graph::traits::{GDirectedGraph, GImplicitDirectedGraph};
+use crate::graph::visual_graph::{VisualEdge, VisualVertex};
 
 /// A visual graph implementation with vertex/selection tracking and
 /// change listener dispatch.
@@ -178,6 +176,7 @@ where
 mod tests {
     use super::*;
     use crate::graph::default_edge::DefaultGEdge;
+    use crate::graph::visual_graph::Point2D;
 
     #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     struct V {

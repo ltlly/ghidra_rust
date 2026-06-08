@@ -6,7 +6,6 @@
 //! non-returning function name patterns loaded from XML data files.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Mutex;
 
 /// Manages non-returning function name patterns for different programs.
 ///

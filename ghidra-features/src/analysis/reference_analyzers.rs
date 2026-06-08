@@ -8,7 +8,7 @@
 // - ExternalSymbolResolverAnalyzer -- resolves external library symbols
 // ===========================================================================
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, HashMap};
 
 use ghidra_core::Address;
 

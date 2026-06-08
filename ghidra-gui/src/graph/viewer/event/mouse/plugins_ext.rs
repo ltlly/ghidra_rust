@@ -11,7 +11,7 @@
 //! - [`VisualGraphScreenPositioningPlugin`] -- screen-position-based navigation.
 //! - [`VisualGraphScrollWheelPanningPlugin`] -- scroll wheel panning.
 
-use crate::graph::viewer::{Point2D, Rect2D};
+use crate::graph::viewer::Point2D;
 
 // ============================================================================
 // Mouse event types
@@ -87,27 +87,27 @@ pub trait GraphMousePlugin: Send + std::fmt::Debug {
     fn name(&self) -> &str;
 
     /// Called when a mouse button is pressed.
-    fn mouse_pressed(&mut self, event: &GraphMouseEvent) -> bool {
+    fn mouse_pressed(&mut self, _event: &GraphMouseEvent) -> bool {
         false
     }
 
     /// Called when a mouse button is released.
-    fn mouse_released(&mut self, event: &GraphMouseEvent) -> bool {
+    fn mouse_released(&mut self, _event: &GraphMouseEvent) -> bool {
         false
     }
 
     /// Called when the mouse is moved (with button held).
-    fn mouse_dragged(&mut self, event: &GraphMouseEvent) -> bool {
+    fn mouse_dragged(&mut self, _event: &GraphMouseEvent) -> bool {
         false
     }
 
     /// Called when the mouse is moved (without button held).
-    fn mouse_moved(&mut self, event: &GraphMouseEvent) -> bool {
+    fn mouse_moved(&mut self, _event: &GraphMouseEvent) -> bool {
         false
     }
 
     /// Called on scroll wheel events.
-    fn mouse_scrolled(&mut self, event: &GraphMouseEvent) -> bool {
+    fn mouse_scrolled(&mut self, _event: &GraphMouseEvent) -> bool {
         false
     }
 

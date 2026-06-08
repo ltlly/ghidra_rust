@@ -4,7 +4,6 @@
 //! `DummyCancellableTaskMonitor`, `UnknownProgressWrappingTaskMonitor`,
 //! `SwingUpdateManager`, `BufferedSwingRunner`.
 
-use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use super::tracked_task::TaskState;

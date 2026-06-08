@@ -200,7 +200,7 @@ impl VectorStore {
         if self.vectors.is_some() {
             return;
         }
-        let mut map = std::collections::HashMap::new();
+        let map = std::collections::HashMap::new();
         // In a real implementation, this would load from H2FileFunctionDatabase.
         // For now, we initialize an empty map.
         self.vectors = Some(map);

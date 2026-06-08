@@ -9,10 +9,8 @@
 use std::collections::HashMap;
 
 use ghidra_core::addr::AddressSet;
-use ghidra_core::Address;
 
 use super::action_manager::ProgramTreeActionManager;
-use super::node::ProgramNode;
 use super::tree::ProgramTree;
 use super::view_provider::{TreeViewProvider, ViewState};
 use super::GroupPath;

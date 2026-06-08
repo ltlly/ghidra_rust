@@ -31,9 +31,7 @@ use std::fmt;
 
 use crate::base::analyzer::{Address, AddressRange, AddressSet};
 use crate::loader::framework::{
-    CompilerSpecId, LanguageCompilerSpecPair, LanguageId, LoadError, LoadOption, LoadOptionValue,
-    LoadResults, LoadSpec, Loaded, LoaderRegistry, LoaderTier, MessageLog, QueryOpinionService,
-    QueryResult,
+    LanguageCompilerSpecPair, LoadOption, LoadSpec, LoaderTier, QueryOpinionService,
 };
 
 // ---------------------------------------------------------------------------
@@ -408,7 +406,7 @@ impl AddressSetPartitioner {
 
         for range in ranges {
             let mut current_start = range.start;
-            let mut current_end = range.end;
+            let current_end = range.end;
 
             // Find partitions that fall within this range (but not at start)
             let mut splits: Vec<Address> = partitions

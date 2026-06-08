@@ -211,7 +211,7 @@ pub use function_database::{
 use anyhow::{anyhow, Context, Result};
 use ghidra_core::addr::{Address, AddressRange};
 use ghidra_core::database::Database;
-use ghidra_core::program::listing::{Function, FunctionData};
+use ghidra_core::program::listing::Function;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 

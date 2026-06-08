@@ -31,7 +31,6 @@
 //! | `UndoRedoArchiveAction`         | `UndoArchiveTransactionAction`, etc.  |
 //! | `ArchiveManagementAction`       | `OpenArchiveAction`, `CloseArchiveAction`, etc. |
 
-use std::collections::HashMap;
 use std::fmt;
 
 use ghidra_core::data::{CategoryPath, DataTypePath};

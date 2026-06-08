@@ -27,7 +27,7 @@
 //! use ghidra_core::pty::{local_pty_factory, PtySession};
 //!
 //! let factory = local_pty_factory();
-//! let pty = factory.openpty_default().unwrap();
+//! let mut pty = factory.openpty_default().unwrap();
 //! let mut session = pty.child().session(
 //!     &["/bin/bash"], &[], None, &[]
 //! ).unwrap();

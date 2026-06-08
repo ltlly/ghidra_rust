@@ -4,7 +4,7 @@
 //! CancellableIterator, and IssueListener.
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 /// Marker trait for errors that indicate user cancellation.
 ///
@@ -132,7 +132,7 @@ pub trait TaskMonitor: Send + Sync {
 }
 
 /// Returns the given monitor if non-null, otherwise a `StubTaskMonitor`.
-pub fn dummy_if_null(monitor: Option<&mut dyn TaskMonitor>) -> &mut dyn TaskMonitor {
+pub fn dummy_if_null(_monitor: Option<&mut dyn TaskMonitor>) -> &mut dyn TaskMonitor {
     // This is a helper; callers typically use StubTaskMonitor::new() directly
     // when they don't have a monitor.
     unimplemented!("Use StubTaskMonitor::new() directly")

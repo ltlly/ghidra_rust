@@ -34,11 +34,18 @@ mod macromedia_flash;
 mod mswim;
 mod pak_arc;
 mod pkzip;
+mod ppmd;
 mod rar;
 mod rpm;
+mod sbc;
+mod seven_zip;
+mod spanned_pkzip;
 mod sqlite;
 mod stuffit;
 mod tar;
+mod uharc;
+mod unix_compress;
+mod unix_pack;
 mod vhd;
 mod xar;
 mod xz;
@@ -66,11 +73,18 @@ pub use macromedia_flash::MacromediaFlashRecognizer;
 pub use mswim::MSWIMRecognizer;
 pub use pak_arc::PakArcRecognizer;
 pub use pkzip::PkzipRecognizer;
+pub use ppmd::PpmdRecognizer;
 pub use rar::RarRecognizer;
 pub use rpm::RpmRecognizer;
+pub use sbc::SbcRecognizer;
+pub use seven_zip::SevenZipRecognizer;
+pub use spanned_pkzip::SpannedPkzipRecognizer;
 pub use sqlite::SqliteRecognizer;
 pub use stuffit::StuffitRecognizer;
 pub use tar::TarRecognizer;
+pub use uharc::UharcRecognizer;
+pub use unix_compress::UnixCompressRecognizer;
+pub use unix_pack::UnixPackRecognizer;
 pub use vhd::VHDRecognizer;
 pub use xar::XarRecognizer;
 pub use xz::XzRecognizer;
@@ -105,11 +119,18 @@ pub fn all_recognizers() -> Vec<Box<dyn Recognizer>> {
         Box::new(MSWIMRecognizer),
         Box::new(PakArcRecognizer),
         Box::new(PkzipRecognizer),
+        Box::new(PpmdRecognizer),
         Box::new(RarRecognizer),
         Box::new(RpmRecognizer),
+        Box::new(SbcRecognizer),
+        Box::new(SevenZipRecognizer),
+        Box::new(SpannedPkzipRecognizer),
         Box::new(SqliteRecognizer),
         Box::new(StuffitRecognizer),
         Box::new(TarRecognizer),
+        Box::new(UharcRecognizer),
+        Box::new(UnixCompressRecognizer),
+        Box::new(UnixPackRecognizer),
         Box::new(VHDRecognizer),
         Box::new(XarRecognizer),
         Box::new(XzRecognizer),

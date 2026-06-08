@@ -20,8 +20,6 @@ use std::collections::VecDeque;
 use std::fmt;
 
 use ghidra_core::addr::Address;
-use ghidra_core::data::{DataType, DataTypeManager};
-
 use super::actions::*;
 
 // ---------------------------------------------------------------------------

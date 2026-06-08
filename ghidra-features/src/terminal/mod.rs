@@ -855,7 +855,7 @@ impl TerminalAwtEventEncoder {
     /// Encode a key press into terminal bytes.
     ///
     /// Returns `None` if the key is not mapped.
-    pub fn encode_key(&self, key_code: u32, modifiers: u32) -> Option<Vec<u8>> {
+    pub fn encode_key(&self, key_code: u32, _modifiers: u32) -> Option<Vec<u8>> {
         // Arrow keys
         match key_code {
             37 => Some(if self.application_cursor_keys {

@@ -26,7 +26,6 @@
 use nom::bytes::complete::take;
 use nom::number::complete::{be_u16, be_u32, be_u8};
 use nom::IResult;
-use std::collections::HashMap;
 
 // ============================================================================
 // Magic Number and Version Constants
@@ -1724,7 +1723,7 @@ pub fn decode_bytecode(code: &[u8], offset: usize) -> Option<(&'static str, usiz
         // aload_0..aload_3, etc.
         | 0x1a..=0x2d
         // array loads, stores, stack
-        | 0x2e..=0x5f
+        | 0x2e..=0x35 | 0x3b..=0x5f
         // arithmetic
         | 0x60..=0x83
         // conversions, comparisons, returns, array length

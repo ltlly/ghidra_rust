@@ -5,7 +5,6 @@
 use std::sync::Arc;
 
 use super::task_dialog::TaskDialog;
-use super::tracked_task::{TaskState, TrackedTask, TrackedTaskListener};
 
 /// Result of a task execution.
 #[derive(Debug, Clone)]

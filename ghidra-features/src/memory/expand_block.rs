@@ -6,7 +6,7 @@
 //! Provides the business logic for expanding a memory block by adding
 //! space above (lower address) or below (higher address) its current range.
 
-use super::{MemoryBlockInfo, MemoryBlockType, MemoryMapModel};
+use super::{MemoryBlockInfo, MemoryMapModel};
 use ghidra_core::Address;
 
 // ============================================================================

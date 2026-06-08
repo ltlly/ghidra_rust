@@ -284,15 +284,15 @@ impl AbstractSqlFunctionDatabase {
     pub const JAVA_TIME_FORMAT: &'static str = "yyyy-MM-dd HH:mm:ss.SSSZ";
 
     /// Architecture string table name.
-    const ARCH_TABLE_NAME: &'static str = "archtable";
+    const _ARCH_TABLE_NAME: &'static str = "archtable";
     /// Compiler string table name.
-    const COMPILER_TABLE_NAME: &'static str = "comptable";
+    const _COMPILER_TABLE_NAME: &'static str = "comptable";
     /// Repository string table name.
-    const REPOSITORY_TABLE_NAME: &'static str = "repotable";
+    const _REPOSITORY_TABLE_NAME: &'static str = "repotable";
     /// Path string table name.
-    const PATH_TABLE_NAME: &'static str = "pathtable";
+    const _PATH_TABLE_NAME: &'static str = "pathtable";
     /// Category string table name.
-    const CAT_STRING_TABLE_NAME: &'static str = "catstringtable";
+    const _CAT_STRING_TABLE_NAME: &'static str = "catstringtable";
 
     /// Create a new abstract SQL function database.
     pub fn new(connection_url: impl Into<String>) -> Self {

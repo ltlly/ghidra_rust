@@ -16,7 +16,6 @@ use super::action_trigger::ActionTrigger;
 use super::option_type::OptionType;
 use super::option_value::{FontDescriptor, KeyStroke, OptionValue};
 use super::options_trait::{Options, OptionsChangeListener, DELIMITER};
-use super::tool_options::ToolOptions;
 
 // ============================================================================
 // OptionDefinition

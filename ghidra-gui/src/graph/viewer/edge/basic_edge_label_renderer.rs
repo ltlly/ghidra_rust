@@ -5,7 +5,7 @@
 //! A custom edge label renderer that overrides the default label placement
 //! to position edge labels at the midpoint of the edge path.
 
-use super::super::{Point2D, VisualEdge, VisualVertex};
+use super::super::{Point2D, VisualEdge};
 
 /// Edge label position relative to the edge path.
 #[derive(Debug, Clone, Copy, PartialEq)]

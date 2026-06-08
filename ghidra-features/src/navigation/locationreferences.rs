@@ -676,7 +676,7 @@ mod tests {
 
     #[test]
     fn test_location_references_plugin_basic() {
-        let mut plugin = LocationReferencesPlugin::new();
+        let plugin = LocationReferencesPlugin::new();
         assert_eq!(plugin.name(), "LocationReferencesPlugin");
         assert!(plugin.current_descriptor().is_none());
     }
@@ -1995,7 +1995,7 @@ mod new_types_tests {
             "main",
             "test.exe",
         );
-        let mut refs = vec![LocationReference::new(addr(0x2000))];
+        let refs = vec![LocationReference::new(addr(0x2000))];
         let mut desc_mut = desc.clone();
         desc_mut.set_references(refs);
         hl.set_descriptor(Some(desc_mut));

@@ -247,7 +247,7 @@ impl X86FunctionPurgeAnalyzer {
         function_returns: &[(u64, u64, u32)], // (func_entry, ret_addr, instruction_size)
     ) -> Vec<(u64, Option<i32>)> {
         let mut results = Vec::new();
-        for &(func_entry, ret_addr, instr_size) in function_returns {
+        for &(func_entry, _ret_addr, instr_size) in function_returns {
             // Check if the return instruction is "RET imm16" (opcode C2 xx xx)
             // vs plain "RET" (opcode C3).  In a real implementation we would
             // read bytes from the program; here we use the instruction_size as

@@ -1,7 +1,6 @@
 // Port of help.validator.model.GhidraTOCFile
 
 use std::collections::HashMap;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use super::toc_item::{TocItem, TocItemDefinition, TocItemReference};

@@ -5,9 +5,7 @@
 //! editing data fields, and renaming data fields.  Actual rendering is
 //! in the GUI layer.
 
-use std::fmt;
 
-use ghidra_core::addr::Address;
 
 // ---------------------------------------------------------------------------
 // StructureFieldInfo

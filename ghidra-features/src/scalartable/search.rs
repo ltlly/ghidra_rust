@@ -7,8 +7,6 @@
 //! `ScalarRowObject`, and mappers are defined in the parent `model` module.
 //! This module provides only the additional types that were missing.
 
-use super::{ScalarCategory, ScalarEntry};
-use ghidra_core::Address;
 
 // ---------------------------------------------------------------------------
 // RangeFilterTextField

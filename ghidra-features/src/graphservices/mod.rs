@@ -4,9 +4,8 @@
 //! and graph navigation helpers for the function graph viewer.
 
 use crate::functiongraph::{
-    CfgEdgeType, FGEdge, FGVertex, FunctionGraph, GraphLayout, LayoutAlgorithm,
+    CfgEdgeType, FunctionGraph, LayoutAlgorithm,
 };
-use ghidra_core::addr::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 
@@ -99,7 +98,7 @@ impl GraphRenderer {
         .map_err(|e| e.to_string())?;
 
         // Edges
-        for (i, edge) in graph.edges.iter().enumerate() {
+        for (_i, edge) in graph.edges.iter().enumerate() {
             let color = colour_for_edge_type(&edge.edge_type);
             let marker = format!("url(#arrow_{})", &color[1..]);
 
@@ -630,6 +629,29 @@ pub mod exporter;
 /// Build a set of attribute filters from a collection of attributed elements.
 pub mod filters;
 pub use filters::AttributeFilter;
+
+/// Graph display options and rendering configuration.
+pub mod display_options;
+pub use display_options::GraphDisplayOptions;
+
+/// GroupVertex: collapsed node grouping for graph visualization.
+pub mod group_vertex;
+pub use group_vertex::GroupVertex;
+
+/// Edge comparator for prioritized edge ordering in graph layouts.
+pub mod edge_comparator;
+pub use edge_comparator::EdgeComparator;
+
+/// Graph collapser for grouping and ungrouping vertices.
+pub mod graph_collapser;
+pub use graph_collapser::GraphCollapser;
+
+/// Layout algorithm registry and implementations.
+pub mod layout_algorithms;
+pub use layout_algorithms::{
+    CircularLayoutAlgorithm, CompactHierarchicalLayoutAlgorithm, ForceDirectedLayoutAlgorithm,
+    HierarchicalLayoutAlgorithm, LayoutResult,
+};
 
 #[cfg(test)]
 mod tests {

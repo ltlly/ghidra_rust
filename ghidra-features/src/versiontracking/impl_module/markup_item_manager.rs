@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use ghidra_core::addr::Address;
 use crate::versiontracking::error::{VtError, VtResult};
 use crate::versiontracking::impl_module::markup_item_impl::MarkupItemImpl;
 use crate::versiontracking::markup::MarkupType;

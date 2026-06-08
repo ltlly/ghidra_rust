@@ -12,6 +12,17 @@
 //! | `Register` | [`Register`] -- CPU register with hierarchy and typing |
 //! | `RegisterManager` | [`RegisterManager`] -- register index and lookup |
 //! | `Processor` | [`Processor`] -- processor family (ISA grouping) |
+//! | `DynamicVariableStorage` | [`DynamicVariableStorage`] -- variable storage with dynamic properties |
+//! | `InjectPayloadSleigh` | [`InjectPayloadSleigh`] -- Sleigh-based P-code injection |
+//! | `InjectPayloadCallfixup` | [`InjectPayloadCallfixup`] -- call-fixup injection |
+//! | `InjectPayloadCallother` | [`InjectPayloadCallother`] -- callother-fixup injection |
+//! | `InjectPayloadCallotherError` | [`InjectPayloadCallotherError`] -- failed callother placeholder |
+//! | `InvalidPrototype` | [`InvalidPrototype`] -- invalid instruction placeholder |
+//! | `ProgramProcessorContext` | [`ProgramProcessorContext`] -- context at a single address |
+//! | `ParserContext` | [`ParserContext`] (trait) -- language-specific parser state |
+//! | `DisassemblerContext` | [`DisassemblerContext`] (trait) -- disassembler future-value tracking |
+//! | `VersionedLanguageService` | [`VersionedLanguageService`] (trait) -- versioned language lookup |
+//! | `DataTypeProviderContext` | [`DataTypeProviderContext`] (trait) -- data type provision |
 //!
 //! # Correspondence to Ghidra
 //!
@@ -81,6 +92,7 @@ impl LanguageID {
     /// # Examples
     ///
     /// ```
+    /// use ghidra_core::program::lang::LanguageID;
     /// let id = LanguageID::new("x86", "LE", 64, "default");
     /// ```
     pub fn new(
@@ -5126,6 +5138,1170 @@ impl Default for RegisterTranslator {
 }
 
 // ============================================================================
+// AutoParameterType
+// ============================================================================
+
+/// Types of auto-parameters that the decompiler automatically inserts.
+///
+/// Corresponds to `ghidra.program.model.listing.AutoParameterType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AutoParameterType {
+    /// Return address placed by the caller.
+    ReturnAddress,
+    /// Hidden pointer to a struct/class return value.
+    HiddenReturn,
+    /// "this" pointer for C++ member functions.
+    ThisPointer,
+}
+
+impl fmt::Display for AutoParameterType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AutoParameterType::ReturnAddress => write!(f, "ReturnAddress"),
+            AutoParameterType::HiddenReturn => write!(f, "HiddenReturn"),
+            AutoParameterType::ThisPointer => write!(f, "ThisPointer"),
+        }
+    }
+}
+
+// ============================================================================
+// DynamicVariableStorage
+// ============================================================================
+
+/// Dynamic variable storage for parameters and return values in function signatures.
+///
+/// Corresponds to `ghidra.program.model.lang.DynamicVariableStorage`.
+///
+/// This extends basic variable storage with flags for forced-indirect passing,
+/// auto-parameter classification, unassigned state, and void storage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicVariableStorage {
+    /// The storage addresses (register offsets or stack offsets).
+    pub addresses: Vec<Address>,
+    /// Sizes in bytes for each storage location.
+    pub sizes: Vec<usize>,
+    /// The auto-parameter type, if this is an auto-parameter.
+    pub auto_param_type: Option<AutoParameterType>,
+    /// If true, the parameter is passed as a pointer rather than by value.
+    pub forced_indirect: bool,
+    /// If true, this storage is unassigned (no concrete location yet).
+    pub is_unassigned: bool,
+    /// If true, this is void return storage (no actual value returned).
+    pub is_void: bool,
+}
+
+impl DynamicVariableStorage {
+    /// Sentinel for void return storage with forced-indirect flag.
+    pub fn indirect_void() -> Self {
+        Self {
+            addresses: Vec::new(),
+            sizes: Vec::new(),
+            auto_param_type: None,
+            forced_indirect: true,
+            is_unassigned: false,
+            is_void: true,
+        }
+    }
+
+    /// Construct unassigned storage with an optional auto-parameter type.
+    ///
+    /// Corresponds to `getUnassignedDynamicStorage(AutoParameterType)` in Java.
+    pub fn unassigned(auto_param_type: Option<AutoParameterType>) -> Self {
+        Self {
+            addresses: Vec::new(),
+            sizes: Vec::new(),
+            auto_param_type,
+            forced_indirect: false,
+            is_unassigned: true,
+            is_void: false,
+        }
+    }
+
+    /// Construct unassigned storage with forced-indirect flag.
+    ///
+    /// Corresponds to `getUnassignedDynamicStorage(boolean)` in Java.
+    pub fn unassigned_forced_indirect(forced_indirect: bool) -> Self {
+        Self {
+            addresses: Vec::new(),
+            sizes: Vec::new(),
+            auto_param_type: None,
+            forced_indirect,
+            is_unassigned: true,
+            is_void: false,
+        }
+    }
+
+    /// Construct dynamic storage for a single address/size.
+    pub fn at_address(
+        address: Address,
+        size: usize,
+        auto_param_type: Option<AutoParameterType>,
+        forced_indirect: bool,
+    ) -> Self {
+        Self {
+            addresses: vec![address],
+            sizes: vec![size],
+            auto_param_type,
+            forced_indirect,
+            is_unassigned: false,
+            is_void: false,
+        }
+    }
+
+    /// Construct dynamic storage from multiple varnode locations.
+    pub fn from_varnodes(
+        addresses: Vec<Address>,
+        sizes: Vec<usize>,
+        auto_param_type: Option<AutoParameterType>,
+        forced_indirect: bool,
+    ) -> Self {
+        Self {
+            addresses,
+            sizes,
+            auto_param_type,
+            forced_indirect,
+            is_unassigned: false,
+            is_void: false,
+        }
+    }
+
+    /// Returns true if the parameter is forced-indirect (passed as pointer).
+    ///
+    /// Corresponds to `isForcedIndirect()` in Java.
+    pub fn is_forced_indirect(&self) -> bool {
+        self.forced_indirect
+    }
+
+    /// Returns true if this is auto-parameter storage.
+    ///
+    /// Corresponds to `isAutoStorage()` in Java.
+    pub fn is_auto_storage(&self) -> bool {
+        self.auto_param_type.is_some()
+    }
+
+    /// Returns true if this storage is unassigned.
+    ///
+    /// Corresponds to `isUnassignedStorage()` in Java.
+    pub fn is_unassigned_storage(&self) -> bool {
+        self.is_unassigned
+    }
+
+    /// Returns true if this is void storage.
+    ///
+    /// Corresponds to `isVoidStorage()` in Java.
+    pub fn is_void_storage(&self) -> bool {
+        self.is_void
+    }
+
+    /// Get the auto-parameter type.
+    ///
+    /// Corresponds to `getAutoParameterType()` in Java.
+    pub fn get_auto_parameter_type(&self) -> Option<AutoParameterType> {
+        self.auto_param_type
+    }
+
+    /// Returns the total size in bytes across all storage locations.
+    pub fn total_size(&self) -> usize {
+        self.sizes.iter().sum()
+    }
+
+    /// Returns true if storage has no concrete locations.
+    pub fn is_empty(&self) -> bool {
+        self.addresses.is_empty()
+    }
+
+    /// Returns the number of storage locations.
+    pub fn num_locations(&self) -> usize {
+        self.addresses.len()
+    }
+}
+
+impl fmt::Display for DynamicVariableStorage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.is_void {
+            return write!(f, "void");
+        }
+        if self.is_unassigned {
+            write!(f, "unassigned")?;
+        } else {
+            let locs: Vec<String> = self
+                .addresses
+                .iter()
+                .zip(self.sizes.iter())
+                .map(|(addr, sz)| format!("{}:{}", addr.offset, sz))
+                .collect();
+            write!(f, "{}", locs.join(", "))?;
+        }
+        if self.forced_indirect {
+            write!(f, " (ptr)")?;
+        }
+        if let Some(apt) = &self.auto_param_type {
+            write!(f, " (auto: {})", apt)?;
+        }
+        Ok(())
+    }
+}
+
+impl PartialEq for DynamicVariableStorage {
+    fn eq(&self, other: &Self) -> bool {
+        self.addresses == other.addresses
+            && self.sizes == other.sizes
+            && self.forced_indirect == other.forced_indirect
+            && self.is_unassigned == other.is_unassigned
+            && self.is_void == other.is_void
+            && self.auto_param_type == other.auto_param_type
+    }
+}
+impl Eq for DynamicVariableStorage {}
+
+// ============================================================================
+// InjectParameter
+// ============================================================================
+
+/// A named parameter for an injection payload (input or output).
+///
+/// Corresponds to `ghidra.program.model.lang.InjectParameter`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectParameter {
+    /// The parameter name.
+    pub name: String,
+    /// The size in bytes.
+    pub size: usize,
+    /// The index assigned during ordering.
+    pub index: usize,
+}
+
+impl InjectParameter {
+    pub fn new(name: impl Into<String>, size: usize) -> Self {
+        Self {
+            name: name.into(),
+            size,
+            index: 0,
+        }
+    }
+
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn get_size(&self) -> usize {
+        self.size
+    }
+
+    pub fn set_index(&mut self, index: usize) {
+        self.index = index;
+    }
+
+    pub fn is_equivalent(&self, other: &Self) -> bool {
+        self.name == other.name && self.size == other.size
+    }
+}
+
+// ============================================================================
+// InjectPayloadSleigh
+// ============================================================================
+
+/// A P-code injection payload defined via Sleigh source code.
+///
+/// Corresponds to `ghidra.program.model.lang.InjectPayloadSleigh`.
+///
+/// This is the base class for call-fixups and callother-fixups that are
+/// compiled from Sleigh p-code snippets. In Rust, we store the source
+/// string and metadata rather than a compiled Sleigh template.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectPayloadSleigh {
+    /// Formal name of this injection.
+    pub name: String,
+    /// Type of payload (CALLFIXUP_TYPE, CALLOTHERFIXUP_TYPE, etc.).
+    pub payload_type: u32,
+    /// Source description (e.g., compiler spec file path).
+    pub source: String,
+    /// Sleigh p-code parse string (the source to be compiled).
+    pub parse_string: Option<String>,
+    /// Parameter shift (used for stack-based calling conventions).
+    pub param_shift: i32,
+    /// Whether this injection is a fall-through (does not branch away).
+    pub is_fallthru: bool,
+    /// Treat COPY operations as incidental (for analysis purposes).
+    pub incidental_copy: bool,
+    /// Sub-type: 0 = uponentry, 1 = uponreturn (for CALLMECHANISM_TYPE).
+    pub sub_type: i32,
+    /// Input parameters.
+    pub input_list: Vec<InjectParameter>,
+    /// Output parameters.
+    pub output_list: Vec<InjectParameter>,
+}
+
+impl InjectPayloadSleigh {
+    /// Create a new Sleigh injection payload.
+    pub fn new(
+        name: impl Into<String>,
+        payload_type: u32,
+        source: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            payload_type,
+            source: source.into(),
+            parse_string: None,
+            param_shift: 0,
+            is_fallthru: true,
+            incidental_copy: false,
+            sub_type: -1,
+            input_list: Vec::new(),
+            output_list: Vec::new(),
+        }
+    }
+
+    /// Create a failed-payload placeholder.
+    pub fn failed(name: impl Into<String>, payload_type: u32, source: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            payload_type,
+            source: format!("{}_FAILED", source.into()),
+            parse_string: None,
+            param_shift: 0,
+            is_fallthru: true,
+            incidental_copy: false,
+            sub_type: -1,
+            input_list: Vec::new(),
+            output_list: Vec::new(),
+        }
+    }
+
+    /// Set the Sleigh parse string (the p-code source body).
+    pub fn with_parse_string(mut self, s: impl Into<String>) -> Self {
+        self.parse_string = Some(s.into());
+        self
+    }
+
+    /// Set the parameter shift.
+    pub fn with_param_shift(mut self, shift: i32) -> Self {
+        self.param_shift = shift;
+        self
+    }
+
+    /// Set fall-through flag.
+    pub fn with_fallthru(mut self, fallthru: bool) -> Self {
+        self.is_fallthru = fallthru;
+        self
+    }
+
+    /// Set incidental copy flag.
+    pub fn with_incidental_copy(mut self, val: bool) -> Self {
+        self.incidental_copy = val;
+        self
+    }
+
+    /// Set the sub-type (0=uponentry, 1=uponreturn).
+    pub fn with_sub_type(mut self, sub_type: i32) -> Self {
+        self.sub_type = sub_type;
+        self
+    }
+
+    /// Add an input parameter.
+    pub fn with_input(mut self, name: impl Into<String>, size: usize) -> Self {
+        self.input_list.push(InjectParameter::new(name, size));
+        self
+    }
+
+    /// Add an output parameter.
+    pub fn with_output(mut self, name: impl Into<String>, size: usize) -> Self {
+        self.output_list.push(InjectParameter::new(name, size));
+        self
+    }
+
+    /// Set input parameters.
+    pub fn set_input_parameters(&mut self, params: Vec<InjectParameter>) {
+        self.input_list = params;
+    }
+
+    /// Set output parameters.
+    pub fn set_output_parameters(&mut self, params: Vec<InjectParameter>) {
+        self.output_list = params;
+    }
+
+    /// Order parameters: inputs first, then outputs, each with a unique index.
+    ///
+    /// Corresponds to `orderParameters()` in Java.
+    pub fn order_parameters(&mut self) {
+        let mut id = 0;
+        for param in &mut self.input_list {
+            param.set_index(id);
+            id += 1;
+        }
+        for param in &mut self.output_list {
+            param.set_index(id);
+            id += 1;
+        }
+    }
+
+    /// Get input parameters.
+    pub fn get_input(&self) -> &[InjectParameter] {
+        &self.input_list
+    }
+
+    /// Get output parameters.
+    pub fn get_output(&self) -> &[InjectParameter] {
+        &self.output_list
+    }
+
+    /// Check if this is an error placeholder.
+    pub fn is_error_placeholder(&self) -> bool {
+        false
+    }
+
+    /// Determine equivalence with another payload.
+    ///
+    /// Corresponds to `isEquivalent(InjectPayload)` in Java.
+    pub fn is_equivalent(&self, other: &InjectPayloadSleigh) -> bool {
+        if self.name != other.name {
+            return false;
+        }
+        if self.input_list.len() != other.input_list.len() {
+            return false;
+        }
+        for (a, b) in self.input_list.iter().zip(other.input_list.iter()) {
+            if !a.is_equivalent(b) {
+                return false;
+            }
+        }
+        if self.output_list.len() != other.output_list.len() {
+            return false;
+        }
+        for (a, b) in self.output_list.iter().zip(other.output_list.iter()) {
+            if !a.is_equivalent(b) {
+                return false;
+            }
+        }
+        self.incidental_copy == other.incidental_copy
+            && self.param_shift == other.param_shift
+            && self.payload_type == other.payload_type
+            && self.sub_type == other.sub_type
+    }
+
+    /// Get the name.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    /// Get the type.
+    pub fn get_type(&self) -> u32 {
+        self.payload_type
+    }
+
+    /// Get the source.
+    pub fn get_source(&self) -> &str {
+        &self.source
+    }
+
+    /// Get the parameter shift.
+    pub fn get_param_shift(&self) -> i32 {
+        self.param_shift
+    }
+
+    /// Whether this injection falls through.
+    pub fn is_fallthru(&self) -> bool {
+        self.is_fallthru
+    }
+
+    /// Whether COPY operations are incidental.
+    pub fn is_incidental_copy(&self) -> bool {
+        self.incidental_copy
+    }
+
+    /// Release the parse string (take ownership, leaving None).
+    ///
+    /// Corresponds to `releaseParseString()` in Java.
+    pub fn release_parse_string(&mut self) -> Option<String> {
+        self.parse_string.take()
+    }
+}
+
+impl fmt::Display for InjectPayloadSleigh {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "InjectPayloadSleigh({}: {} in, {} out)",
+            self.name,
+            self.input_list.len(),
+            self.output_list.len()
+        )
+    }
+}
+
+// ============================================================================
+// InjectPayloadCallfixup
+// ============================================================================
+
+/// A call-fixup injection payload that substitutes P-code for a function call.
+///
+/// Corresponds to `ghidra.program.model.lang.InjectPayloadCallfixup`.
+///
+/// A callfixup maps one or more target function names to a Sleigh P-code
+/// snippet that replaces the call during analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectPayloadCallfixup {
+    /// The base Sleigh payload.
+    pub base: InjectPayloadSleigh,
+    /// Names of target functions this fixup applies to.
+    pub target_symbol_names: Vec<String>,
+}
+
+impl InjectPayloadCallfixup {
+    /// Create a new call-fixup for the given source.
+    pub fn new(source_name: impl Into<String>) -> Self {
+        let mut base = InjectPayloadSleigh::new("", 0, source_name);
+        base.payload_type = InjectPayload::CALLFIXUP_TYPE;
+        Self {
+            base,
+            target_symbol_names: Vec::new(),
+        }
+    }
+
+    /// Create a call-fixup from an existing payload with failed p-code.
+    pub fn from_failed(pcode_snippet: &str, failed: InjectPayloadCallfixup) -> Self {
+        let base = InjectPayloadSleigh::failed(
+            &failed.base.name,
+            failed.base.payload_type,
+            &failed.base.source,
+        )
+        .with_parse_string(pcode_snippet);
+        Self {
+            base,
+            target_symbol_names: failed.target_symbol_names,
+        }
+    }
+
+    /// Add a target function name.
+    pub fn with_target(mut self, name: impl Into<String>) -> Self {
+        self.target_symbol_names.push(name.into());
+        self
+    }
+
+    /// Get the target function names.
+    pub fn get_targets(&self) -> &[String] {
+        &self.target_symbol_names
+    }
+
+    /// Determine equivalence with another callfixup.
+    pub fn is_equivalent(&self, other: &Self) -> bool {
+        if self.target_symbol_names != other.target_symbol_names {
+            return false;
+        }
+        self.base.is_equivalent(&other.base)
+    }
+
+    /// Get the name.
+    pub fn get_name(&self) -> &str {
+        &self.base.name
+    }
+
+    /// Check if this is an error placeholder.
+    pub fn is_error_placeholder(&self) -> bool {
+        false
+    }
+}
+
+impl fmt::Display for InjectPayloadCallfixup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Callfixup({}: targets=[{}])",
+            self.base.name,
+            self.target_symbol_names.join(", ")
+        )
+    }
+}
+
+// ============================================================================
+// InjectPayloadCallother
+// ============================================================================
+
+/// A callother-fixup injection payload for user-defined P-code operations.
+///
+/// Corresponds to `ghidra.program.model.lang.InjectPayloadCallother`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectPayloadCallother {
+    /// The base Sleigh payload.
+    pub base: InjectPayloadSleigh,
+    /// The callother operation name being fixed up.
+    pub callother_name: String,
+}
+
+impl InjectPayloadCallother {
+    /// Create a new callother-fixup.
+    pub fn new(
+        callother_name: impl Into<String>,
+        source_name: impl Into<String>,
+    ) -> Self {
+        let name: String = callother_name.into();
+        let mut base = InjectPayloadSleigh::new(&name, 0, source_name);
+        base.payload_type = InjectPayload::CALLOTHERFIXUP_TYPE;
+        Self {
+            base,
+            callother_name: name,
+        }
+    }
+
+    /// Create from a failed payload.
+    pub fn from_failed(pcode_snippet: &str, failed: &InjectPayloadCallother) -> Self {
+        let base = InjectPayloadSleigh::failed(
+            &failed.base.name,
+            failed.base.payload_type,
+            &failed.base.source,
+        )
+        .with_parse_string(pcode_snippet);
+        Self {
+            base,
+            callother_name: failed.callother_name.clone(),
+        }
+    }
+
+    /// Get the callother operation name.
+    pub fn get_callother_name(&self) -> &str {
+        &self.callother_name
+    }
+
+    /// Determine equivalence.
+    pub fn is_equivalent(&self, other: &Self) -> bool {
+        self.callother_name == other.callother_name && self.base.is_equivalent(&other.base)
+    }
+}
+
+impl fmt::Display for InjectPayloadCallother {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Callother({})", self.callother_name)
+    }
+}
+
+// ============================================================================
+// InjectPayloadCallotherError
+// ============================================================================
+
+/// A substitute for a callother fixup that failed to parse.
+///
+/// Corresponds to `ghidra.program.model.lang.InjectPayloadCallotherError`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectPayloadCallotherError {
+    /// The base callother payload (marked as failed).
+    pub base: InjectPayloadCallother,
+}
+
+impl InjectPayloadCallotherError {
+    /// Construct from a failed callother payload.
+    pub fn from_failed(failed: InjectPayloadCallother) -> Self {
+        let base = InjectPayloadCallother::from_failed("tmp = tmp + 0;", &failed);
+        Self { base }
+    }
+
+    /// Construct from a name (for simple error placeholders).
+    pub fn from_name(name: impl Into<String>) -> Self {
+        let base = InjectPayloadCallother::new(name, "FAILED");
+        Self { base }
+    }
+
+    /// Returns true -- this is always an error placeholder.
+    pub fn is_error_placeholder(&self) -> bool {
+        true
+    }
+}
+
+impl fmt::Display for InjectPayloadCallotherError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "CallotherError({})", self.base.callother_name)
+    }
+}
+
+// ============================================================================
+// InjectPayloadJumpAssist
+// ============================================================================
+
+/// A jump-assist injection payload for switch table analysis.
+///
+/// Corresponds to `ghidra.program.model.lang.InjectPayloadJumpAssist`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InjectPayloadJumpAssist {
+    /// The base Sleigh payload.
+    pub base: InjectPayloadSleigh,
+    /// Indirect storage space name.
+    pub indirect_storage_space: Option<String>,
+    /// Normalized size.
+    pub normalized_size: usize,
+    /// Maximum delay.
+    pub max_delay: i32,
+}
+
+impl InjectPayloadJumpAssist {
+    /// Create a new jump-assist payload.
+    pub fn new(source_name: impl Into<String>) -> Self {
+        let mut base = InjectPayloadSleigh::new("jumpassist", 0, source_name);
+        base.payload_type = InjectPayload::CALLOTHERFIXUP_TYPE;
+        Self {
+            base,
+            indirect_storage_space: None,
+            normalized_size: 0,
+            max_delay: 0,
+        }
+    }
+
+    /// Builder: set the indirect storage space name.
+    pub fn with_indirect_storage_space(mut self, name: impl Into<String>) -> Self {
+        self.indirect_storage_space = Some(name.into());
+        self
+    }
+
+    /// Builder: set the normalized size.
+    pub fn with_normalized_size(mut self, size: usize) -> Self {
+        self.normalized_size = size;
+        self
+    }
+
+    /// Builder: set the maximum delay.
+    pub fn with_max_delay(mut self, delay: i32) -> Self {
+        self.max_delay = delay;
+        self
+    }
+}
+
+impl fmt::Display for InjectPayloadJumpAssist {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "JumpAssist(space={:?}, norm_size={}, max_delay={})",
+            self.indirect_storage_space, self.normalized_size, self.max_delay
+        )
+    }
+}
+
+// ============================================================================
+// DataTypeProviderContext (trait)
+// ============================================================================
+
+/// Interface for objects that can provide data type instances.
+///
+/// Corresponds to `ghidra.program.model.lang.DataTypeProviderContext` (interface).
+pub trait DataTypeProviderContext: fmt::Debug + Send + Sync {
+    /// Get a unique name for a data type given a base name prefix.
+    fn get_unique_name(&self, base_name: &str) -> String;
+
+    /// Get the data type component at the given offset.
+    /// Returns None if offset is out of bounds.
+    fn get_data_type_component(&self, offset: i32) -> Option<DataTypeComponent>;
+
+    /// Get data type components between start and end offsets.
+    fn get_data_type_components(&self, start: i32, end: i32) -> Vec<DataTypeComponent>;
+}
+
+/// A component of a composite data type (struct field, union member).
+///
+/// Corresponds to `ghidra.program.model.data.DataTypeComponent`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataTypeComponent {
+    /// The data type name of this component.
+    pub data_type_name: String,
+    /// The byte offset within the parent composite type.
+    pub offset: i32,
+    /// The size in bytes.
+    pub size: usize,
+    /// The field name.
+    pub field_name: Option<String>,
+    /// Whether this component is an unnamed bitfield.
+    pub is_bitfield: bool,
+}
+
+impl DataTypeComponent {
+    pub fn new(
+        data_type_name: impl Into<String>,
+        offset: i32,
+        size: usize,
+    ) -> Self {
+        Self {
+            data_type_name: data_type_name.into(),
+            offset,
+            size,
+            field_name: None,
+            is_bitfield: false,
+        }
+    }
+
+    /// Builder: set the field name.
+    pub fn with_field_name(mut self, name: impl Into<String>) -> Self {
+        self.field_name = Some(name.into());
+        self
+    }
+
+    /// Builder: mark as bitfield.
+    pub fn with_bitfield(mut self) -> Self {
+        self.is_bitfield = true;
+        self
+    }
+}
+
+// ============================================================================
+// ParserContext (trait)
+// ============================================================================
+
+/// Language-provider-specific parser context that may be cached.
+///
+/// Corresponds to `ghidra.program.model.lang.ParserContext` (interface).
+pub trait ParserContext: fmt::Debug + Send + Sync {
+    /// Get the instruction prototype for this context.
+    fn get_prototype(&self) -> &dyn InstructionPrototype;
+}
+
+// ============================================================================
+// DisassemblerContext (trait)
+// ============================================================================
+
+/// Extended processor context used by the disassembler with future value tracking.
+///
+/// Corresponds to `ghidra.program.model.lang.DisassemblerContext` (interface).
+///
+/// The disassembler context extends `ProcessorContext` with methods for setting
+/// future register values at addresses that have not yet been disassembled.
+/// This allows context register changes to flow forward through the code.
+pub trait DisassemblerContext: ProcessorContext {
+    /// Set a future register value at an address.
+    ///
+    /// Combines `value` with any previously saved future value at `address`.
+    /// When conflicting bits exist, the new `value` takes precedence.
+    ///
+    /// Corresponds to `setFutureRegisterValue(Address, RegisterValue)` in Java.
+    fn set_future_register_value(&mut self, address: Address, value: &RegisterValue);
+
+    /// Set a future register value flowing from one address to another.
+    ///
+    /// Combines `value` with any previously saved future value at `to_addr`,
+    /// recording that the flow came from `from_addr`.
+    ///
+    /// Corresponds to `setFutureRegisterValue(Address, Address, RegisterValue)` in Java.
+    fn set_future_register_value_flow(
+        &mut self,
+        from_addr: Address,
+        to_addr: Address,
+        value: &RegisterValue,
+    );
+}
+
+// ============================================================================
+// VersionedLanguageService (trait)
+// ============================================================================
+
+/// A language service that supports retrieving specific language versions.
+///
+/// Corresponds to `ghidra.program.model.lang.VersionedLanguageService` (interface).
+///
+/// This extends `LanguageService` with methods to retrieve a specific major
+/// version of a language or its description, used during language upgrades.
+pub trait VersionedLanguageService: LanguageService {
+    /// Get a specific language version by ID and major version number.
+    ///
+    /// Corresponds to `getLanguage(LanguageID, int)` in Java.
+    fn get_language_version(
+        &self,
+        language_id: &LanguageID,
+        version: i32,
+    ) -> Result<Arc<Language>, LangError>;
+
+    /// Get the language description for a specific version.
+    ///
+    /// Corresponds to `getLanguageDescription(LanguageID, int)` in Java.
+    fn get_language_description_version(
+        &self,
+        language_id: &LanguageID,
+        version: i32,
+    ) -> Result<Box<dyn LanguageDescription>, LangError>;
+}
+
+// ============================================================================
+// InvalidPrototype
+// ============================================================================
+
+/// An invalid instruction prototype used as a placeholder for bad instructions.
+///
+/// Corresponds to `ghidra.program.model.lang.InvalidPrototype`.
+///
+/// When disassembly encounters bytes that do not form a valid instruction,
+/// an `InvalidPrototype` is used to represent the error. It always returns
+/// "BAD-Instruction" as its mnemonic, has no flows, and produces a single
+/// UNIMPLEMENTED P-code op.
+#[derive(Debug, Clone)]
+pub struct InvalidPrototype {
+    /// The language this prototype belongs to.
+    pub language_id: LanguageID,
+}
+
+impl InvalidPrototype {
+    /// Create a new invalid instruction prototype.
+    pub fn new(language_id: LanguageID) -> Self {
+        Self { language_id }
+    }
+
+    /// Returns false -- no delay slots.
+    pub fn has_delay_slots(&self) -> bool {
+        false
+    }
+
+    /// Returns false -- no cross-build dependency.
+    pub fn has_cross_build_dependency(&self) -> bool {
+        false
+    }
+
+    /// Returns false -- no next2 dependency.
+    pub fn has_next2_dependency(&self) -> bool {
+        false
+    }
+
+    /// Returns the mnemonic "BAD-Instruction".
+    pub fn get_mnemonic(&self) -> &str {
+        "BAD-Instruction"
+    }
+
+    /// Returns 1 byte (minimum instruction length).
+    pub fn get_length(&self) -> usize {
+        1
+    }
+
+    /// Returns no flows.
+    pub fn get_flows(&self) -> Vec<Address> {
+        Vec::new()
+    }
+
+    /// Returns 0 delay slot depth.
+    pub fn get_delay_slot_depth(&self) -> usize {
+        0
+    }
+
+    /// Returns false -- not in a delay slot.
+    pub fn is_in_delay_slot(&self) -> bool {
+        false
+    }
+
+    /// Returns 1 operand.
+    pub fn get_num_operands(&self) -> usize {
+        1
+    }
+
+    /// Returns no fall-through offset.
+    pub fn get_fall_through_offset(&self) -> Option<usize> {
+        None
+    }
+
+    /// Returns a representation string for the operand.
+    pub fn get_op_representation(&self) -> &str {
+        "Please Re-Disassemble"
+    }
+
+    /// Returns the language ID.
+    pub fn get_language_id(&self) -> &LanguageID {
+        &self.language_id
+    }
+}
+
+impl fmt::Display for InvalidPrototype {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "InvalidPrototype({})", self.language_id)
+    }
+}
+
+// ============================================================================
+// ProgramProcessorContext
+// ============================================================================
+
+/// A processor context backed by a program's register state at a specific address.
+///
+/// Corresponds to `ghidra.program.model.lang.ProgramProcessorContext`.
+///
+/// This wraps a program-level register context (which stores register values
+/// across all addresses) and provides a view of register state at a single
+/// address. Mutations are forwarded to the program context for the specific
+/// address range.
+#[derive(Debug, Clone)]
+pub struct ProgramProcessorContext {
+    /// The address at which to read/write register state.
+    pub address: Address,
+    /// Register values stored by name.
+    pub register_values: HashMap<String, RegisterValue>,
+    /// The context base register name.
+    pub context_base_register: Option<String>,
+    /// All available registers.
+    pub registers: HashMap<String, Register>,
+}
+
+impl ProgramProcessorContext {
+    /// Create a new program processor context at the given address.
+    pub fn new(address: Address) -> Self {
+        Self {
+            address,
+            register_values: HashMap::new(),
+            context_base_register: None,
+            registers: HashMap::new(),
+        }
+    }
+
+    /// Builder: set the context base register.
+    pub fn with_context_base_register(mut self, name: impl Into<String>) -> Self {
+        self.context_base_register = Some(name.into());
+        self
+    }
+
+    /// Builder: add a register definition.
+    pub fn with_register(mut self, reg: Register) -> Self {
+        self.registers.insert(reg.name.clone(), reg);
+        self
+    }
+
+    /// Get the context base register.
+    pub fn get_base_context_register(&self) -> Option<&Register> {
+        self.context_base_register
+            .as_ref()
+            .and_then(|name| self.registers.get(name))
+    }
+
+    /// Get all registers.
+    pub fn get_registers(&self) -> Vec<&Register> {
+        self.registers.values().collect()
+    }
+
+    /// Get a register by name.
+    pub fn get_register(&self, name: &str) -> Option<&Register> {
+        self.registers.get(name)
+    }
+
+    /// Get the value for a register.
+    pub fn get_value(&self, register: &Register, _signed: bool) -> Option<u64> {
+        self.register_values
+            .get(&register.name)
+            .and_then(|rv| rv.get_unsigned_value())
+    }
+
+    /// Get the register value (with mask).
+    pub fn get_register_value(&self, register: &Register) -> Option<&RegisterValue> {
+        self.register_values.get(&register.name)
+    }
+
+    /// Check if a register has a value.
+    pub fn has_value(&self, register: &Register) -> bool {
+        self.register_values
+            .get(&register.name)
+            .map(|rv| rv.has_value())
+            .unwrap_or(false)
+    }
+
+    /// Set a register value.
+    pub fn set_value(&mut self, register: &Register, value: u64) {
+        let rv = RegisterValue::new(
+            &register.name,
+            register.bit_length,
+            value,
+            register.big_endian,
+        );
+        self.register_values.insert(register.name.clone(), rv);
+    }
+
+    /// Set a register value directly.
+    pub fn set_register_value(&mut self, value: RegisterValue) {
+        self.register_values
+            .insert(value.register_name.clone(), value);
+    }
+
+    /// Clear a register's value.
+    pub fn clear_register(&mut self, register: &Register) {
+        self.register_values.remove(&register.name);
+    }
+}
+
+impl ProcessorContextView for ProgramProcessorContext {
+    fn get_base_context_register(&self) -> Option<&Register> {
+        self.get_base_context_register()
+    }
+
+    fn get_registers(&self) -> Vec<&Register> {
+        self.get_registers()
+    }
+
+    fn get_register(&self, name: &str) -> Option<&Register> {
+        self.get_register(name)
+    }
+
+    fn get_value(&self, register: &Register, signed: bool) -> Option<u64> {
+        self.get_value(register, signed)
+    }
+
+    fn get_register_value(&self, register: &Register) -> Option<RegisterValue> {
+        self.get_register_value(register).cloned()
+    }
+
+    fn has_value(&self, register: &Register) -> bool {
+        self.has_value(register)
+    }
+}
+
+impl ProcessorContext for ProgramProcessorContext {
+    fn set_value(&mut self, register: &Register, value: u64) -> Result<(), LangError> {
+        self.set_value(register, value);
+        Ok(())
+    }
+
+    fn set_register_value(&mut self, value: RegisterValue) -> Result<(), LangError> {
+        self.set_register_value(value);
+        Ok(())
+    }
+
+    fn clear_register(&mut self, register: &Register) -> Result<(), LangError> {
+        self.clear_register(register);
+        Ok(())
+    }
+}
+
+impl fmt::Display for ProgramProcessorContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "ProgramProcessorContext(addr={}, {} registers, {} values)",
+            self.address,
+            self.registers.len(),
+            self.register_values.len()
+        )
+    }
+}
+
+// ============================================================================
+// ProcessorNotFoundException (specific error type)
+// ============================================================================
+
+/// Exception thrown when a processor cannot be found.
+///
+/// Corresponds to `ghidra.program.model.lang.ProcessorNotFoundException`.
+#[derive(Debug, Clone)]
+pub struct ProcessorNotFoundException {
+    pub processor_name: String,
+    pub message: String,
+}
+
+impl ProcessorNotFoundException {
+    pub fn new(processor_name: impl Into<String>) -> Self {
+        let name = processor_name.into();
+        Self {
+            message: format!(
+                "Could not find processor {} (which was expected to already exist)",
+                name
+            ),
+            processor_name: name,
+        }
+    }
+}
+
+impl fmt::Display for ProcessorNotFoundException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for ProcessorNotFoundException {}
+
+// ============================================================================
 // PrototypeModelError -- error for prototype model problems
 // ============================================================================
 
@@ -6565,5 +7741,430 @@ mod tests {
         assert!(format!("{}", err).contains("bad model"));
         let err2: Box<dyn std::error::Error> = Box::new(err);
         assert!(!err2.to_string().is_empty());
+    }
+
+    // ========================================================================
+    // AutoParameterType tests
+    // ========================================================================
+
+    #[test]
+    fn test_auto_parameter_type_display() {
+        assert_eq!(format!("{}", AutoParameterType::ReturnAddress), "ReturnAddress");
+        assert_eq!(format!("{}", AutoParameterType::HiddenReturn), "HiddenReturn");
+        assert_eq!(format!("{}", AutoParameterType::ThisPointer), "ThisPointer");
+    }
+
+    #[test]
+    fn test_auto_parameter_type_eq() {
+        assert_eq!(AutoParameterType::ReturnAddress, AutoParameterType::ReturnAddress);
+        assert_ne!(AutoParameterType::ReturnAddress, AutoParameterType::HiddenReturn);
+    }
+
+    // ========================================================================
+    // DynamicVariableStorage tests
+    // ========================================================================
+
+    #[test]
+    fn test_dynamic_variable_storage_indirect_void() {
+        let dvs = DynamicVariableStorage::indirect_void();
+        assert!(dvs.is_void_storage());
+        assert!(dvs.is_forced_indirect());
+        assert!(!dvs.is_unassigned_storage());
+        assert!(!dvs.is_auto_storage());
+        assert!(dvs.is_empty());
+        let s = format!("{}", dvs);
+        assert_eq!(s, "void");
+    }
+
+    #[test]
+    fn test_dynamic_variable_storage_unassigned() {
+        let dvs = DynamicVariableStorage::unassigned(Some(AutoParameterType::ReturnAddress));
+        assert!(dvs.is_unassigned_storage());
+        assert!(dvs.is_auto_storage());
+        assert_eq!(dvs.get_auto_parameter_type(), Some(AutoParameterType::ReturnAddress));
+        assert!(!dvs.is_void_storage());
+        assert!(!dvs.is_forced_indirect());
+    }
+
+    #[test]
+    fn test_dynamic_variable_storage_unassigned_forced_indirect() {
+        let dvs = DynamicVariableStorage::unassigned_forced_indirect(true);
+        assert!(dvs.is_unassigned_storage());
+        assert!(dvs.is_forced_indirect());
+        assert!(!dvs.is_auto_storage());
+    }
+
+    #[test]
+    fn test_dynamic_variable_storage_at_address() {
+        let dvs = DynamicVariableStorage::at_address(
+            Address::new(0x1000),
+            4,
+            None,
+            false,
+        );
+        assert!(!dvs.is_unassigned_storage());
+        assert!(!dvs.is_void_storage());
+        assert_eq!(dvs.num_locations(), 1);
+        assert_eq!(dvs.total_size(), 4);
+        assert!(!dvs.is_empty());
+    }
+
+    #[test]
+    fn test_dynamic_variable_storage_from_varnodes() {
+        let dvs = DynamicVariableStorage::from_varnodes(
+            vec![Address::new(0x100), Address::new(0x200)],
+            vec![4, 8],
+            Some(AutoParameterType::ThisPointer),
+            true,
+        );
+        assert_eq!(dvs.num_locations(), 2);
+        assert_eq!(dvs.total_size(), 12);
+        assert!(dvs.is_forced_indirect());
+        assert!(dvs.is_auto_storage());
+        let s = format!("{}", dvs);
+        assert!(s.contains("(ptr)"));
+        assert!(s.contains("(auto: ThisPointer)"));
+    }
+
+    #[test]
+    fn test_dynamic_variable_storage_eq() {
+        let a = DynamicVariableStorage::at_address(Address::new(0x1000), 4, None, false);
+        let b = DynamicVariableStorage::at_address(Address::new(0x1000), 4, None, false);
+        let c = DynamicVariableStorage::at_address(Address::new(0x2000), 4, None, false);
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    // ========================================================================
+    // InjectParameter tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_parameter() {
+        let mut p = InjectParameter::new("input0", 8);
+        assert_eq!(p.get_name(), "input0");
+        assert_eq!(p.get_size(), 8);
+        assert_eq!(p.index, 0);
+        p.set_index(5);
+        assert_eq!(p.index, 5);
+    }
+
+    #[test]
+    fn test_inject_parameter_equivalent() {
+        let a = InjectParameter::new("x", 4);
+        let b = InjectParameter::new("x", 4);
+        let c = InjectParameter::new("y", 4);
+        assert!(a.is_equivalent(&b));
+        assert!(!a.is_equivalent(&c));
+    }
+
+    // ========================================================================
+    // InjectPayloadSleigh tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_payload_sleigh_new() {
+        let p = InjectPayloadSleigh::new("fix_malloc", 0, "test.cspec");
+        assert_eq!(p.get_name(), "fix_malloc");
+        assert_eq!(p.get_source(), "test.cspec");
+        assert_eq!(p.get_param_shift(), 0);
+        assert!(p.is_fallthru());
+        assert!(!p.is_incidental_copy());
+        assert!(p.get_input().is_empty());
+        assert!(p.get_output().is_empty());
+        assert!(!p.is_error_placeholder());
+    }
+
+    #[test]
+    fn test_inject_payload_sleigh_failed() {
+        let p = InjectPayloadSleigh::failed("bad_payload", 1, "spec.xml");
+        assert_eq!(p.get_name(), "bad_payload");
+        assert!(p.get_source().contains("FAILED"));
+    }
+
+    #[test]
+    fn test_inject_payload_sleigh_builders() {
+        let p = InjectPayloadSleigh::new("test", 0, "src")
+            .with_parse_string("RAX = RBX + RCX;")
+            .with_param_shift(4)
+            .with_fallthru(false)
+            .with_incidental_copy(true)
+            .with_sub_type(1)
+            .with_input("in0", 8)
+            .with_input("in1", 4)
+            .with_output("out0", 8);
+
+        assert_eq!(p.parse_string, Some("RAX = RBX + RCX;".to_string()));
+        assert_eq!(p.get_param_shift(), 4);
+        assert!(!p.is_fallthru());
+        assert!(p.is_incidental_copy());
+        assert_eq!(p.sub_type, 1);
+        assert_eq!(p.get_input().len(), 2);
+        assert_eq!(p.get_output().len(), 1);
+    }
+
+    #[test]
+    fn test_inject_payload_sleigh_order_parameters() {
+        let mut p = InjectPayloadSleigh::new("test", 0, "src")
+            .with_input("a", 4)
+            .with_input("b", 4)
+            .with_output("c", 4);
+        p.order_parameters();
+        assert_eq!(p.input_list[0].index, 0);
+        assert_eq!(p.input_list[1].index, 1);
+        assert_eq!(p.output_list[0].index, 2);
+    }
+
+    #[test]
+    fn test_inject_payload_sleigh_equivalent() {
+        let a = InjectPayloadSleigh::new("test", 0, "src")
+            .with_input("x", 4);
+        let b = InjectPayloadSleigh::new("test", 0, "src")
+            .with_input("x", 4);
+        let c = InjectPayloadSleigh::new("other", 0, "src")
+            .with_input("x", 4);
+        assert!(a.is_equivalent(&b));
+        assert!(!a.is_equivalent(&c));
+    }
+
+    #[test]
+    fn test_inject_payload_sleigh_release_parse_string() {
+        let mut p = InjectPayloadSleigh::new("test", 0, "src")
+            .with_parse_string("code");
+        assert!(p.parse_string.is_some());
+        let s = p.release_parse_string();
+        assert_eq!(s, Some("code".to_string()));
+        assert!(p.parse_string.is_none());
+    }
+
+    #[test]
+    fn test_inject_payload_sleigh_display() {
+        let p = InjectPayloadSleigh::new("test", 0, "src")
+            .with_input("a", 4)
+            .with_output("b", 8);
+        let s = format!("{}", p);
+        assert!(s.contains("test"));
+        assert!(s.contains("1 in"));
+        assert!(s.contains("1 out"));
+    }
+
+    // ========================================================================
+    // InjectPayloadCallfixup tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_payload_callfixup_new() {
+        let cf = InjectPayloadCallfixup::new("spec.xml")
+            .with_target("malloc")
+            .with_target("calloc");
+        assert_eq!(cf.get_name(), "");
+        assert_eq!(cf.get_targets().len(), 2);
+        assert_eq!(cf.get_targets()[0], "malloc");
+        assert_eq!(cf.get_targets()[1], "calloc");
+        assert!(!cf.is_error_placeholder());
+    }
+
+    #[test]
+    fn test_inject_payload_callfixup_display() {
+        let cf = InjectPayloadCallfixup::new("spec.xml")
+            .with_target("malloc");
+        let s = format!("{}", cf);
+        assert!(s.contains("Callfixup"));
+        assert!(s.contains("malloc"));
+    }
+
+    #[test]
+    fn test_inject_payload_callfixup_equivalent() {
+        let a = InjectPayloadCallfixup::new("src").with_target("foo");
+        let b = InjectPayloadCallfixup::new("src").with_target("foo");
+        let c = InjectPayloadCallfixup::new("src").with_target("bar");
+        assert!(a.is_equivalent(&b));
+        assert!(!a.is_equivalent(&c));
+    }
+
+    // ========================================================================
+    // InjectPayloadCallother tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_payload_callother() {
+        let co = InjectPayloadCallother::new("myop", "spec.xml");
+        assert_eq!(co.get_callother_name(), "myop");
+        let s = format!("{}", co);
+        assert!(s.contains("myop"));
+    }
+
+    #[test]
+    fn test_inject_payload_callother_equivalent() {
+        let a = InjectPayloadCallother::new("op1", "src");
+        let b = InjectPayloadCallother::new("op1", "src");
+        let c = InjectPayloadCallother::new("op2", "src");
+        assert!(a.is_equivalent(&b));
+        assert!(!a.is_equivalent(&c));
+    }
+
+    // ========================================================================
+    // InjectPayloadCallotherError tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_payload_callother_error() {
+        let err = InjectPayloadCallotherError::from_name("bad_op");
+        assert!(err.is_error_placeholder());
+        assert_eq!(err.base.callother_name, "bad_op");
+        let s = format!("{}", err);
+        assert!(s.contains("CallotherError"));
+        assert!(s.contains("bad_op"));
+    }
+
+    #[test]
+    fn test_inject_payload_callother_error_from_failed() {
+        let co = InjectPayloadCallother::new("failing_op", "spec.xml");
+        let err = InjectPayloadCallotherError::from_failed(co);
+        assert!(err.is_error_placeholder());
+        assert_eq!(err.base.callother_name, "failing_op");
+    }
+
+    // ========================================================================
+    // InjectPayloadJumpAssist tests
+    // ========================================================================
+
+    #[test]
+    fn test_inject_payload_jump_assist() {
+        let ja = InjectPayloadJumpAssist::new("spec.xml")
+            .with_indirect_storage_space("ram")
+            .with_normalized_size(4)
+            .with_max_delay(2);
+        assert_eq!(ja.indirect_storage_space, Some("ram".to_string()));
+        assert_eq!(ja.normalized_size, 4);
+        assert_eq!(ja.max_delay, 2);
+        let s = format!("{}", ja);
+        assert!(s.contains("JumpAssist"));
+        assert!(s.contains("ram"));
+    }
+
+    // ========================================================================
+    // InvalidPrototype tests
+    // ========================================================================
+
+    #[test]
+    fn test_invalid_prototype() {
+        let ip = InvalidPrototype::new(LanguageID::x86_64());
+        assert_eq!(ip.get_mnemonic(), "BAD-Instruction");
+        assert_eq!(ip.get_length(), 1);
+        assert!(!ip.has_delay_slots());
+        assert!(!ip.has_cross_build_dependency());
+        assert!(!ip.has_next2_dependency());
+        assert!(ip.get_flows().is_empty());
+        assert_eq!(ip.get_delay_slot_depth(), 0);
+        assert!(!ip.is_in_delay_slot());
+        assert_eq!(ip.get_num_operands(), 1);
+        assert!(ip.get_fall_through_offset().is_none());
+        assert_eq!(ip.get_op_representation(), "Please Re-Disassemble");
+        assert_eq!(ip.get_language_id(), &LanguageID::x86_64());
+        let s = format!("{}", ip);
+        assert!(s.contains("InvalidPrototype"));
+    }
+
+    // ========================================================================
+    // ProgramProcessorContext tests
+    // ========================================================================
+
+    #[test]
+    fn test_program_processor_context_new() {
+        let ctx = ProgramProcessorContext::new(Address::new(0x1000));
+        assert_eq!(ctx.address, Address::new(0x1000));
+        assert!(ctx.registers.is_empty());
+        assert!(ctx.register_values.is_empty());
+    }
+
+    #[test]
+    fn test_program_processor_context_with_register() {
+        let rax = Register::new("RAX", 64, "register", 0x00);
+        let ctx = ProgramProcessorContext::new(Address::new(0x1000))
+            .with_register(rax)
+            .with_context_base_register("EFLAGS");
+        assert_eq!(ctx.registers.len(), 1);
+        assert!(ctx.get_register("RAX").is_some());
+        assert!(ctx.get_register("MISSING").is_none());
+        assert!(ctx.get_base_context_register().is_none()); // EFLAGS not in registers
+    }
+
+    #[test]
+    fn test_program_processor_context_set_get_value() {
+        let rax = Register::new("RAX", 64, "register", 0x00);
+        let mut ctx = ProgramProcessorContext::new(Address::new(0x1000))
+            .with_register(rax);
+        let reg = ctx.get_register("RAX").unwrap().clone();
+        assert!(!ctx.has_value(&reg));
+        ctx.set_value(&reg, 0xDEADBEEF);
+        assert!(ctx.has_value(&reg));
+        let val = ctx.get_value(&reg, false);
+        assert!(val.is_some());
+    }
+
+    #[test]
+    fn test_program_processor_context_clear() {
+        let rax = Register::new("RAX", 64, "register", 0x00);
+        let mut ctx = ProgramProcessorContext::new(Address::new(0x1000))
+            .with_register(rax);
+        let reg = ctx.get_register("RAX").unwrap().clone();
+        ctx.set_value(&reg, 42);
+        assert!(ctx.has_value(&reg));
+        ctx.clear_register(&reg);
+        assert!(!ctx.has_value(&reg));
+    }
+
+    #[test]
+    fn test_program_processor_context_display() {
+        let ctx = ProgramProcessorContext::new(Address::new(0x1000));
+        let s = format!("{}", ctx);
+        assert!(s.contains("ProgramProcessorContext"));
+        assert!(s.contains("00001000")); // 0x1000 in hex (Address displays as hex)
+    }
+
+    // ========================================================================
+    // ProcessorNotFoundException tests
+    // ========================================================================
+
+    #[test]
+    fn test_processor_not_found_exception() {
+        let err = ProcessorNotFoundException::new("x86");
+        assert!(err.message.contains("x86"));
+        assert!(err.message.contains("Could not find processor"));
+        assert_eq!(err.processor_name, "x86");
+        let s = format!("{}", err);
+        assert!(s.contains("x86"));
+        let err2: Box<dyn std::error::Error> = Box::new(err);
+        assert!(!err2.to_string().is_empty());
+    }
+
+    // ========================================================================
+    // DataTypeComponent tests
+    // ========================================================================
+
+    #[test]
+    fn test_data_type_component() {
+        let c = DataTypeComponent::new("int", 0, 4)
+            .with_field_name("x")
+            .with_bitfield();
+        assert_eq!(c.data_type_name, "int");
+        assert_eq!(c.offset, 0);
+        assert_eq!(c.size, 4);
+        assert_eq!(c.field_name, Some("x".to_string()));
+        assert!(c.is_bitfield);
+    }
+
+    // ========================================================================
+    // DynamicVariableStorage display tests
+    // ========================================================================
+
+    #[test]
+    fn test_dynamic_variable_storage_unassigned_display() {
+        let dvs = DynamicVariableStorage::unassigned(None);
+        let s = format!("{}", dvs);
+        assert!(s.contains("unassigned"));
+        assert!(!s.contains("(ptr)"));
+        assert!(!s.contains("(auto"));
     }
 }

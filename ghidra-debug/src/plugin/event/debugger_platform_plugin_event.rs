@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerPlatformPluginEvent::new("test".to_string(), None);
+        let _obj = DebuggerPlatformPluginEvent::new("test".to_string(), None);
         assert!(true);
     }
 

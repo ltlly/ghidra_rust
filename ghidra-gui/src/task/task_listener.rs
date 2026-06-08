@@ -10,22 +10,22 @@ use super::task::TaskState;
 /// Ports `ghidra.util.task.TaskListener`.
 pub trait TaskListener: Send + Sync {
     /// Called when a task starts.
-    fn task_started(&self, task_name: &str) {}
+    fn task_started(&self, _task_name: &str) {}
 
     /// Called when a task makes progress.
-    fn task_progress(&self, task_name: &str, progress: f64) {}
+    fn task_progress(&self, _task_name: &str, _progress: f64) {}
 
     /// Called when a task completes successfully.
-    fn task_completed(&self, task_name: &str) {}
+    fn task_completed(&self, _task_name: &str) {}
 
     /// Called when a task is cancelled.
-    fn task_cancelled(&self, task_name: &str) {}
+    fn task_cancelled(&self, _task_name: &str) {}
 
     /// Called when a task fails.
-    fn task_failed(&self, task_name: &str, error: &str) {}
+    fn task_failed(&self, _task_name: &str, _error: &str) {}
 
     /// Called when a task changes state.
-    fn task_state_changed(&self, task_name: &str, old_state: TaskState, new_state: TaskState) {}
+    fn task_state_changed(&self, _task_name: &str, _old_state: TaskState, _new_state: TaskState) {}
 }
 
 /// A no-op task listener that does nothing.

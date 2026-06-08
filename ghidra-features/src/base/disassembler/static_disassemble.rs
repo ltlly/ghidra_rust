@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn test_disassembled_view_plugin() {
-        let mut plugin = DisassembledViewPlugin::new();
+        let plugin = DisassembledViewPlugin::new();
         assert_eq!(plugin.name(), "Disassembled View");
         assert!(plugin.is_enabled());
         assert!(!plugin.is_locked());

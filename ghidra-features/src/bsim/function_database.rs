@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::description::DatabaseInformation;
-use super::protocol::{BSimQueryType, BSimResponseType, CreateDatabase};
+use super::protocol::{BSimQueryType, BSimResponseType};
 
 // ============================================================================
 // BSimServerInfo
@@ -530,6 +530,7 @@ impl Default for SimilarFunctionQueryService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bsim::CreateDatabase;
 
     #[test]
     fn test_h2_database_lifecycle() {

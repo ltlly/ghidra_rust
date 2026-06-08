@@ -29,9 +29,6 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
-use std::time::SystemTime;
 
 use super::model::*;
 use super::{ProjectLocator, ProjectResult};
@@ -706,8 +703,8 @@ pub struct DefaultProjectData {
     root_folder_path: String,
     file_count: i32,
     max_name_length: usize,
-    listeners: DomainFolderChangeListenerList,
-    is_closed: bool,
+    _listeners: DomainFolderChangeListenerList,
+    _is_closed: bool,
 }
 
 impl DefaultProjectData {
@@ -718,8 +715,8 @@ impl DefaultProjectData {
             root_folder_path,
             file_count: -1,
             max_name_length: 256,
-            listeners: DomainFolderChangeListenerList::new(),
-            is_closed: false,
+            _listeners: DomainFolderChangeListenerList::new(),
+            _is_closed: false,
         }
     }
 

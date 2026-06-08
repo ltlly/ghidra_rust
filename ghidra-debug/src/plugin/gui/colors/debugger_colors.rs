@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerColors::new(Default::default());
+        let _obj = DebuggerColors::new(Default::default());
         assert!(true);
     }
 

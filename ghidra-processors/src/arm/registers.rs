@@ -38,6 +38,7 @@ const FPSCR_OFFSET: u64 = 0x0500;
 
 /// Bit positions in the CPSR (Current Program Status Register).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[allow(non_camel_case_types)]
 pub enum CpsrFlagBit {
     /// Mode field (bits 0-4)
     MODE = 0,

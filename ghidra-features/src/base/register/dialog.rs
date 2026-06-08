@@ -8,7 +8,7 @@
 //! address range. GUI code is not ported; only the data-model and
 //! validation are provided.
 
-use ghidra_core::addr::{Address, AddressRange, AddressSet};
+use ghidra_core::addr::AddressSet;
 use ghidra_core::program::lang::Register;
 
 /// Validation errors for the register value dialog.
@@ -222,6 +222,7 @@ impl RegisterValueDialogModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
     use ghidra_core::program::lang::RegisterTypeFlags;
     use std::collections::HashSet;
 

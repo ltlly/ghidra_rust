@@ -24,7 +24,7 @@
 //! - [`Objc2MessageReference`] -- a message reference (for swift)
 //! - [`Objc2TypeMetadata`] -- the top-level metadata parser
 
-use super::{ObjcMethod, ObjcMethodList, ObjcMethodType, ObjcState};
+use super::{ObjcMethod, ObjcMethodType, ObjcState};
 
 // ============================================================================
 // Objc2Constants
@@ -492,6 +492,7 @@ impl Objc2Method {
             .unwrap_or_else(|| format!("method_{}", offset));
         let types = super::ObjcUtils::read_string_at(data, types_addr)
             .unwrap_or_default();
+        let _ = pos;
 
         Some(Self {
             method: ObjcMethod::new(name, types, imp, method_type, offset as u64),
@@ -812,6 +813,7 @@ impl Objc2Protocol {
 
         let name = super::ObjcUtils::read_string_at(data, name_addr)
             .unwrap_or_else(|| format!("protocol_{}", offset));
+        let _ = pos;
 
         // Skip: protocols pointer, instanceMethods, classMethods,
         //        optionalInstanceMethods, optionalClassMethods,
@@ -1054,6 +1056,7 @@ impl Objc2Class {
             ]);
             pos += 8; v
         };
+        let _ = pos;
 
         Some(Self {
             isa,
@@ -1167,6 +1170,7 @@ impl Objc2Category {
             ]);
             pos += 8; v
         };
+        let _ = pos;
 
         let name = super::ObjcUtils::read_string_at(data, name_addr)
             .unwrap_or_else(|| format!("category_{}", offset));

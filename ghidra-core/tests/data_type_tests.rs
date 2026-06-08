@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use ghidra_core::data::{
-    builtin_data_type_tree, DataType, DataTypeKind, DataTypePath, DataTypeTreeNode,
+    builtin_data_type_tree, DataType, DataTypePath, DataTypeTreeNode,
     types::{StructureDataType, EnumDataType, UnionDataType, ArrayDataType, PointerDataType,
             TypedefDataType, FunctionDefinitionDataType, StringDataType, UndefinedDataType},
     builtin_types::{BooleanDataType, ByteDataType, IntegerDataType, FloatDataType, DoubleDataType,
@@ -299,7 +299,7 @@ fn test_builtin_tree_leaf_types() {
 fn test_hierarchical_type_system() {
     let mut root = DataTypeTreeNode::new("/");
 
-    let mut primitives = DataTypeTreeNode::category(
+    let primitives = DataTypeTreeNode::category(
         "primitives",
         vec![
             DataTypeTreeNode::leaf("int", Arc::new(IntegerDataType::new()) as Arc<dyn DataType>),
@@ -308,7 +308,7 @@ fn test_hierarchical_type_system() {
     );
 
     let char_ptr: Arc<dyn DataType> = Arc::new(CharDataType::new());
-    let mut composites = DataTypeTreeNode::category(
+    let composites = DataTypeTreeNode::category(
         "composites",
         vec![
             DataTypeTreeNode::leaf("string", Arc::new(StringDataType::new(0)) as Arc<dyn DataType>),

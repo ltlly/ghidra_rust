@@ -19,7 +19,6 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.marker` Java package.
 pub mod plugin;
 
-use ghidra_core::Address;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 // ============================================================================

@@ -26,13 +26,11 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::base::analyzer::{Address, Program};
 use crate::loader::framework::{
-    CompilerSpecId, LanguageCompilerSpecPair, LanguageId, LoadError, LoadOption, LoadOptionValue,
-    LoadResults, LoadSpec, Loaded, LoaderRegistry, LoaderTier, MessageLog, QueryOpinionService,
-    QueryResult,
+    CompilerSpecId, LanguageCompilerSpecPair, LanguageId, LoadError, LoadOption,
+    LoadResults, LoadSpec, LoaderTier, MessageLog,
 };
 
 // ---------------------------------------------------------------------------
@@ -700,7 +698,7 @@ impl AutoImporter {
     /// Import a byte slice, auto-detecting format.
     pub fn import_bytes(
         data: &[u8],
-        name: &str,
+        _name: &str,
         options: &[LoadOption],
         log: &mut MessageLog,
     ) -> Result<LoadResults, LoadError> {

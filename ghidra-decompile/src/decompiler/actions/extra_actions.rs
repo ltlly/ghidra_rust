@@ -13,7 +13,7 @@
 use ghidra_core::addr::Address;
 use serde::{Deserialize, Serialize};
 
-use super::{ActionCategory, ActionMetadata, DecompilerActionContext};
+use super::{ActionCategory, ActionMetadata};
 
 // ============================================================================
 // Slice actions

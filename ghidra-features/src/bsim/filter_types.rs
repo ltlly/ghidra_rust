@@ -15,7 +15,6 @@
 //!
 //! Each filter type can be negated via the `NegatedBSimFilterType` wrapper.
 
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// The base trait for all BSim filter types.

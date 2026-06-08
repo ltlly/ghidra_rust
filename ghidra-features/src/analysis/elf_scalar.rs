@@ -8,7 +8,7 @@
 //! [`ScalarOperandAnalyzer`].
 
 use crate::base::analyzer::{
-    AbstractAnalyzer, Address, AddressRange, AddressSet, AnalysisPriority, Analyzer, AnalyzerType,
+    AbstractAnalyzer, AddressSet, AnalysisPriority, Analyzer, AnalyzerType,
     CancelledError, MessageLog, Program, TaskMonitor,
 };
 
@@ -73,7 +73,7 @@ impl ElfScalarOperandAnalyzer {
             return Ok(false);
         }
 
-        let mut removed = false;
+        let removed = false;
         for addr in set.get_addresses(true) {
             monitor.check_cancelled()?;
             // In the full implementation, this would:

@@ -149,7 +149,7 @@ impl std::io::Write for MpscWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Read, Write};
+    
 
     #[test]
     fn test_memory_pty_creation() {

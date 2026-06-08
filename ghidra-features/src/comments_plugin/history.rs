@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 
 use ghidra_core::Address;
 
-use super::{CommentEntry, CommentType};
+use super::CommentType;
 
 // ---------------------------------------------------------------------------
 // CommentHistoryEntry -- a single history record

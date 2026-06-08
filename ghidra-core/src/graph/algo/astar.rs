@@ -282,7 +282,7 @@ impl<N: Clone + Eq + std::hash::Hash> Default for AStarSearch<N> {
 /// ```
 pub fn topological_sort<N: Clone + Eq + std::hash::Hash>(
     edges: &[(N, N)],
-    vertex_count: usize,
+    _vertex_count: usize,
 ) -> Option<Vec<N>> {
     use std::collections::{HashMap, VecDeque};
 

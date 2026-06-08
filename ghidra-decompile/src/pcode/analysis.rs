@@ -992,8 +992,8 @@ impl SsaBuilder {
     ) -> Self {
         // Map each operation to its block.
         let mut op_to_block = HashMap::new();
-        for (node, block) in cfg.blocks.iter().enumerate() {
-            if let Some(block_node) = block.node {
+        for (_node, block) in cfg.blocks.iter().enumerate() {
+            if let Some(_block_node) = block.node {
                 // Approximate: operations in this block.
                 // For simplicity, assign placeholder - we'll compute properly.
             }
@@ -1172,7 +1172,7 @@ impl SsaBuilder {
             // Fill phi-node inputs in successor blocks.
             for succ in self.cfg.successors(node) {
                 if let Some(succ_phis) = phi_nodes.get(&succ) {
-                    for phi in succ_phis {
+                    for _phi in succ_phis {
                         // Find the phi for the output varnode of this phi.
                         // (We need to update the input from this block.)
                         // In this simplified version, phi inputs are already
@@ -1634,7 +1634,7 @@ impl DeadCodeElimination {
 
     /// Returns the set of live operation indices.
     pub fn live_indices(operations: &[PcodeOperation]) -> HashSet<usize> {
-        let n = operations.len();
+        let _n = operations.len();
         let mut live = HashSet::new();
         let mut worklist = VecDeque::new();
         let du = DefUseChain::build(operations);
@@ -2011,7 +2011,7 @@ mod tests {
         graph.add_edge(c, d, CfgEdge::Fallthrough);
         graph.add_edge(d, exit, CfgEdge::Fallthrough);
 
-        let mut blocks: Vec<BasicBlock> = (0..6).map(|i| {
+        let blocks: Vec<BasicBlock> = (0..6).map(|i| {
             let mut bb = BasicBlock::new(i);
             bb.node = Some(NodeIndex::new(i));
             bb
@@ -2137,7 +2137,7 @@ mod tests {
         graph.add_edge(header, exit, CfgEdge::FalseBranch);
         graph.add_edge(body, header, CfgEdge::Branch);
 
-        let mut blocks: Vec<BasicBlock> = (0..4).map(|i| {
+        let blocks: Vec<BasicBlock> = (0..4).map(|i| {
             let mut bb = BasicBlock::new(i);
             bb.node = Some(NodeIndex::new(i));
             bb

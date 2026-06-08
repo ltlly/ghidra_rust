@@ -149,11 +149,7 @@ impl LabelActionContext {
     }
 
     /// Creates a context for a position on an operand field with a reference.
-    pub fn on_operand(
-        address: Address,
-        ref_address: Option<Address>,
-        operand_index: i32,
-    ) -> Self {
+    pub fn on_operand(address: Address, ref_address: Option<Address>, operand_index: i32) -> Self {
         Self {
             address,
             ref_address,
@@ -236,10 +232,9 @@ pub fn is_remove_label_enabled(ctx: &LabelActionContext) -> bool {
 
     match ctx.symbol_type {
         Some(SymbolType::Label) => !ctx.is_dynamic,
-        Some(SymbolType::Function) => {
-            ctx.symbol_source
-                .map_or(false, |s| s != SourceType::Default)
-        }
+        Some(SymbolType::Function) => ctx
+            .symbol_source
+            .map_or(false, |s| s != SourceType::Default),
         _ => false,
     }
 }
@@ -307,7 +302,10 @@ mod tests {
     fn test_edit_label_on_component() {
         let mut ctx = LabelActionContext::empty(addr(0x1000));
         ctx.component_path = vec![0];
-        assert_eq!(is_edit_label_enabled(&ctx), Some(LabelAction::EditFieldName));
+        assert_eq!(
+            is_edit_label_enabled(&ctx),
+            Some(LabelAction::EditFieldName)
+        );
     }
 
     #[test]
@@ -394,7 +392,10 @@ mod tests {
         assert_eq!(LabelAction::AddLabel.display_name(), "Add Label...");
         assert_eq!(LabelAction::EditLabel.display_name(), "Edit Label...");
         assert_eq!(LabelAction::RemoveLabel.display_name(), "Remove Label");
-        assert_eq!(LabelAction::ShowLabelHistory.display_name(), "Show Label History...");
+        assert_eq!(
+            LabelAction::ShowLabelHistory.display_name(),
+            "Show Label History..."
+        );
     }
 
     #[test]

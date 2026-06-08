@@ -10,7 +10,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::fid_db::{FidDB, FunctionRecord};
-use super::fid_hasher::{FidHasher, HashFamily, HashMatch};
+use super::fid_hasher::{FidHasher, HashFamily};
 
 // ---------------------------------------------------------------------------
 // FidMatchScore
@@ -65,7 +65,7 @@ pub struct FidSearchResult {
 /// # Usage
 ///
 /// ```rust
-/// use ghidra_features::function_id::*;
+/// use ghidra_features::function_id::{FidDB, FidHasher, FidService, FunctionRecord, HashFamily, LibraryRecord};
 ///
 /// let mut db = FidDB::new("x86", "x86:LE:64:default");
 /// db.add_library(LibraryRecord::new("libc.so", "2.31", "x86", "x86:LE:64:default"));

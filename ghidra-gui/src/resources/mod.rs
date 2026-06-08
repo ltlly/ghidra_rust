@@ -20,7 +20,7 @@ pub use icons_ext::{
 pub use multi_icon::{BuiltinIcon, IconId, IconOverlay, MultiIcon, MultiIconBuilder, Quadrant};
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::RwLock;
 
 use std::sync::LazyLock;

@@ -71,7 +71,7 @@ fn test_connection_with_targets() {
 
     // Publish multiple targets
     let t1 = inner.publish_target(TargetKey::new("trace-process-1"));
-    let t2 = inner.publish_target(TargetKey::new("trace-process-2"));
+    let _t2 = inner.publish_target(TargetKey::new("trace-process-2"));
 
     assert_eq!(inner.get_targets().len(), 2);
     assert!(inner.is_target(&TargetKey::new("trace-process-1")));
@@ -515,7 +515,7 @@ fn test_full_debug_session_simulation() {
     inner.set_state(ConnectionState::Connected);
 
     // 3. Publish a target
-    let target = inner.publish_target(TargetKey::new("trace-0"));
+    let _target = inner.publish_target(TargetKey::new("trace-0"));
     let conn_id = service.register_connection(
         "localhost".into(),
         ghidra_debug::api::tracermi::RemoteMethodRegistry::new(),
@@ -576,9 +576,9 @@ fn test_full_debug_session_simulation() {
 
 use ghidra_debug::proposed_utils::{
     DependentServiceConstructor, DependentServiceResolver, TopologicalSorter,
-    UnionedCollection, CatenatedCollection, DistinctIterator, StreamUtils,
+    UnionedCollection, StreamUtils,
     SuppressableCallback, QueuedListener, DbgMsgTracer, TimedMsg,
-    DefaultObservableCollection, ID, IDKeyed, IDHashed, ProxyUtilities,
+    DefaultObservableCollection, ID,
     ByteBufferUtils,
 };
 use ghidra_debug::proposed_utils::database::{

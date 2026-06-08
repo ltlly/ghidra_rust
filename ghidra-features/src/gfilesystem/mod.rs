@@ -17,7 +17,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
 // ---------------------------------------------------------------------------
 // FSRL -- File System Resource Locator
@@ -801,7 +801,7 @@ mod tests {
 
     #[test]
     fn test_filesystem_instance_manager() {
-        let mut mgr = FileSystemInstanceManager::new();
+        let mgr = FileSystemInstanceManager::new();
         assert!(mgr.is_empty());
         // Manager lifecycle test (no real FS, just structure)
         assert_eq!(mgr.len(), 0);

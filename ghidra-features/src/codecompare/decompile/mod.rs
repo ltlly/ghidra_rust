@@ -6,13 +6,34 @@
 //! computing token-level differences, and providing highlighting information
 //! for a side-by-side code comparison view.
 //!
+//! # Submodules
+//!
+//! - [`action_context`] -- action context for the dual decompiler view
+//! - [`decompiler_options`] -- configurable highlight colors for decompiler comparison
+//! - [`highlight_controller`] -- diff highlight controller with token bin tracking
+//! - [`scroll_coordinator`] -- synchronized scrolling between two decompiler panels
+//! - [`token_pair`] -- matched token pairs from the Pinning algorithm
+//!
 //! # Key types
 //!
 //! - [`DecompileDataDiff`] -- the main diff engine for decompiler output
 //! - [`DiffLine`] -- a single line in the diff
 //! - [`HighlightInfo`] -- highlighting information for matched/mismatched tokens
 
-use super::graphanalysis::{DecompilerToken, Side, TokenBin, TokenKind};
+pub mod action_context;
+pub mod c_display;
+pub mod callee_tokens_action;
+pub mod data_diff_engine;
+pub mod decompiler_comparison_view;
+pub mod decompiler_options;
+pub mod determine_differences_task;
+pub mod find_action;
+pub mod highlight_controller;
+pub mod matched_tokens_action;
+pub mod scroll_coordinator;
+pub mod token_pair;
+
+use super::graphanalysis::{DecompilerToken, Side};
 
 /// A single line of decompiled code.
 #[derive(Debug, Clone)]
@@ -333,6 +354,7 @@ pub struct DiffStatistics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codecompare::graphanalysis::TokenKind;
 
     fn make_line(num: usize, text: &str) -> DecompiledLine {
         DecompiledLine::new(

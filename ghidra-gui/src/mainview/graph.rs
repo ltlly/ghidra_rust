@@ -2119,7 +2119,7 @@ impl FunctionGraphWidget {
             if input.key_pressed(egui::Key::Home) {
                 if let Some(entry) = self.entry_index {
                     self.focus_node(entry);
-                    if let Some(bounds) = self.cached_bounds {
+                    if let Some(_bounds) = self.cached_bounds {
                         self.camera.focus_node(self.positions[entry], canvas_rect);
                     }
                 }

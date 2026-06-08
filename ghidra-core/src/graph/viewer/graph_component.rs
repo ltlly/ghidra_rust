@@ -50,13 +50,13 @@ pub struct GraphComponent {
     /// Popup regulator.
     popup: PopupRegulator,
     /// Mouse picking plugin.
-    picking: PickingGraphMousePlugin,
+    _picking: PickingGraphMousePlugin,
     /// Mouse scaling plugin.
-    scaling: ScalingGraphMousePlugin,
+    _scaling: ScalingGraphMousePlugin,
     /// Mouse translating plugin.
-    translating: TranslatingGraphMousePlugin,
+    _translating: TranslatingGraphMousePlugin,
     /// Edge selection plugin.
-    edge_selection: EdgeSelectionGraphMousePlugin,
+    _edge_selection: EdgeSelectionGraphMousePlugin,
     /// Hover plugin.
     hover: HoverMousePlugin,
     /// Whether the component is enabled (responds to input).
@@ -77,10 +77,10 @@ impl GraphComponent {
             hovered_edge: None,
             satellite: SatelliteGraphViewer::default(),
             popup: PopupRegulator::default(),
-            picking: PickingGraphMousePlugin::new(),
-            scaling: ScalingGraphMousePlugin::new(),
-            translating: TranslatingGraphMousePlugin::new(),
-            edge_selection: EdgeSelectionGraphMousePlugin::new(),
+            _picking: PickingGraphMousePlugin::new(),
+            _scaling: ScalingGraphMousePlugin::new(),
+            _translating: TranslatingGraphMousePlugin::new(),
+            _edge_selection: EdgeSelectionGraphMousePlugin::new(),
             hover: HoverMousePlugin::new(),
             enabled: true,
         }

@@ -10,7 +10,6 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-use super::default_edge::DefaultGEdge;
 use super::hash_graph::HashDirectedGraph;
 use super::traits::{GDirectedGraph, GEdge, GImplicitDirectedGraph};
 
@@ -201,6 +200,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::default_edge::DefaultGEdge;
 
     fn make_delegate() -> HashDirectedGraph<i32, DefaultGEdge<i32>> {
         let mut g = HashDirectedGraph::<i32, DefaultGEdge<i32>>::new();

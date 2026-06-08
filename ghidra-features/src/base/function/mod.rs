@@ -14,6 +14,8 @@
 //! | `thunk`     | Thunk function actions                             |
 //! | `stack`     | Stack analysis and purge actions                   |
 
+#![allow(ambiguous_glob_reexports)]
+
 pub mod plugin;
 pub mod actions;
 pub mod tags;

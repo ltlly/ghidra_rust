@@ -222,7 +222,7 @@ impl MemoryDiff {
         let mem_b = program_b.memory.intersect(addr_set);
 
         let in_both = mem_a.intersect(&mem_b);
-        let only_in_a = mem_a.clone();
+        let _only_in_a = mem_a.clone();
         // Compute only_in_a = mem_a - in_both
         let mut only_in_a_set = mem_a;
         only_in_a_set.delete(&in_both);
@@ -1395,6 +1395,1116 @@ impl GroupView {
 }
 
 // ---------------------------------------------------------------------------
+// AddressTranslationException
+// ---------------------------------------------------------------------------
+
+/// Exception thrown when an attempt is made to translate an address
+/// from one program into an equivalent address in another program.
+///
+/// Ported from `ghidra.program.util.AddressTranslationException`.
+#[derive(Debug, Clone)]
+pub struct AddressTranslationException {
+    /// The address that could not be translated.
+    pub address: Option<Address>,
+    /// Description of the translation failure.
+    pub message: String,
+}
+
+impl AddressTranslationException {
+    /// Create a new exception with no specific address.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            address: None,
+            message: message.into(),
+        }
+    }
+
+    /// Create a new exception for a specific address with source/dest program names.
+    pub fn with_address(
+        address: Address,
+        source_program: &str,
+        dest_program: &str,
+    ) -> Self {
+        Self {
+            address: Some(address),
+            message: format!(
+                "Cannot translate address \"0x{:X}\" in program \"{}\" to address in program \"{}\".",
+                address.offset, source_program, dest_program
+            ),
+        }
+    }
+}
+
+impl fmt::Display for AddressTranslationException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for AddressTranslationException {}
+
+// ---------------------------------------------------------------------------
+// AddressTranslator (trait)
+// ---------------------------------------------------------------------------
+
+/// Translates addresses between two programs.
+///
+/// Ported from `ghidra.program.util.AddressTranslator`.
+pub trait AddressTranslator: Send + Sync + std::fmt::Debug {
+    /// Get the destination program for translated addresses.
+    fn destination_program(&self) -> &str;
+
+    /// Get the source program for addresses being translated.
+    fn source_program(&self) -> &str;
+
+    /// Translate a single address from the source program to the destination program.
+    fn get_address(&self, source_address: Address) -> Result<Address, AddressTranslationException>;
+
+    /// Returns true if this translator provides a one-to-one mapping
+    /// (preserving relative offsets within ranges).
+    fn is_one_for_one(&self) -> bool;
+
+    /// Translate an address range. Only meaningful if `is_one_for_one()` returns true.
+    fn get_address_range(
+        &self,
+        source_range: &AddressRange,
+    ) -> Result<AddressRange, AddressTranslationException> {
+        let start = self.get_address(source_range.start)?;
+        let end = self.get_address(source_range.end)?;
+        Ok(AddressRange::new(start, end))
+    }
+
+    /// Translate an address set. Only meaningful if `is_one_for_one()` returns true.
+    fn get_address_set(
+        &self,
+        source_set: &AddressSet,
+    ) -> Result<AddressSet, AddressTranslationException> {
+        let mut result = AddressSet::new();
+        for range in source_set.iter() {
+            let translated = self.get_address_range(range)?;
+            result.add_range(translated);
+        }
+        Ok(result)
+    }
+}
+
+/// A simple offset-based address translator.
+///
+/// Translates addresses by applying a fixed offset.
+/// Ported from `ghidra.program.util.DefaultAddressTranslator` (the Java interface version).
+#[derive(Debug, Clone)]
+pub struct OffsetAddressTranslator {
+    source_name: String,
+    dest_name: String,
+    offset: i64,
+}
+
+impl OffsetAddressTranslator {
+    pub fn new(
+        source_name: impl Into<String>,
+        dest_name: impl Into<String>,
+        offset: i64,
+    ) -> Self {
+        Self {
+            source_name: source_name.into(),
+            dest_name: dest_name.into(),
+            offset,
+        }
+    }
+}
+
+impl AddressTranslator for OffsetAddressTranslator {
+    fn destination_program(&self) -> &str {
+        &self.dest_name
+    }
+
+    fn source_program(&self) -> &str {
+        &self.source_name
+    }
+
+    fn get_address(&self, source_address: Address) -> Result<Address, AddressTranslationException> {
+        let new_offset = (source_address.offset as i64 + self.offset) as u64;
+        Ok(Address::new(new_offset))
+    }
+
+    fn is_one_for_one(&self) -> bool {
+        true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MemoryBlockDiff
+// ---------------------------------------------------------------------------
+
+/// Determines the types of differences between two memory blocks.
+///
+/// Ported from `ghidra.program.util.MemoryBlockDiff`.
+#[derive(Debug, Clone)]
+pub struct MemoryBlockDiff {
+    /// The first block's name.
+    pub block1_name: Option<String>,
+    /// The second block's name.
+    pub block2_name: Option<String>,
+    /// Bitflags indicating which properties differ.
+    diff_flags: u32,
+}
+
+/// Memory block property difference flags.
+pub mod memory_block_flags {
+    /// Block names differ.
+    pub const NAME: u32          = 0x001;
+    /// Start addresses differ.
+    pub const START_ADDRESS: u32 = 0x002;
+    /// End addresses differ.
+    pub const END_ADDRESS: u32   = 0x004;
+    /// Sizes differ.
+    pub const SIZE: u32          = 0x008;
+    /// Read permissions differ.
+    pub const READ: u32          = 0x010;
+    /// Write permissions differ.
+    pub const WRITE: u32         = 0x020;
+    /// Execute permissions differ.
+    pub const EXECUTE: u32       = 0x040;
+    /// Volatile flags differ.
+    pub const VOLATILE: u32      = 0x080;
+    /// Artificial flags differ.
+    pub const ARTIFICIAL: u32    = 0x100;
+    /// Block types differ.
+    pub const TYPE: u32          = 0x200;
+    /// Initialization states differ.
+    pub const INIT: u32          = 0x400;
+    /// Source names differ.
+    pub const SOURCE: u32        = 0x800;
+    /// Comments differ.
+    pub const COMMENT: u32       = 0x1000;
+    /// All difference flags combined.
+    pub const ALL: u32           = 0x1FFF;
+}
+
+/// Describes a memory block for use with `MemoryBlockDiff`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MemoryBlockDesc {
+    pub name: String,
+    pub start: u64,
+    pub end: u64,
+    pub size: u64,
+    pub read: bool,
+    pub write: bool,
+    pub execute: bool,
+    pub volatile: bool,
+    pub artificial: bool,
+    pub block_type: String,
+    pub initialized: bool,
+    pub source_name: Option<String>,
+    pub comment: Option<String>,
+}
+
+impl MemoryBlockDesc {
+    pub fn new(name: impl Into<String>, start: u64, end: u64) -> Self {
+        let s = start;
+        let e = end;
+        Self {
+            name: name.into(),
+            start: s,
+            end: e,
+            size: e - s + 1,
+            read: true,
+            write: false,
+            execute: false,
+            volatile: false,
+            artificial: false,
+            block_type: "DEFAULT".into(),
+            initialized: true,
+            source_name: None,
+            comment: None,
+        }
+    }
+}
+
+impl MemoryBlockDiff {
+    /// Compare two optional memory block descriptions.
+    ///
+    /// If both are `None`, no differences are reported.
+    /// If only one is `None`, all flags are set.
+    pub fn new(block1: Option<&MemoryBlockDesc>, block2: Option<&MemoryBlockDesc>) -> Self {
+        let (b1_name, b2_name) = match (&block1, &block2) {
+            (Some(b1), Some(b2)) => (Some(b1.name.clone()), Some(b2.name.clone())),
+            (Some(b1), None) => (Some(b1.name.clone()), None),
+            (None, Some(b2)) => (None, Some(b2.name.clone())),
+            (None, None) => (None, None),
+        };
+
+        Self {
+            block1_name: b1_name,
+            block2_name: b2_name,
+            diff_flags: Self::compute_flags(block1, block2),
+        }
+    }
+
+    fn compute_flags(
+        block1: Option<&MemoryBlockDesc>,
+        block2: Option<&MemoryBlockDesc>,
+    ) -> u32 {
+        match (block1, block2) {
+            (None, None) => 0,
+            (None, Some(_)) | (Some(_), None) => memory_block_flags::ALL,
+            (Some(b1), Some(b2)) => {
+                let mut flags = 0u32;
+                if b1.name != b2.name {
+                    flags |= memory_block_flags::NAME;
+                }
+                if b1.start != b2.start {
+                    flags |= memory_block_flags::START_ADDRESS;
+                }
+                if b1.end != b2.end {
+                    flags |= memory_block_flags::END_ADDRESS;
+                }
+                if b1.size != b2.size {
+                    flags |= memory_block_flags::SIZE;
+                }
+                if b1.read != b2.read {
+                    flags |= memory_block_flags::READ;
+                }
+                if b1.write != b2.write {
+                    flags |= memory_block_flags::WRITE;
+                }
+                if b1.execute != b2.execute {
+                    flags |= memory_block_flags::EXECUTE;
+                }
+                if b1.volatile != b2.volatile {
+                    flags |= memory_block_flags::VOLATILE;
+                }
+                if b1.artificial != b2.artificial {
+                    flags |= memory_block_flags::ARTIFICIAL;
+                }
+                if b1.block_type != b2.block_type {
+                    flags |= memory_block_flags::TYPE;
+                }
+                if b1.initialized != b2.initialized {
+                    flags |= memory_block_flags::INIT;
+                }
+                if b1.source_name != b2.source_name {
+                    flags |= memory_block_flags::SOURCE;
+                }
+                if b1.comment != b2.comment {
+                    flags |= memory_block_flags::COMMENT;
+                }
+                flags
+            }
+        }
+    }
+
+    /// Returns true if the block names differ.
+    pub fn is_name_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::NAME) != 0
+    }
+
+    /// Returns true if the start addresses differ.
+    pub fn is_start_address_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::START_ADDRESS) != 0
+    }
+
+    /// Returns true if the end addresses differ.
+    pub fn is_end_address_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::END_ADDRESS) != 0
+    }
+
+    /// Returns true if the sizes differ.
+    pub fn is_size_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::SIZE) != 0
+    }
+
+    /// Returns true if the read permissions differ.
+    pub fn is_read_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::READ) != 0
+    }
+
+    /// Returns true if the write permissions differ.
+    pub fn is_write_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::WRITE) != 0
+    }
+
+    /// Returns true if the execute permissions differ.
+    pub fn is_exec_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::EXECUTE) != 0
+    }
+
+    /// Returns true if the volatile flags differ.
+    pub fn is_volatile_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::VOLATILE) != 0
+    }
+
+    /// Returns true if the artificial flags differ.
+    pub fn is_artificial_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::ARTIFICIAL) != 0
+    }
+
+    /// Returns true if the block types differ.
+    pub fn is_type_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::TYPE) != 0
+    }
+
+    /// Returns true if the initialization states differ.
+    pub fn is_init_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::INIT) != 0
+    }
+
+    /// Returns true if the source names differ.
+    pub fn is_source_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::SOURCE) != 0
+    }
+
+    /// Returns true if the comments differ.
+    pub fn is_comment_different(&self) -> bool {
+        (self.diff_flags & memory_block_flags::COMMENT) != 0
+    }
+
+    /// Returns true if there are any differences at all.
+    pub fn has_differences(&self) -> bool {
+        self.diff_flags != 0
+    }
+
+    /// Returns the raw difference flags.
+    pub fn flags(&self) -> u32 {
+        self.diff_flags
+    }
+
+    /// Gets a string representation of the types of differences.
+    pub fn differences_as_string(&self) -> String {
+        let mut parts = Vec::new();
+        if self.is_name_different() { parts.push("Name"); }
+        if self.is_start_address_different() { parts.push("StartAddress"); }
+        if self.is_end_address_different() { parts.push("EndAddress"); }
+        if self.is_size_different() { parts.push("Size"); }
+        if self.is_read_different() { parts.push("R"); }
+        if self.is_write_different() { parts.push("W"); }
+        if self.is_exec_different() { parts.push("X"); }
+        if self.is_volatile_different() { parts.push("Volatile"); }
+        if self.is_artificial_different() { parts.push("Artificial"); }
+        if self.is_type_different() { parts.push("Type"); }
+        if self.is_init_different() { parts.push("Initialized"); }
+        if self.is_source_different() { parts.push("Source"); }
+        if self.is_comment_different() { parts.push("Comment"); }
+        parts.join(" ")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MultiAddressIterator
+// ---------------------------------------------------------------------------
+
+/// Iterates through multiple address iterators simultaneously.
+///
+/// The `next()` method returns the next address as determined from all the iterators,
+/// respecting sort order (forward or backward).
+///
+/// Ported from `ghidra.program.util.MultiAddressIterator`.
+#[derive(Debug)]
+pub struct MultiAddressIterator {
+    /// Buffered addresses from each iterator, one per source.
+    addrs: Vec<Option<Address>>,
+    /// The underlying address sources (collected into sorted Vecs).
+    sources: Vec<Vec<Address>>,
+    /// Current index into each source.
+    indices: Vec<usize>,
+    /// Whether to iterate forward (ascending) or backward (descending).
+    forward: bool,
+}
+
+impl MultiAddressIterator {
+    /// Create a new multi-address iterator from multiple address sets.
+    ///
+    /// All iterators will proceed in the direction indicated by `forward`.
+    pub fn new(sets: &[&AddressSet], forward: bool) -> Self {
+        let mut sources = Vec::with_capacity(sets.len());
+        for set in sets {
+            let mut addrs: Vec<Address> = set.iter().flat_map(|r| {
+                let mut v = Vec::new();
+                let mut a = r.start;
+                while a.offset <= r.end.offset {
+                    v.push(a);
+                    a = Address::new(a.offset + 1);
+                }
+                v
+            }).collect();
+            if !forward {
+                addrs.reverse();
+            }
+            sources.push(addrs);
+        }
+        let n = sources.len();
+        Self {
+            addrs: vec![None; n],
+            sources,
+            indices: vec![0; n],
+            forward,
+        }
+    }
+
+    /// Create from pre-built sorted address vectors.
+    pub fn from_sorted_vecs(vectors: Vec<Vec<Address>>, forward: bool) -> Self {
+        let n = vectors.len();
+        Self {
+            addrs: vec![None; n],
+            sources: vectors,
+            indices: vec![0; n],
+            forward,
+        }
+    }
+
+    /// Fill empty slots from their respective sources.
+    fn fill_empty(&mut self) {
+        for i in 0..self.addrs.len() {
+            if self.addrs[i].is_none() && self.indices[i] < self.sources[i].len() {
+                self.addrs[i] = Some(self.sources[i][self.indices[i]]);
+                self.indices[i] += 1;
+            }
+        }
+    }
+
+    /// Check whether any iterator still has addresses.
+    pub fn has_next(&mut self) -> bool {
+        self.fill_empty();
+        self.addrs.iter().any(|a| a.is_some())
+    }
+
+    /// Returns the next address (the minimum or maximum depending on direction).
+    pub fn next(&mut self) -> Option<Address> {
+        self.fill_empty();
+
+        let mut best: Option<Address> = None;
+        let mut best_indices = Vec::new();
+
+        for (i, addr_opt) in self.addrs.iter().enumerate() {
+            if let Some(addr) = addr_opt {
+                match best {
+                    None => {
+                        best = Some(*addr);
+                        best_indices.clear();
+                        best_indices.push(i);
+                    }
+                    Some(current_best) => {
+                        let cmp = addr.offset.cmp(&current_best.offset);
+                        let is_better = if self.forward {
+                            cmp == std::cmp::Ordering::Less
+                        } else {
+                            cmp == std::cmp::Ordering::Greater
+                        };
+
+                        if addr.offset == current_best.offset {
+                            best_indices.push(i);
+                        } else if is_better {
+                            best = Some(*addr);
+                            best_indices.clear();
+                            best_indices.push(i);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Consume all slots that matched the best address.
+        for &i in &best_indices {
+            self.addrs[i] = None;
+        }
+
+        best
+    }
+
+    /// Returns the next addresses from all iterators that share the
+    /// same minimum/maximum address. Each element in the result corresponds
+    /// to the source at that index; `None` if that source did not contribute.
+    pub fn next_addresses(&mut self) -> Vec<Option<Address>> {
+        self.fill_empty();
+
+        let mut best: Option<Address> = None;
+        let mut best_indices = Vec::new();
+
+        for (i, addr_opt) in self.addrs.iter().enumerate() {
+            if let Some(addr) = addr_opt {
+                match best {
+                    None => {
+                        best = Some(*addr);
+                        best_indices.clear();
+                        best_indices.push(i);
+                    }
+                    Some(current_best) => {
+                        let cmp = addr.offset.cmp(&current_best.offset);
+                        let is_better = if self.forward {
+                            cmp == std::cmp::Ordering::Less
+                        } else {
+                            cmp == std::cmp::Ordering::Greater
+                        };
+
+                        if addr.offset == current_best.offset {
+                            best_indices.push(i);
+                        } else if is_better {
+                            best = Some(*addr);
+                            best_indices.clear();
+                            best_indices.push(i);
+                        }
+                    }
+                }
+            }
+        }
+
+        let n = self.addrs.len();
+        let mut result = vec![None; n];
+        for &i in &best_indices {
+            result[i] = self.addrs[i];
+            self.addrs[i] = None;
+        }
+
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MultiCodeUnitIterator
+// ---------------------------------------------------------------------------
+
+/// Represents a code unit at an address (simplified for the Rust model).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CodeUnitInfo {
+    /// Address of the code unit.
+    pub address: Address,
+    /// Mnemonic or data type name.
+    pub mnemonic: String,
+    /// Size in bytes.
+    pub size: usize,
+}
+
+/// Iterates through multiple code-unit iterators simultaneously.
+///
+/// Returns the next code unit(s) as determined from all the iterators.
+///
+/// Ported from `ghidra.program.util.MultiCodeUnitIterator`.
+#[derive(Debug)]
+pub struct MultiCodeUnitIterator {
+    /// Buffered code units from each source, one per source.
+    cus: Vec<Option<CodeUnitInfo>>,
+    /// The underlying code-unit sources.
+    sources: Vec<Vec<CodeUnitInfo>>,
+    /// Current index into each source.
+    indices: Vec<usize>,
+    /// Iteration direction.
+    forward: bool,
+}
+
+impl MultiCodeUnitIterator {
+    /// Create a new multi-code-unit iterator from multiple sorted code-unit lists.
+    pub fn new(sources: Vec<Vec<CodeUnitInfo>>, forward: bool) -> Self {
+        let n = sources.len();
+        Self {
+            cus: vec![None; n],
+            sources,
+            indices: vec![0; n],
+            forward,
+        }
+    }
+
+    fn fill_empty(&mut self) {
+        for i in 0..self.cus.len() {
+            if self.cus[i].is_none() && self.indices[i] < self.sources[i].len() {
+                self.cus[i] = Some(self.sources[i][self.indices[i]].clone());
+                self.indices[i] += 1;
+            }
+        }
+    }
+
+    /// Check whether any source still has code units.
+    pub fn has_next(&mut self) -> bool {
+        self.fill_empty();
+        self.cus.iter().any(|c| c.is_some())
+    }
+
+    /// Returns the next code-unit array. Each element corresponds to the source
+    /// at that index; `None` if that source does not have a code unit at this address.
+    pub fn next_code_units(&mut self) -> Vec<Option<CodeUnitInfo>> {
+        self.fill_empty();
+
+        let mut best_addr: Option<Address> = None;
+        let mut best_indices = Vec::new();
+
+        for (i, cu_opt) in self.cus.iter().enumerate() {
+            if let Some(cu) = cu_opt {
+                match best_addr {
+                    None => {
+                        best_addr = Some(cu.address);
+                        best_indices.clear();
+                        best_indices.push(i);
+                    }
+                    Some(current_best) => {
+                        let cmp = cu.address.offset.cmp(&current_best.offset);
+                        let is_better = if self.forward {
+                            cmp == std::cmp::Ordering::Less
+                        } else {
+                            cmp == std::cmp::Ordering::Greater
+                        };
+
+                        if cu.address.offset == current_best.offset {
+                            best_indices.push(i);
+                        } else if is_better {
+                            best_addr = Some(cu.address);
+                            best_indices.clear();
+                            best_indices.push(i);
+                        }
+                    }
+                }
+            }
+        }
+
+        let n = self.cus.len();
+        let mut result = vec![None; n];
+        for &i in &best_indices {
+            result[i] = self.cus[i].clone();
+            self.cus[i] = None;
+        }
+
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CombinedAddressRangeIterator
+// ---------------------------------------------------------------------------
+
+/// Combines two address range iterators into a single iterator that produces
+/// non-overlapping ranges covering the union of both inputs.
+///
+/// When two ranges overlap, the output is split so that overlapping sub-ranges
+/// appear once and non-overlapping parts from each source also appear.
+///
+/// Ported from `ghidra.program.util.CombinedAddressRangeIterator`.
+#[derive(Debug)]
+pub struct CombinedAddressRangeIterator {
+    ranges_a: Vec<AddressRange>,
+    ranges_b: Vec<AddressRange>,
+    index_a: usize,
+    index_b: usize,
+    /// Partially consumed range from A.
+    current_a: Option<AddressRange>,
+    /// Partially consumed range from B.
+    current_b: Option<AddressRange>,
+}
+
+impl CombinedAddressRangeIterator {
+    /// Create a new combined iterator from two address sets.
+    pub fn new(set_a: &AddressSet, set_b: &AddressSet) -> Self {
+        let ranges_a: Vec<AddressRange> = set_a.iter().copied().collect();
+        let ranges_b: Vec<AddressRange> = set_b.iter().copied().collect();
+        Self {
+            ranges_a,
+            ranges_b,
+            index_a: 0,
+            index_b: 0,
+            current_a: None,
+            current_b: None,
+        }
+    }
+
+    fn advance_a(&mut self) {
+        if self.index_a < self.ranges_a.len() {
+            self.current_a = Some(self.ranges_a[self.index_a]);
+            self.index_a += 1;
+        } else {
+            self.current_a = None;
+        }
+    }
+
+    fn advance_b(&mut self) {
+        if self.index_b < self.ranges_b.len() {
+            self.current_b = Some(self.ranges_b[self.index_b]);
+            self.index_b += 1;
+        } else {
+            self.current_b = None;
+        }
+    }
+
+    /// Get the next non-overlapping range from the union of both inputs.
+    pub fn next_range(&mut self) -> Option<AddressRange> {
+        // Lazily advance if we have nothing current.
+        if self.current_a.is_none() && self.index_a < self.ranges_a.len() {
+            self.advance_a();
+        }
+        if self.current_b.is_none() && self.index_b < self.ranges_b.len() {
+            self.advance_b();
+        }
+
+        match (self.current_a, self.current_b) {
+            (None, None) => None,
+            (Some(a), None) => {
+                self.current_a = None;
+                Some(a)
+            }
+            (None, Some(b)) => {
+                self.current_b = None;
+                Some(b)
+            }
+            (Some(a), Some(b)) => {
+                // If they don't overlap, emit the one that starts first.
+                if a.end.offset < b.start.offset {
+                    self.current_a = None;
+                    Some(a)
+                } else if b.end.offset < a.start.offset {
+                    self.current_b = None;
+                    Some(b)
+                } else {
+                    // They overlap. Emit the non-overlapping prefix of whichever starts first,
+                    // then adjust the other.
+                    if a.start.offset < b.start.offset {
+                        // Emit [a.start, b.start-1], advance a to [b.start, a.end]
+                        let result = AddressRange::new(a.start, Address::new(b.start.offset - 1));
+                        self.current_a = Some(AddressRange::new(b.start, a.end));
+                        Some(result)
+                    } else if b.start.offset < a.start.offset {
+                        let result = AddressRange::new(b.start, Address::new(a.start.offset - 1));
+                        self.current_b = Some(AddressRange::new(a.start, b.end));
+                        Some(result)
+                    } else {
+                        // Same start. Emit the shorter one, advance the longer.
+                        if a.end.offset <= b.end.offset {
+                            self.current_a = None;
+                            if a.end.offset < b.end.offset {
+                                self.current_b = Some(AddressRange::new(
+                                    Address::new(a.end.offset + 1),
+                                    b.end,
+                                ));
+                            } else {
+                                self.current_b = None;
+                            }
+                            Some(a)
+                        } else {
+                            self.current_b = None;
+                            self.current_a = Some(AddressRange::new(
+                                Address::new(b.end.offset + 1),
+                                a.end,
+                            ));
+                            Some(b)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramMemoryComparator
+// ---------------------------------------------------------------------------
+
+/// Compares the memory address sets of two programs and determines
+/// which addresses are shared, which are exclusive to each program,
+/// and which initialized memory overlaps.
+///
+/// Ported from `ghidra.program.util.ProgramMemoryComparator`.
+#[derive(Debug)]
+pub struct ProgramMemoryComparator {
+    /// Addresses of initialized memory in both programs.
+    init_in_both: AddressSet,
+    /// Addresses with the same memory type in both programs.
+    same_type_in_both: AddressSet,
+    /// Addresses present in both programs (any type).
+    in_both: AddressSet,
+    /// Addresses only in program one.
+    only_in_one: AddressSet,
+    /// Addresses only in program two.
+    only_in_two: AddressSet,
+}
+
+impl ProgramMemoryComparator {
+    /// Compare two programs' memory layouts.
+    ///
+    /// Returns `Err` if the programs cannot be compared (null or conflicting address spaces).
+    pub fn new(program_a: &Program, program_b: &Program) -> Result<Self, ProgramConflictException> {
+        if program_a.language.processor != program_b.language.processor
+            || program_a.language.variant != program_b.language.variant
+            || program_a.language.size != program_b.language.size
+        {
+            return Err(ProgramConflictException {
+                address: Address::new(0),
+                message: format!(
+                    "Address spaces conflict between {} and {}.",
+                    program_a.name, program_b.name
+                ),
+            });
+        }
+
+        Ok(Self::compute(program_a, program_b))
+    }
+
+    fn compute(program_a: &Program, program_b: &Program) -> Self {
+        let mem_a = &program_a.memory;
+        let mem_b = &program_b.memory;
+
+        let in_both = mem_a.intersect(mem_b);
+        let only_in_a = {
+            let mut s = mem_a.clone();
+            s.delete(&in_both);
+            s
+        };
+        let only_in_b = {
+            let mut s = mem_b.clone();
+            s.delete(&in_both);
+            s
+        };
+
+        // For initialized memory, use the full memory sets (the Program model
+        // only tracks initialized addresses).
+        let init_in_both = in_both.clone();
+        let same_type_in_both = init_in_both.clone();
+
+        Self {
+            init_in_both,
+            same_type_in_both,
+            in_both,
+            only_in_one: only_in_a,
+            only_in_two: only_in_b,
+        }
+    }
+
+    /// Check whether two programs are similar (same language or address spaces).
+    pub fn similar_programs(program_a: &Program, program_b: &Program) -> bool {
+        program_a.language.processor == program_b.language.processor
+            && program_a.language.variant == program_b.language.variant
+            && program_a.language.size == program_b.language.size
+    }
+
+    /// Get the combined address set from both programs.
+    pub fn combined_addresses(program_a: &Program, program_b: &Program) -> AddressSet {
+        program_a.memory.union(&program_b.memory)
+    }
+
+    /// Addresses in common between both programs.
+    pub fn addresses_in_common(&self) -> &AddressSet {
+        &self.in_both
+    }
+
+    /// Initialized addresses in common.
+    pub fn initialized_in_common(&self) -> &AddressSet {
+        &self.init_in_both
+    }
+
+    /// Addresses with the same memory type in common.
+    pub fn same_type_in_common(&self) -> &AddressSet {
+        &self.same_type_in_both
+    }
+
+    /// Addresses only in program one.
+    pub fn addresses_only_in_one(&self) -> &AddressSet {
+        &self.only_in_one
+    }
+
+    /// Addresses only in program two.
+    pub fn addresses_only_in_two(&self) -> &AddressSet {
+        &self.only_in_two
+    }
+
+    /// Whether the two programs have any memory differences.
+    pub fn has_memory_differences(&self) -> bool {
+        !self.only_in_one.is_empty() || !self.only_in_two.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramMergeManager
+// ---------------------------------------------------------------------------
+
+/// Manages merging of differences between two programs.
+///
+/// Program1 is the program being modified by the merge. Program2 is the source
+/// for obtaining differences to apply to program1.
+///
+/// Ported from `ghidra.program.util.ProgramMergeManager`.
+#[derive(Debug)]
+pub struct ProgramMergeManager {
+    /// The first program (modified by merge).
+    program1: Program,
+    /// The second program (source of differences).
+    program2: Program,
+    /// The diff filter controlling which categories are compared.
+    diff_filter: ProgramDiffFilter,
+    /// The merge filter controlling which categories are merged.
+    merge_filter: ProgramMergeFilter,
+    /// Error messages accumulated during merge.
+    error_messages: Vec<String>,
+    /// Informational messages accumulated during merge.
+    info_messages: Vec<String>,
+}
+
+impl ProgramMergeManager {
+    /// Create a new merge manager for two programs.
+    pub fn new(program1: Program, program2: Program) -> Self {
+        Self {
+            program1,
+            program2,
+            diff_filter: ProgramDiffFilter::all(),
+            merge_filter: ProgramMergeFilter::new(),
+            error_messages: Vec::new(),
+            info_messages: Vec::new(),
+        }
+    }
+
+    /// Get the first program (the one being modified).
+    pub fn program_one(&self) -> &Program {
+        &self.program1
+    }
+
+    /// Get the second program (the source of differences).
+    pub fn program_two(&self) -> &Program {
+        &self.program2
+    }
+
+    /// Get a reference to the current diff filter.
+    pub fn diff_filter(&self) -> &ProgramDiffFilter {
+        &self.diff_filter
+    }
+
+    /// Set the diff filter.
+    pub fn set_diff_filter(&mut self, filter: ProgramDiffFilter) {
+        self.diff_filter = filter;
+    }
+
+    /// Get a reference to the current merge filter.
+    pub fn merge_filter(&self) -> &ProgramMergeFilter {
+        &self.merge_filter
+    }
+
+    /// Set the merge filter.
+    pub fn set_merge_filter(&mut self, filter: ProgramMergeFilter) {
+        self.merge_filter = filter;
+    }
+
+    /// Whether the memory layouts of the two programs match.
+    pub fn memory_matches(&self) -> bool {
+        ProgramMemoryComparator::similar_programs(&self.program1, &self.program2)
+    }
+
+    /// Get the combined addresses from both programs.
+    pub fn combined_addresses(&self) -> AddressSet {
+        ProgramMemoryComparator::combined_addresses(&self.program1, &self.program2)
+    }
+
+    /// Get the addresses in common between both programs.
+    pub fn addresses_in_common(&self) -> AddressSet {
+        self.program1.memory.intersect(&self.program2.memory)
+    }
+
+    /// Get addresses only in program one.
+    pub fn addresses_only_in_one(&self) -> AddressSet {
+        let in_both = self.program1.memory.intersect(&self.program2.memory);
+        let mut only = self.program1.memory.clone();
+        only.delete(&in_both);
+        only
+    }
+
+    /// Get addresses only in program two.
+    pub fn addresses_only_in_two(&self) -> AddressSet {
+        let in_both = self.program1.memory.intersect(&self.program2.memory);
+        let mut only = self.program2.memory.clone();
+        only.delete(&in_both);
+        only
+    }
+
+    /// Get filtered differences between the two programs.
+    pub fn get_filtered_differences(&self) -> ProgramDiffReport {
+        let addr_set = self.combined_addresses();
+        ProgramDiff::full_diff(&self.program1, &self.program2, &addr_set)
+    }
+
+    /// Merge functions from program2 into program1 at the specified addresses.
+    pub fn merge_functions(&mut self, addr_set: &AddressSet) -> AddressSet {
+        ProgramMerge::merge_functions(&mut self.program1, &self.program2, addr_set)
+    }
+
+    /// Merge symbols from program2 into program1 at the specified addresses.
+    pub fn merge_symbols(&mut self, addr_set: &AddressSet) -> AddressSet {
+        ProgramMerge::merge_symbols(&mut self.program1, &self.program2, addr_set)
+    }
+
+    /// Perform a full merge based on the current merge filter.
+    pub fn merge_all(&mut self) -> AddressSet {
+        let mut merged = AddressSet::new();
+        let addr_set = self.addresses_in_common();
+
+        if self.merge_filter.should_merge(DiffCategory::Functions) {
+            let result = self.merge_functions(&addr_set);
+            for range in result.iter() {
+                merged.add_range(*range);
+            }
+        }
+
+        if self.merge_filter.should_merge(DiffCategory::Labels) {
+            let result = self.merge_symbols(&addr_set);
+            for range in result.iter() {
+                merged.add_range(*range);
+            }
+        }
+
+        merged
+    }
+
+    /// Get accumulated error messages.
+    pub fn error_messages(&self) -> &[String] {
+        &self.error_messages
+    }
+
+    /// Get accumulated informational messages.
+    pub fn info_messages(&self) -> &[String] {
+        &self.info_messages
+    }
+
+    /// Clear all accumulated messages.
+    pub fn clear_messages(&mut self) {
+        self.error_messages.clear();
+        self.info_messages.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DiffUtility
+// ---------------------------------------------------------------------------
+
+/// Utility functions for getting and creating objects in one program based on
+/// objects from another program.
+///
+/// Ported from `ghidra.program.util.DiffUtility`.
+pub struct DiffUtility;
+
+impl DiffUtility {
+    /// Convert an address set from one program to a compatible address set in
+    /// the other program. For the simplified model this returns the same set
+    /// since both programs share the same address space.
+    pub fn get_compatible_address_set(addr_set: &AddressSet, _other_program: &Program) -> AddressSet {
+        addr_set.clone()
+    }
+
+    /// Get a compatible memory address in another program.
+    pub fn get_compatible_memory_address(
+        addr: Address,
+        _other_program: &Program,
+    ) -> Option<Address> {
+        Some(addr)
+    }
+
+    /// Get the code-unit-aligned address set for the given address set.
+    /// In this simplified model, returns the same set.
+    pub fn get_code_unit_set(addr_set: &AddressSet, _program: &Program) -> AddressSet {
+        addr_set.clone()
+    }
+
+    /// Compare addresses from two different programs.
+    pub fn compare(
+        _program1: &Program,
+        addr1: Address,
+        _program2: &Program,
+        addr2: Address,
+    ) -> std::cmp::Ordering {
+        addr1.offset.cmp(&addr2.offset)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2006,5 +3116,430 @@ mod tests {
         let merged = ProgramMerge::merge_functions(&mut dest, &source, &addr_set);
         assert!(!merged.is_empty());
         assert!(dest.function_manager.functions.contains_key(&Address::new(0x1000)));
+    }
+
+    // --- Tests for newly added types ---
+
+    #[test]
+    fn test_memory_block_diff_identical() {
+        let block = MemoryBlockDesc::new(".text", 0x401000, 0x401FFF);
+        let diff = MemoryBlockDiff::new(Some(&block), Some(&block));
+        assert!(!diff.has_differences());
+        assert!(!diff.is_name_different());
+        assert!(!diff.is_start_address_different());
+        assert!(!diff.is_end_address_different());
+        assert!(!diff.is_size_different());
+        assert!(!diff.is_read_different());
+        assert!(!diff.is_write_different());
+        assert!(!diff.is_exec_different());
+        assert_eq!(diff.flags(), 0);
+    }
+
+    #[test]
+    fn test_memory_block_diff_all_different() {
+        let mut block1 = MemoryBlockDesc::new(".text", 0x401000, 0x401FFF);
+        block1.write = false;
+        block1.execute = true;
+        block1.block_type = "DEFAULT".into();
+
+        let mut block2 = MemoryBlockDesc::new(".code", 0x402000, 0x402FFF);
+        block2.write = true;
+        block2.execute = false;
+        block2.block_type = "OVERLAY".into();
+
+        let diff = MemoryBlockDiff::new(Some(&block1), Some(&block2));
+        assert!(diff.has_differences());
+        assert!(diff.is_name_different());
+        assert!(diff.is_start_address_different());
+        assert!(diff.is_end_address_different());
+        assert!(!diff.is_size_different()); // both blocks are the same size (0x1000)
+        assert!(diff.is_write_different());
+        assert!(diff.is_exec_different());
+        assert!(diff.is_type_different());
+    }
+
+    #[test]
+    fn test_memory_block_diff_none_blocks() {
+        let diff = MemoryBlockDiff::new(None, None);
+        assert!(!diff.has_differences());
+    }
+
+    #[test]
+    fn test_memory_block_diff_one_none() {
+        let block = MemoryBlockDesc::new(".text", 0x401000, 0x401FFF);
+        let diff = MemoryBlockDiff::new(Some(&block), None);
+        assert!(diff.has_differences());
+        assert_eq!(diff.flags(), memory_block_flags::ALL);
+    }
+
+    #[test]
+    fn test_memory_block_diff_permissions() {
+        let mut block1 = MemoryBlockDesc::new(".text", 0x401000, 0x401FFF);
+        block1.read = true;
+        block1.write = false;
+        block1.volatile = false;
+
+        let mut block2 = MemoryBlockDesc::new(".text", 0x401000, 0x401FFF);
+        block2.read = true;
+        block2.write = true;
+        block2.volatile = true;
+
+        let diff = MemoryBlockDiff::new(Some(&block1), Some(&block2));
+        assert!(!diff.is_read_different());
+        assert!(diff.is_write_different());
+        assert!(diff.is_volatile_different());
+        assert!(!diff.is_name_different());
+    }
+
+    #[test]
+    fn test_memory_block_diff_differences_string() {
+        let mut block1 = MemoryBlockDesc::new(".text", 0x401000, 0x401FFF);
+        block1.write = false;
+
+        let mut block2 = MemoryBlockDesc::new(".data", 0x401000, 0x401FFF);
+        block2.write = true;
+
+        let diff = MemoryBlockDiff::new(Some(&block1), Some(&block2));
+        let s = diff.differences_as_string();
+        assert!(s.contains("Name"));
+        assert!(s.contains("W"));
+    }
+
+    #[test]
+    fn test_multi_address_iterator_forward() {
+        let mut set_a = AddressSet::new();
+        set_a.add(Address::new(0x1000));
+        set_a.add(Address::new(0x1002));
+
+        let mut set_b = AddressSet::new();
+        set_b.add(Address::new(0x1001));
+        set_b.add(Address::new(0x1003));
+
+        let mut iter = MultiAddressIterator::new(&[&set_a, &set_b], true);
+        assert!(iter.has_next());
+        assert_eq!(iter.next(), Some(Address::new(0x1000)));
+        assert_eq!(iter.next(), Some(Address::new(0x1001)));
+        assert_eq!(iter.next(), Some(Address::new(0x1002)));
+        assert_eq!(iter.next(), Some(Address::new(0x1003)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multi_address_iterator_backward() {
+        let mut set_a = AddressSet::new();
+        set_a.add(Address::new(0x1000));
+        set_a.add(Address::new(0x1002));
+
+        let mut set_b = AddressSet::new();
+        set_b.add(Address::new(0x1001));
+        set_b.add(Address::new(0x1003));
+
+        let mut iter = MultiAddressIterator::new(&[&set_a, &set_b], false);
+        assert_eq!(iter.next(), Some(Address::new(0x1003)));
+        assert_eq!(iter.next(), Some(Address::new(0x1002)));
+        assert_eq!(iter.next(), Some(Address::new(0x1001)));
+        assert_eq!(iter.next(), Some(Address::new(0x1000)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multi_address_iterator_duplicate_addresses() {
+        let mut set_a = AddressSet::new();
+        set_a.add(Address::new(0x1000));
+
+        let mut set_b = AddressSet::new();
+        set_b.add(Address::new(0x1000));
+
+        let mut iter = MultiAddressIterator::new(&[&set_a, &set_b], true);
+        // Both sources have 0x1000, next() should return it once
+        assert_eq!(iter.next(), Some(Address::new(0x1000)));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_multi_address_iterator_next_addresses() {
+        let mut set_a = AddressSet::new();
+        set_a.add(Address::new(0x1000));
+
+        let mut set_b = AddressSet::new();
+        set_b.add(Address::new(0x1000));
+
+        let mut iter = MultiAddressIterator::new(&[&set_a, &set_b], true);
+        let addrs = iter.next_addresses();
+        assert_eq!(addrs.len(), 2);
+        assert_eq!(addrs[0], Some(Address::new(0x1000)));
+        assert_eq!(addrs[1], Some(Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_multi_address_iterator_empty() {
+        let set_a = AddressSet::new();
+        let set_b = AddressSet::new();
+
+        let mut iter = MultiAddressIterator::new(&[&set_a, &set_b], true);
+        assert!(!iter.has_next());
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_address_translation_exception() {
+        let err = AddressTranslationException::new("cannot translate");
+        assert_eq!(err.message, "cannot translate");
+        assert!(err.address.is_none());
+        let display = format!("{}", err);
+        assert!(display.contains("cannot translate"));
+    }
+
+    #[test]
+    fn test_address_translation_exception_with_address() {
+        let err = AddressTranslationException::with_address(
+            Address::new(0x401000),
+            "program1",
+            "program2",
+        );
+        assert!(err.address.is_some());
+        assert_eq!(err.address.unwrap().offset, 0x401000);
+        assert!(err.message.contains("401000"));
+        assert!(err.message.contains("program1"));
+        assert!(err.message.contains("program2"));
+    }
+
+    #[test]
+    fn test_offset_address_translator() {
+        let translator = OffsetAddressTranslator::new("src", "dst", 0x10000);
+        assert_eq!(translator.source_program(), "src");
+        assert_eq!(translator.destination_program(), "dst");
+        assert!(translator.is_one_for_one());
+
+        let addr = translator.get_address(Address::new(0x100)).unwrap();
+        assert_eq!(addr.offset, 0x10100);
+
+        let addr2 = translator.get_address(Address::new(0)).unwrap();
+        assert_eq!(addr2.offset, 0x10000);
+    }
+
+    #[test]
+    fn test_offset_address_translator_range() {
+        let translator = OffsetAddressTranslator::new("src", "dst", 0x10000);
+        let range = AddressRange::new(Address::new(0x100), Address::new(0x200));
+        let translated = translator.get_address_range(&range).unwrap();
+        assert_eq!(translated.start.offset, 0x10100);
+        assert_eq!(translated.end.offset, 0x10200);
+    }
+
+    #[test]
+    fn test_offset_address_translator_set() {
+        let translator = OffsetAddressTranslator::new("src", "dst", 0x10000);
+        let mut set = AddressSet::new();
+        set.add_range(AddressRange::new(Address::new(0x100), Address::new(0x1FF)));
+
+        let translated = translator.get_address_set(&set).unwrap();
+        assert!(translated.contains(&Address::new(0x10100)));
+        assert!(translated.contains(&Address::new(0x101FF)));
+        assert!(!translated.contains(&Address::new(0x100)));
+    }
+
+    #[test]
+    fn test_multi_code_unit_iterator() {
+        let cu1 = vec![
+            CodeUnitInfo { address: Address::new(0x1000), mnemonic: "MOV".into(), size: 2 },
+            CodeUnitInfo { address: Address::new(0x1002), mnemonic: "ADD".into(), size: 3 },
+        ];
+        let cu2 = vec![
+            CodeUnitInfo { address: Address::new(0x1001), mnemonic: "NOP".into(), size: 1 },
+            CodeUnitInfo { address: Address::new(0x1002), mnemonic: "SUB".into(), size: 3 },
+        ];
+
+        let mut iter = MultiCodeUnitIterator::new(vec![cu1, cu2], true);
+        assert!(iter.has_next());
+
+        // First: address 0x1000 from source 0 only
+        let batch = iter.next_code_units();
+        assert!(batch[0].is_some());
+        assert!(batch[1].is_none());
+        assert_eq!(batch[0].as_ref().unwrap().address.offset, 0x1000);
+
+        // Second: address 0x1001 from source 1 only
+        let batch = iter.next_code_units();
+        assert!(batch[0].is_none());
+        assert!(batch[1].is_some());
+        assert_eq!(batch[1].as_ref().unwrap().address.offset, 0x1001);
+
+        // Third: address 0x1002 from both sources
+        let batch = iter.next_code_units();
+        assert!(batch[0].is_some());
+        assert!(batch[1].is_some());
+        assert_eq!(batch[0].as_ref().unwrap().mnemonic, "ADD");
+        assert_eq!(batch[1].as_ref().unwrap().mnemonic, "SUB");
+
+        assert!(!iter.has_next());
+    }
+
+    #[test]
+    fn test_combined_address_range_iterator_no_overlap() {
+        let mut set_a = AddressSet::new();
+        set_a.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+        let mut set_b = AddressSet::new();
+        set_b.add_range(AddressRange::new(Address::new(0x3000), Address::new(0x3FFF)));
+
+        let mut iter = CombinedAddressRangeIterator::new(&set_a, &set_b);
+        let r1 = iter.next_range().unwrap();
+        assert_eq!(r1.start.offset, 0x1000);
+        assert_eq!(r1.end.offset, 0x1FFF);
+        let r2 = iter.next_range().unwrap();
+        assert_eq!(r2.start.offset, 0x3000);
+        assert_eq!(r2.end.offset, 0x3FFF);
+        assert!(iter.next_range().is_none());
+    }
+
+    #[test]
+    fn test_combined_address_range_iterator_full_overlap() {
+        let mut set_a = AddressSet::new();
+        set_a.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x2000)));
+        let mut set_b = AddressSet::new();
+        set_b.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x2000)));
+
+        let mut iter = CombinedAddressRangeIterator::new(&set_a, &set_b);
+        let r1 = iter.next_range().unwrap();
+        assert_eq!(r1.start.offset, 0x1000);
+        assert_eq!(r1.end.offset, 0x2000);
+        assert!(iter.next_range().is_none());
+    }
+
+    #[test]
+    fn test_combined_address_range_iterator_partial_overlap() {
+        let mut set_a = AddressSet::new();
+        set_a.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x2000)));
+        let mut set_b = AddressSet::new();
+        set_b.add_range(AddressRange::new(Address::new(0x1800), Address::new(0x2800)));
+
+        let mut iter = CombinedAddressRangeIterator::new(&set_a, &set_b);
+        let ranges: Vec<AddressRange> = std::iter::from_fn(|| iter.next_range()).collect();
+        // Should have: [0x1000,0x17FF], [0x1800,0x2000], [0x2001,0x2800]
+        assert_eq!(ranges.len(), 3);
+        assert_eq!(ranges[0].start.offset, 0x1000);
+        assert_eq!(ranges[0].end.offset, 0x17FF);
+    }
+
+    #[test]
+    fn test_program_memory_comparator() {
+        let mut prog_a = make_program("a");
+        let mut prog_b = make_program("b");
+
+        prog_a.language = Language { processor: "x86".into(), variant: "LE".into(), size: 64 };
+        prog_b.language = Language { processor: "x86".into(), variant: "LE".into(), size: 64 };
+
+        prog_a.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+        prog_b.memory.add_range(AddressRange::new(Address::new(0x1800), Address::new(0x2FFF)));
+
+        let comparator = ProgramMemoryComparator::new(&prog_a, &prog_b).unwrap();
+
+        assert!(comparator.has_memory_differences());
+        assert!(comparator.addresses_in_common().contains(&Address::new(0x1800)));
+        assert!(!comparator.addresses_only_in_one().is_empty());
+        assert!(!comparator.addresses_only_in_two().is_empty());
+    }
+
+    #[test]
+    fn test_program_memory_comparator_identical() {
+        let mut prog_a = make_program("a");
+        let mut prog_b = make_program("b");
+
+        prog_a.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+        prog_b.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+
+        let comparator = ProgramMemoryComparator::new(&prog_a, &prog_b).unwrap();
+        assert!(!comparator.has_memory_differences());
+        assert!(comparator.addresses_only_in_one().is_empty());
+        assert!(comparator.addresses_only_in_two().is_empty());
+    }
+
+    #[test]
+    fn test_program_memory_comparator_similar() {
+        let prog_a = make_program("a");
+        let prog_b = make_program("b");
+        assert!(ProgramMemoryComparator::similar_programs(&prog_a, &prog_b));
+    }
+
+    #[test]
+    fn test_program_merge_manager() {
+        let mut prog_a = make_program("a");
+        let mut prog_b = make_program("b");
+
+        prog_a.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+        prog_b.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+
+        prog_b.function_manager.functions.insert(
+            Address::new(0x1000),
+            Function {
+                name: Some("main".into()),
+                entry_point: Address::new(0x1000),
+                body: AddressSet::new(),
+                is_external: false,
+                is_thunk: false,
+                is_inline: false,
+                has_noreturn: false,
+                call_fixup: None,
+            },
+        );
+
+        let mut manager = ProgramMergeManager::new(prog_a, prog_b);
+        assert!(manager.memory_matches());
+        assert!(manager.program_one().function_manager.functions.is_empty());
+        assert!(!manager.program_two().function_manager.functions.is_empty());
+
+        // Merge with functions enabled
+        manager.set_merge_filter(ProgramMergeFilter::merge_all());
+        let merged = manager.merge_all();
+        assert!(!merged.is_empty());
+        assert!(manager.program_one().function_manager.functions.contains_key(&Address::new(0x1000)));
+    }
+
+    #[test]
+    fn test_program_merge_manager_address_sets() {
+        let mut prog_a = make_program("a");
+        let mut prog_b = make_program("b");
+
+        prog_a.memory.add_range(AddressRange::new(Address::new(0x1000), Address::new(0x1FFF)));
+        prog_b.memory.add_range(AddressRange::new(Address::new(0x1800), Address::new(0x2FFF)));
+
+        let manager = ProgramMergeManager::new(prog_a, prog_b);
+
+        assert!(manager.memory_matches());
+        let combined = manager.combined_addresses();
+        assert!(combined.contains(&Address::new(0x1000)));
+        assert!(combined.contains(&Address::new(0x2FFF)));
+
+        let common = manager.addresses_in_common();
+        assert!(common.contains(&Address::new(0x1800)));
+        assert!(common.contains(&Address::new(0x1FFF)));
+
+        let only_one = manager.addresses_only_in_one();
+        assert!(only_one.contains(&Address::new(0x1000)));
+        assert!(!only_one.contains(&Address::new(0x1800)));
+
+        let only_two = manager.addresses_only_in_two();
+        assert!(only_two.contains(&Address::new(0x2000)));
+        assert!(!only_two.contains(&Address::new(0x1FFF)));
+    }
+
+    #[test]
+    fn test_diff_utility() {
+        let prog_a = make_program("a");
+        let prog_b = make_program("b");
+
+        let mut set = AddressSet::new();
+        set.add(Address::new(0x1000));
+        set.add(Address::new(0x2000));
+
+        let compatible = DiffUtility::get_compatible_address_set(&set, &prog_b);
+        assert!(compatible.contains(&Address::new(0x1000)));
+        assert!(compatible.contains(&Address::new(0x2000)));
+
+        let addr = DiffUtility::get_compatible_memory_address(Address::new(0x3000), &prog_b);
+        assert_eq!(addr, Some(Address::new(0x3000)));
+
+        let ord = DiffUtility::compare(&prog_a, Address::new(0x1000), &prog_b, Address::new(0x2000));
+        assert_eq!(ord, std::cmp::Ordering::Less);
     }
 }

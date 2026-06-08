@@ -8,8 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use super::super::{Point2D, Rect2D};
-use super::{LayoutLocationMap, LayoutPositions, VisualGraphLayout};
+use super::{LayoutPositions, VisualGraphLayout};
 
 /// Status of a layout computation task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -251,6 +250,7 @@ impl LayoutTaskHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::graph::viewer::Point2D;
 
     #[test]
     fn task_status_lifecycle() {

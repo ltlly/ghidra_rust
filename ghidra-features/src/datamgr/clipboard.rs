@@ -5,7 +5,6 @@
 //! Provides clipboard support for data types in the data type manager tree,
 //! allowing users to cut, copy, and paste data types between archives.
 
-use std::collections::HashMap;
 
 /// Content on the data type clipboard.
 #[derive(Debug, Clone)]

@@ -3,7 +3,6 @@
 //! Ported from `ghidra.app.plugin.core.script.ScriptGroup`,
 //! `ScriptCategoryNode`, `RootNode`.
 
-use std::collections::BTreeMap;
 
 /// Built-in script groups shown in the script manager.
 ///

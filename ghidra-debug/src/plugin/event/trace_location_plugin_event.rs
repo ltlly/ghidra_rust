@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceLocationPluginEvent::new(0, 0);
+        let _obj = TraceLocationPluginEvent::new(0, 0);
         assert!(true);
     }
 

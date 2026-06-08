@@ -5,7 +5,6 @@
 //! in a trace. The comparison is limited to raw bytes.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 
 /// The state of a diff comparison session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -8,7 +8,7 @@
 use super::config::StackAnalysisConfig;
 use super::ref_record::{RefType, ReferenceSource, StackReferenceCollection, StackReferenceRecord};
 use super::var_info::{StackVariableAccumulator, StackVariableKind};
-use crate::base::analyzer::core::{Address, AddressSet, AddressRange, CancelledError};
+use crate::base::analyzer::core::{Address, AddressRange, CancelledError};
 
 /// A minimal instruction representation used during stack analysis.
 ///

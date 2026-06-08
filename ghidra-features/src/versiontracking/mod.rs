@@ -37,10 +37,9 @@ use std::fmt;
 use std::sync::Arc;
 
 use ghidra_core::addr::Address;
-use ghidra_core::listing::ListingRow;
 use ghidra_core::program::program::SimpleDataType;
 use ghidra_core::program::Program;
-use ghidra_core::symbol::{Symbol, SymbolKind};
+use ghidra_core::symbol::{Symbol, SymbolType};
 use thiserror::Error;
 
 use helpers::{
@@ -458,7 +457,7 @@ impl Correlator for SymbolNameCorrelator {
 
         let mut dest_funcs_by_name: HashMap<String, &Symbol> = HashMap::new();
         for sym in dest.symbol_table.iter() {
-            if sym.kind() == SymbolKind::Function && !sym.name().is_empty() && !sym.name().starts_with("sub_") {
+            if sym.kind() == SymbolType::Function && !sym.name().is_empty() && !sym.name().starts_with("sub_") {
                 dest_funcs_by_name.insert(sym.name(), sym);
             }
         }
@@ -476,7 +475,7 @@ impl Correlator for SymbolNameCorrelator {
         let mut matches = Vec::new();
 
         for src_sym in source.symbol_table.iter() {
-            if src_sym.kind() != SymbolKind::Function { continue; }
+            if src_sym.kind() != SymbolType::Function { continue; }
             if already_matched_src.contains(src_sym.address()) { continue; }
             if src_sym.name().is_empty() || src_sym.name().starts_with("sub_") { continue; }
 
@@ -691,7 +690,7 @@ impl VersionTracker {
         log::info!("Applying {} matches across {} unique destination addresses", matches.len(), matched_dest_addrs.len());
         for m in matches {
             let has_func = self.dest_program.symbol_at(&m.dest_address)
-                .map(|s| s.kind() == SymbolKind::Function).unwrap_or(false);
+                .map(|s| s.kind() == SymbolType::Function).unwrap_or(false);
             let has_data = self.dest_program.data_types.contains_key(&m.dest_address);
             if !has_func && !has_data {
                 return Err(VersionTrackError::MatchTargetNotFound { address: m.dest_address });
@@ -703,8 +702,8 @@ impl VersionTracker {
     pub fn export_results(&self) -> VersionTrackResults {
         let mut matches_by_type: HashMap<MatchType, Vec<VersionTrackMatch>> = HashMap::new();
         for m in &self.matches { matches_by_type.entry(m.match_type).or_default().push(m.clone()); }
-        let src_func_count = self.source_program.symbol_table.iter().filter(|s| s.kind() == SymbolKind::Function).count();
-        let dest_func_count = self.dest_program.symbol_table.iter().filter(|s| s.kind() == SymbolKind::Function).count();
+        let src_func_count = self.source_program.symbol_table.iter().filter(|s| s.kind() == SymbolType::Function).count();
+        let dest_func_count = self.dest_program.symbol_table.iter().filter(|s| s.kind() == SymbolType::Function).count();
         let summary = VersionTrackSummary::from_matches(&self.matches, src_func_count, dest_func_count);
         VersionTrackResults {
             source_program_name: self.source_program.name.clone(),
@@ -727,7 +726,7 @@ mod tests {
     use ghidra_core::listing::ListingRow;
     use ghidra_core::program::program::SimpleDataType;
     use ghidra_core::program::Program;
-    use ghidra_core::symbol::{Symbol, SymbolKind};
+    use ghidra_core::symbol::{Symbol, SymbolType};
 
     fn make_test_program(name: &str, funcs: &[(&str, u64, &[(&str, u64, &[u8])])]) -> Program {
         let mut prog = Program::new(name, Address::new(0x1000));
@@ -751,8 +750,8 @@ mod tests {
         ]);
         prog.data_types.insert(Address::new(0x3000), SimpleDataType::u32());
         prog.data_types.insert(Address::new(0x3004), SimpleDataType::i32());
-        prog.symbol_table.add(Symbol::new("my_var".to_string(), Address::new(0x3000), SymbolKind::Label));
-        prog.symbol_table.add(Symbol::new("counter".to_string(), Address::new(0x3004), SymbolKind::Label));
+        prog.symbol_table.add(Symbol::new("my_var".to_string(), Address::new(0x3000), SymbolType::Label));
+        prog.symbol_table.add(Symbol::new("counter".to_string(), Address::new(0x3004), SymbolType::Label));
         prog.xrefs.insert(Address::new(0x2000), vec![Address::new(0x1000)]);
         prog
     }

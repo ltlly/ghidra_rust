@@ -6,7 +6,7 @@
 //! and compute the stack purge from the return state.
 
 use super::config::StackAnalysisConfig;
-use super::ref_record::{RefType, ReferenceSource, StackReferenceCollection, StackReferenceRecord};
+use super::ref_record::{StackReferenceCollection, StackReferenceRecord};
 use super::var_info::{StackVariableAccumulator, StackVariableKind};
 use crate::base::analyzer::core::{Address, CancelledError};
 
@@ -266,6 +266,8 @@ impl FunctionResultStateStackAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::ref_record::RefType;
+    use super::super::ref_record::ReferenceSource;
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

@@ -543,7 +543,7 @@ impl Disassembler {
     /// Internal: disassemble a single block from the queue.
     fn disassemble_block(
         &self,
-        block: &mut InstructionBlock,
+        _block: &mut InstructionBlock,
         program: &Program,
         queue: &DisassemblerQueue,
         monitor: &dyn TaskMonitor,

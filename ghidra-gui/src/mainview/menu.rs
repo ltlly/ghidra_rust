@@ -448,8 +448,8 @@ pub fn process_keyboard_shortcuts(ctx: &Context, bindings: &KeyBindings) -> Menu
     let input = ctx.input(|i| i.clone());
 
     // Check for modifier+key combinations
-    let mod_ctrl = input.modifiers.ctrl;
-    let mod_shift = input.modifiers.shift;
+    let _mod_ctrl = input.modifiers.ctrl;
+    let _mod_shift = input.modifiers.shift;
 
     // Iterate through recently pressed keys
     for event in &input.events {

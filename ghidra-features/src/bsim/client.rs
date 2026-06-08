@@ -14,11 +14,10 @@ use std::collections::HashMap;
 
 use super::description::{
     CategoryRecord, DatabaseInformation, DescriptionManager, ExecutableRecord,
-    FunctionDescription, RowKey, VectorResult,
+    FunctionDescription, VectorResult,
 };
 use super::protocol::{
-    BSimFilter, BSimQueryType, BSimResponseType, FunctionEntry,
-    SimilarityResult,
+    BSimQueryType, BSimResponseType,
 };
 
 // ============================================================================
@@ -576,8 +575,8 @@ impl ExecutableScorer {
     pub fn score_all_pairs(
         &mut self,
         functions: &[FunctionDescription],
-        similarity_threshold: f64,
-        significance_threshold: f64,
+        _similarity_threshold: f64,
+        _significance_threshold: f64,
     ) {
         // Group functions by (exe_index, vector_id) for efficient comparison.
         let mut groups: HashMap<(usize, u64), Vec<&FunctionDescription>> = HashMap::new();

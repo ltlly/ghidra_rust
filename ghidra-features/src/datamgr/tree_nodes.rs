@@ -12,7 +12,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::archive::{Archive, ArchiveKind};
+use super::archive::ArchiveKind;
 
 // ---------------------------------------------------------------------------
 // ArchiveRootNodeListener

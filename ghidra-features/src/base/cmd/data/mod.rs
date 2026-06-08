@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.data`.
 
+#![allow(dead_code)]
+
 /// Command to create a data item at an address.
 #[derive(Debug)]
 pub struct CreateDataCmd {

@@ -51,7 +51,11 @@
 
 pub mod breakpoints;
 pub mod executor;
+pub mod memstate;
 pub mod memory;
+pub mod opbehavior;
+pub mod pcode_arithmetic;
+pub mod pcode_program;
 pub mod state;
 pub mod symz3;
 
@@ -65,6 +69,8 @@ pub use executor::{MemoryAccessCallback, PcodeExecutor, PcodeFrame, UseropLibrar
 pub use memory::{
     EmulatedMemory, MemoryError, MemorySegment, MemoryWriteEntry, MemoryWriteTracker,
 };
+pub use pcode_arithmetic::{BytesPcodeArithmetic, PcodeArithmetic, Purpose};
+pub use pcode_program::PcodeProgram;
 pub use state::{AccessReason, EmulatorState, RegisterDefinition, StateSnapshot};
 
 // ---------------------------------------------------------------------------
@@ -761,6 +767,7 @@ mod tests {
         Varnode::constant(value, size)
     }
 
+    #[allow(dead_code)]
     fn make_ram_vn(offset: u64, size: u32) -> Varnode {
         Varnode::ram(offset, size)
     }

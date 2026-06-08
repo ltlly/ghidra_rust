@@ -6,11 +6,6 @@
 //! References:
 //! - Apple's lzfse library: <https://github.com/lzfse/lzfse>
 
-use nom::{
-    bytes::complete::take,
-    number::complete::{le_u16, le_u32, le_u8},
-    IResult,
-};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

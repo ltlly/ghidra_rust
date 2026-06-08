@@ -31,7 +31,7 @@ fn build_registers() -> RegisterBank {
     // R7: Program counter
     for i in 0..8u32 {
         let name = format!("R{}", i);
-        let description = match i {
+        let _description = match i {
             6 => "Stack pointer (implied for JSR)",
             7 => "Program counter",
             _ => "General-purpose register",

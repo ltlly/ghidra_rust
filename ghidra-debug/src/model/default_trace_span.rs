@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DefaultTraceSpan::new(0, 0, None);
+        let _obj = DefaultTraceSpan::new(0, 0, None);
         assert!(true);
     }
 

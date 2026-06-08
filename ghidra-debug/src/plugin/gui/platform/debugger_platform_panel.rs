@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerPlatformPanel::new(vec![], None);
+        let _obj = DebuggerPlatformPanel::new(vec![], None);
         assert!(true);
     }
 

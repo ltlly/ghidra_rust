@@ -11,7 +11,7 @@
 use super::config::StackAnalysisConfig;
 use super::ref_record::{RefType, ReferenceSource, StackReferenceCollection, StackReferenceRecord};
 use super::var_info::{StackVariableAccumulator, StackVariableKind};
-use crate::base::analyzer::core::{Address, AddressSet, AddressRange, CancelledError};
+use crate::base::analyzer::core::{Address, CancelledError};
 
 /// Minimal instruction representation for the new stack analyzer.
 #[derive(Debug, Clone)]
@@ -113,7 +113,7 @@ impl NewFunctionStackAnalyzer {
     /// get the stack purge value.
     pub fn analyze_function(
         &self,
-        entry: &Address,
+        _entry: &Address,
         instructions: &[SymbolicInstruction],
         stack_offset_fn: &dyn Fn(&SymbolicInstruction, i32) -> i32,
         terminal_purge_fn: &dyn Fn(&SymbolicInstruction) -> Option<i32>,

@@ -6,7 +6,6 @@
 //! - RFC 8878: <https://datatracker.ietf.org/doc/html/rfc8878>
 //! - Zstandard format specification: <https://github.com/facebook/zstd/blob/dev/doc/zstd_compression_format.md>
 
-use nom::{bytes::complete::take, number::complete::le_u32, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

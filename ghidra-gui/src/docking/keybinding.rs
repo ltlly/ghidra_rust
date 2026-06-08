@@ -4,7 +4,6 @@
 //! `KeyBindingOverrideKeyEventDispatcher`.  Controls the priority order
 //! in which key events are processed.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 

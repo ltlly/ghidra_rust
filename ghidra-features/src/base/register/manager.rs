@@ -7,17 +7,17 @@
 //! groups registers for selection) and the value range table (which
 //! shows the address ranges where a register has a specific value).
 
-use ghidra_core::addr::{Address, AddressRange, AddressSet};
+use ghidra_core::addr::Address;
 use ghidra_core::program::lang::Register;
 use ghidra_core::program::listing::ProgramContext;
 use ghidra_core::program::program::Program;
 
 use super::commands::{
-    CompoundRegisterCmd, InMemoryRegisterContext, RegisterCommand, RegisterContext,
+    CompoundRegisterCmd,
     SetRegisterValueCmd,
 };
 use super::tree::RegisterTree;
-use super::value_range::{merge_adjacent_ranges, RegisterValueRange};
+use super::value_range::RegisterValueRange;
 
 /// Manages register value display, selection, and modification.
 ///
@@ -69,7 +69,7 @@ impl RegisterManager {
     /// Set the program and populate the register tree.
     pub fn set_program(&mut self, program: Option<&Program>) {
         match program {
-            Some(prog) => {
+            Some(_prog) => {
                 // In a full implementation, we'd get registers from ProgramContext.
                 // Here we use a simplified approach: check if the program has
                 // a language with registers.
@@ -156,7 +156,7 @@ impl RegisterManager {
     pub fn refresh_value_ranges(&mut self, context: Option<&ProgramContext>) {
         self.value_ranges.clear();
 
-        let reg_name = match &self.selected_register {
+        let _reg_name = match &self.selected_register {
             Some(name) => name.clone(),
             None => return,
         };

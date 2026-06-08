@@ -24,7 +24,7 @@ impl VtOptions {
     pub fn set_bool(&mut self, key: impl Into<String>, value: bool) { self.bool_options.insert(key.into(), value); }
     pub fn get_bool(&self, key: &str, default: bool) -> bool { self.bool_options.get(key).copied().unwrap_or(default) }
     pub fn set_string(&mut self, key: impl Into<String>, value: impl Into<String>) { self.string_options.insert(key.into(), value.into()); }
-    pub fn get_string<'a>(&'a self, key: &str, default: &'a str) -> &str { self.string_options.get(key).map(|s| s.as_str()).unwrap_or(default) }
+    pub fn get_string<'a>(&'a self, key: &str, default: &'a str) -> &'a str { self.string_options.get(key).map(|s| s.as_str()).unwrap_or(default) }
     pub fn set_double(&mut self, key: impl Into<String>, value: f64) { self.double_options.insert(key.into(), value); }
     pub fn get_double(&self, key: &str, default: f64) -> f64 { self.double_options.get(key).copied().unwrap_or(default) }
     pub fn register_option(&mut self, key: impl Into<String>, description: impl Into<String>) { self.descriptions.insert(key.into(), description.into()); }

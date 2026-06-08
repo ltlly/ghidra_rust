@@ -211,7 +211,7 @@ impl FilterState {
 ///
 /// This implementation is not internally synchronized. Callers are
 /// responsible for external locking if used from multiple threads.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BookmarkManager {
     /// All bookmarks by ID.
     bookmarks: BTreeMap<u64, Bookmark>,

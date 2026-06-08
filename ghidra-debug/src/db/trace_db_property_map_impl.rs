@@ -4,8 +4,6 @@
 //! and concrete property map types. Provides address-snap-keyed property
 //! storage with range queries and occlusion handling.
 
-use std::collections::BTreeMap;
-
 use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;

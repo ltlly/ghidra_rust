@@ -10,7 +10,6 @@
 //! - Go slices (pointer + length + capacity structs)
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 // ---------------------------------------------------------------------------
 // GolangSymbolAnalyzer

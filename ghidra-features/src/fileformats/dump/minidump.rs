@@ -5,8 +5,6 @@
 //! References:
 //! - Microsoft MiniDump format: <https://learn.microsoft.com/en-us/windows/win32/api/minidumpapiset/>
 
-use nom::number::complete::{le_u16, le_u32, le_u64};
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

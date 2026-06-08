@@ -9,7 +9,7 @@
 
 use nom::{
     bytes::complete::take,
-    number::complete::{le_u32, le_u8},
+    number::complete::le_u32,
     IResult,
 };
 

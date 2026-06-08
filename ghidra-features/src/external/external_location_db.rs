@@ -198,6 +198,11 @@ impl ExternalLocationDB {
         self.external_program_address
     }
 
+    /// Returns the external program address (alias).
+    pub fn external_address(&self) -> Option<Address> {
+        self.external_program_address
+    }
+
     /// Returns the external space address.
     pub fn external_space_address(&self) -> Option<Address> {
         self.external_space_address
@@ -305,8 +310,8 @@ impl ExternalLocationDB {
     }
 
     /// Set the original imported name.
-    pub fn set_original_imported_name(&mut self, name: Option<String>) {
-        self.original_imported_name = name;
+    pub fn set_original_imported_name(&mut self, name: impl Into<Option<String>>) {
+        self.original_imported_name = name.into();
     }
 
     /// Set the data type ID.

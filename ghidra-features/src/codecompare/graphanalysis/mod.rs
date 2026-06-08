@@ -6,6 +6,10 @@
 //! between two functions using data-flow and control-flow graph analysis.
 //! This is the core engine behind cross-architecture code comparison.
 //!
+//! # Submodules
+//!
+//! - [`graph`] -- control-flow and data-flow graph construction
+//!
 //! # Key types
 //!
 //! - [`TokenBin`] -- a group of decompiler tokens that share the same
@@ -14,6 +18,9 @@
 //! - [`DataVertex`] -- a vertex in a data-flow graph
 //! - [`CtrlVertex`] -- a vertex in a control-flow graph
 //! - [`NGramHash`] -- an n-gram hash for structural fingerprinting
+
+pub mod graph;
+pub mod ngram;
 
 use std::collections::HashMap;
 

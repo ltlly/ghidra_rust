@@ -64,7 +64,7 @@ impl UpdateAlignmentAction {
     /// specified alignment.
     pub fn set_alignment(
         &self,
-        program: &mut Program,
+        _program: &mut Program,
         set: &AddressSet,
         alignment: u32,
         monitor: &dyn TaskMonitor,

@@ -412,14 +412,14 @@ impl Drop for Worker {
 
 /// A job backed by a closure.
 pub struct FnJob<F: FnOnce(&TaskMonitor) + Send + 'static> {
-    name: String,
+    _name: String,
     f: Mutex<Option<F>>,
 }
 
 impl<F: FnOnce(&TaskMonitor) + Send + 'static> FnJob<F> {
     pub fn new(name: impl Into<String>, f: F) -> Self {
         Self {
-            name: name.into(),
+            _name: name.into(),
             f: Mutex::new(Some(f)),
         }
     }

@@ -1373,7 +1373,7 @@ fn evaluate_constant_op(opcode: &OpCode, inputs: &[ConstantValue]) -> Option<Con
 #[cfg(test)]
 mod tests {
     use super::*;
-        use super::*;
+        
 
     // --- Helper builders ---
 
@@ -1811,7 +1811,7 @@ mod tests {
         let mut engine = DataFlowEngine::new();
         let cnst = make_vn_const(42, 4);
 
-        let seq = PcodeSequence::new(vec![], addr(0x1000), addr(0x1000));
+        let _seq = PcodeSequence::new(vec![], addr(0x1000), addr(0x1000));
         // Sneak the constant into the graph manually.
         engine.get_or_create_node(&cnst);
 

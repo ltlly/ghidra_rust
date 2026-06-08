@@ -1,6 +1,6 @@
 //! DBChangeSet ported from Java's `db.DBChangeSet`.
 
-use crate::database::db::{Database, DbResult, FieldValue};
+use crate::database::db::{Database, DbResult};
 use rusqlite::params;
 
 /// The name of the change set table.

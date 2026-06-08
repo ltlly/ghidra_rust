@@ -5,10 +5,8 @@
 //! Each instance represents a single filesystem browser window with a
 //! tree view, action handling, and file handler integration.
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
 
-use super::{Fsrl, GFile, GFileSystem, FileSystemRef, RefdFile};
+use super::{Fsrl, GFile, GFileSystem, FileSystemRef};
 use super::node::{FsBrowserNode, FsBrowserNodeKind, FsBrowserNodeTree, NodeId};
 
 // ---------------------------------------------------------------------------

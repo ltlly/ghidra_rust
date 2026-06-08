@@ -5,7 +5,6 @@
 //! [`ChooseDataTypeActionDef`], [`CycleGroupActionDef`], [`PointerDataActionDef`],
 //! and [`RecentlyUsedActionDef`].
 
-use ghidra_core::Address;
 
 /// A definition for a data-creation action in the listing context.
 ///

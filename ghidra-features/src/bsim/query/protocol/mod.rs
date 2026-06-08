@@ -8,8 +8,8 @@ pub mod protocol_ext;
 use serde::{Deserialize, Serialize};
 
 use super::super::description::{
-    CategoryRecord, DatabaseInformation, ExecutableRecord, FunctionDescription,
-    SignatureRecord, VectorResult,
+    DatabaseInformation, ExecutableRecord, FunctionDescription,
+    SignatureRecord,
 };
 
 /// An operator type for a BSim filter atom.
@@ -2538,7 +2538,7 @@ mod tests {
 
     #[test]
     fn test_response_nearest() {
-        let mut r = ResponseNearest::new();
+        let r = ResponseNearest::new();
         assert!(r.results.is_empty());
     }
 

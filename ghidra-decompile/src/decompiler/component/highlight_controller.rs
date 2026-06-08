@@ -3,7 +3,6 @@
 //! Ports `ghidra.app.decompiler.component.LocationClangHighlightController`
 //! and related types.
 
-use super::super::clang_node::SyntaxType;
 
 /// A highlight applied to a token or range of tokens in the decompiler view.
 #[derive(Debug, Clone)]

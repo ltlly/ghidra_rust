@@ -24,6 +24,7 @@
 pub mod program;
 pub mod listing;
 pub mod lang;
+pub mod dynamic_var;
 
 // ============================================================================
 // Re-exports from program.rs
@@ -140,3 +141,8 @@ pub use lang::{
     InstructionSet, LanguageNotFoundException, ParamList, ParamListRegisterOut,
     ParamPassingConvention, PrototypeModelError, RegisterTranslator,
 };
+
+// ============================================================================
+// Re-exports from dynamic_var.rs
+// ============================================================================
+pub use dynamic_var::{DynamicStorageKind, DynamicVariableStorage, VarnodeStorage};

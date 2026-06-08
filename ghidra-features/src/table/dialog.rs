@@ -6,12 +6,12 @@
 //! select rows and execute an action via a [`TableChooserExecutor`].
 
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use ghidra_core::addr::Address;
 
 use super::model::{SimpleRowObject, TableChooserTableModel, TableSortState};
-use super::traits::{AddressableRowObject, TableChooserExecutor};
+use super::traits::TableChooserExecutor;
 
 // ---------------------------------------------------------------------------
 // DialogState
@@ -387,7 +387,9 @@ impl TableServiceTableChooserDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::table::AddressableRowObject;
     use ghidra_core::addr::Address;
+    use std::sync::RwLock;
 
     #[test]
     fn test_dialog_lifecycle() {

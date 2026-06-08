@@ -30,6 +30,11 @@ pub mod dialog;
 /// `ghidra.app.plugin.core.comments.CommentHistoryPanel`.
 pub mod history;
 
+/// Comments plugin: lifecycle, options, core operations, and action handling.
+///
+/// Ported from `ghidra.app.plugin.core.comments.CommentsPlugin`.
+pub mod plugin;
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 

@@ -7,9 +7,9 @@
 #[cfg(test)]
 mod stack_unwind_comprehensive_tests {
     use std::collections::HashMap;
-    use std::time::Duration;
+    
     use crate::stack::{
-        ConstSym, OpaqueSym, RegisterSym, SavedRegisterMap, StackDerefSym, StackOffsetSym,
+        ConstSym, OpaqueSym, SavedRegisterMap, StackDerefSym, StackOffsetSym,
         StackUnwinder, Sym, SymArithmetic, SymState, UnwindInfo, UnwindWarning,
         UnwindWarningKind, UnwindWarningSet,
     };
@@ -678,7 +678,7 @@ mod stack_unwind_comprehensive_tests {
     #[test]
     fn test_sym_state_creation() {
         let arith = SymArithmetic::new("SP", false);
-        let state = SymState::new(arith);
+        let _state = SymState::new(arith);
         // Should create without panic
     }
 
@@ -978,9 +978,9 @@ mod platform_opinion_comprehensive_tests {
         PlatformOpinion, PlatformOpinionRegistry, OpinionContext,
         create_default_registry,
     };
-    use crate::plugin::platform_gdb::GdbPlatformOpinion;
-    use crate::plugin::platform_lldb::LldbPlatformOpinion;
-    use crate::plugin::platform_frida::FridaPlatformOpinion;
+    
+    
+    
 
     #[test]
     fn test_platform_opinion_creation() {
@@ -1040,11 +1040,10 @@ mod platform_opinion_comprehensive_tests {
 #[cfg(test)]
 mod services_integration_comprehensive_tests {
     use crate::services::{
-        ConsoleService, DebuggerControlService, EmulationService, LogicalBreakpointService,
-        MappingProposal, PlatformService, ProgressService, StaticMappingService,
-        TargetService, TraceManagerService, WatchService,
+        ConsoleService, EmulationService,
+        MappingProposal, ProgressService, TraceManagerService, WatchService,
     };
-    use crate::api::breakpoint::LogicalBreakpoint;
+    
 
     struct TestTraceInfo {
         key: i64,
@@ -1398,7 +1397,7 @@ mod util_comprehensive_tests {
 
     #[test]
     fn test_compute_diffs_partial_change() {
-        let mut old = vec![0u8; 16];
+        let old = vec![0u8; 16];
         let mut new = vec![0u8; 16];
         new[5] = 0xFF;
         new[6] = 0xFF;

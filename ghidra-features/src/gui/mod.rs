@@ -5,7 +5,6 @@
 //! Contains the Window Location Plugin, a developer diagnostic tool
 //! that visualizes all open windows and their screen geometry.
 
-use std::collections::HashMap;
 
 /// Window Location Plugin.
 ///

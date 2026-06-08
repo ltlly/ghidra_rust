@@ -4,7 +4,6 @@
 //! operation on a [`Program`]'s memory that can succeed or fail with a
 //! status message, mirroring the Java `Command<Program>` pattern.
 
-use ghidra_core::mem::MemoryBlockType;
 use ghidra_core::program::program::Program;
 use ghidra_core::addr::Address;
 

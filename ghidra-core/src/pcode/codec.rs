@@ -3,7 +3,6 @@
 //! Ported from `ghidra.program.model.pcode.Decoder`, `Encoder`,
 //! `ElementId`, `AttributeId`, and `DecoderException`.
 
-use std::collections::HashMap;
 use std::fmt;
 
 // ============================================================================
@@ -214,7 +213,7 @@ attr!(ATTRIB_OFFSET, "offset", 32);
 #[derive(Debug, Clone)]
 pub struct Decoder {
     /// The raw XML string (for testing).
-    xml_data: String,
+    _xml_data: String,
     /// Current position in the data.
     position: usize,
     /// Currently open element depth.
@@ -227,7 +226,7 @@ impl Decoder {
     /// Create a new decoder from XML data.
     pub fn new(xml_data: impl Into<String>) -> Self {
         Self {
-            xml_data: xml_data.into(),
+            _xml_data: xml_data.into(),
             position: 0,
             depth: 0,
             last_attrib_id: 0,

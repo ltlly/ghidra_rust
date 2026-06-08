@@ -67,7 +67,7 @@ impl EntryPointAnalyzer {
     ) -> EntryPointCollection {
         let mut collection = EntryPointCollection::new();
         let mut do_now = HashSet::new();
-        let mut do_later = HashSet::new();
+        let do_later = HashSet::new();
 
         // Collect code symbols
         for (addr, name) in &program.symbols {

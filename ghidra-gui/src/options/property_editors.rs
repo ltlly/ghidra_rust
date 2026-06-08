@@ -7,7 +7,6 @@
 //! - [`ErrorPropertyEditor`] -- displays an error message for an option.
 //! - [`NoRegisteredEditorPropertyEditor`] -- sentinel marker for options with no registered editor.
 
-use std::sync::{Arc, Mutex};
 
 // ============================================================================
 // PropertyEditor trait (Rust equivalent of Java's PropertyEditor interface)

@@ -10,7 +10,7 @@
 
 use ghidra_core::addr::Address;
 
-use super::model::{Bookmark, BookmarkManager, BookmarkRowObject};
+use super::model::Bookmark;
 
 // ---------------------------------------------------------------------------
 // BookmarkRowObjectToAddressTableRowMapper
@@ -127,6 +127,7 @@ impl ProgramLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::base::bookmark::model::BookmarkManager;
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

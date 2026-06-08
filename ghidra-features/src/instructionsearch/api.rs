@@ -11,7 +11,7 @@
 //! 1. Searches may only be performed on a single program.
 //! 2. Only a single address range may be searched at a time.
 
-use super::model::{InstructionMetadata, MaskContainer, MaskSettings};
+use super::model::{MaskContainer, MaskSettings};
 use super::utils::InstructionSearchUtils;
 use ghidra_core::Address;
 

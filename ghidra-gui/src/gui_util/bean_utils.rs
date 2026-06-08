@@ -3,7 +3,6 @@
 //! Ports `ghidra.util.bean` and `ghidra.util.bean.opteditor` from Ghidra's
 //! Java source into idiomatic Rust types.
 
-use std::collections::HashMap;
 
 /// A generic property change event.
 ///

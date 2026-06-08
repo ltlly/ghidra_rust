@@ -591,9 +591,9 @@ mod tests {
     #[test]
     fn h2_database_query_functions_by_exe() {
         let mut db = H2FileFunctionDatabase::new("/tmp/test.bsim");
-        db.insert_function(&FunctionDescription::new(0, "f1", Some(0x1000)));
-        db.insert_function(&FunctionDescription::new(0, "f2", Some(0x2000)));
-        db.insert_function(&FunctionDescription::new(1, "f3", Some(0x3000)));
+        let _ = db.insert_function(&FunctionDescription::new(0, "f1", Some(0x1000)));
+        let _ = db.insert_function(&FunctionDescription::new(0, "f2", Some(0x2000)));
+        let _ = db.insert_function(&FunctionDescription::new(1, "f3", Some(0x3000)));
 
         let exe0_funcs = db.query_functions_by_exe(0);
         assert_eq!(exe0_funcs.len(), 2);
@@ -605,8 +605,8 @@ mod tests {
     #[test]
     fn h2_database_functions_and_executables() {
         let mut db = H2FileFunctionDatabase::new("/tmp/test.bsim");
-        db.insert_function(&FunctionDescription::new(0, "f1", Some(0x1000)));
-        db.insert_executable(&ExecutableRecord::new("abc", "prog", "x86", "gcc"));
+        let _ = db.insert_function(&FunctionDescription::new(0, "f1", Some(0x1000)));
+        let _ = db.insert_executable(&ExecutableRecord::new("abc", "prog", "x86", "gcc"));
 
         assert_eq!(db.functions().len(), 1);
         assert_eq!(db.executables().len(), 1);

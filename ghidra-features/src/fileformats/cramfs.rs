@@ -8,10 +8,9 @@
 
 use nom::{
     bytes::complete::take,
-    number::complete::{le_u16, le_u32, le_u8},
+    number::complete::{le_u16, le_u32},
     IResult,
 };
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

@@ -3,9 +3,8 @@
 //! Port of Ghidra's `DockingMenuItem`, `DockingCheckBoxMenuItem`,
 //! `GenericHeader`, `DockableHeader`, and related UI abstractions.
 
-use std::sync::Arc;
 
-use super::action::{ActionCallback, DockingAction, KeyBinding};
+use super::action::KeyBinding;
 
 // ---------------------------------------------------------------------------
 // MenuItemKind — the type of a menu item
@@ -365,7 +364,7 @@ impl DockableHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::action::{Key, Modifiers};
+    use super::super::action::Key;
 
     #[test]
     fn test_menu_item_new() {

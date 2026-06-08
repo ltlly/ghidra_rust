@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.comments`.
 
+#![allow(dead_code)]
+
 /// Comment types corresponding to Ghidra's comment categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentType {

@@ -24,11 +24,23 @@ pub mod globals;
 pub mod pdb_applicator;
 pub mod symbol_server;
 
-use std::collections::HashMap;
+// New modules ported from Ghidra Java PDB implementation
+pub mod pdb_kind;
+pub mod wrapped_data_type;
+pub mod pdb_member;
+pub mod pdb_bitfield;
+pub mod pdb_categories;
+pub mod pdb_program_attributes;
+pub mod pdb_namespace_utils;
+pub mod composite_member;
+pub mod pdb_applicator_options;
+pub mod pdb_applicator_metrics;
+pub mod pdb_address_calculator;
+pub mod find_option;
+
 use std::fmt;
 
 use nom::error::{ErrorKind, ParseError};
-use nom::IResult;
 
 
 // =============================================================================
@@ -499,7 +511,7 @@ pub fn parse_pdb_info_stream(data: &[u8]) -> Result<PdbInfoStream, StreamError> 
     let mut pos = 0usize;
     while pos < tail.len() {
         let np = match tail[pos..].iter().position(|&b|b==0) { Some(p)=>pos+p, None=>break };
-        if np==pos { pos+=1; break; }
+        if np==pos { break; }
         names.push(String::from_utf8_lossy(&tail[pos..np]).to_string());
         pos=np+1; if pos+8>tail.len(){break;} pos+=8;
     }

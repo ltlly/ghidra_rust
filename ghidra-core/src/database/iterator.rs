@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn test_key_to_record_iterator() {
         let keys = vec![FieldValue::Long(1), FieldValue::Long(2), FieldValue::Long(3)];
-        let mut iter = KeyToRecordIterator::new(keys);
+        let iter = KeyToRecordIterator::new(keys);
         assert!(iter.has_next().unwrap());
         assert_eq!(iter.remaining(), 3);
     }

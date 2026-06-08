@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.formats`.
 
+#![allow(dead_code)]
+
 /// Binary format types that can be analyzed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryFormat {

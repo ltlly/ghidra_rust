@@ -108,6 +108,18 @@ impl AddressSet {
     }
     pub fn union(&self, other: &AddressSet) -> AddressSet { let mut r = self.clone(); r.add_all(other); r }
     pub fn contains(&self, addr: &Address) -> bool { self.ranges.iter().any(|r| r.contains(addr)) }
+    pub fn contains_set(&self, other: &AddressSet) -> bool {
+        if other.is_empty() { return true; }
+        if self.is_empty() { return false; }
+        for range in &other.ranges {
+            let mut addr = range.start;
+            while addr.offset <= range.end.offset {
+                if !self.contains(&addr) { return false; }
+                addr = addr.add(1);
+            }
+        }
+        true
+    }
     pub fn is_empty(&self) -> bool { self.ranges.is_empty() }
     pub fn num_addresses(&self) -> u64 { self.ranges.iter().map(|r| r.len()).sum() }
     pub fn iter(&self) -> impl Iterator<Item = &AddressRange> { self.ranges.iter() }
@@ -212,7 +224,7 @@ impl std::error::Error for CancelledError {}
 // Program stubs
 // ============================================================================
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Language { pub processor: String, pub variant: String, pub size: u32 }
 impl Language {
     pub fn has_property(&self, _name: &str) -> bool { false }

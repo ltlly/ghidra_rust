@@ -9,7 +9,6 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use super::pcode_branch::{BranchKind, PcodeBranch};
 use super::pcode_frontend::PcodeOp;
 use super::work_item::WorkItem;
 

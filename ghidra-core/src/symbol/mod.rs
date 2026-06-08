@@ -12,11 +12,12 @@
 //! This module is a direct translation of Ghidra's
 //! `ghidra.program.model.symbol` package.
 
+pub mod utilities;
+
 use crate::addr::Address;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::Arc;
 use thiserror::Error;
 
 // ---------------------------------------------------------------------------
@@ -133,7 +134,6 @@ impl SymbolType {
             SymbolType::Import => 9,
             SymbolType::Export => 10,
             SymbolType::Global => -1,
-            _ => -2,
             SymbolType::Unknown => -2,
         }
     }
@@ -2772,17 +2772,22 @@ impl ReferenceManager {
     }
 
     /// Adds a stack reference.
+    ///
+    /// Stack references are used to reference stack variables. The stack offset
+    /// is encoded into the "to" address using the stack address space. In this
+    /// simplified implementation, the offset is stored as the address offset.
     pub fn add_stack_reference(
         &mut self,
         from_addr: Address,
         op_index: i32,
-        _stack_offset: i32,
+        stack_offset: i32,
         ref_type: RefType,
         source: SourceType,
     ) -> SymbolResult<&Reference> {
         self.remove_references_at(from_addr, op_index);
-        // Stack references use a special stack address.
-        let to_addr = Address::new(0); // placeholder; real impl would use stack offset
+        // Stack references encode the stack offset into the address.
+        // The stack address space uses a high bit to distinguish from memory addresses.
+        let to_addr = Address::new(stack_offset as u64);
         let r = Reference::with_options(from_addr, to_addr, ref_type, op_index, source, true);
         self.add_reference(r)
     }
@@ -2802,6 +2807,10 @@ impl ReferenceManager {
     }
 
     /// Adds an external reference.
+    ///
+    /// External references point to symbols in external libraries. If no external
+    /// address is provided, a special external-space address is synthesized from
+    /// the label name hash.
     pub fn add_external_reference(
         &mut self,
         from_addr: Address,
@@ -2813,8 +2822,12 @@ impl ReferenceManager {
     ) -> SymbolResult<&Reference> {
         self.remove_references_at(from_addr, op_index);
         let to_addr = ext_addr.unwrap_or_else(|| {
-            // External address: use a special encoding.
-            Address::new(0) // placeholder; real impl uses external space addressing
+            // Synthesize an external address from the label name hash.
+            // External addresses use a high range to distinguish from memory addresses.
+            let hash = ext_label.bytes().fold(0u64, |acc, b| {
+                acc.wrapping_mul(31).wrapping_add(b as u64)
+            });
+            Address::new(0xFFFF_FFFF_FFFF_0000u64.wrapping_add(hash & 0xFFFF))
         });
         let r = Reference::with_options(from_addr, to_addr, ref_type, op_index, source, true);
         self.add_reference(r)
@@ -5138,6 +5151,76 @@ impl Iterator for ExternalLocationIterator {
 }
 
 // ---------------------------------------------------------------------------
+// ExternalLocationAdapter  (ExternalLocationAdapter.java)
+// ---------------------------------------------------------------------------
+
+/// Adapter that wraps any `Iterator` of boxed `ExternalLocation` trait objects
+/// into an `ExternalLocationIterator`-compatible interface.
+///
+/// Corresponds to Ghidra's `ExternalLocationAdapter` which adapts a generic
+/// `Iterator<ExternalLocation>` to the `ExternalLocationIterator` interface.
+pub struct ExternalLocationAdapter {
+    locations: Vec<Box<dyn ExternalLocation>>,
+    index: usize,
+}
+
+impl ExternalLocationAdapter {
+    /// Creates a new adapter from a vector of boxed external locations.
+    pub fn new(locations: Vec<Box<dyn ExternalLocation>>) -> Self {
+        Self { locations, index: 0 }
+    }
+
+    /// Creates an empty adapter.
+    pub fn empty() -> Self {
+        Self { locations: Vec::new(), index: 0 }
+    }
+
+    /// Returns `true` if there are more external locations.
+    pub fn has_next(&self) -> bool {
+        self.index < self.locations.len()
+    }
+
+    /// Returns the number of remaining locations.
+    pub fn remaining(&self) -> usize {
+        self.locations.len().saturating_sub(self.index)
+    }
+
+    /// Returns the total number of locations.
+    pub fn len(&self) -> usize {
+        self.locations.len()
+    }
+
+    /// Returns `true` if there are no locations.
+    pub fn is_empty(&self) -> bool {
+        self.locations.is_empty()
+    }
+
+    /// Resets the iterator to the beginning.
+    pub fn reset(&mut self) {
+        self.index = 0;
+    }
+
+    /// Returns a reference to the next location without advancing.
+    pub fn peek(&self) -> Option<&dyn ExternalLocation> {
+        self.locations.get(self.index).map(|b| b.as_ref())
+    }
+}
+
+impl Iterator for ExternalLocationAdapter {
+    type Item = Box<dyn ExternalLocation>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.locations.len() {
+            let loc = self.locations.remove(self.index);
+            // Don't increment index since we removed the element
+            Some(loc)
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ExternalLocationImpl  (ExternalLocationAdapter.java / concrete impl)
 // ---------------------------------------------------------------------------
 
@@ -5615,7 +5698,7 @@ impl StackReference {
     ) -> Self {
         Self {
             from_address,
-            to_address: Address::new(0), // stack address placeholder
+            to_address: Address::new(stack_offset as u64),
             stack_offset,
             ref_type,
             op_index,

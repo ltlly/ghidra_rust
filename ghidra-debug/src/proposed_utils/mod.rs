@@ -1730,6 +1730,7 @@ mod tests {
 
     struct TestObject {
         id: ID,
+        #[allow(dead_code)]
         name: String,
     }
 

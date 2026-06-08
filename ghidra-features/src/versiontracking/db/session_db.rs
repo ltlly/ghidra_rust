@@ -15,9 +15,6 @@ use crate::versiontracking::association::{AssociationHook, VtAssociation, VtAsso
 use crate::versiontracking::db::address_correlator_db::AddressCorrelatorDB;
 use crate::versiontracking::db::match_set_db::VtMatchSetDB;
 use crate::versiontracking::db::tag_db::VtMatchTagDB;
-use crate::versiontracking::db::table::{
-    self, FieldType, TableDescriptor,
-};
 use crate::versiontracking::error::{VtError, VtResult};
 use crate::versiontracking::impl_module::VTEvent;
 use crate::versiontracking::match_set::VtMatchSet;

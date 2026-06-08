@@ -4,8 +4,8 @@
 //! mode, identifying function boundaries via prologue/epilogue patterns,
 //! and detecting calling conventions.
 
-use crate::arm::instructions::{ArmMnemonic, ConditionCode, InstructionCategory};
-use crate::arm::registers::{ArmRegisterBank, ProcessorMode};
+use crate::arm::instructions::ArmMnemonic;
+use crate::arm::registers::ArmRegisterBank;
 
 // ========================================================================
 // Binary Format Detection for ARM

@@ -161,7 +161,7 @@ impl HelpFile {
         }
 
         for (line_num, line) in content.lines().enumerate() {
-            let line_lower = line.to_lowercase();
+            let _line_lower = line.to_lowercase();
 
             // Parse <a name="..."> tags for anchor definitions
             parse_anchors(&file, line, line_num, &mut self.anchors_by_help_path, &mut self.anchors_by_name, &mut self.anchors_by_id);

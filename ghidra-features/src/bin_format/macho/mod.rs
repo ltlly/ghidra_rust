@@ -1,0 +1,69 @@
+//! Mach-O binary format types ported from Ghidra's
+//! `ghidra.app.util.bin.format.macho` package.
+//!
+//! Provides core types for parsing Mach-O (Mach Object) binaries:
+//! - [`MachHeader`] -- `mach_header` / `mach_header_64` structure
+//! - [`Section`] -- `section` / `section_64` structure
+//! - [`RelocationInfo`] -- `relocation_info` / `scattered_relocation_info`
+//! - [`mach_constants`] -- magic numbers and name length
+//! - [`mach_exception`] -- error types for Mach-O parsing
+//! - [`cpu_types`] -- CPU type and subtype constants
+//! - [`mach_header_types`] -- file type and flag constants
+//! - [`section_types`] -- section type, attribute, and name constants
+
+pub mod cpu_types;
+pub mod mach_constants;
+pub mod mach_exception;
+pub mod mach_header;
+pub mod mach_header_types;
+pub mod relocation_info;
+pub mod section;
+pub mod section_types;
+
+pub use cpu_types::{
+    cpu_type_bit_size, cpu_type_magic_string, cpu_type_to_processor, CPU_ARCH_ABI64,
+    CPU_ARCH_ABI64_32, CPU_ARCH_MASK, CPU_SUBTYPE_ARM_ALL, CPU_SUBTYPE_ARM_V4T,
+    CPU_SUBTYPE_ARM_V5, CPU_SUBTYPE_ARM_V5TEJ, CPU_SUBTYPE_ARM_V6, CPU_SUBTYPE_ARM_V6M,
+    CPU_SUBTYPE_ARM_V7, CPU_SUBTYPE_ARM_V7EM, CPU_SUBTYPE_ARM_V7F, CPU_SUBTYPE_ARM_V7K,
+    CPU_SUBTYPE_ARM_V7M, CPU_SUBTYPE_ARM_V7S, CPU_SUBTYPE_ARM_XSCALE, CPU_SUBTYPE_BIG_ENDIAN,
+    CPU_SUBTYPE_I386_ALL, CPU_SUBTYPE_LITTLE_ENDIAN, CPU_SUBTYPE_MULTIPLE,
+    CPU_SUBTYPE_POWERPC_ALL, CPU_SUBTYPE_POWERPC_601, CPU_SUBTYPE_POWERPC_970,
+    CPU_SUBTYPE_X86_ALL, CPU_SUBTYPE_X86_ARCH1, CPU_TYPE_ANY, CPU_TYPE_ARM, CPU_TYPE_ARM64_32,
+    CPU_TYPE_ARM_64, CPU_TYPE_HPPA, CPU_TYPE_I386, CPU_TYPE_I860, CPU_TYPE_MC680X0,
+    CPU_TYPE_MC88000, CPU_TYPE_MC98000, CPU_TYPE_POWERPC, CPU_TYPE_POWERPC64, CPU_TYPE_SPARC,
+    CPU_TYPE_VAX, CPU_TYPE_X86, CPU_TYPE_X86_64,
+};
+pub use mach_constants::{is_little_endian, is_magic, is_64bit, DATA_TYPE_CATEGORY, MH_CIGAM,
+    MH_CIGAM_64, MH_MAGIC, MH_MAGIC_64, NAME_LENGTH};
+pub use mach_exception::{MachException, ObsoleteException};
+pub use mach_header::MachHeader;
+pub use mach_header_types::{
+    file_type_description, file_type_name, get_flag_names, MH_ALLMODSBOUND, MH_ALLOW_STACK_EXECUTION,
+    MH_APP_EXTENSION_SAFE, MH_BINDATLOAD, MH_BINDS_TO_WEAK, MH_BUNDLE, MH_CANONICAL,
+    MH_CORE, MH_DEAD_STRIPPABLE_DYLIB, MH_DYLDLINK, MH_DYLIB, MH_DYLIB_IN_CACHE,
+    MH_DYLIB_STUB, MH_DYLINKER, MH_EXECUTE, MH_FILESET, MH_FORCE_FLAT, MH_FVMLIB,
+    MH_HAS_TLV_DESCRIPTORS, MH_INCRLINK, MH_KEXT_BUNDLE, MH_LAZY_INIT, MH_NLIST_OUTOFSYNC_WITH_DYLDINFO,
+    MH_NOFIXPREBINDING, MH_NO_HEAP_EXECUTION, MH_NO_REEXPORTED_DYLIBS, MH_NOMULTIDEFS,
+    MH_NOUNDEFS, MH_OBJECT, MH_PIE, MH_PREBINDABLE, MH_PREBOUND, MH_PRELOAD,
+    MH_ROOT_SAFE, MH_SETUID_SAFE, MH_SIM_SUPPORT, MH_SPLIT_SEGS, MH_SUBSECTIONS_VIA_SYMBOLS,
+    MH_TWOLEVEL, MH_WEAK_DEFINES, MH_DSYM,
+};
+pub use relocation_info::RelocationInfo;
+pub use section::Section;
+pub use section_types::{
+    get_attribute_names, section_type_name, S_16BYTE_LITERALS, S_4BYTE_LITERALS,
+    S_8BYTE_LITERALS, S_ATTR_EXT_RELOC, S_ATTR_LIVE_SUPPORT, S_ATTR_LOC_RELOC,
+    S_ATTR_NO_DEAD_STRIP, S_ATTR_NO_TOC, S_ATTR_PURE_INSTRUCTIONS,
+    S_ATTR_SELF_MODIFYING_CODE, S_ATTR_SOME_INSTRUCTIONS, S_ATTR_STRIP_STATIC_SYMS,
+    S_COALESCED, S_CSTRING_LITERALS, S_DTRACE_DOF, S_GB_ZEROFILL, S_INTERPOSING,
+    S_LAZY_DYLIB_SYMBOL_POINTERS, S_LAZY_SYMBOL_POINTERS, S_LITERAL_POINTERS,
+    S_MOD_INIT_FUNC_POINTERS, S_MOD_TERM_FUNC_POINTERS, S_NON_LAZY_SYMBOL_POINTERS,
+    S_REGULAR, S_SYMBOL_STUBS, S_THREAD_LOCAL_INIT_FUNCTION_POINTERS, S_THREAD_LOCAL_REGULAR,
+    S_THREAD_LOCAL_VARIABLE_POINTERS, S_THREAD_LOCAL_VARIABLES, S_THREAD_LOCAL_ZEROFILL,
+    S_ZEROFILL, SECTION_ATTRIBUTES_MASK, SECTION_ATTRIBUTES_SYS, SECTION_ATTRIBUTES_USR,
+    SECTION_TYPE_MASK, SECT_BSS, SECT_COMMON, SECT_CONST, SECT_CSTRING, SECT_DATA,
+    SECT_DATA_CONST, SECT_DYLD, SECT_FVMLIB_INIT0, SECT_FVMLIB_INIT1, SECT_GOT,
+    SECT_JUMP_TABLE, SECT_LA_SYMBOL_PTR, SECT_LITERAL4, SECT_LITERAL8, SECT_MOD_INIT_FUNC,
+    SECT_MOD_TERM_FUNC, SECT_NL_SYMBOL_PTR, SECT_PICSYMBOL_STUB, SECT_POINTERS,
+    SECT_PROGRAM_VARS, SECT_SYMBOL_STUB, SECT_TEXT, SEG_PRELINK_TEXT, SEG_TEXT, SEG_TEXT_EXEC,
+};

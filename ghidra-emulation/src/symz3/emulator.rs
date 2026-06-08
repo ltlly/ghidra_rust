@@ -19,7 +19,7 @@ pub struct SymZ3PcodeEmulator {
     /// The symbolic state (register, memory, unique spaces).
     state: SymZ3State,
     /// Arithmetic dispatch for symbolic operations.
-    arithmetic: SymZ3PcodeArithmetic,
+    _arithmetic: SymZ3PcodeArithmetic,
     /// User-defined operation library.
     userop_library: HashMap<String, Box<dyn Fn(&[SymValueZ3]) -> SymValueZ3>>,
     /// Instruction counter.
@@ -31,7 +31,7 @@ impl SymZ3PcodeEmulator {
     pub fn new() -> Self {
         Self {
             state: SymZ3State::new(),
-            arithmetic: SymZ3PcodeArithmetic,
+            _arithmetic: SymZ3PcodeArithmetic,
             userop_library: HashMap::new(),
             instruction_count: 0,
         }

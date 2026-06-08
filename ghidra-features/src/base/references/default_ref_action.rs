@@ -146,7 +146,7 @@ impl DefaultRefResolver {
                 ReferenceClass::Memory
             };
 
-            let mut ctx = DefaultRefContext {
+            let ctx = DefaultRefContext {
                 ref_class,
                 memory_address: if ref_class == ReferenceClass::Memory {
                     Some(target_addr)

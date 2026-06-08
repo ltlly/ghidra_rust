@@ -3,7 +3,7 @@
 //! Ported from `ghidra.app.plugin.core.printing.PrintingPlugin`,
 //! `CodeUnitPrintable`, and `PrintOptionsDialog`.
 
-use super::{PageOrientation, PaperSize, PrintSettings};
+use super::PrintSettings;
 use ghidra_core::Address;
 
 // ---------------------------------------------------------------------------
@@ -256,6 +256,8 @@ impl Default for PrintOptionsDialog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::printing::PageOrientation;
+    use crate::printing::PaperSize;
 
     #[test]
     fn test_code_unit_printable_basic() {

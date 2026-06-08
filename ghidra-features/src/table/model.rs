@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use ghidra_core::addr::Address;
 
-use super::adapter::{ColumnDisplayDynamicTableColumnAdapter, DynamicTableColumn};
-use super::traits::{AddressableRowObject, ColumnDisplay};
+use super::adapter::DynamicTableColumn;
+use super::traits::AddressableRowObject;
 
 // ---------------------------------------------------------------------------
 // SimpleRowObject

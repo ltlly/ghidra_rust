@@ -14,8 +14,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use super::super::client::{BSimError, BSimResult};
-use super::super::description::{DatabaseInformation, ExecutableRecord, FunctionDescription};
+use super::super::client::BSimError;
 
 // New modules ported from Ghidra's BSim elastic package
 pub mod base64_lite;

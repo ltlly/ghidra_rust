@@ -7,8 +7,7 @@
 //! These types model the reference editing UI without Swing/AWT dependencies.
 
 use ghidra_core::addr::Address;
-use ghidra_core::symbol::{DataRefType, FlowType, RefType, Reference, SourceType};
-use serde::{Deserialize, Serialize};
+use ghidra_core::symbol::{DataRefType, RefType, Reference, SourceType};
 
 use super::instruction_info::InstructionOperandInfo;
 
@@ -332,6 +331,7 @@ impl Default for InstructionPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::symbol::FlowType;
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

@@ -158,7 +158,7 @@ pub struct RelationRecord {
 /// # Usage
 ///
 /// ```rust
-/// use ghidra_features::function_id::*;
+/// use ghidra_features::function_id::{FidDB, FunctionRecord, LibraryRecord};
 ///
 /// let mut db = FidDB::new("x86", "x86:LE:64:default");
 ///

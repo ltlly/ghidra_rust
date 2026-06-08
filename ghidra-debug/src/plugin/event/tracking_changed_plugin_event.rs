@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TrackingChangedPluginEvent::new(true);
+        let _obj = TrackingChangedPluginEvent::new(true);
         assert!(true);
     }
 

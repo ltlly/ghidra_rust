@@ -446,7 +446,7 @@ fn parse_nds_header(input: &[u8]) -> IResult<&[u8], NdsRom> {
 
     // Parse remaining bytes up to 0x200
     // (already consumed 0x80 bytes out of 0x200)
-    let remaining_header = NDS_HEADER_SIZE
+    let _remaining_header = NDS_HEADER_SIZE
         .saturating_sub(0x80)
         .saturating_sub(0x20); // we have parsed 0x80+0x20 so far
     // Actually let's recalculate:

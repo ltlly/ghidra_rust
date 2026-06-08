@@ -323,7 +323,7 @@ mod tests {
         let mut ram_view = CodeUnitsMemoryView::new("ram", 0, 100);
         ram_view.add_entry(CodeUnitViewEntry::instruction(0x400000, 3, 0, "NOP"));
 
-        let mut reg_view = CodeUnitsMemoryView::new("register", 0, 100);
+        let reg_view = CodeUnitsMemoryView::new("register", 0, 100);
 
         composed.add_view(ram_view);
         composed.add_view(reg_view);

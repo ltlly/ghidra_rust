@@ -15,7 +15,7 @@ fn addr(offset: u64) -> Address {
 // ============================================================================
 
 mod console_tests {
-    use super::*;
+    
     use ghidra_features::base::console::{
         CodeCompletion, ConsoleComponentProvider, ConsolePlugin, ConsoleService, ConsoleWord,
     };
@@ -218,10 +218,8 @@ mod function_tests {
         StackDepthChangeEvent as SDEvent,
     };
     use ghidra_features::base::function::variable_comment::{
-        VariableComment as VCComment,
         VariableCommentModel as VCModel,
         VariableCommentType as VCType,
-        VariableCommentUpdate as VCUpdate,
     };
     use ghidra_features::base::function::editor::*;
 
@@ -748,8 +746,8 @@ mod references_tests {
         let mut provider = ExternalReferencesProvider::new();
         assert_eq!(provider.row_count(), 0);
 
-        provider.add_library("libc.so.6".to_string());
-        provider.add_library("libm.so.6".to_string());
+        let _ = provider.add_library("libc.so.6".to_string());
+        let _ = provider.add_library("libm.so.6".to_string());
         assert_eq!(provider.row_count(), 2);
 
         assert_eq!(provider.find_by_name("libc.so.6"), Some(0));
@@ -1185,7 +1183,7 @@ mod cross_module_tests {
     use ghidra_features::base::function::{FunctionTagManager, FunctionPlugin, ThunkRelation};
     use ghidra_features::base::references::{ReferenceClass, RefTypeFactory, ReferencesPlugin};
     use ghidra_features::base::register::{RegisterManager, RegisterValueRange, RegisterTree};
-    use ghidra_core::symbol::{DataRefType, FlowType, RefType};
+    use ghidra_core::symbol::{FlowType, RefType};
     use ghidra_core::program::lang::{Register, RegisterTypeFlags};
     use std::collections::HashSet;
 

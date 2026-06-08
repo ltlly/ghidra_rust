@@ -342,7 +342,7 @@ mod tests {
 
     #[test]
     fn test_broker_listener_closure() {
-        let mut count = 0u32;
+        let count = 0u32;
         {
             let mut listener = ClosureBrokerListener::new(|| {
                 // Can't mutate captured variable in this test setup,

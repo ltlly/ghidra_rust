@@ -3,7 +3,6 @@
 //! These tests exercise the deepened action framework, factory system,
 //! and cross-module workflows ported from Ghidra's Java source.
 
-use ghidra_core::Address;
 
 // ============================================================================
 // Action framework tests
@@ -13,9 +12,8 @@ mod action_framework_tests {
     use ghidra_features::base::actions::{
         ActionContextType, ActionManager, CopyAction, CreateFunctionAction,
         DeleteAction, DisassembleAction, DockingAction, GoToAddressAction,
-        KeyBinding, MenuData, PasteAction, RedoAction, RenameAction,
-        SelectAllAction, SetEolCommentAction, SetPlateCommentAction,
-        SetPostCommentAction, SetPreCommentAction, ToggleConnectAction,
+        KeyBinding, MenuData, PasteAction, RedoAction, RenameAction, SetEolCommentAction, SetPlateCommentAction,
+        SetPostCommentAction, SetPreCommentAction,
         ToolBarData, UndoAction,
         edit_menu_data, file_menu_data, analysis_menu_data,
         function_menu_data, window_menu_data,
@@ -346,7 +344,7 @@ mod factory_framework_tests {
 
 mod cross_module_tests {
     use ghidra_features::base::actions::{
-        ActionManager, CopyAction, DockingAction, KeyBinding, MenuData,
+        ActionManager, DockingAction, KeyBinding, MenuData,
         edit_menu_data, window_menu_data,
     };
     use ghidra_features::base::factory::{

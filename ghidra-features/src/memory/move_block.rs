@@ -39,7 +39,7 @@ impl MoveBlockModel {
         new_start: Address,
     ) -> Self {
         let size = block.size();
-        let new_end = Address::new(new_start.offset + size - 1);
+        let _new_end = Address::new(new_start.offset + size - 1);
 
         let message = if new_start.offset == block.start.offset {
             Some("New address is the same as the current address".into())

@@ -173,7 +173,7 @@ impl VariableHeightPairLayout {
     /// Returns positions as `((left_x, left_y), (right_x, right_y))`.
     pub fn layout(
         &self,
-        container_width: f64,
+        _container_width: f64,
         pairs: &[(f64, f64, f64, f64)],
     ) -> Vec<((f64, f64), (f64, f64))> {
         let left_width = pairs
@@ -348,7 +348,7 @@ mod tests {
     fn right_sided_buddy_layout() {
         let layout = RightSidedBuddyLayout::new(100.0, 10.0, 5.0);
         let (lx, ly, lw, lh) = layout.left_bounds(400.0, 200.0);
-        let (rx, ry, rw, rh) = layout.right_bounds(400.0, 200.0);
+        let (rx, _ry, rw, _rh) = layout.right_bounds(400.0, 200.0);
 
         assert_eq!(lx, 5.0);
         assert_eq!(ly, 5.0);

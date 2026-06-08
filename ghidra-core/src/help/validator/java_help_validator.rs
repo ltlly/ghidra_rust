@@ -1,11 +1,10 @@
 // Port of help.validator.JavaHelpValidator
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::help::links::*;
 use crate::help::location::HelpModuleCollection;
-use crate::help::model::{HelpFile, HelpTopic, TocItem};
+use crate::help::model::TocItem;
 use crate::help::validator::link_database::{DuplicateAnchorCollection, LinkDatabase};
 
 /// Prefix for external help references (files outside the help system).

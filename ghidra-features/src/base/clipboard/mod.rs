@@ -219,7 +219,7 @@ struct ProviderState {
     /// Whether this provider can paste.
     can_paste: bool,
     /// Available copy special types.
-    copy_types: Vec<ClipboardType>,
+    _copy_types: Vec<ClipboardType>,
 }
 
 impl ClipboardManager {
@@ -258,7 +258,7 @@ impl ClipboardManager {
             ProviderState {
                 can_copy,
                 can_paste,
-                copy_types,
+                _copy_types: copy_types,
             },
         );
     }

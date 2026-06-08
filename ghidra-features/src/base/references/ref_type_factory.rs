@@ -109,11 +109,30 @@ impl RefTypeFactory {
         RefType::Data(DataRefType::Read)
     }
 
+    /// Returns the default stack reference type for a given operand index.
+    ///
+    /// Currently ignores the operand index and returns the default stack
+    /// reference type (Read).
+    pub fn get_default_stack_ref_type_for_operand(_op_index: i32) -> RefType {
+        Self::get_default_stack_ref_type()
+    }
+
     /// Returns the default register reference type.
     ///
     /// Uses the provided register's default reference type (typically `WRITE`).
     pub fn get_default_register_ref_type() -> RefType {
         RefType::Data(DataRefType::Write)
+    }
+
+    /// Returns the default memory reference type for a given operand index.
+    ///
+    /// If `is_computed_flow` is true, returns a computed jump type; otherwise
+    /// returns the data reference type.
+    pub fn get_default_memory_ref_type_for_operand(
+        _op_index: i32,
+        is_computed_flow: bool,
+    ) -> RefType {
+        Self::get_default_memory_ref_type(false, is_computed_flow, false)
     }
 
     /// Determines the allowed reference types for a specific reference,

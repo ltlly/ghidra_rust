@@ -107,7 +107,7 @@ impl ShapePickSupport {
         rect_y: f64,
         rect_w: f64,
         rect_h: f64,
-        corner_radius: f64,
+        _corner_radius: f64,
     ) -> bool {
         // Check if inside the bounding box first.
         if point.x < rect_x || point.x > rect_x + rect_w {
@@ -177,7 +177,7 @@ mod tests {
     #[test]
     fn test_graph_loop_shape() {
         let shape = GraphLoopShape::new(Point2d::new(100.0, 200.0), 80.0, 30.0);
-        let (start, cp1, cp2, end) = shape.bezier_control_points();
+        let (start, cp1, _cp2, end) = shape.bezier_control_points();
         assert!(start.x > shape.center.x);
         assert!(end.x < shape.center.x);
         assert!(cp1.y < shape.center.y); // loops above

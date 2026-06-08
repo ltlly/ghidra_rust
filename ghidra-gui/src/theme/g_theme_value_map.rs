@@ -2,11 +2,10 @@
 //!
 //! Ports `generic.theme.GThemeValueMap`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::color_value::ColorValue;
 use super::font_value::FontValue;
-use super::icon_value::IconValue;
 use crate::gui_util::web_colors::RgbaColor;
 use crate::options::option_value::FontDescriptor;
 

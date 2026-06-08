@@ -11,7 +11,6 @@
 use serde::{Deserialize, Serialize};
 
 use super::description::{ExecutableRecord, FunctionDescription, SignatureRecord};
-use super::FeatureVector;
 
 /// Result of decompiling a single function for BSim.
 ///
@@ -266,6 +265,7 @@ impl RichDecompileFunctionTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bsim::FeatureVector;
 
     fn make_function(name: &str, addr: u64) -> FunctionDescription {
         FunctionDescription::new(0, name, Some(addr))

@@ -6,7 +6,7 @@
 //! [`ProgramSaveManager`] to provide the public API for opening,
 //! closing, saving, and switching between programs.
 
-use super::multi_program_manager::{MultiProgramManager, ProgramEvent, OPEN_CURRENT, OPEN_VISIBLE};
+use super::multi_program_manager::{MultiProgramManager, ProgramEvent};
 use super::program_cache::ProgramCache;
 use super::save_manager::{ProgramSaveManager, SaveState};
 use super::transaction_monitor::TransactionMonitor;
@@ -289,6 +289,8 @@ impl Default for ProgramManagerPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::progmgr::multi_program_manager::OPEN_CURRENT;
+    use crate::progmgr::multi_program_manager::OPEN_VISIBLE;
 
     fn make_plugin() -> ProgramManagerPlugin {
         ProgramManagerPlugin::new("TestPlugin")

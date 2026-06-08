@@ -7,7 +7,6 @@
 //! - MS-DOS Programmer's Reference
 
 use nom::{bytes::complete::take, number::complete::{le_u16, le_u8}, IResult};
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

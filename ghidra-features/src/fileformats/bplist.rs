@@ -6,8 +6,7 @@
 //! - Apple Binary Property List specification
 //! - <https://opensource.apple.com/source/CF/CF-550/CFBinaryPList.c>
 
-use nom::{bytes::complete::take, number::complete::{be_u16, be_u32, be_u64, be_u8, le_u8}, IResult};
-use std::fmt;
+use nom::{bytes::complete::take, number::complete::{be_u64, le_u8}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

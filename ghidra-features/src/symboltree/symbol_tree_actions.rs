@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{SymbolCategory, SymbolType};
+use super::SymbolType;
 
 // ---------------------------------------------------------------------------
 // Action result

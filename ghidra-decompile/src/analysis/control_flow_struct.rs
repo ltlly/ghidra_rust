@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Control-flow structuring engine.
 //!
 //! Converts an unstructured control-flow graph (with gotos) into structured C
@@ -628,6 +630,7 @@ impl PostDominatorTree {
 
     /// Returns true if `a` post-dominates `b` (every path from `b` to exit
     /// goes through `a`).
+    #[allow(dead_code)]
     fn postdominates(&self, a: NodeIndex, b: NodeIndex) -> bool {
         if a == b {
             return true;
@@ -705,7 +708,7 @@ pub struct ControlFlowStructurer {
 
     // -- internal state -------------------------------------------------------
     /// Dominator tree for the CFG (entry-based).
-    dom: DominatorTree,
+    _dom: DominatorTree,
 
     /// Post-dominator tree, computed lazily.
     pdom: Option<PostDominatorTree>,
@@ -737,7 +740,7 @@ impl ControlFlowStructurer {
             cfg,
             structured: StructuredGraph::default(),
             options: StructuringOptions::default(),
-            dom,
+            _dom: dom,
             pdom: None,
             loops,
             node_to_loop,
@@ -2070,6 +2073,7 @@ impl ControlFlowStructurer {
     }
 
     /// Generate a unique label name.
+    #[allow(dead_code)]
     fn fresh_label(&mut self) -> String {
         let lbl = format!("L{}", self.label_counter);
         self.label_counter += 1;

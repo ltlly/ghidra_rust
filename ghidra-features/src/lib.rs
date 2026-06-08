@@ -1,3 +1,7 @@
+#![allow(dead_code, unused_imports, unused_variables, unreachable_patterns)]
+#![allow(non_camel_case_types, non_snake_case, private_interfaces)]
+#![allow(unused_assignments)]
+
 //! Ghidra Rust - Features crate.
 //!
 //! This crate provides analysis features including:
@@ -71,6 +75,21 @@ pub mod system_emulation;
 pub mod symtable;
 pub mod table;
 pub mod versiontracking;
+
+// -- New modules ported from Ghidra's Features/ProgramGraph --
+/// Program graph generation: block flow, code flow, call graphs, and data reference graphs.
+/// Ported from `ghidra.graph.program` (Features/ProgramGraph).
+pub mod program_graph;
+
+// -- New modules ported from Ghidra's Features/DataGraph --
+/// Data graph visualization for program data exploration.
+/// Ported from `datagraph` (Features/DataGraph).
+pub mod datagraph;
+
+// -- New modules ported from Ghidra's Features/WildcardAssembler --
+/// Wildcard Sleigh assembler for pattern-based assembly.
+/// Ported from `ghidra.asm.wild` (Features/WildcardAssembler).
+pub mod wildcard_assembler;
 
 // -- New modules ported from Ghidra's Features/Base plugin/core --
 pub mod instructionsearch;

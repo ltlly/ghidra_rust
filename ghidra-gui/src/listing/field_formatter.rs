@@ -435,7 +435,7 @@ impl FieldFormatter {
     }
 
     /// Format a label for display as an operand reference.
-    pub fn format_label_ref(&self, symbol: &Symbol, program: Option<&Program>) -> String {
+    pub fn format_label_ref(&self, symbol: &Symbol, _program: Option<&Program>) -> String {
         let name = self.format_label(symbol);
         let addr = symbol.address();
         if self.show_block_names {

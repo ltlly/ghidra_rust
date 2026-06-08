@@ -12,9 +12,9 @@
 use std::fmt;
 
 use ghidra_core::addr::Address;
-use ghidra_core::symbol::{RefType, Reference, ReferenceManager, SourceType};
+use ghidra_core::symbol::{Reference, ReferenceManager};
 
-use super::{ThunkReference, XRefDisplayRow, XRefEntry};
+use super::{ThunkReference, XRefEntry};
 
 // ---------------------------------------------------------------------------
 // XRefColumn -- column identifiers for xref tables
@@ -489,7 +489,7 @@ impl ReferenceChangeTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghidra_core::symbol::DataRefType;
+    use ghidra_core::symbol::{DataRefType, RefType};
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

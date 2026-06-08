@@ -15,7 +15,7 @@ mod references_tests {
     use ghidra_features::base::references::{
         AddMemRefCmd, ExternalNameRow, ExternalReferencesProvider,
         OffsetTablePlugin, ParameterConflictException,
-        ReferenceClass, ReferenceCommand, ReferenceResult, ReferencesPlugin, ReferencesPluginState,
+        ReferenceClass, ReferenceResult, ReferencesPlugin,
         RefTypeFactory, ReservedNameException,
     };
     use ghidra_core::symbol::{DataRefType, FlowType, RefType, SourceType};
@@ -112,8 +112,8 @@ mod references_tests {
         let mut provider = ExternalReferencesProvider::new();
         assert_eq!(provider.row_count(), 0);
 
-        provider.add_library("libc.so.6".to_string());
-        provider.add_library("libm.so.6".to_string());
+        let _ = provider.add_library("libc.so.6".to_string());
+        let _ = provider.add_library("libm.so.6".to_string());
         assert_eq!(provider.row_count(), 2);
 
         assert_eq!(provider.find_by_name("libc.so.6"), Some(0));
@@ -196,8 +196,8 @@ mod references_tests {
 mod register_tests {
     use super::*;
     use ghidra_features::base::register::{
-        RegisterGroupNode, RegisterManager, RegisterNode,
-        RegisterTree, RegisterValueRange, RegisterValuesPanel, SetRegisterValueCmd, SortDirection,
+        RegisterManager, RegisterNode,
+        RegisterTree, RegisterValueRange, SetRegisterValueCmd, SortDirection,
     };
     use ghidra_core::program::lang::{Register, RegisterTypeFlags};
     use std::collections::HashSet;
@@ -606,7 +606,7 @@ mod function_tests {
 // ============================================================================
 
 mod console_tests {
-    use super::*;
+    
     use ghidra_features::base::console::{
         CodeCompletion, ConsoleComponentProvider, ConsolePlugin, ConsoleService, ConsoleWord,
     };
@@ -775,7 +775,7 @@ mod cross_plugin_tests {
     use ghidra_features::base::references::RefTypeFactory;
     use ghidra_features::base::register::{RegisterManager, RegisterValueRange};
     use ghidra_features::base::function::{
-        ActionContext, FunctionTagManager, ThunkRelation,
+        FunctionTagManager, ThunkRelation,
     };
     use ghidra_features::base::console::{ConsolePlugin, ConsoleService};
 

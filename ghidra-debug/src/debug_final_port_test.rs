@@ -227,8 +227,8 @@ mod tests {
     fn test_service_listener_comprehensive() {
         let mut composite = CompositeTraceRmiServiceListener::new();
 
-        let rec1 = RecordingServiceListener::new();
-        let rec2 = RecordingServiceListener::new();
+        let _rec1 = RecordingServiceListener::new();
+        let _rec2 = RecordingServiceListener::new();
 
         composite.add_listener(Box::new(RecordingServiceListener::new()));
 
@@ -471,7 +471,7 @@ mod tests {
     #[test]
     fn test_cross_module_full_integration() {
         // 1. Create a trace address snap space
-        let space = TraceAddressSnapSpace::with_bounds("ram", 0, 0xFFFF_FFFF, 0, 10000);
+        let _space = TraceAddressSnapSpace::with_bounds("ram", 0, 0xFFFF_FFFF, 0, 10000);
 
         // 2. Build an R*-tree for spatial indexing
         let mut tree = RStarTree::<String>::new();

@@ -1,6 +1,8 @@
 //! Call Tree -- function call and reference trees.
 //!
-//! Ported from Ghidra's `ghidra.app.plugin.core.calltree` Java package.
+//! Ported from Ghidra's `ghidra.app.plugin.core.calltree` Java package
+//! and `functioncalls.graph` / `functioncalls.plugin` from
+//! `Features/GraphFunctionCalls`.
 //!
 //! Provides two trees for a given function `foo`:
 //!
@@ -13,6 +15,17 @@
 //! - [`CallTree`] -- a complete call tree for a function.
 //! - [`CallTreeBuilder`] -- builds call trees from function metadata.
 //! - [`CallTreeDirection`] -- incoming (callers) or outgoing (callees).
+//!
+//! # Function Call Graph (ported from GraphFunctionCalls)
+//!
+//! - [`fcg_direction`] -- vertex direction enum (In, InAndOut, Out).
+//! - [`fcg_level`] -- vertex level / row in the bow-tie layout.
+//! - [`fcg_vertex`] -- a vertex in the function call graph.
+//! - [`fcg_edge`] -- an edge in the function call graph.
+//! - [`function_call_graph`] -- the main graph data structure.
+//! - [`function_edge`] -- simple function-to-function edge.
+//! - [`function_edge_cache`] -- cache of known function edges.
+//! - [`fcg_data`] -- data abstraction layer (trait + valid/empty impls + factory).
 
 /// Call tree options and configuration.
 ///
@@ -34,8 +47,49 @@ pub mod provider;
 /// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreePlugin`.
 pub mod plugin;
 
+/// Function Call Graph direction enum (In, InAndOut, Out).
+///
+/// Ported from `functioncalls.graph.FcgDirection`.
+pub mod fcg_direction;
+
+/// Function Call Graph level (row + direction).
+///
+/// Ported from `functioncalls.graph.FcgLevel`.
+pub mod fcg_level;
+
+/// Function Call Graph vertex.
+///
+/// Ported from `functioncalls.graph.FcgVertex`.
+pub mod fcg_vertex;
+
+/// Function Call Graph edge.
+///
+/// Ported from `functioncalls.graph.FcgEdge`.
+pub mod fcg_edge;
+
+/// Function Call Graph -- the main graph data structure.
+///
+/// Ported from `functioncalls.graph.FunctionCallGraph`.
+pub mod function_call_graph;
+
+/// Simple function-to-function edge (not added to the visual graph).
+///
+/// Ported from `functioncalls.plugin.FunctionEdge`.
+pub mod function_edge;
+
+/// Cache of known function edges.
+///
+/// Ported from `functioncalls.plugin.FunctionEdgeCache`.
+pub mod function_edge_cache;
+
+/// FCG data abstraction (trait + valid/empty implementations + factory).
+///
+/// Ported from `functioncalls.plugin.FcgData`, `ValidFcgData`,
+/// `EmptyFcgData`, and `FcgDataFactory`.
+pub mod fcg_data;
+
 use ghidra_core::Address;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 use options::CallTreeOptions;
 

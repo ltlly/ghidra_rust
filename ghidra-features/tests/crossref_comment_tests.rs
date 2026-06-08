@@ -9,12 +9,12 @@ use ghidra_core::program::listing::CommentType;
 use ghidra_core::symbol::{DataRefType, RefType, Reference, ReferenceManager, SourceType, MNEMONIC};
 use ghidra_features::base::comments::{
     CommentActionKind, CommentHistoryEntry, CommentHistoryStore, CommentUpdate,
-    CommentsPlugin, CommentsDialogModel, CommentDeleteRequest,
+    CommentsPlugin, CommentDeleteRequest,
     create_standard_actions, determine_comment_type, is_comment_allowed,
     popup_label_for_comment_type,
 };
 use ghidra_features::base::crossrefs::{
-    self, CodeUnitXRef, CrossReferenceManager, ThunkReference, XRefDisplayRow, XRefEntry,
+    self, CodeUnitXRef, CrossReferenceManager, ThunkReference, XRefDisplayRow,
     ALL_REFS,
 };
 

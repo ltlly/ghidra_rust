@@ -3,7 +3,7 @@
 //! Ported from `generic.theme.HeadlessThemeManager`.
 
 use super::color_value::ColorValue;
-use super::g_color::{GColor, MISSING_COLOR_RGB};
+use super::g_color::GColor;
 use super::g_icon::GIcon;
 use super::g_theme::GTheme;
 use super::g_theme_value_map::GThemeValueMap;

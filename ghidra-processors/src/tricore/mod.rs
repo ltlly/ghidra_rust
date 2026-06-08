@@ -79,7 +79,7 @@ fn build_registers() -> RegisterBank {
     // E0 = D1:D0, E2 = D3:D2, etc.
     for i in 0..8u32 {
         let d_even = i * 2;
-        let d_odd = d_even + 1;
+        let _d_odd = d_even + 1;
         bank.add(Register::new(
             &format!("E{}", d_even),
             64,

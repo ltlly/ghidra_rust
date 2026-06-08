@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceMemoryStatePcodeArithmetic::new(true, 4);
+        let _obj = TraceMemoryStatePcodeArithmetic::new(true, 4);
         assert!(true);
     }
 

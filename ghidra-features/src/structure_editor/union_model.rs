@@ -5,8 +5,6 @@
 //! all components share offset 0 (each occupies the full union size).
 
 use super::composite_model::{CompositeEditorModel, ViewComponent};
-use super::model::StructureEditorModel;
-use super::selection::EditorSelection;
 
 // ---------------------------------------------------------------------------
 // UnionEditorModel

@@ -15,7 +15,6 @@
 //! - `resources.IconProvider` -- interface for providing icons
 //! - `icons.DisabledImageIconWrapper` -- icon wrapper for disabled state
 
-use std::collections::HashMap;
 use std::fmt;
 
 // ============================================================================

@@ -8,7 +8,6 @@ use std::sync::{Arc, RwLock};
 
 use super::color_model::{
     LayeredColorModel, ListingBackgroundColorModel, MarkerServiceBackgroundColorModel,
-    SimpleBackgroundColorModel,
 };
 use super::hover::{HoverServiceRegistry, ListingHoverService};
 use super::plugin_interface::CodeBrowserPluginInterface;
@@ -463,6 +462,7 @@ impl CodeBrowserPluginInterface for CodeBrowserPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::codebrowser::SimpleBackgroundColorModel;
 
     #[test]
     fn test_abstract_plugin_creation() {

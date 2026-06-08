@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = BreakpointTableModel::new(vec![], None);
+        let _obj = BreakpointTableModel::new(vec![], None);
         assert!(true);
     }
 

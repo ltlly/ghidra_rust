@@ -2,7 +2,6 @@
 //!
 //! Ports `ghidra.graph.viewer.edge.VisualEdgeRenderer`.
 
-use crate::graph::viewer::Point2D;
 
 /// Rendering style for edges.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

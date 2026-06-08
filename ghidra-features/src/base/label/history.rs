@@ -202,7 +202,11 @@ impl LabelHistoryTableModel {
 
     /// Returns the number of visible columns.
     pub fn column_count(&self) -> usize {
-        if self.show_address { 5 } else { 4 }
+        if self.show_address {
+            5
+        } else {
+            4
+        }
     }
 
     /// Returns the column header name for the given column index.
@@ -295,10 +299,34 @@ mod tests {
 
     fn sample_entries() -> Vec<LabelHistoryEntry> {
         vec![
-            LabelHistoryEntry::new(addr(0x1000), LabelHistoryAction::Add, "main", "user1", "2024-01-01"),
-            LabelHistoryEntry::new(addr(0x1000), LabelHistoryAction::Rename, "main_old", "user1", "2024-01-02"),
-            LabelHistoryEntry::new(addr(0x2000), LabelHistoryAction::Add, "helper", "user2", "2024-01-03"),
-            LabelHistoryEntry::new(addr(0x2000), LabelHistoryAction::Remove, "helper", "user2", "2024-01-04"),
+            LabelHistoryEntry::new(
+                addr(0x1000),
+                LabelHistoryAction::Add,
+                "main",
+                "user1",
+                "2024-01-01",
+            ),
+            LabelHistoryEntry::new(
+                addr(0x1000),
+                LabelHistoryAction::Rename,
+                "main_old",
+                "user1",
+                "2024-01-02",
+            ),
+            LabelHistoryEntry::new(
+                addr(0x2000),
+                LabelHistoryAction::Add,
+                "helper",
+                "user2",
+                "2024-01-03",
+            ),
+            LabelHistoryEntry::new(
+                addr(0x2000),
+                LabelHistoryAction::Remove,
+                "helper",
+                "user2",
+                "2024-01-04",
+            ),
         ]
     }
 
@@ -311,9 +339,18 @@ mod tests {
 
     #[test]
     fn test_action_from_id() {
-        assert_eq!(LabelHistoryAction::from_id(0), Some(LabelHistoryAction::Add));
-        assert_eq!(LabelHistoryAction::from_id(1), Some(LabelHistoryAction::Remove));
-        assert_eq!(LabelHistoryAction::from_id(2), Some(LabelHistoryAction::Rename));
+        assert_eq!(
+            LabelHistoryAction::from_id(0),
+            Some(LabelHistoryAction::Add)
+        );
+        assert_eq!(
+            LabelHistoryAction::from_id(1),
+            Some(LabelHistoryAction::Remove)
+        );
+        assert_eq!(
+            LabelHistoryAction::from_id(2),
+            Some(LabelHistoryAction::Rename)
+        );
         assert_eq!(LabelHistoryAction::from_id(99), None);
     }
 
@@ -406,7 +443,10 @@ mod tests {
     #[test]
     fn test_column_properties() {
         assert_eq!(LabelHistoryColumn::Address.display_name(), "Address");
-        assert_eq!(LabelHistoryColumn::ModificationDate.display_name(), "Modification Date");
+        assert_eq!(
+            LabelHistoryColumn::ModificationDate.display_name(),
+            "Modification Date"
+        );
         assert_eq!(LabelHistoryColumn::Label.index(), 2);
     }
 

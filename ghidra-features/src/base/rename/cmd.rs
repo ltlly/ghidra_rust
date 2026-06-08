@@ -10,7 +10,7 @@
 //! - [`ApplyFunctionSignatureCmd`] -- apply a new signature/name to a function
 
 use ghidra_core::addr::Address;
-use ghidra_core::symbol::{SourceType, SymbolApi, SymbolError, SymbolResult, SymbolType};
+use ghidra_core::symbol::{SourceType, SymbolError, SymbolResult};
 use serde::{Deserialize, Serialize};
 
 /// Maximum allowed length for a symbol name.

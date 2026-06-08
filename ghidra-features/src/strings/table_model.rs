@@ -5,8 +5,7 @@
 //! Provides the table model for displaying all defined string data items
 //! in the program, with sorting, filtering, and column access.
 
-use super::{DefinedStringInfo, EncodedStringFilter, StringConstraint};
-use std::cmp::Ordering;
+use super::{DefinedStringInfo, EncodedStringFilter};
 
 /// Column definitions for the defined strings table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -165,6 +164,7 @@ impl Default for DefinedStringsTableModel {
 mod tests {
     use super::*;
     use super::super::DefinedStringInfo;
+    use crate::strings::StringConstraint;
 
     fn make_info(addr: u64, val: &str, enc: &str) -> DefinedStringInfo {
         DefinedStringInfo {

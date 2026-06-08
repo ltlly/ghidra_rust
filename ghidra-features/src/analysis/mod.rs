@@ -133,6 +133,50 @@ pub mod analysis_panel;
 /// Ported from `ghidra.app.plugin.core.analysis.NoReturnFunctionAnalyzer`.
 pub mod no_return_analyzer;
 
+/// Analysis listener infrastructure for lifecycle events.
+/// Ported from `ghidra.app.plugin.core.analysis.AutoAnalysisManagerListener`.
+pub mod analysis_listener;
+
+/// Analyzer adapter and wrapper types for scheduling.
+/// Ported from `ghidra.app.plugin.core.analysis.AnalyzerAdapter`.
+pub mod analysis_adapter;
+
+/// Analysis priority levels for task ordering.
+/// Ported from `ghidra.app.services.AnalysisPriority`.
+pub mod analysis_priority;
+
+/// Analysis worker command infrastructure.
+/// Ported from `AutoAnalysisManager.AnalysisWorkerCommand` and `JointTaskMonitor`.
+pub mod analysis_worker_command;
+
+/// Analysis message log for warnings and errors.
+/// Ported from `ghidra.app.util.importer.MessageLog`.
+pub mod analysis_message_log;
+
+/// Protected locations tracking during analysis.
+/// Ported from `AutoAnalysisManager`'s protected locations mechanism.
+pub mod protected_locations;
+
+/// Analysis timing utilities for performance monitoring.
+/// Ported from `AutoAnalysisManager` task timing and `StoredAnalyzerTimes`.
+pub mod analysis_timing;
+
+/// Analysis yield mechanism for task prioritization.
+/// Ported from `AutoAnalysisManager.yield()` and `waitForAnalysis()`.
+pub mod analysis_yield;
+
+/// Analysis event handler for program change events.
+/// Ported from `AutoAnalysisManager`'s `DomainObjectListener`.
+pub mod analysis_event_handler;
+
+/// Domain object listener for connecting program changes to analysis.
+/// Ported from `AutoAnalysisManager.createDomainObjectListener()`.
+pub mod analysis_domain_listener;
+
+/// Analyze all open programs batch task.
+/// Ported from `AnalyzeAllOpenProgramsTask` and `AnalyzeProgramStrategy`.
+pub mod analyze_open_programs;
+
 // Re-export types from base::analyzer that are commonly needed
 pub use crate::base::analyzer::StoredAnalyzerTimes;
 pub use crate::base::analyzer::TransientProgramProperties;

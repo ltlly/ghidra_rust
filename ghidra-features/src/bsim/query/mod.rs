@@ -35,8 +35,8 @@ pub mod ingest;
 
 use serde::{Deserialize, Serialize};
 
-use super::client::{BSimError, BSimResult, ConnectionType};
-use super::description::{DescriptionManager, ExecutableRecord, FunctionDescription, SignatureRecord};
+use super::client::{BSimError, ConnectionType};
+use super::description::{DescriptionManager, SignatureRecord};
 use super::FeatureVector;
 
 // ============================================================================

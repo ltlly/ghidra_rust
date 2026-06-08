@@ -22,7 +22,7 @@
 use std::fmt;
 
 use crate::base::function::editor::{
-    FunctionData, FunctionEditorModel, ParamInfo, VarnodeInfo, VarnodeType,
+    FunctionData, FunctionEditorModel, VarnodeInfo, VarnodeType,
 };
 
 // ---------------------------------------------------------------------------

@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use ghidra_core::Address;
 
-use crate::overview::RgbColor;
 
 // ---------------------------------------------------------------------------
 // GoToService trait

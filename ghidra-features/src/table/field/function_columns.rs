@@ -164,7 +164,7 @@ pub struct FunctionSignatureTableColumn;
 impl ProgramBasedDynamicTableColumn<FunctionInfo> for FunctionSignatureTableColumn {
     fn column_name(&self) -> &str { "Function Signature" }
 
-    fn get_value(&self, row: &FunctionInfo, settings: &Settings, _program: &ProgramInfo,
+    fn get_value(&self, row: &FunctionInfo, _settings: &Settings, _program: &ProgramInfo,
                  _sp: &ServiceProvider) -> Option<String> {
         Some(row.display_signature(true, true, true))
     }

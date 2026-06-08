@@ -11,10 +11,9 @@
 // Uses `super::sync::DataTypeSyncState` and `super::sync::DataTypeSyncInfo`.
 // ===========================================================================
 
-use std::collections::{BTreeMap, HashMap};
 
 use ghidra_core::Address;
-use super::sync::{DataTypeSyncState, DataTypeSyncInfo};
+use super::sync::DataTypeSyncState;
 
 // ---------------------------------------------------------------------------
 // DataTypeKind

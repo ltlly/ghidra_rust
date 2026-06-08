@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Extended decompiler actions: rename, retype, slice, convert, and structural actions.
 //!
 //! Ports the missing Ghidra decompiler action classes:
@@ -12,7 +14,6 @@
 //!   PCodeDfgDisplayListener
 //! - Clone/Other: CloneDecompilerAction, AbstractDecompilerAction
 
-use std::collections::HashMap;
 
 /// Result of a decompiler action.
 #[derive(Debug, Clone)]
@@ -187,7 +188,7 @@ impl RenameTask {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RenameLocalAction`.
 #[derive(Debug, Clone)]
 pub struct RenameLocalAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The function address.
     pub function_address: u64,
     /// The variable ID.
@@ -198,7 +199,7 @@ impl RenameLocalAction {
     /// Create a new rename local action.
     pub fn new(function_address: u64, variable_id: impl Into<String>) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Rename Local Variable", "Rename a local variable")
+            _base: AbstractDecompilerAction::new("Rename Local Variable", "Rename a local variable")
                 .with_key_binding("L"),
             function_address,
             variable_id: variable_id.into(),
@@ -219,7 +220,7 @@ impl RenameLocalAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RenameGlobalAction`.
 #[derive(Debug, Clone)]
 pub struct RenameGlobalAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The symbol address.
     pub symbol_address: u64,
 }
@@ -228,7 +229,7 @@ impl RenameGlobalAction {
     /// Create a new rename global action.
     pub fn new(symbol_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Rename Global", "Rename a global symbol"),
+            _base: AbstractDecompilerAction::new("Rename Global", "Rename a global symbol"),
             symbol_address,
         }
     }
@@ -244,7 +245,7 @@ impl RenameGlobalAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RenameFunctionAction`.
 #[derive(Debug, Clone)]
 pub struct RenameFunctionAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The function address.
     pub function_address: u64,
 }
@@ -253,7 +254,7 @@ impl RenameFunctionAction {
     /// Create a new rename function action.
     pub fn new(function_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Rename Function", "Rename the current function"),
+            _base: AbstractDecompilerAction::new("Rename Function", "Rename the current function"),
             function_address,
         }
     }
@@ -269,7 +270,7 @@ impl RenameFunctionAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RenameFieldAction`.
 #[derive(Debug, Clone)]
 pub struct RenameFieldAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The data type address.
     pub data_type_address: u64,
     /// The field index.
@@ -280,7 +281,7 @@ impl RenameFieldAction {
     /// Create a new rename field action.
     pub fn new(data_type_address: u64, field_index: usize) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Rename Field", "Rename a structure field"),
+            _base: AbstractDecompilerAction::new("Rename Field", "Rename a structure field"),
             data_type_address,
             field_index,
         }
@@ -292,7 +293,7 @@ impl RenameFieldAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RenameBitFieldAction`.
 #[derive(Debug, Clone)]
 pub struct RenameBitFieldAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The data type address.
     pub data_type_address: u64,
     /// The field index.
@@ -307,7 +308,7 @@ impl RenameBitFieldAction {
     /// Create a new rename bit field action.
     pub fn new(data_type_address: u64, field_index: usize, bit_offset: u32, bit_size: u32) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Rename Bit Field", "Rename a bit field"),
+            _base: AbstractDecompilerAction::new("Rename Bit Field", "Rename a bit field"),
             data_type_address,
             field_index,
             bit_offset,
@@ -321,7 +322,7 @@ impl RenameBitFieldAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RenameLabelAction`.
 #[derive(Debug, Clone)]
 pub struct RenameLabelAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The label address.
     pub label_address: u64,
 }
@@ -330,7 +331,7 @@ impl RenameLabelAction {
     /// Create a new rename label action.
     pub fn new(label_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Rename Label", "Rename a code label"),
+            _base: AbstractDecompilerAction::new("Rename Label", "Rename a code label"),
             label_address,
         }
     }
@@ -345,7 +346,7 @@ impl RenameLabelAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RetypeLocalAction`.
 #[derive(Debug, Clone)]
 pub struct RetypeLocalAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub function_address: u64,
     pub variable_id: String,
 }
@@ -353,7 +354,7 @@ pub struct RetypeLocalAction {
 impl RetypeLocalAction {
     pub fn new(function_address: u64, variable_id: impl Into<String>) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Retype Local", "Change the type of a local variable"),
+            _base: AbstractDecompilerAction::new("Retype Local", "Change the type of a local variable"),
             function_address,
             variable_id: variable_id.into(),
         }
@@ -365,14 +366,14 @@ impl RetypeLocalAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RetypeGlobalAction`.
 #[derive(Debug, Clone)]
 pub struct RetypeGlobalAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub symbol_address: u64,
 }
 
 impl RetypeGlobalAction {
     pub fn new(symbol_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Retype Global", "Change the type of a global"),
+            _base: AbstractDecompilerAction::new("Retype Global", "Change the type of a global"),
             symbol_address,
         }
     }
@@ -383,14 +384,14 @@ impl RetypeGlobalAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RetypeReturnAction`.
 #[derive(Debug, Clone)]
 pub struct RetypeReturnAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub function_address: u64,
 }
 
 impl RetypeReturnAction {
     pub fn new(function_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Retype Return", "Change the return type of a function"),
+            _base: AbstractDecompilerAction::new("Retype Return", "Change the return type of a function"),
             function_address,
         }
     }
@@ -401,7 +402,7 @@ impl RetypeReturnAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.RetypeFieldAction`.
 #[derive(Debug, Clone)]
 pub struct RetypeFieldAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub data_type_address: u64,
     pub field_index: usize,
 }
@@ -409,7 +410,7 @@ pub struct RetypeFieldAction {
 impl RetypeFieldAction {
     pub fn new(data_type_address: u64, field_index: usize) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Retype Field", "Change the type of a structure field"),
+            _base: AbstractDecompilerAction::new("Retype Field", "Change the type of a structure field"),
             data_type_address,
             field_index,
         }
@@ -486,7 +487,7 @@ impl RetypeStructFieldTask {
 /// Ports `ghidra.app.plugin.core.decompile.actions.AbstractSetSecondaryHighlightAction`.
 #[derive(Debug, Clone)]
 pub struct AbstractSetSecondaryHighlightAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     /// The highlight color.
     pub color: String,
 }
@@ -494,7 +495,7 @@ pub struct AbstractSetSecondaryHighlightAction {
 impl AbstractSetSecondaryHighlightAction {
     pub fn new(name: impl Into<String>, color: impl Into<String>) -> Self {
         Self {
-            base: AbstractDecompilerAction::new(name, "Set secondary highlight"),
+            _base: AbstractDecompilerAction::new(name, "Set secondary highlight"),
             color: color.into(),
         }
     }
@@ -509,14 +510,14 @@ impl AbstractSetSecondaryHighlightAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.PCodeCfgAction`.
 #[derive(Debug, Clone)]
 pub struct PCodeCfgAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub function_address: u64,
 }
 
 impl PCodeCfgAction {
     pub fn new(function_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("PCode CFG", "Display PCode control-flow graph"),
+            _base: AbstractDecompilerAction::new("PCode CFG", "Display PCode control-flow graph"),
             function_address,
         }
     }
@@ -527,14 +528,14 @@ impl PCodeCfgAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.PCodeDfgAction`.
 #[derive(Debug, Clone)]
 pub struct PCodeDfgAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub function_address: u64,
 }
 
 impl PCodeDfgAction {
     pub fn new(function_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("PCode DFG", "Display PCode data-flow graph"),
+            _base: AbstractDecompilerAction::new("PCode DFG", "Display PCode data-flow graph"),
             function_address,
         }
     }
@@ -579,14 +580,14 @@ impl PCodeDfgDisplayListener {
 /// Ports `ghidra.app.plugin.core.decompile.actions.ListingStructureVariableAction`.
 #[derive(Debug, Clone)]
 pub struct ListingStructureVariableAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub address: u64,
 }
 
 impl ListingStructureVariableAction {
     pub fn new(address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Create Structure", "Create a structure from variable"),
+            _base: AbstractDecompilerAction::new("Create Structure", "Create a structure from variable"),
             address,
         }
     }
@@ -597,7 +598,7 @@ impl ListingStructureVariableAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.DecompilerStructureVariableAction`.
 #[derive(Debug, Clone)]
 pub struct DecompilerStructureVariableAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub function_address: u64,
     pub variable_id: String,
 }
@@ -605,7 +606,7 @@ pub struct DecompilerStructureVariableAction {
 impl DecompilerStructureVariableAction {
     pub fn new(function_address: u64, variable_id: impl Into<String>) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Create Structure (Decompiler)", "Create structure from decompiler variable"),
+            _base: AbstractDecompilerAction::new("Create Structure (Decompiler)", "Create structure from decompiler variable"),
             function_address,
             variable_id: variable_id.into(),
         }
@@ -621,14 +622,14 @@ impl DecompilerStructureVariableAction {
 /// Ports `ghidra.app.plugin.core.decompile.actions.CloneDecompilerAction`.
 #[derive(Debug, Clone)]
 pub struct CloneDecompilerAction {
-    base: AbstractDecompilerAction,
+    _base: AbstractDecompilerAction,
     pub source_function_address: u64,
 }
 
 impl CloneDecompilerAction {
     pub fn new(source_function_address: u64) -> Self {
         Self {
-            base: AbstractDecompilerAction::new("Clone Decompiler", "Open a new decompiler view"),
+            _base: AbstractDecompilerAction::new("Clone Decompiler", "Open a new decompiler view"),
             source_function_address,
         }
     }

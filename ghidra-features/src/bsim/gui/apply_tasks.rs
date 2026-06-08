@@ -6,7 +6,7 @@
 //! function names, namespaces, signatures, and tags from matched
 //! functions to the current program).
 
-use super::{BSimMatchResult, BSimResultStatus};
+use super::BSimMatchResult;
 
 /// Result of applying a single BSim result.
 #[derive(Debug, Clone)]
@@ -299,6 +299,7 @@ impl BSimApplyTask for SignatureBSimApplyTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::BSimResultStatus;
 
     fn make_match(name: &str, addr: &str, sim: f64) -> BSimMatchResult {
         BSimMatchResult {

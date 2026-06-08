@@ -9,12 +9,9 @@
 //! - Android DTBO: <https://source.android.com/devices/architecture/dto/partitions>
 
 use nom::{
-    bytes::complete::take,
-    number::complete::{be_u32, be_u64},
+    number::complete::be_u32,
     IResult,
 };
-use std::collections::HashMap;
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

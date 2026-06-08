@@ -12,7 +12,7 @@
 //! - [`MemoryAccessCallback`] -- before/after load/store hooks (ported
 //!   from Ghidra's executor extension points).
 
-use ghidra_core::addr::{Address, AddressSpace, AddrSpaceType};
+use ghidra_core::addr::Address;
 use ghidra_decompile::pcode::{OpCode, PcodeOperation, Varnode};
 
 use crate::memory::EmulatedMemory;
@@ -1658,6 +1658,7 @@ fn bytes_to_u64(bytes: &[u8]) -> u64 {
 mod tests {
     use super::*;
     use crate::MemorySegment;
+    use ghidra_core::addr::{AddressSpace, AddrSpaceType};
 
     fn make_reg_vn(offset: u64, size: u32) -> Varnode {
         Varnode::new(
@@ -1671,6 +1672,7 @@ mod tests {
         Varnode::constant(value, size)
     }
 
+    #[allow(dead_code)]
     fn make_ram_vn(offset: u64, size: u32) -> Varnode {
         Varnode::ram(offset, size)
     }

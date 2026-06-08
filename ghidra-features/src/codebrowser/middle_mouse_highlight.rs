@@ -13,7 +13,6 @@
 //! - [`HighlightScope`] -- scope of variable/register highlighting
 //! - [`HighlightColors`] -- configurable highlight colors
 
-use std::collections::HashMap;
 
 /// Highlight mode for the middle-mouse button.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

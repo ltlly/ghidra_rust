@@ -5,7 +5,6 @@
 //! References:
 //! - <https://en.wikipedia.org/wiki/Apple_Disk_Image>
 
-use nom::number::complete::{be_u32, be_u64};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

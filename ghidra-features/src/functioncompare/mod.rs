@@ -197,7 +197,7 @@ impl FunctionComparisonPlugin {
     /// Check whether an action is enabled for the given context.
     pub fn is_action_enabled(
         &self,
-        action: FunctionComparisonAction,
+        _action: FunctionComparisonAction,
         context: &ComparisonContext,
     ) -> bool {
         if !self.enabled || !context.is_valid() {

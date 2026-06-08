@@ -13,8 +13,8 @@
 //! | `FunctionTagProviderModel` | `FunctionTagProvider`     |
 //! | `FunctionTableModel`       | `FunctionTableModel`      |
 
-use crate::base::function::actions::{ActionContext, ListingContext, MenuData};
-use crate::base::function::tags::{FunctionTag, FunctionTagManager, FunctionTagRowObject};
+use crate::base::function::actions::{ActionContext, MenuData};
+use crate::base::function::tags::{FunctionTag, FunctionTagManager};
 
 // ---------------------------------------------------------------------------
 // EditFunctionTagsAction
@@ -672,6 +672,7 @@ impl Default for FunctionTagProviderModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::function::ListingContext;
 
     // -- EditFunctionTagsAction --
 

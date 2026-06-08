@@ -31,7 +31,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceInactiveCoordinatesPluginEvent::new("test".to_string());
+        let _obj = TraceInactiveCoordinatesPluginEvent::new("test".to_string());
         assert!(true);
     }
 

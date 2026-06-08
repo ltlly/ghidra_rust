@@ -1739,6 +1739,8 @@ dependencies = [
  "ghidra-core",
  "ghidra-decompile",
  "log",
+ "num-bigint",
+ "num-traits",
  "serde",
  "smallvec",
  "thiserror 2.0.18",

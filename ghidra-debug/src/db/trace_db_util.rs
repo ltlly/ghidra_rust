@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn test_sequence_cache_basic() {
-        let mut cache = SequenceQueryCache::<String>::new(5, 0x1000);
+        let cache = SequenceQueryCache::<String>::new(5, 0x1000);
         assert!(cache.is_empty());
         assert_eq!(cache.len(), 0);
     }
@@ -493,7 +493,7 @@ mod tests {
         }
         let s = shared_sequence_cache::<i32>(5, 0x100);
         {
-            let mut guard = s.write().unwrap();
+            let guard = s.write().unwrap();
             assert!(guard.is_empty());
         }
     }

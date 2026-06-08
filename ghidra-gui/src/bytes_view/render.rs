@@ -621,7 +621,7 @@ fn render_ascii_column(
     glyph_w: f32,
     line_h: f32,
 ) {
-    for (col, &(offset, byte)) in row.iter().enumerate() {
+    for (_col, &(offset, byte)) in row.iter().enumerate() {
         let is_cursor = !view.edit_mode && view.cursor_offset == offset;
         let is_selected = view.is_selected(offset);
         let is_changed = view.is_changed(offset);

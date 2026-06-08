@@ -7,7 +7,7 @@
 //! and initialization settings. Call [`AddBlockModel::execute`] after
 //! configuration to apply the block to the program's memory.
 
-use ghidra_core::addr::{Address, AddressRange};
+use ghidra_core::addr::Address;
 use ghidra_core::mem::{ByteMappingScheme, MemoryBlockType, MAX_BLOCK_SIZE};
 use ghidra_core::program::program::Program;
 use std::collections::HashSet;
@@ -554,7 +554,7 @@ impl AddBlockModel {
 
         let name = self.block_name.as_ref().unwrap();
         let start = self.start_addr.unwrap();
-        let flags = self.compute_flags();
+        let _flags = self.compute_flags();
 
         match self.block_type {
             MemoryBlockType::Default => {

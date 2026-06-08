@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceSelectionPluginEvent::new(None, None);
+        let _obj = TraceSelectionPluginEvent::new(None, None);
         assert!(true);
     }
 

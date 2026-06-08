@@ -321,12 +321,10 @@ pub fn nom_uleb128(input: &[u8]) -> IResult<&[u8], u64> {
 pub fn nom_sleb128(input: &[u8]) -> IResult<&[u8], i64> {
     let mut result: i64 = 0;
     let mut shift: u32 = 0;
-    let mut last_byte: u8 = 0;
     for (i, &byte) in input.iter().enumerate() {
         if i >= 10 {
             return Err(nom::Err::Error(Error::new(input, ErrorKind::TooLarge)));
         }
-        last_byte = byte;
         result |= ((byte & 0x7f) as i64) << shift;
         shift += 7;
         if byte & 0x80 == 0 {
@@ -337,10 +335,7 @@ pub fn nom_sleb128(input: &[u8]) -> IResult<&[u8], i64> {
             return Ok((&input[i + 1..], result));
         }
     }
-    // Sign-extend truncated value
-    if shift < 64 && (last_byte & 0x40) != 0 {
-        result |= -(1i64 << shift);
-    }
+    // Truncated LEB128 — result is discarded since we return an error
     Err(nom::Err::Error(Error::new(input, ErrorKind::TooLarge)))
 }
 

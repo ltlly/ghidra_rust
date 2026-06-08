@@ -453,11 +453,10 @@ mod exporter_plugin_tests {
 mod cross_module_integration {
     use super::*;
     use ghidra_features::memory::{
-        expand_block::ExpandBlockModel,
-        MemoryBlockInfo, MemoryBlockPermission, MemoryBlockType, MemoryMapModel,
+        MemoryBlockInfo, MemoryBlockType, MemoryMapModel,
     };
     use ghidra_features::label::{
-        LabelInfo, LabelManager, LabelScope,
+        LabelInfo, LabelManager,
         history::LabelHistory,
         symbol_chooser::{SymbolChooserModel, SymbolEntry, SymbolType},
     };

@@ -9,11 +9,9 @@
 use std::collections::HashMap;
 
 use ghidra_core::addr::Address;
-use ghidra_core::symbol::{
-    LabelHistory, LabelSymbol, SourceType, SymbolApi, SymbolType,
-};
+use ghidra_core::symbol::{LabelSymbol, SourceType, SymbolApi};
 
-use super::actions::{LabelActionContext, LabelAction};
+use super::actions::{LabelAction, LabelActionContext};
 
 // ---------------------------------------------------------------------------
 // LabelManager
@@ -84,12 +82,7 @@ impl LabelManager {
     /// Adds a label at the given address.
     ///
     /// Returns the new label symbol.
-    pub fn add_label(
-        &mut self,
-        address: &Address,
-        name: &str,
-        source: SourceType,
-    ) -> &LabelSymbol {
+    pub fn add_label(&mut self, address: &Address, name: &str, source: SourceType) -> &LabelSymbol {
         let id = self.next_id;
         self.next_id += 1;
 
@@ -106,12 +99,7 @@ impl LabelManager {
     /// Edits the label at the given address.
     ///
     /// Returns true if the label was found and renamed.
-    pub fn edit_label(
-        &mut self,
-        address: &Address,
-        new_name: &str,
-        source: SourceType,
-    ) -> bool {
+    pub fn edit_label(&mut self, address: &Address, new_name: &str, source: SourceType) -> bool {
         if let Some(label) = self.labels.get_mut(&address.offset) {
             let old_name = label.get_name();
             if let Err(e) = label.set_name(new_name, source) {
@@ -159,10 +147,7 @@ impl LabelManager {
             label: label.to_string(),
             timestamp: chrono_timestamp(),
         };
-        self.history
-            .entry(address.offset)
-            .or_default()
-            .push(entry);
+        self.history.entry(address.offset).or_default().push(entry);
     }
 
     /// Returns the label history at the given address.
@@ -240,6 +225,7 @@ fn chrono_timestamp() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::symbol::SymbolType;
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

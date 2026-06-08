@@ -4,8 +4,6 @@
 
 use super::theme_value::ThemeValue;
 use super::g_theme_value_map::GThemeValueMap;
-use super::color_value::LAST_RESORT_DEFAULT;
-use crate::gui_util::web_colors::RgbaColor;
 use crate::options::option_value::FontDescriptor;
 
 /// Prefix for internal font ids.

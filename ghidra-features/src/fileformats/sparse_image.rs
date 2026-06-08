@@ -5,7 +5,7 @@
 //! References:
 //! - Android sparse image format: <https://android.googlesource.com/platform/system/core/+/refs/heads/main/libsparse/>
 
-use nom::{bytes::complete::take, number::complete::{le_u16, le_u32}, IResult};
+use nom::{number::complete::{le_u16, le_u32}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

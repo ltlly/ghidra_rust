@@ -8,7 +8,6 @@
 
 use super::{Relocation, RelocationType};
 use ghidra_core::Address;
-use std::collections::BTreeMap;
 
 // ---------------------------------------------------------------------------
 // RelocationFixupHandler trait

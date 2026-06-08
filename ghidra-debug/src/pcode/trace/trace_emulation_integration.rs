@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceEmulationIntegration::new(true, true);
+        let _obj = TraceEmulationIntegration::new(true, true);
         assert!(true);
     }
 

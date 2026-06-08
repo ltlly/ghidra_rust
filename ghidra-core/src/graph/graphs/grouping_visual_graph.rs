@@ -2,8 +2,6 @@
 //!
 //! Port of `ghidra.graph.graphs.GroupingVisualGraph`.
 
-use std::fmt::Debug;
-use std::hash::Hash;
 
 use crate::graph::visual_graph::{VisualEdge, VisualVertex};
 

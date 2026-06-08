@@ -5,7 +5,6 @@
 //! Provides utilities for decompiling multiple functions in parallel
 //! using a chunked approach.
 
-use std::sync::Arc;
 
 /// Configuration for a single decompile operation.
 #[derive(Debug, Clone)]

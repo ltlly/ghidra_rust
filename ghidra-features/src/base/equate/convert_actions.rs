@@ -455,7 +455,7 @@ pub fn all_convert_action_models() -> Vec<AbstractConvertActionModel> {
 }
 
 /// Returns the menu label for a given format and signedness.
-fn menu_label_for_format(format: ScalarFormat, is_signed: bool) -> String {
+fn menu_label_for_format(format: ScalarFormat, _is_signed: bool) -> String {
     match format {
         ScalarFormat::Binary => "Convert to Binary".to_string(),
         ScalarFormat::Char => "Convert to Char".to_string(),

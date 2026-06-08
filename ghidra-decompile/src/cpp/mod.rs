@@ -9,7 +9,7 @@
 //! - Preprocessor directive management
 //! - Include-file dependency tracking
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::fmt;
 
 /// Represents a C/C++ type declaration that needs to be emitted.

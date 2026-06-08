@@ -8,11 +8,9 @@
 //! - <https://man7.org/linux/man-pages/man5/cpio.5.html>
 
 use nom::{
-    bytes::complete::{tag, take},
-    combinator::map_res,
+    bytes::complete::take,
     IResult,
 };
-use std::fmt;
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants
@@ -130,7 +128,7 @@ fn align4(n: usize) -> usize {
 
 /// Parse a newc/crc format entry header.
 fn parse_newc_entry(input: &[u8], offset: u64) -> IResult<&[u8], CpioEntry> {
-    let start = input;
+    let _start = input;
     let (i, magic) = take(6usize)(input)?;
 
     let format = if magic == CPIO_NEWC_MAGIC {

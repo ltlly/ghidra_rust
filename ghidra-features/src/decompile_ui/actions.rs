@@ -5,7 +5,6 @@
 //! registered with the [`DecompilerProvider`](super::provider::DecompilerProvider)
 //! and executed against a [`DecompilerActionContext`](super::action_context::DecompilerActionContext).
 
-use ghidra_core::addr::Address;
 
 // ---------------------------------------------------------------------------
 // Action base trait
@@ -40,7 +39,20 @@ pub trait DecompilerAction: std::fmt::Debug {
     }
 
     /// Execute the action.
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult;
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+        if self.perform(ctx) {
+            DecompilerActionResult::Success(self.name().to_string())
+        } else {
+            DecompilerActionResult::NotApplicable
+        }
+    }
+
+    /// Perform the action, returning true on success.
+    /// Override this instead of `execute` for actions that simply need
+    /// a boolean success/failure.
+    fn perform(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> bool {
+        false
+    }
 }
 
 /// Result type for action execution.
@@ -97,7 +109,7 @@ impl DecompilerAction for RenameLocalAction {
         !ctx.is_decompiling() && ctx.token_at_cursor().is_some()
     }
 
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         let token = match ctx.token_at_cursor() {
             Some(t) => t,
             None => return DecompilerActionResult::NotApplicable,
@@ -125,7 +137,7 @@ impl DecompilerAction for RenameGlobalAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 1 }
 
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         match ctx.token_at_cursor() {
             Some(token) => DecompilerActionResult::NeedsDialog(DialogRequest {
                 kind: DialogKind::Input,
@@ -152,7 +164,7 @@ impl DecompilerAction for RenameFieldAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 2 }
 
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         match ctx.token_at_cursor() {
             Some(token) => DecompilerActionResult::NeedsDialog(DialogRequest {
                 kind: DialogKind::Input,
@@ -179,7 +191,7 @@ impl DecompilerAction for RenameFunctionAction {
     fn menu_group(&self) -> &str { "1 - Function Group" }
     fn menu_sub_group(&self) -> u32 { 4 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::Input,
             prompt: "Rename function:".into(),
@@ -203,7 +215,7 @@ impl DecompilerAction for RetypeLocalAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 5 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::DataTypeChooser,
             prompt: "Select new type:".into(),
@@ -227,7 +239,7 @@ impl DecompilerAction for RetypeGlobalAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 7 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::DataTypeChooser,
             prompt: "Select new type for global:".into(),
@@ -251,7 +263,7 @@ impl DecompilerAction for RetypeReturnAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 8 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::DataTypeChooser,
             prompt: "Select new return type:".into(),
@@ -275,7 +287,7 @@ impl DecompilerAction for RetypeFieldAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 9 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::DataTypeChooser,
             prompt: "Select new type for field:".into(),
@@ -299,7 +311,7 @@ impl DecompilerAction for EditDataTypeAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 12 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::DataTypeChooser,
             prompt: "Edit data type:".into(),
@@ -323,7 +335,7 @@ impl DecompilerAction for EditFieldAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 13 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Field editor opened".into())
     }
 }
@@ -343,7 +355,7 @@ impl DecompilerAction for EditBitFieldAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 14 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::Input,
             prompt: "Edit bit field:".into(),
@@ -367,7 +379,7 @@ impl DecompilerAction for RenameBitFieldAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 3 }
 
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         match ctx.token_at_cursor() {
             Some(token) => DecompilerActionResult::NeedsDialog(DialogRequest {
                 kind: DialogKind::Input,
@@ -394,7 +406,7 @@ impl DecompilerAction for CommitParamsAction {
     fn menu_group(&self) -> &str { "3 - Commit Group" }
     fn menu_sub_group(&self) -> u32 { 0 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Parameters committed".into())
     }
 }
@@ -414,7 +426,7 @@ impl DecompilerAction for CommitLocalsAction {
     fn menu_group(&self) -> &str { "3 - Commit Group" }
     fn menu_sub_group(&self) -> u32 { 1 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Locals committed".into())
     }
 }
@@ -434,7 +446,7 @@ impl DecompilerAction for HighlightDefinedUseAction {
     fn menu_group(&self) -> &str { "4a - Highlight Group" }
     fn menu_sub_group(&self) -> u32 { 0 }
 
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         match ctx.token_at_cursor() {
             Some(token) => DecompilerActionResult::Success(
                 format!("Highlighted def-use for '{}'", token.text),
@@ -459,7 +471,7 @@ impl DecompilerAction for ForwardSliceAction {
     fn menu_group(&self) -> &str { "4a - Highlight Group" }
     fn menu_sub_group(&self) -> u32 { 1 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Forward slice highlighted".into())
     }
 }
@@ -475,7 +487,7 @@ impl DecompilerAction for BackwardsSliceAction {
     fn menu_group(&self) -> &str { "4a - Highlight Group" }
     fn menu_sub_group(&self) -> u32 { 2 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Backwards slice highlighted".into())
     }
 }
@@ -493,7 +505,7 @@ impl DecompilerAction for SelectAllAction {
     fn description(&self) -> &str { "Select all text in the decompiler" }
     fn menu_path(&self) -> &[&str] { &["Select All"] }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("All text selected".into())
     }
 }
@@ -513,7 +525,7 @@ impl DecompilerAction for FindAction {
     fn menu_group(&self) -> &str { "Comment2 - Search Group" }
     fn menu_sub_group(&self) -> u32 { 0 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::Input,
             prompt: "Search for:".into(),
@@ -537,7 +549,7 @@ impl DecompilerAction for FindReferencesToDataTypeAction {
     fn menu_group(&self) -> &str { "Comment2 - Search Group" }
     fn menu_sub_group(&self) -> u32 { 1 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Searching for data type references".into())
     }
 }
@@ -557,7 +569,7 @@ impl DecompilerAction for FindReferencesToHighSymbolAction {
     fn menu_group(&self) -> &str { "Comment2 - Search Group" }
     fn menu_sub_group(&self) -> u32 { 2 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Searching for symbol references".into())
     }
 }
@@ -577,7 +589,7 @@ impl DecompilerAction for FindReferencesToAddressAction {
     fn menu_group(&self) -> &str { "Comment2 - Search Group" }
     fn menu_sub_group(&self) -> u32 { 3 }
 
-    fn execute(&self, ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success(
             format!("Searching for references to 0x{:x}", ctx.function_entry_point.offset),
         )
@@ -599,7 +611,7 @@ impl DecompilerAction for SetEquateAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 0 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::Input,
             prompt: "Enter equate name:".into(),
@@ -619,7 +631,7 @@ impl DecompilerAction for RemoveEquateAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 1 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Equate removed".into())
     }
 }
@@ -639,7 +651,7 @@ impl DecompilerAction for ConvertBinaryAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 2 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to binary".into())
     }
 }
@@ -655,7 +667,7 @@ impl DecompilerAction for ConvertDecAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 3 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to decimal".into())
     }
 }
@@ -671,7 +683,7 @@ impl DecompilerAction for ConvertHexAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 4 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to hex".into())
     }
 }
@@ -687,7 +699,7 @@ impl DecompilerAction for ConvertOctAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 5 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to octal".into())
     }
 }
@@ -703,7 +715,7 @@ impl DecompilerAction for ConvertFloatAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 6 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to float".into())
     }
 }
@@ -719,7 +731,7 @@ impl DecompilerAction for ConvertDoubleAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 7 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to double".into())
     }
 }
@@ -735,7 +747,7 @@ impl DecompilerAction for ConvertCharAction {
     fn menu_group(&self) -> &str { "7 - Convert Group" }
     fn menu_sub_group(&self) -> u32 { 8 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Converted to char".into())
     }
 }
@@ -755,7 +767,7 @@ impl DecompilerAction for IsolateVariableAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 10 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Variable isolated".into())
     }
 }
@@ -775,7 +787,7 @@ impl DecompilerAction for ForceUnionAction {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 4 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Forced union".into())
     }
 }
@@ -793,7 +805,7 @@ impl DecompilerAction for ExportToCAction {
     fn description(&self) -> &str { "Export the decompiled function as C source" }
     fn menu_path(&self) -> &[&str] { &["Export Function as C"] }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Exported to C file".into())
     }
 }
@@ -813,7 +825,7 @@ impl DecompilerAction for SpecifyCPrototypeAction {
     fn menu_group(&self) -> &str { "1 - Function Group" }
     fn menu_sub_group(&self) -> u32 { 0 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::Input,
             prompt: "Enter C prototype:".into(),
@@ -837,7 +849,7 @@ impl DecompilerAction for OverridePrototypeAction {
     fn menu_group(&self) -> &str { "1 - Function Group" }
     fn menu_sub_group(&self) -> u32 { 1 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::NeedsDialog(DialogRequest {
             kind: DialogKind::Input,
             prompt: "Enter new prototype:".into(),
@@ -861,7 +873,7 @@ impl DecompilerAction for RemoveLabelAction {
     fn menu_group(&self) -> &str { "1 - Function Group" }
     fn menu_sub_group(&self) -> u32 { 6 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Label removed".into())
     }
 }
@@ -881,8 +893,237 @@ impl DecompilerAction for CreatePointerRelative {
     fn menu_group(&self) -> &str { "2 - Variable Group" }
     fn menu_sub_group(&self) -> u32 { 6 }
 
-    fn execute(&self, _ctx: &super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
         DecompilerActionResult::Success("Pointer-relative reference created".into())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CloneDecompilerAction
+// ---------------------------------------------------------------------------
+
+/// Action: Clone the decompiler window into a snapshot (disconnected copy).
+///
+/// Ported from `ghidra.app.plugin.core.decompile.actions.CloneDecompilerAction`.
+/// This is a toolbar action (key binding: Ctrl+Shift+T) that creates a
+/// disconnected copy of the current decompiler provider so the user can
+/// inspect a second function without losing the current view.
+#[derive(Debug, Default)]
+pub struct CloneDecompilerAction;
+
+impl DecompilerAction for CloneDecompilerAction {
+    fn name(&self) -> &str {
+        "Decompile Clone"
+    }
+
+    fn description(&self) -> &str {
+        "Create a snapshot (disconnected) copy of this Decompiler window"
+    }
+
+    fn menu_path(&self) -> &[&str] {
+        &["Decompile Clone"]
+    }
+
+    fn menu_group(&self) -> &str {
+        "0 - Clone Group"
+    }
+
+    fn menu_sub_group(&self) -> u32 {
+        0
+    }
+
+    fn is_enabled(&self, ctx: &super::action_context::DecompilerActionContext) -> bool {
+        // Enabled when there is a real function to clone from.
+        // In the full implementation this checks context.getFunction() != null.
+        ctx.function_entry_point.offset != 0
+    }
+
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+        // The real implementation calls context.getComponentProvider().cloneWindow().
+        // Here we signal the request to create a disconnected provider.
+        DecompilerActionResult::Success(format!(
+            "Cloned decompiler window for function at 0x{:x}",
+            ctx.function_entry_point.offset
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EditPrototypeOverrideAction
+// ---------------------------------------------------------------------------
+
+/// Action: Edit an existing function signature override at the current call site.
+///
+/// Ported from `ghidra.app.plugin.core.decompile.actions.EditPrototypeOverrideAction`.
+/// Allows the user to modify a previously-set calling convention override for
+/// an indirect call target.  The action reads the existing `DataTypeSymbol`
+/// override from the symbol table, presents it for editing, and writes the
+/// updated prototype back.
+#[derive(Debug, Default)]
+pub struct EditPrototypeOverrideAction;
+
+impl DecompilerAction for EditPrototypeOverrideAction {
+    fn name(&self) -> &str {
+        "Edit Signature Override"
+    }
+
+    fn description(&self) -> &str {
+        "Edit the signature override for the function at the cursor"
+    }
+
+    fn menu_path(&self) -> &[&str] {
+        &["Edit Signature Override"]
+    }
+
+    fn menu_group(&self) -> &str {
+        "1 - Function Group"
+    }
+
+    fn menu_sub_group(&self) -> u32 {
+        2
+    }
+
+    fn is_enabled(&self, ctx: &super::action_context::DecompilerActionContext) -> bool {
+        // Enabled when the token names a function that has an existing override.
+        // In the full impl: function != null && !(function instanceof UndefinedFunction)
+        //   && OverridePrototypeAction.getSymbol(function, token) != null
+        //   && HighFunctionDBUtil.readOverride(sym) != null
+        match ctx.token_at_cursor() {
+            Some(token) => token.is_function_name && token.function_entry.is_some(),
+            None => false,
+        }
+    }
+
+    fn execute(&self, ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+        match ctx.token_at_cursor() {
+            Some(token) => DecompilerActionResult::NeedsDialog(DialogRequest {
+                kind: DialogKind::Input,
+                prompt: format!("Edit signature override for '{}':", token.text),
+                default_value: Some(token.text.clone()),
+            }),
+            None => DecompilerActionResult::NotApplicable,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DeletePrototypeOverrideAction
+// ---------------------------------------------------------------------------
+
+/// Action: Remove an existing function signature override.
+///
+/// Ported from `ghidra.app.plugin.core.decompile.actions.DeletePrototypeOverrideAction`.
+/// Deletes the override marker symbol and cleans up the unused
+/// `DataTypeSymbol` from the database.  This effectively reverts the
+/// call site to use the default inferred prototype.
+#[derive(Debug, Default)]
+pub struct DeletePrototypeOverrideAction;
+
+impl DecompilerAction for DeletePrototypeOverrideAction {
+    fn name(&self) -> &str {
+        "Remove Signature Override"
+    }
+
+    fn description(&self) -> &str {
+        "Remove the signature override for the function at the cursor"
+    }
+
+    fn menu_path(&self) -> &[&str] {
+        &["Remove Signature Override"]
+    }
+
+    fn menu_group(&self) -> &str {
+        "1 - Function Group"
+    }
+
+    fn menu_sub_group(&self) -> u32 {
+        3
+    }
+
+    fn is_enabled(&self, ctx: &super::action_context::DecompilerActionContext) -> bool {
+        // Enabled when there is a function with a symbol that can be removed.
+        match ctx.token_at_cursor() {
+            Some(token) => token.is_function_name && token.function_entry.is_some(),
+            None => false,
+        }
+    }
+
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+        // The real implementation starts a program transaction, reads the
+        // DataTypeSymbol via HighFunctionDBUtil.readOverride(sym), deletes the
+        // marker symbol, and calls dts.cleanupUnusedOverride().
+        DecompilerActionResult::Success("Signature override removed".into())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GoToNextBraceAction
+// ---------------------------------------------------------------------------
+
+/// Action: Navigate to the next enclosing closing brace.
+///
+/// Ported from `ghidra.app.plugin.core.decompile.actions.GoToNextBraceAction`.
+/// Searches forward from the current token for the matching `}` brace and
+/// moves the cursor there.  Key binding: `Shift+]`.
+#[derive(Debug, Default)]
+pub struct GoToNextBraceAction;
+
+impl DecompilerAction for GoToNextBraceAction {
+    fn name(&self) -> &str {
+        "Go To Next Brace"
+    }
+
+    fn description(&self) -> &str {
+        "Navigate to the next enclosing closing brace"
+    }
+
+    fn menu_path(&self) -> &[&str] {
+        &["Go To Next Brace"]
+    }
+
+    fn is_enabled(&self, _ctx: &super::action_context::DecompilerActionContext) -> bool {
+        // Always enabled when there is a decompiled view.
+        true
+    }
+
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+        // The real implementation calls DecompilerUtils.getNextBrace(token, true)
+        // then panel.goToToken(brace).
+        DecompilerActionResult::Success("Navigated to next brace".into())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// GoToPreviousBraceAction
+// ---------------------------------------------------------------------------
+
+/// Action: Navigate to the previous enclosing opening brace.
+///
+/// Ported from `ghidra.app.plugin.core.decompile.actions.GoToPreviousBraceAction`.
+/// Searches backward from the current token for the matching `{` brace and
+/// moves the cursor there.  Key binding: `Shift+[`.
+#[derive(Debug, Default)]
+pub struct GoToPreviousBraceAction;
+
+impl DecompilerAction for GoToPreviousBraceAction {
+    fn name(&self) -> &str {
+        "Go To Previous Brace"
+    }
+
+    fn description(&self) -> &str {
+        "Navigate to the previous enclosing opening brace"
+    }
+
+    fn menu_path(&self) -> &[&str] {
+        &["Go To Previous Brace"]
+    }
+
+    fn is_enabled(&self, _ctx: &super::action_context::DecompilerActionContext) -> bool {
+        true
+    }
+
+    fn execute(&self, _ctx: &mut super::action_context::DecompilerActionContext) -> DecompilerActionResult {
+        DecompilerActionResult::Success("Navigated to previous brace".into())
     }
 }
 
@@ -903,9 +1144,13 @@ impl ActionRegistry {
     /// Create the default action registry populated with all standard actions.
     pub fn default_actions() -> Self {
         let actions: Vec<Box<dyn DecompilerAction>> = vec![
+            // Clone group
+            Box::new(CloneDecompilerAction),
             // Function group
             Box::new(SpecifyCPrototypeAction),
             Box::new(OverridePrototypeAction),
+            Box::new(EditPrototypeOverrideAction),
+            Box::new(DeletePrototypeOverrideAction),
             Box::new(RenameFunctionAction),
             Box::new(RemoveLabelAction),
             // Variable group
@@ -945,6 +1190,9 @@ impl ActionRegistry {
             Box::new(FindReferencesToDataTypeAction),
             Box::new(FindReferencesToHighSymbolAction),
             Box::new(FindReferencesToAddressAction),
+            // Navigation group
+            Box::new(GoToNextBraceAction),
+            Box::new(GoToPreviousBraceAction),
             // Other
             Box::new(SelectAllAction),
             Box::new(ExportToCAction),
@@ -983,6 +1231,7 @@ impl ActionRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
     use crate::decompile_ui::action_context::{ClangTokenRef, DecompilerActionContext};
 
     #[test]
@@ -1013,7 +1262,7 @@ mod tests {
         ctx.set_token_at_cursor(ClangTokenRef::new("x", 1, 0, false, None, 0));
         assert!(action.is_enabled(&ctx));
 
-        let result = action.execute(&ctx);
+        let result = action.execute(&mut ctx);
         match result {
             DecompilerActionResult::NeedsDialog(req) => {
                 assert_eq!(req.kind, DialogKind::Input);
@@ -1026,16 +1275,16 @@ mod tests {
     #[test]
     fn test_rename_function_action() {
         let action = RenameFunctionAction;
-        let ctx = DecompilerActionContext::new(Address::new(0x2000), false, 0);
-        let result = action.execute(&ctx);
+        let mut ctx = DecompilerActionContext::new(Address::new(0x2000), false, 0);
+        let result = action.execute(&mut ctx);
         assert!(matches!(result, DecompilerActionResult::NeedsDialog(_)));
     }
 
     #[test]
     fn test_commit_params_action() {
         let action = CommitParamsAction;
-        let ctx = DecompilerActionContext::new(Address::new(0), false, 0);
-        let result = action.execute(&ctx);
+        let mut ctx = DecompilerActionContext::new(Address::new(0), false, 0);
+        let result = action.execute(&mut ctx);
         assert_eq!(
             result,
             DecompilerActionResult::Success("Parameters committed".into())
@@ -1044,22 +1293,22 @@ mod tests {
 
     #[test]
     fn test_convert_actions() {
-        let ctx = DecompilerActionContext::new(Address::new(0), false, 0);
+        let mut ctx = DecompilerActionContext::new(Address::new(0), false, 0);
 
         assert_eq!(
-            ConvertBinaryAction.execute(&ctx),
+            ConvertBinaryAction.execute(&mut ctx),
             DecompilerActionResult::Success("Converted to binary".into())
         );
         assert_eq!(
-            ConvertDecAction.execute(&ctx),
+            ConvertDecAction.execute(&mut ctx),
             DecompilerActionResult::Success("Converted to decimal".into())
         );
         assert_eq!(
-            ConvertHexAction.execute(&ctx),
+            ConvertHexAction.execute(&mut ctx),
             DecompilerActionResult::Success("Converted to hex".into())
         );
         assert_eq!(
-            ConvertOctAction.execute(&ctx),
+            ConvertOctAction.execute(&mut ctx),
             DecompilerActionResult::Success("Converted to octal".into())
         );
     }
@@ -1067,9 +1316,9 @@ mod tests {
     #[test]
     fn test_export_to_c_action() {
         let action = ExportToCAction;
-        let ctx = DecompilerActionContext::new(Address::new(0x4000), false, 0);
+        let mut ctx = DecompilerActionContext::new(Address::new(0x4000), false, 0);
         assert_eq!(
-            action.execute(&ctx),
+            action.execute(&mut ctx),
             DecompilerActionResult::Success("Exported to C file".into())
         );
     }
@@ -1077,8 +1326,8 @@ mod tests {
     #[test]
     fn test_find_action() {
         let action = FindAction;
-        let ctx = DecompilerActionContext::new(Address::new(0), false, 0);
-        let result = action.execute(&ctx);
+        let mut ctx = DecompilerActionContext::new(Address::new(0), false, 0);
+        let result = action.execute(&mut ctx);
         match result {
             DecompilerActionResult::NeedsDialog(req) => {
                 assert_eq!(req.kind, DialogKind::Input);
@@ -1091,9 +1340,9 @@ mod tests {
     #[test]
     fn test_forward_slice_action() {
         let action = ForwardSliceAction;
-        let ctx = DecompilerActionContext::new(Address::new(0), false, 0);
+        let mut ctx = DecompilerActionContext::new(Address::new(0), false, 0);
         assert_eq!(
-            action.execute(&ctx),
+            action.execute(&mut ctx),
             DecompilerActionResult::Success("Forward slice highlighted".into())
         );
     }
@@ -1121,5 +1370,217 @@ mod tests {
             default_value: None,
         };
         assert_eq!(r1, r2);
+    }
+
+    // -- CloneDecompilerAction tests --
+
+    #[test]
+    fn test_clone_decompiler_action_metadata() {
+        let action = CloneDecompilerAction;
+        assert_eq!(action.name(), "Decompile Clone");
+        assert_eq!(action.description(), "Create a snapshot (disconnected) copy of this Decompiler window");
+        assert_eq!(action.menu_group(), "0 - Clone Group");
+    }
+
+    #[test]
+    fn test_clone_decompiler_action_disabled_with_zero_address() {
+        let action = CloneDecompilerAction;
+        let ctx = DecompilerActionContext::new(Address::new(0), false, 0);
+        assert!(!action.is_enabled(&ctx));
+    }
+
+    #[test]
+    fn test_clone_decompiler_action_enabled_with_valid_address() {
+        let action = CloneDecompilerAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x401000), false, 1);
+        assert!(action.is_enabled(&ctx));
+
+        let result = action.execute(&mut ctx);
+        match result {
+            DecompilerActionResult::Success(msg) => {
+                assert!(msg.contains("0x401000"));
+            }
+            _ => panic!("expected Success"),
+        }
+    }
+
+    // -- EditPrototypeOverrideAction tests --
+
+    #[test]
+    fn test_edit_prototype_override_action_metadata() {
+        let action = EditPrototypeOverrideAction;
+        assert_eq!(action.name(), "Edit Signature Override");
+        assert_eq!(action.menu_group(), "1 - Function Group");
+        assert_eq!(action.menu_sub_group(), 2);
+    }
+
+    #[test]
+    fn test_edit_prototype_override_disabled_without_function_token() {
+        let action = EditPrototypeOverrideAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        // Token that is NOT a function name.
+        ctx.set_token_at_cursor(ClangTokenRef::new("x", 1, 0, false, None, 0));
+        assert!(!action.is_enabled(&ctx));
+    }
+
+    #[test]
+    fn test_edit_prototype_override_enabled_with_function_token() {
+        let action = EditPrototypeOverrideAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        ctx.set_token_at_cursor(ClangTokenRef::new(
+            "malloc", 3, 0, true, Some(Address::new(0x401000)), 10,
+        ));
+        assert!(action.is_enabled(&ctx));
+
+        let result = action.execute(&mut ctx);
+        match result {
+            DecompilerActionResult::NeedsDialog(req) => {
+                assert_eq!(req.kind, DialogKind::Input);
+                assert!(req.prompt.contains("malloc"));
+            }
+            _ => panic!("expected NeedsDialog"),
+        }
+    }
+
+    #[test]
+    fn test_edit_prototype_override_disabled_without_token() {
+        let action = EditPrototypeOverrideAction;
+        let ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        assert!(!action.is_enabled(&ctx));
+    }
+
+    // -- DeletePrototypeOverrideAction tests --
+
+    #[test]
+    fn test_delete_prototype_override_action_metadata() {
+        let action = DeletePrototypeOverrideAction;
+        assert_eq!(action.name(), "Remove Signature Override");
+        assert_eq!(action.menu_group(), "1 - Function Group");
+        assert_eq!(action.menu_sub_group(), 3);
+    }
+
+    #[test]
+    fn test_delete_prototype_override_enabled_with_function_token() {
+        let action = DeletePrototypeOverrideAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        ctx.set_token_at_cursor(ClangTokenRef::new(
+            "puts", 5, 0, true, Some(Address::new(0x402000)), 20,
+        ));
+        assert!(action.is_enabled(&ctx));
+
+        let result = action.execute(&mut ctx);
+        assert_eq!(
+            result,
+            DecompilerActionResult::Success("Signature override removed".into())
+        );
+    }
+
+    #[test]
+    fn test_delete_prototype_override_disabled_without_token() {
+        let action = DeletePrototypeOverrideAction;
+        let ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        assert!(!action.is_enabled(&ctx));
+    }
+
+    #[test]
+    fn test_delete_prototype_override_disabled_with_non_function_token() {
+        let action = DeletePrototypeOverrideAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        ctx.set_token_at_cursor(ClangTokenRef::new("buf", 2, 0, false, None, 5));
+        assert!(!action.is_enabled(&ctx));
+    }
+
+    // -- GoToNextBraceAction tests --
+
+    #[test]
+    fn test_go_to_next_brace_action_metadata() {
+        let action = GoToNextBraceAction;
+        assert_eq!(action.name(), "Go To Next Brace");
+        assert_eq!(action.description(), "Navigate to the next enclosing closing brace");
+    }
+
+    #[test]
+    fn test_go_to_next_brace_always_enabled() {
+        let action = GoToNextBraceAction;
+        let ctx = DecompilerActionContext::new(Address::new(0), true, 0);
+        assert!(action.is_enabled(&ctx));
+    }
+
+    #[test]
+    fn test_go_to_next_brace_execute() {
+        let action = GoToNextBraceAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        let result = action.execute(&mut ctx);
+        assert_eq!(
+            result,
+            DecompilerActionResult::Success("Navigated to next brace".into())
+        );
+    }
+
+    // -- GoToPreviousBraceAction tests --
+
+    #[test]
+    fn test_go_to_previous_brace_action_metadata() {
+        let action = GoToPreviousBraceAction;
+        assert_eq!(action.name(), "Go To Previous Brace");
+        assert_eq!(action.description(), "Navigate to the previous enclosing opening brace");
+    }
+
+    #[test]
+    fn test_go_to_previous_brace_always_enabled() {
+        let action = GoToPreviousBraceAction;
+        let ctx = DecompilerActionContext::new(Address::new(0), false, 0);
+        assert!(action.is_enabled(&ctx));
+    }
+
+    #[test]
+    fn test_go_to_previous_brace_execute() {
+        let action = GoToPreviousBraceAction;
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        let result = action.execute(&mut ctx);
+        assert_eq!(
+            result,
+            DecompilerActionResult::Success("Navigated to previous brace".into())
+        );
+    }
+
+    // -- Registry integration tests --
+
+    #[test]
+    fn test_registry_contains_new_actions() {
+        let registry = ActionRegistry::default_actions();
+        assert!(registry.find_by_name("Decompile Clone").is_some());
+        assert!(registry.find_by_name("Edit Signature Override").is_some());
+        assert!(registry.find_by_name("Remove Signature Override").is_some());
+        assert!(registry.find_by_name("Go To Next Brace").is_some());
+        assert!(registry.find_by_name("Go To Previous Brace").is_some());
+    }
+
+    #[test]
+    fn test_registry_count_increased() {
+        let registry = ActionRegistry::default_actions();
+        // We added 5 new actions: CloneDecompiler, EditPrototypeOverride,
+        // DeletePrototypeOverride, GoToNextBrace, GoToPreviousBrace.
+        assert!(registry.count() >= 35, "expected >=35 actions, got {}", registry.count());
+    }
+
+    #[test]
+    fn test_edit_and_delete_override_share_enabled_logic() {
+        let edit = EditPrototypeOverrideAction;
+        let delete = DeletePrototypeOverrideAction;
+
+        // Both should require a function-name token.
+        let mut ctx = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        ctx.set_token_at_cursor(ClangTokenRef::new(
+            "free", 4, 0, true, Some(Address::new(0x403000)), 15,
+        ));
+        assert!(edit.is_enabled(&ctx));
+        assert!(delete.is_enabled(&ctx));
+
+        // Both should be disabled without a function-name token.
+        let mut ctx2 = DecompilerActionContext::new(Address::new(0x1000), false, 1);
+        ctx2.set_token_at_cursor(ClangTokenRef::new("retval", 4, 0, false, None, 15));
+        assert!(!edit.is_enabled(&ctx2));
+        assert!(!delete.is_enabled(&ctx2));
     }
 }

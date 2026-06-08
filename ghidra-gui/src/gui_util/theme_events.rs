@@ -173,16 +173,16 @@ impl AllValuesChangedThemeEvent {
 /// Port of Ghidra's `generic.theme.ThemeListener`.
 pub trait ThemeListener: std::fmt::Debug {
     /// Called when a theme color changes.
-    fn color_changed(&mut self, event: &ColorChangedThemeEvent) {}
+    fn color_changed(&mut self, _event: &ColorChangedThemeEvent) {}
 
     /// Called when a theme font changes.
-    fn font_changed(&mut self, event: &FontChangedThemeEvent) {}
+    fn font_changed(&mut self, _event: &FontChangedThemeEvent) {}
 
     /// Called when a theme icon changes.
-    fn icon_changed(&mut self, event: &IconChangedThemeEvent) {}
+    fn icon_changed(&mut self, _event: &IconChangedThemeEvent) {}
 
     /// Called when all theme values change.
-    fn all_values_changed(&mut self, event: &AllValuesChangedThemeEvent) {}
+    fn all_values_changed(&mut self, _event: &AllValuesChangedThemeEvent) {}
 }
 
 /// A collection of theme listeners.

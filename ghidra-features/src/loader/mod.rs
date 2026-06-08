@@ -202,7 +202,7 @@ mod tests {
 
     #[test]
     fn test_detect_format_mz() {
-        let mut data = make_test_mz();
+        let data = make_test_mz();
         assert_eq!(detect_format(&data), Some(mz_loader::MZ_NAME));
     }
 

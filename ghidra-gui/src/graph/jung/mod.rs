@@ -20,7 +20,7 @@ pub mod adapter;
 
 pub use adapter::PetGraphAdapter;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use crate::graph::{DefaultGEdge, GDirectedGraph, GEdge};

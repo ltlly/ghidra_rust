@@ -2,6 +2,8 @@
 //!
 //! Ported from `ghidra.app.cmd.memory`.
 
+#![allow(dead_code)]
+
 /// Memory block permissions.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MemoryPermissions {

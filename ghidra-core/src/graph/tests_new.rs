@@ -7,8 +7,8 @@ mod tests {
     use crate::graph::hash_graph::HashDirectedGraph;
     use crate::graph::graph_path::{GraphPath, GraphPathSet};
     use crate::graph::factory::{get_sources, get_sinks, is_self_contained, GraphFactory};
-    use crate::graph::graph_to_tree::{to_tree, to_tree_default};
-    use crate::graph::edge_weight::{ConstantWeightMetric, GEdgeWeightMetric};
+    use crate::graph::graph_to_tree::to_tree_default;
+    use crate::graph::edge_weight::GEdgeWeightMetric;
     use crate::graph::algo::graph_navigator::GraphNavigator;
     use crate::graph::algo::depth_first_sorter::DepthFirstSorter;
     use crate::graph::algo::find_paths::{find_paths_iterative, find_paths_recursive};

@@ -28,11 +28,11 @@ use std::fmt;
 
 use nom::{
     bytes::complete::take,
-    combinator::{cond, map, map_opt, map_res, opt, verify},
-    multi::{count, many0, many_till},
+    combinator::{map, verify},
+    multi::count,
     number::complete::{le_u16, le_u32, le_u64, le_u8},
     sequence::tuple,
-    IResult, Parser,
+    IResult,
 };
 
 // ===========================================================================
@@ -1905,7 +1905,7 @@ fn parse_file_header(input: &[u8]) -> IResult<&[u8], FileHeader> {
 
 fn parse_optional_header(
     input: &[u8],
-    size: u16,
+    _size: u16,
 ) -> IResult<&[u8], OptionalHeader> {
     let (i, magic) = verify(le_u16, |&m| {
         m == PE32_MAGIC || m == PE32_PLUS_MAGIC || m == ROM_MAGIC
@@ -3098,8 +3098,8 @@ fn parse_fpo_data(data: &[u8], off: usize, size: usize) -> Vec<FpoDataEntry> {
         let cb_regs = (u16::from_le_bytes(buf[14..16].try_into().unwrap()) >> 8) & 0x07;
         let f_has_seh = (u16::from_le_bytes(buf[14..16].try_into().unwrap()) >> 11) & 1 != 0;
         let f_use_bp = (u16::from_le_bytes(buf[14..16].try_into().unwrap()) >> 12) & 1 != 0;
-        let reserved = (u16::from_le_bytes(buf[14..16].try_into().unwrap()) >> 13) & 0x07;
-        let cb_frame = u32::from_le_bytes(buf[16..20].try_into().unwrap());
+        let _reserved = (u16::from_le_bytes(buf[14..16].try_into().unwrap()) >> 13) & 0x07;
+        let _cb_frame = u32::from_le_bytes(buf[16..20].try_into().unwrap());
 
         // Actually the FPO structure is:
         // ulOffStart: u32 (0-3)
@@ -3287,8 +3287,7 @@ fn read_null_terminated_string(data: &[u8], off: usize) -> Option<String> {
 // ===========================================================================
 
 use crate::base::analyzer::{
-    Address, AddressRange, AddressSet, Function, FunctionManager, Language,
-    Listing, MemoryBlock, Program,
+    Address, AddressRange, AddressSet, Function, Language, MemoryBlock, Program,
 };
 
 /// PE machine code to Ghidra processor name mapping.

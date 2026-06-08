@@ -64,8 +64,8 @@ impl GdbPlatformOpinion {
     /// Get compiler specs for GNU toolchain based on arch, os, and endian.
     pub fn get_compiler_specs_for_gnu(
         arch: &str,
-        os: &str,
-        endian: Option<Endian>,
+        _os: &str,
+        _endian: Option<Endian>,
     ) -> Vec<LanguageCompilerSpecId> {
         let arch_lower = arch.to_lowercase();
         GDB_ARCH_MAPPINGS

@@ -18,7 +18,6 @@ pub mod decompiler_actions_ext;
 use ghidra_core::addr::Address;
 
 use super::clang_node::{ClangNodeId, SyntaxType};
-use super::component::TokenKey;
 
 // ============================================================================
 // Action categories

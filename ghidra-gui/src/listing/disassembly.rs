@@ -16,11 +16,11 @@
 
 use super::field_formatter::FieldFormatter;
 use egui::{
-    pos2, vec2, Align, Align2, Color32, CursorIcon, Frame, Id, Key, Layout, Modifiers, Pos2, Rect,
-    Response, RichText, ScrollArea, Sense, Stroke, Ui, Vec2,
+    pos2, vec2, Align, Align2, Color32, CursorIcon, Frame, Id, Key, Pos2, Rect,
+    Response, RichText, Sense, Stroke, Ui,
 };
 use ghidra_core::addr::{Address, AddressRange};
-use ghidra_core::program::listing::{Data, FlowType, InMemoryListing, Instruction, Listing, Operand};
+use ghidra_core::program::listing::{FlowType, InMemoryListing, Instruction, Listing, Operand};
 use std::collections::HashSet;
 
 // ============================================================================
@@ -43,7 +43,7 @@ const HEADER_HEIGHT: f32 = 24.0;
 const COLUMN_PADDING_X: f32 = 3.0;
 
 /// Padding inside columns (vertical).
-const COLUMN_PADDING_Y: f32 = 1.0;
+const _COLUMN_PADDING_Y: f32 = 1.0;
 
 /// Gap between columns.
 const COLUMN_GAP: f32 = 4.0;
@@ -163,7 +163,7 @@ pub struct DisassemblyRenderer {
     /// Drag start address (for address tracking during scroll).
     drag_start_address: Option<Address>,
     /// Last click position (for double-click detection).
-    last_click_pos: Option<Pos2>,
+    _last_click_pos: Option<Pos2>,
     /// Address that was last clicked.
     last_clicked_address: Option<Address>,
 
@@ -216,7 +216,7 @@ impl Default for DisassemblyRenderer {
             is_dragging: false,
             drag_start: None,
             drag_start_address: None,
-            last_click_pos: None,
+            _last_click_pos: None,
             last_clicked_address: None,
 
             formatter: FieldFormatter::default(),
@@ -451,7 +451,7 @@ impl DisassemblyRenderer {
     }
 
     /// Map a pixel offset within the listing body to a row index.
-    fn y_to_row_index(&self, y: f32) -> usize {
+    fn _y_to_row_index(&self, y: f32) -> usize {
         if y < 0.0 || self.line_height <= 0.0 {
             return 0;
         }
@@ -460,7 +460,7 @@ impl DisassemblyRenderer {
 
     /// Map an address to a y-position within the listing body relative to
     /// the top visible address.
-    fn addr_to_y_offset(&self, addr: &Address, top_addr: &Address) -> f32 {
+    fn _addr_to_y_offset(&self, addr: &Address, top_addr: &Address) -> f32 {
         if addr.offset < top_addr.offset {
             return 0.0;
         }
@@ -613,7 +613,7 @@ impl DisassemblyRenderer {
         let total_height = addresses.len() as f32 * self.line_height;
 
         // Wrap in a scroll area
-        let scroll_id = ui.make_persistent_id("disassembly_scroll");
+        let _scroll_id = ui.make_persistent_id("disassembly_scroll");
 
         // We render inside a frame
         Frame::none().fill(self.background_color).show(ui, |ui| {
@@ -639,7 +639,7 @@ impl DisassemblyRenderer {
 
             // Allocate space for the scrollable content
             let content_size = vec2(content_width.max(inner_rect.width()), total_height);
-            let (rect, _response) = ui.allocate_exact_size(content_size, Sense::click_and_drag());
+            let (_rect, _response) = ui.allocate_exact_size(content_size, Sense::click_and_drag());
 
             // Handle scroll drag in the body
             let input = ui.input(|i| i.clone());
@@ -813,6 +813,7 @@ impl DisassemblyRenderer {
                     }
                     col_idx += 1;
                 }
+                let _ = col_idx;
 
                 // Comment column
                 if self.show_comment {
@@ -947,8 +948,8 @@ impl DisassemblyRenderer {
     }
 
     /// Render a column separator (vertical gap between columns).
-    fn render_col_separator(&self, ui: &Ui, x: f32, y: f32, col_idx: usize) {
-        let sep_rect = Rect::from_min_size(pos2(x, y), vec2(COLUMN_GAP, self.line_height));
+    fn render_col_separator(&self, ui: &Ui, x: f32, y: f32, _col_idx: usize) {
+        let _sep_rect = Rect::from_min_size(pos2(x, y), vec2(COLUMN_GAP, self.line_height));
         // Subtle vertical line
         let mid_x = x + COLUMN_GAP * 0.5;
         ui.painter().line_segment(
@@ -1125,7 +1126,7 @@ impl DisassemblyRenderer {
             if let Some(start_pos) = self.drag_start {
                 if let Some(current_pos) = response.interact_pointer_pos() {
                     let delta_y = current_pos.y - start_pos.y;
-                    let rows_moved = (delta_y / self.line_height) as i64;
+                    let _rows_moved = (delta_y / self.line_height) as i64;
                     // The caller (application) should handle actual scroll
                     // based on this information.
                 }
@@ -1255,12 +1256,13 @@ impl DisassemblyRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ghidra_core::program::listing::{InMemoryListing, Instruction};
+    use ghidra_core::program::listing::InMemoryListing;
 
     fn make_test_renderer() -> DisassemblyRenderer {
         DisassemblyRenderer::default()
     }
 
+    #[allow(dead_code)]
     fn make_test_listing() -> InMemoryListing {
         let mut listing = InMemoryListing::new();
         // Add some code units

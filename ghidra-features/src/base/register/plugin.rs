@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::base::function::actions::{ActionContext, KeyBindingData, ListingContext, MenuData};
+use crate::base::function::actions::{ActionContext, KeyBindingData, MenuData};
 
 // ---------------------------------------------------------------------------
 // RegisterPluginAction
@@ -345,6 +345,7 @@ impl RegisterManagerContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::function::ListingContext;
 
     // -- RegisterActionType --
 

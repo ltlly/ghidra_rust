@@ -18,8 +18,7 @@
 use super::{BracketKind, BracketPair, CToken, CTokenKind, FoldRegion, TokenNavigation};
 
 use egui::{
-    pos2, vec2, Align2, Color32, CursorIcon, FontId, Id, Key, Modifiers, Painter, Pos2, Rect,
-    Response, RichText, Sense, Stroke, Ui, Vec2,
+    pos2, vec2, Color32, CursorIcon, FontId, Id, Key, Rect, Sense, Stroke, Ui,
 };
 use ghidra_core::addr::Address;
 use std::collections::HashSet;
@@ -41,7 +40,7 @@ const LINE_NUMBER_GUTTER_WIDTH: f32 = 48.0;
 const CODE_PADDING_X: f32 = 6.0;
 
 /// Padding inside the gutter.
-const GUTTER_PADDING_X: f32 = 3.0;
+const _GUTTER_PADDING_X: f32 = 3.0;
 
 /// Space character width estimate (monospace).
 const CHAR_WIDTH: f32 = 8.4;
@@ -246,14 +245,14 @@ impl CColors {
 
 /// A literal position in pixel coordinates, used internally during rendering.
 #[derive(Debug, Clone, Copy, Default)]
-struct PixelPos {
+struct _PixelPos {
     x: f32,
     y: f32,
 }
 
 /// Internal state tracking whether the user is performing a text selection drag.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SelectionMode {
+enum _SelectionMode {
     None,
     /// Dragging to extend a text selection.
     Extending,
@@ -262,10 +261,10 @@ enum SelectionMode {
 /// Internal line-render data computed once per frame.
 struct LineLayout {
     line_index: usize,
-    y_pos: f32,
+    _y_pos: f32,
     is_visible: bool,
-    is_folded: bool,
-    fold_depth: usize,
+    _is_folded: bool,
+    _fold_depth: usize,
 }
 
 // ============================================================================
@@ -323,7 +322,7 @@ pub struct CDecompilerRenderer {
     /// Scroll position.
     scroll_offset: f32,
     /// Whether the user manually scrolled.
-    user_scrolled: bool,
+    _user_scrolled: bool,
     /// Pending action produced by the last render.
     pending_action: Option<DecompilerAction>,
 }
@@ -348,7 +347,7 @@ impl Default for CDecompilerRenderer {
             highlighted_variable: None,
             matching_bracket_pos: None,
             scroll_offset: 0.0,
-            user_scrolled: true,
+            _user_scrolled: true,
             pending_action: None,
         }
     }
@@ -463,7 +462,7 @@ impl CDecompilerRenderer {
     }
 
     /// Check if a position is within the selection.
-    fn is_position_selected(&self, line: usize, col: usize) -> bool {
+    fn _is_position_selected(&self, line: usize, col: usize) -> bool {
         if !self.has_selection {
             return false;
         }
@@ -620,7 +619,7 @@ impl CDecompilerRenderer {
 
         // Determine which lines are visible
         let total_lines = tokens.len();
-        let line_count = total_lines as f32 * LINE_HEIGHT;
+        let _line_count = total_lines as f32 * LINE_HEIGHT;
 
         // Receive keyboard input before we start painting
         let input = ui.input(|i| i.clone());
@@ -633,10 +632,10 @@ impl CDecompilerRenderer {
                 let is_folded = self.is_folded(line_idx);
                 LineLayout {
                     line_index: line_idx,
-                    y_pos: 0.0, // computed during rendering
+                    _y_pos: 0.0, // computed during rendering
                     is_visible,
-                    is_folded,
-                    fold_depth: fold_regions
+                    _is_folded: is_folded,
+                    _fold_depth: fold_regions
                         .iter()
                         .filter(|r| r.start_line == line_idx)
                         .map(|r| r.depth)
@@ -651,7 +650,7 @@ impl CDecompilerRenderer {
         let total_content_height = visible_count as f32 * LINE_HEIGHT;
 
         // Scroll area
-        let scroll_id = ui.make_persistent_id("decompiler_scroll");
+        let _scroll_id = ui.make_persistent_id("decompiler_scroll");
         let available = ui.available_rect_before_wrap();
         let content_size = vec2(
             available.width(),
@@ -663,8 +662,8 @@ impl CDecompilerRenderer {
         // Determine which visible lines fall within the viewport
         let clip = ui.clip_rect();
         let first_visible_y = (clip.top() - available.top()).max(0.0);
-        let first_line_idx = (first_visible_y / LINE_HEIGHT) as usize;
-        let last_line_idx = ((first_visible_y + clip.height()) / LINE_HEIGHT) as usize + 2;
+        let _first_line_idx = (first_visible_y / LINE_HEIGHT) as usize;
+        let _last_line_idx = ((first_visible_y + clip.height()) / LINE_HEIGHT) as usize + 2;
 
         // Paint background
         ui.painter().rect_filled(
@@ -962,7 +961,7 @@ impl CDecompilerRenderer {
         &mut self,
         input: &egui::InputState,
         tokens: &[Vec<CToken>],
-        fold_regions: &[FoldRegion],
+        _fold_regions: &[FoldRegion],
         line_addresses: &[Option<Address>],
     ) {
         let modifiers = input.modifiers;

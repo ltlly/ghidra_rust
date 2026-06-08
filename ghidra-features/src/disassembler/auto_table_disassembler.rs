@@ -432,7 +432,7 @@ mod tests {
 
     #[test]
     fn test_auto_table_disassembler_validate_too_few_entries() {
-        let mut model = AutoTableDisassemblerModel::new();
+        let model = AutoTableDisassemblerModel::new();
         let table = AddressTable::new(
             Address::new(0x2000),
             TableEntryKind::Absolute,

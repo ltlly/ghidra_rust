@@ -823,7 +823,7 @@ mod tests {
 
     #[test]
     fn test_pcode_block_basic() {
-        let mut block = PcodeBlock::new(0, BlockType::Basic);
+        let block = PcodeBlock::new(0, BlockType::Basic);
         assert_eq!(block.get_index(), 0);
         assert_eq!(block.get_type(), BlockType::Basic);
         assert!(block.is_leaf());

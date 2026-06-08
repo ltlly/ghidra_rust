@@ -18,7 +18,7 @@ use super::popup::popup_source::PopupSource;
 use super::renderer::RenderContext;
 use super::satellite::SatelliteView;
 use super::visual_graph_view::VisualGraphView;
-use super::{Point2D, Rect2D, VisualEdge, VisualGraph, VisualVertex};
+use super::{Point2D, VisualEdge, VisualGraph};
 
 /// Graph viewer mode controls the primary interaction behavior.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -392,6 +392,7 @@ fn point_to_segment_distance(p: Point2D, a: Point2D, b: Point2D) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::VisualVertex;
 
     #[test]
     fn test_graph_viewer_default() {

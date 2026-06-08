@@ -5,7 +5,6 @@
 use std::collections::HashSet;
 use std::hash::Hash;
 
-use super::GEdge;
 
 /// A directed graph where edges are derived from a function rather than stored.
 ///

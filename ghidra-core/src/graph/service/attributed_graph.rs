@@ -4,7 +4,6 @@
 
 use std::collections::HashMap;
 
-use super::attributed::Attributed;
 use super::attributed_edge::AttributedEdge;
 use super::attributed_vertex::AttributedVertex;
 use super::graph_type::GraphType;
@@ -252,6 +251,7 @@ impl AttributedGraph {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::attributed::Attributed;
     use super::super::graph_type::GraphType;
 
     fn make_test_graph() -> AttributedGraph {

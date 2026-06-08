@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use super::super::client::{BSimError, BSimResult, ConnectionType, FunctionDatabase};
 use super::super::description::{
-    DatabaseInformation, DescriptionManager, ExecutableRecord, FunctionDescription,
+    DatabaseInformation, ExecutableRecord, FunctionDescription,
 };
 use super::super::protocol::{SimilarityResult, StagingManager};
 

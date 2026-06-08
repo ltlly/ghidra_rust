@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use ghidra_core::addr::Address;
-use crate::versiontracking::error::{VtError, VtResult};
+use crate::versiontracking::error::VtError;
 use crate::versiontracking::types::{VtAssociationMarkupStatus, VtAssociationStatus, VtAssociationType};
 
 #[derive(Debug, Clone)]

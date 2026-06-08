@@ -497,6 +497,76 @@ impl_any_property!(CharacterJavaProperty);
 impl_any_property!(ObjectJavaProperty);
 
 // ---------------------------------------------------------------------------
+// JavaPropertyFactory
+// ---------------------------------------------------------------------------
+
+/// Factory for creating [`AnyProperty`] instances.
+///
+/// Matches Java's `ghidra.pyghidra.property.JavaPropertyFactory`.  The
+/// original Java implementation inspects `MethodHandle` return / parameter
+/// types at runtime; the Rust port takes an explicit [`JavaPropertyKind`]
+/// and field name.
+pub struct JavaPropertyFactory;
+
+impl JavaPropertyFactory {
+    /// Create a property of the appropriate concrete type for the given
+    /// kind and field name.
+    ///
+    /// This is equivalent to Java's `JavaPropertyFactory.getProperty(field,
+    /// getter, setter)` when the caller has already resolved the type.
+    pub fn get_property(kind: JavaPropertyKind, field: &str) -> Box<dyn AnyProperty> {
+        PropertyUtils::create_property(kind, field)
+    }
+
+    /// Create a property by inferring the kind from a type name string.
+    ///
+    /// Accepts Java-style type names (`"boolean"`, `"int"`, `"long"`,
+    /// etc.) as well as Rust-style names (`"bool"`, `"i32"`, `"i64"`,
+    /// etc.).  Returns `Object` for any unrecognised type.
+    pub fn from_type_name(field: &str, type_name: &str) -> Box<dyn AnyProperty> {
+        let kind = match type_name {
+            "boolean" | "bool" => JavaPropertyKind::Boolean,
+            "byte" | "i8" => JavaPropertyKind::Byte,
+            "char" | "character" | "u16" => JavaPropertyKind::Character,
+            "double" | "f64" => JavaPropertyKind::Double,
+            "float" | "f32" => JavaPropertyKind::Float,
+            "int" | "integer" | "i32" => JavaPropertyKind::Integer,
+            "long" | "i64" => JavaPropertyKind::Long,
+            "short" | "i16" => JavaPropertyKind::Short,
+            _ => JavaPropertyKind::Object,
+        };
+        Self::get_property(kind, field)
+    }
+
+    /// Whether the given type name represents a primitive type.
+    ///
+    /// Matches Java's `cls.isPrimitive()` check in the original factory.
+    pub fn is_primitive_type(type_name: &str) -> bool {
+        matches!(
+            type_name,
+            "boolean"
+                | "bool"
+                | "byte"
+                | "i8"
+                | "char"
+                | "character"
+                | "u16"
+                | "double"
+                | "f64"
+                | "float"
+                | "f32"
+                | "int"
+                | "integer"
+                | "i32"
+                | "long"
+                | "i64"
+                | "short"
+                | "i16"
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 

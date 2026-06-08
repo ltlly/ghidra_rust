@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerStackPanel::new(4, None);
+        let _obj = DebuggerStackPanel::new(4, None);
         assert!(true);
     }
 

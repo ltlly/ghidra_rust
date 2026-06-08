@@ -103,7 +103,7 @@ impl GraphJob for FilterVerticesJob {
         "FilterVertices"
     }
 
-    fn execute(&mut self, graph: &mut VisualGraph) -> bool {
+    fn execute(&mut self, _graph: &mut VisualGraph) -> bool {
         // In a real implementation, this would toggle visibility.
         // For now, mark as modified.
         !self.hide_ids.is_empty()

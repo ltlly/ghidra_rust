@@ -40,6 +40,10 @@ pub mod plugin;
 /// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorProvider`.
 pub mod provider;
 
+pub use manager::EditorCheckResult;
+pub use panel::EditStackAction;
+pub use provider::{DomainObjectChangeRecord, DomainObjectEvent, ProgramEvent};
+
 use ghidra_core::Address;
 use std::collections::BTreeMap;
 
@@ -517,7 +521,7 @@ impl StackEditorProviderModel {
 
     /// Undo the last change.
     pub fn undo(&mut self) -> bool {
-        if let Some(snapshot) = self.undo_stack.pop() {
+        if let Some(_snapshot) = self.undo_stack.pop() {
             // Save current state to redo
             let current = StackEditorSnapshot {
                 variables: self.panel.model.get_variables().into_iter().cloned().collect(),
@@ -536,7 +540,7 @@ impl StackEditorProviderModel {
 
     /// Redo the last undone change.
     pub fn redo(&mut self) -> bool {
-        if let Some(snapshot) = self.redo_stack.pop() {
+        if let Some(_snapshot) = self.redo_stack.pop() {
             let current = StackEditorSnapshot {
                 variables: self.panel.model.get_variables().into_iter().cloned().collect(),
                 frame_size: self.panel.model.frame_size(),

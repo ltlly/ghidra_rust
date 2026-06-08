@@ -1044,7 +1044,7 @@ impl crate::BinaryLoader for ZipLoader {
     ) -> anyhow::Result<crate::base::analyzer::Program> {
         use crate::base::analyzer::{Address, MemoryBlock, Program};
 
-        let zip = parse_zip(data)?;
+        let _zip = parse_zip(data)?;
         let lang = crate::base::analyzer::Language {
             processor: "DATA".into(),
             variant: "LE".into(),

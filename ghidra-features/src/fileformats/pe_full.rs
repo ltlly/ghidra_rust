@@ -29,11 +29,11 @@ use std::fmt;
 
 use nom::{
     bytes::complete::take,
-    combinator::{cond, map, map_opt, verify},
-    multi::{count, many0},
+    combinator::{map, verify},
+    multi::count,
     number::complete::{le_u16, le_u32, le_u64, le_u8},
     sequence::tuple,
-    IResult, Parser,
+    IResult,
 };
 
 // ===========================================================================
@@ -1001,7 +1001,7 @@ fn read_size(input: &[u8], is_plus: bool) -> IResult<&[u8], u64> {
 /// Parse the Optional Header (PE32 or PE32+).
 fn nom_optional_header(
     input: &[u8],
-    size_of_optional_header: u16,
+    _size_of_optional_header: u16,
 ) -> IResult<&[u8], OptionalHeader> {
     let (i, magic) = verify(le_u16, |&m| {
         m == PE32_MAGIC || m == PE32_PLUS_MAGIC || m == ROM_MAGIC
@@ -1161,7 +1161,7 @@ impl PeSkeleton {
 
 /// Parse just enough of the PE to resolve RVAs.
 fn parse_pe_skeleton(data: &[u8]) -> PeFullResult<PeSkeleton> {
-    let (rest, dos_header) = nom_dos_header(data).map_err(PeFullError::from)?;
+    let (_rest, dos_header) = nom_dos_header(data).map_err(PeFullError::from)?;
     let pe_offset = dos_header.e_lfanew as usize;
     if pe_offset > data.len() {
         return Err(PeFullError::TruncatedData);
@@ -1583,7 +1583,7 @@ pub fn parse_pe(data: &[u8]) -> PeFullResult<PeFile> {
 
 /// Top-level nom parser that produces a fully populated PeFile.
 fn nom_parse_pe_file(input: &[u8]) -> IResult<&[u8], PeFile> {
-    let data = input;
+    let _data = input;
     // --- DOS Header ---
     let (input, dos_header) = nom_dos_header(input)?;
     let stub_len = dos_header.e_lfanew as usize - 64;
@@ -1999,7 +1999,7 @@ fn parse_codeview_info(data: &[u8], off: usize, size: usize) -> Option<CodeViewI
             if buf.len() < 16 {
                 return None;
             }
-            let mut guid = [0u8; 16];
+            let guid = [0u8; 16];
             // NB10 has a 4-byte offset and 4-byte timestamp before age.
             // We zero the GUID since NB10 doesn't have one.
             let age = u32::from_le_bytes(buf[12..16].try_into().unwrap());
@@ -2015,7 +2015,7 @@ fn parse_codeview_info(data: &[u8], off: usize, size: usize) -> Option<CodeViewI
         }
         _ => {
             // Unknown CodeView signature: still provide the raw signature
-            let mut guid = [0u8; 16];
+            let guid = [0u8; 16];
             let age = 0u32;
             let pdb_name = String::new();
             Some(CodeViewInfo {
@@ -2129,16 +2129,16 @@ fn parse_load_config_directory(
     // 'global_flags_clear' (4), 'global_flags_set' (4),
     // 'critical_section_default_timeout' (4),
     // then pointer-width fields start at offset 24
-    let de_commit_free_block_threshold = read_ptr(24);
-    let de_commit_total_free_threshold = read_ptr(24 + ptr_size);
-    let lock_prefix_table = read_ptr(24 + 2 * ptr_size);
-    let maximum_allocation_size = read_ptr(24 + 3 * ptr_size);
-    let virtual_memory_threshold = read_ptr(24 + 4 * ptr_size);
-    let process_affinity_mask = read_ptr(24 + 5 * ptr_size);
+    let _de_commit_free_block_threshold = read_ptr(24);
+    let _de_commit_total_free_threshold = read_ptr(24 + ptr_size);
+    let _lock_prefix_table = read_ptr(24 + 2 * ptr_size);
+    let _maximum_allocation_size = read_ptr(24 + 3 * ptr_size);
+    let _virtual_memory_threshold = read_ptr(24 + 4 * ptr_size);
+    let _process_affinity_mask = read_ptr(24 + 5 * ptr_size);
     let off_after_affinity = 24 + 6 * ptr_size;
 
     // process_heap_flags (4), csd_version (2), dependent_load_flags (2), edit_list (ptr)
-    let edit_list = read_ptr(off_after_affinity + 8);
+    let _edit_list = read_ptr(off_after_affinity + 8);
     let security_cookie = read_ptr(off_after_affinity + 8 + ptr_size);
     let next = off_after_affinity + 8 + 2 * ptr_size;
 
@@ -2154,7 +2154,7 @@ fn parse_load_config_directory(
         .unwrap_or(0);
 
     // Extended fields (XFG)
-    let xfg_base = next + 6 * ptr_size + 4 // skip guard_flags + code_integrity (8 bytes)
+    let _xfg_base = next + 6 * ptr_size + 4 // skip guard_flags + code_integrity (8 bytes)
         + 8  // skip code_integrity DataDirectory
         + 5 * ptr_size // skip GuardAddressTakenIatEntry*, GuardLongJumpTarget*
         + 2 * ptr_size // skip DynamicValueRelocTable*, CHPEMetadataPointer

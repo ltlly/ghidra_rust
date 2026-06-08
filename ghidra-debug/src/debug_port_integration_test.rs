@@ -5,10 +5,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::db::{DbTraceSnapshot, DbTraceTimeManager};
-    use crate::model::Lifespan;
+    use crate::db::DbTraceTimeManager;
+    
     use crate::rmi::tracermi_service::{
-        ConnectMode, ConnectionInfo, TargetConnection, TraceRmiServiceEvent, TraceRmiServiceState,
+        ConnectMode, TraceRmiServiceEvent, TraceRmiServiceState,
     };
     use crate::pcode::trace_data_access::{
         DefaultPcodeTraceMemoryAccess, DefaultPcodeTraceRegistersAccess,

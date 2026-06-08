@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::bsim::{FeatureVector, BSimMetadata, BSimSignature};
+use crate::bsim::BSimSignature;
 
 /// Configuration for a file-based BSim database.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -87,7 +87,7 @@ impl FileDatabase {
         let file_path = self.config.root_dir.join(&file_name);
 
         // Serialize the signature
-        let data = bincode::serialize(sig).map_err(|e| format!("Serialization error: {}", e))?;
+        let _data = bincode::serialize(sig).map_err(|e| format!("Serialization error: {}", e))?;
 
         // In a real implementation, write to disk
         self.index.insert(sig.function_hash, file_path);

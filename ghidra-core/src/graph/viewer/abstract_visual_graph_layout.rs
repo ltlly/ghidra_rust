@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 
-use super::layout_provider::{Column, GridBounds, GridLocationMap, LayoutPositions, Row};
 use super::visual_types::Point2d;
 use super::graph_viewer_utils::GraphBounds;
 

@@ -18,7 +18,7 @@
 use super::block_model::{
     BlockFlowType, CodeBlock, CodeBlockModel, CodeBlockReference, TaskMonitor,
 };
-use crate::base::analyzer::core::{Address, AddressRange, AddressSet, CancelledError};
+use crate::base::analyzer::core::{Address, AddressSet, CancelledError};
 
 // ============================================================================
 // SubroutineSourceReferenceIterator

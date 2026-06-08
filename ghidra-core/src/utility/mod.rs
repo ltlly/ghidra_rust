@@ -705,7 +705,7 @@ mod tests {
 
         let re = regex::Regex::new(r".*(Plugin)$").unwrap();
         let paths = vec![tmp_dir.to_string_lossy().to_string()];
-        let result = ClassSearcher::find_files(&paths, &re).unwrap();
+        let _result = ClassSearcher::find_files(&paths, &re).unwrap();
 
         let _ = fs::remove_dir_all(&tmp_dir);
         // We might or might not find it depending on path parsing

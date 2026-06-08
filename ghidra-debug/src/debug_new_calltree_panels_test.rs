@@ -23,7 +23,7 @@ mod tests {
         TraceCallTreeReturnNode, TraceCallTreeTailCallNode,
     };
     use crate::plugin::gui_panel_models::{
-        CellActivationListener, DebuggerCoordinates, DebuggerObjectActionContext,
+        DebuggerCoordinates,
         ObjectValueRef, ObjectsTableBasedPanelModel, QueryTablePanelModel,
     };
 

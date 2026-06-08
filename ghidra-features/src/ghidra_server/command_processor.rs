@@ -4,11 +4,11 @@
 //! commands queued by the `svrAdmin` tool.
 
 use std::fs;
-use std::io::{self, BufRead, BufReader};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use super::repository_manager::RepositoryManager;
-use super::user_manager::{Permission, User};
+use super::user_manager::Permission;
 use super::ServerError;
 
 // ---------------------------------------------------------------------------

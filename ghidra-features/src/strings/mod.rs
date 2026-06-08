@@ -44,7 +44,6 @@ pub mod table_model;
 /// `TrigramStringValidator`, and related classes.
 pub mod encoded;
 
-use std::collections::HashMap;
 
 /// Column header for string value.
 pub const STRING_VALUE_COLUMN: &str = "String";

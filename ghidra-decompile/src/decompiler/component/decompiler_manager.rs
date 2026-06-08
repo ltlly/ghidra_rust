@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Manages threading for the decompiler.
 //!
 //! Ports `ghidra.app.decompiler.component.DecompilerManager`.
@@ -62,7 +63,7 @@ pub struct DecompilerManager {
     /// Queue of pending requests.
     pending_queue: VecDeque<DecompileRequest>,
     /// Debounce delay in milliseconds.
-    debounce_ms: u64,
+    _debounce_ms: u64,
 }
 
 impl DecompilerManager {
@@ -72,7 +73,7 @@ impl DecompilerManager {
             state: DecompileManagerState::Idle,
             current_request: None,
             pending_queue: VecDeque::new(),
-            debounce_ms: 500,
+            _debounce_ms: 500,
         }
     }
 

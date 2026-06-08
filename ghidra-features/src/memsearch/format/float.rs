@@ -18,7 +18,7 @@ pub struct FloatSearchFormat {
 }
 
 impl FloatSearchFormat {
-    fn parse_number(&self, tok: &str, settings: &SearchSettings) -> NumberParseResult {
+    fn parse_number(&self, tok: &str, _settings: &SearchSettings) -> NumberParseResult {
         let tok = tok.trim();
         if tok.is_empty() {
             return NumberParseResult::error("Empty token", false);

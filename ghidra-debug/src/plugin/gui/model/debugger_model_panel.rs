@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerModelPanel::new("test".to_string(), vec![]);
+        let _obj = DebuggerModelPanel::new("test".to_string(), vec![]);
         assert!(true);
     }
 

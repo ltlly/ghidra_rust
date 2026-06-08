@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_concrete_pcode_trace_data_access() {
-        let mut access = ConcretePcodeTraceDataAccess::new(1, 0)
+        let access = ConcretePcodeTraceDataAccess::new(1, 0)
             .with_thread(42);
 
         assert_eq!(access.trace_key(), 1);

@@ -195,7 +195,7 @@ fn build_log_table(chunk_size: usize) -> Vec<f64> {
 }
 
 /// Quantize a histogram chunk into a `0..=255` entropy value.
-fn quantize_chunk(histo: &[u32; 256], log_table: &[f64], chunk_size: usize) -> i32 {
+fn quantize_chunk(histo: &[u32; 256], log_table: &[f64], _chunk_size: usize) -> i32 {
     let mut sum = 0.0f64;
     for &count in histo.iter() {
         sum += log_table[count as usize];

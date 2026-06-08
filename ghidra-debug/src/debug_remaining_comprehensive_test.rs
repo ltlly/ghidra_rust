@@ -13,7 +13,7 @@ mod tests {
         guest::TracePlatformManager,
         lifespan::Lifespan,
         memory::TraceMemoryState,
-        symbol::{TraceReference, TraceSymbol, TraceSymbolManager},
+        symbol::{TraceReference, TraceSymbolManager},
     };
     use crate::target::{
         key_path::KeyPath,
@@ -235,9 +235,9 @@ mod tests {
     #[test]
     fn test_full_symbol_lifecycle() {
         let mut sym_mgr = TraceSymbolManager::new();
-        let main_key = sym_mgr.create_label("main", 0x400000, "ram", Lifespan::now_on(0));
-        let printf_key = sym_mgr.create_label("printf", 0x500000, "ram", Lifespan::now_on(0));
-        let ns_key = sym_mgr.create_namespace("libc", None, Lifespan::ALL);
+        let _main_key = sym_mgr.create_label("main", 0x400000, "ram", Lifespan::now_on(0));
+        let _printf_key = sym_mgr.create_label("printf", 0x500000, "ram", Lifespan::now_on(0));
+        let _ns_key = sym_mgr.create_namespace("libc", None, Lifespan::ALL);
 
         let call_ref = TraceReference::memory(0, 0x400010, 0x500000, Lifespan::now_on(0))
             .with_primary(true);
@@ -271,7 +271,7 @@ mod tests {
         let host_key = plat_mgr.add_platform("x86:LE:64:default", "default");
         plat_mgr.set_native_platform(host_key);
 
-        let guest_key = plat_mgr.add_platform("ARM:LE:32:v8", "default");
+        let _guest_key = plat_mgr.add_platform("ARM:LE:32:v8", "default");
 
         assert!(plat_mgr.platforms().len() >= 2);
     }
@@ -467,7 +467,7 @@ mod tests {
 
     #[test]
     fn test_lifespan_and_breakpoint_integration() {
-        let bp_span = Lifespan::span(0, 100);
+        let _bp_span = Lifespan::span(0, 100);
 
         let mut spec = TraceBreakpointSpec::new("t1", "specs[0]", Lifespan::span(0, 100));
         spec.set_expression(0, "main");

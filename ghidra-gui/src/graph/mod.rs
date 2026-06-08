@@ -66,7 +66,7 @@ pub mod graph_missing;
 // Extended graph algorithms (descendants, ancestors, SCC, complexity depth, subgraph)
 pub mod graph_algorithms_ext;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::hash::Hash;
 

@@ -266,8 +266,8 @@ fn test_action_set_disabled_on_undefined_data() {
 
 #[test]
 fn test_set_equate_blocked_on_composite_data() {
-    let mut plugin = EquatePlugin::new();
-    let mut table = EquateTable::new();
+    let _plugin = EquatePlugin::new();
+    let _table = EquateTable::new();
     let mut ctx = make_ctx(Some(unsigned_scalar(0xFF)), true);
     ctx.is_in_composite_or_array = true;
 

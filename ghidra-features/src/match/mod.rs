@@ -36,7 +36,7 @@ impl FunctionHasher for ExactBytesFunctionHasher {
         fnv1a64(function_bytes)
     }
 
-    fn common_bit_count(&self, func_a: &[u8], func_b: &[u8]) -> usize {
+    fn common_bit_count(&self, func_a: &[u8], _func_b: &[u8]) -> usize {
         func_a.len() * 8
     }
 }

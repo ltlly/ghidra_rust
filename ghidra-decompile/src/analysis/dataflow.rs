@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 //! Data-flow analysis framework for the decompiler.
 //!
 //! Provides a generic trait [`DataFlowAnalyzer`] for implementing forward and
@@ -218,7 +220,7 @@ pub struct DefinitionSite {
 /// with union as the meet operation.
 pub struct ReachDefAnalysis {
     /// All definition sites in the function.
-    all_defs: HashSet<DefinitionSite>,
+    _all_defs: HashSet<DefinitionSite>,
     /// GEN[B]: definitions generated in block B that are not killed
     /// later in B.
     gen: HashMap<NodeIndex, HashSet<DefinitionSite>>,
@@ -247,7 +249,7 @@ impl ReachDefAnalysis {
         let (gen, kill) = Self::compute_gen_kill(operations, cfg, &all_defs);
 
         Self {
-            all_defs,
+            _all_defs: all_defs,
             gen,
             kill,
         }
@@ -256,7 +258,7 @@ impl ReachDefAnalysis {
     /// Find which block contains a given operation by index.
     fn find_block_for_op(
         op_idx: usize,
-        operations: &[PcodeOperation],
+        _operations: &[PcodeOperation],
         cfg: &ControlFlowGraph,
     ) -> NodeIndex {
         let mut cursor = 0;
@@ -274,7 +276,7 @@ impl ReachDefAnalysis {
 
     /// Compute GEN and KILL sets for each block.
     fn compute_gen_kill(
-        operations: &[PcodeOperation],
+        _operations: &[PcodeOperation],
         cfg: &ControlFlowGraph,
         all_defs: &HashSet<DefinitionSite>,
     ) -> (
@@ -1121,7 +1123,7 @@ impl DeadCodeElimination {
 
     /// Returns the set of live operation indices.
     pub fn live_indices(operations: &[PcodeOperation]) -> HashSet<usize> {
-        let n = operations.len();
+        let _n = operations.len();
         let mut live = HashSet::new();
         let mut worklist = VecDeque::new();
         let def_use = Self::build_def_use(operations);

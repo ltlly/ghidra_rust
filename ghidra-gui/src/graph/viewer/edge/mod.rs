@@ -16,7 +16,7 @@ pub mod edge_stroke_transformer;
 pub mod path_highlighter;
 pub mod basic_edge_label_renderer;
 
-use crate::graph::viewer::{Point2D, VisualEdge, VisualVertex};
+use crate::graph::viewer::Point2D;
 
 /// Calculates arrow positions for directed edges.
 #[derive(Debug, Clone, Default)]

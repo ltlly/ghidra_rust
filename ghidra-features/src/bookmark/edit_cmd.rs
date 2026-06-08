@@ -7,7 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{BookmarkData, BookmarkType};
+use super::BookmarkData;
 
 /// Command to set bookmarks at a location or range of locations.
 ///
@@ -460,6 +460,7 @@ impl BookmarkRowObjectToProgramLocationTableRowMapper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bookmark::BookmarkType;
 
     #[test]
     fn test_bookmark_edit_cmd_for_address() {

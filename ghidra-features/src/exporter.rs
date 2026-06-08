@@ -21,9 +21,9 @@ use std::fmt;
 use std::io::{self, Write};
 
 use crate::base::analyzer::{
-    Address, AddressRange, AddressSet, BookmarkType, Program,
+    Address, AddressSet, BookmarkType, Program,
 };
-use crate::loader::framework::{MessageLog as LoaderMessageLog, MessageLevel};
+use crate::loader::framework::MessageLog as LoaderMessageLog;
 
 // ---------------------------------------------------------------------------
 // MemoryModel -- byte-level storage for export
@@ -2375,6 +2375,7 @@ impl ProjectDataContext {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::base::analyzer::AddressRange;
     use crate::base::analyzer::Language;
 
     fn make_test_program() -> Program {

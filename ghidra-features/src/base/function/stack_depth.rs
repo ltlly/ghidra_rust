@@ -205,7 +205,7 @@ impl StackDepthManager {
     /// walks through change points up to and including `address`.
     pub fn compute_depth_at(&self, address: &Address, initial_depth: i32) -> i32 {
         let mut depth = initial_depth;
-        for (&addr, &delta) in self.changes.range(..=address.offset) {
+        for (&_addr, &delta) in self.changes.range(..=address.offset) {
             depth += delta;
         }
         depth

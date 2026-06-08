@@ -4,10 +4,10 @@
 //! vertex/edge type sets), `EmptyGraphType`, and the graph type registration
 //! system.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::RwLock;
 
-use super::service::{GraphDisplayOptions, GraphLabelPosition, GraphType, VertexShape};
+use super::service::{GraphDisplayOptions, GraphType};
 
 /// A registry of graph types and their associated display options.
 ///

@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = TraceDiffPanel::new("test".to_string(), "test".to_string());
+        let _obj = TraceDiffPanel::new("test".to_string(), "test".to_string());
         assert!(true);
     }
 

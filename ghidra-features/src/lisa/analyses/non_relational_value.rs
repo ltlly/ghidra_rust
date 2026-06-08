@@ -169,7 +169,6 @@ impl LatticeElement for PcodeNonRelationalValue {
             (_, Self::Top) => true,
             (Self::Top, _) => false,
             (Self::Value { .. }, Self::Value { .. }) => true, // simplified
-            _ => false,
         }
     }
 }

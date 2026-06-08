@@ -3,7 +3,7 @@
 //! Ported from `help.PathKey`. Represents a path in the help TOC hierarchy.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// A key representing the path to a help topic in the table of contents.
 ///

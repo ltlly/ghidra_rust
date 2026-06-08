@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! DecompInterface: the main client-facing decompiler interface.
 //!
 //! Port of Ghidra's `ghidra.app.decompiler.DecompInterface`.
@@ -10,7 +11,7 @@ use std::sync::Mutex;
 
 use super::decompile_exception::DecompileException;
 use super::decompile_options::DecompileOptions;
-use super::decompile_process::{DecompileProcess, DisposeState, ProcessStatus};
+use super::decompile_process::{DecompileProcess, DisposeState};
 use super::decompile_results::DecompileResults;
 use super::signature::DebugSignature;
 
@@ -42,7 +43,7 @@ pub struct DecompInterface {
     /// Whether to compute parameter measures.
     param_measures: bool,
     /// Whether to simplify the syntax tree.
-    simplify_double_precision: bool,
+    _simplify_double_precision: bool,
     /// Last decompile message.
     decompile_message: String,
     /// Whether the options have been sent to the process.
@@ -61,7 +62,7 @@ impl DecompInterface {
             syntax_tree: true,
             c_code: true,
             param_measures: false,
-            simplify_double_precision: true,
+            _simplify_double_precision: true,
             decompile_message: String::new(),
             options_sent: false,
             lock: Mutex::new(()),
@@ -243,7 +244,7 @@ impl DecompInterface {
     pub fn decompile_function(
         &mut self,
         entry_point: u64,
-        timeout_secs: u32,
+        _timeout_secs: u32,
     ) -> DecompileResults {
         let _guard = self.lock.lock().unwrap();
         self.decompile_message.clear();
@@ -330,8 +331,8 @@ impl DecompInterface {
     /// information from the decompiler.
     pub fn debug_signatures(
         &mut self,
-        entry_point: u64,
-        timeout_secs: u32,
+        _entry_point: u64,
+        _timeout_secs: u32,
     ) -> SignatureResult {
         let _guard = self.lock.lock().unwrap();
         self.decompile_message.clear();

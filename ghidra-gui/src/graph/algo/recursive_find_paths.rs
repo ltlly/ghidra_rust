@@ -3,9 +3,7 @@
 //! Ports `ghidra.graph.algo.RecursiveFindPathsAlgorithm`.
 
 use std::collections::HashSet;
-use std::hash::Hash;
 
-use super::status_listener::{AlgorithmStatus, GraphAlgorithmStatusListener};
 use super::sorter_exception::SorterException;
 
 /// A path through a graph: a sequence of vertex IDs.

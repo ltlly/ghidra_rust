@@ -7,7 +7,6 @@ use std::collections::HashMap;
 
 use super::clang_node::ClangNodeId;
 use super::component::DecompileData;
-use super::decompile_results::DecompileResults;
 
 /// Manages the decompiler session: current function, decompile data,
 /// and panel state.

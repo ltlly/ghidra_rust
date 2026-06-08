@@ -5,11 +5,8 @@
 //! - `SymbolTypeTableColumn` -- displays the symbol type.
 //! - `MonospacedByteRenderer` -- marker for monospaced byte rendering.
 
-use ghidra_core::addr::Address;
 
-use super::traits::{ProgramBasedDynamicTableColumn, ProgramInfo, ProgramLocationTableColumn,
-                    ProgramLocationTableColumnExt, ServiceProvider, Settings, SymbolType,
-                    SourceType};
+use super::traits::{ProgramBasedDynamicTableColumn, ProgramInfo, ServiceProvider, Settings};
 use super::super::mapper::ProgramLocation;
 
 // ---------------------------------------------------------------------------
@@ -77,6 +74,7 @@ impl MonospacedByteRenderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
 
     fn test_program() -> ProgramInfo {
         ProgramInfo::new("test", "x86:LE:64:default")

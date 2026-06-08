@@ -40,7 +40,7 @@ impl<'a> TokenIterator<'a> {
         }
         group_list.reverse();
 
-        let mut node_stack = group_list.clone();
+        let node_stack = group_list.clone();
         let mut index_stack = Vec::with_capacity(node_stack.len());
         let mut node = token_id;
         // Walk back down to find indices
@@ -84,7 +84,7 @@ impl<'a> TokenIterator<'a> {
             }
         }
 
-        let mut node_stack = group_list;
+        let node_stack = group_list;
         let mut index_stack = Vec::with_capacity(node_stack.len());
         for &gid in &node_stack {
             let num = arena.num_children(gid);
@@ -283,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_from_token_iterator() {
-        let (arena, root, expected) = make_arena_with_tokens();
+        let (arena, _root, expected) = make_arena_with_tokens();
         // Start from token 2 (middle), go forward
         let start = expected[2];
         let collected: Vec<ClangNodeId> = TokenIterator::from_token(&arena, start, true).collect();

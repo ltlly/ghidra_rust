@@ -101,7 +101,7 @@ impl SwitchAnalyzer {
         &self,
         table_data: &[u8],
         entry_size: u8,
-        table_addr: u64,
+        _table_addr: u64,
     ) -> Vec<SwitchTableEntry> {
         let mut entries = Vec::new();
         let esize = entry_size as usize;

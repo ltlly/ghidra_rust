@@ -6,7 +6,7 @@
 //! blocks in a program, with column definitions for display and sorting.
 
 use ghidra_core::addr::Address;
-use ghidra_core::mem::{MemoryBlock, MemoryBlockType};
+use ghidra_core::mem::MemoryBlock;
 use ghidra_core::program::program::Program;
 use std::cmp::Ordering;
 

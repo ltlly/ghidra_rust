@@ -12,7 +12,10 @@
 //!
 //! Swing UI code is omitted; only model and business logic are ported.
 
+pub mod bookmark_action;
+pub mod function_action;
 pub mod function_utils;
+pub mod instruction_action;
 pub mod locationreferences;
 pub mod location_service;
 pub mod next_prev_plugins;
@@ -50,9 +53,8 @@ pub mod navigation_settings;
 
 use std::collections::HashMap;
 
-use ghidra_core::Address;
 
-use crate::gotoquery::{LocationMemento, Navigatable, ProgramLocation};
+use crate::gotoquery::LocationMemento;
 
 // ---------------------------------------------------------------------------
 // NavigationOptions
@@ -885,6 +887,7 @@ impl AbstractNextPreviousAction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::addr::Address;
 
 
     fn addr(offset: u64) -> Address {

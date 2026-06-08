@@ -6,7 +6,6 @@
 
 use std::path::{Path, PathBuf};
 
-use super::command_processor::CommandProcessor;
 use super::repository_manager::RepositoryManager;
 use super::user_manager::UserManager;
 

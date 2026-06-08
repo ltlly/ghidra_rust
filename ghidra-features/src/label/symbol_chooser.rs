@@ -6,9 +6,8 @@
 //! program's symbol table.  Used by the label plugin and other plugins
 //! that need to present a filtered list of symbols.
 
-use super::{LabelInfo, LabelManager, LabelScope};
+use super::LabelManager;
 use ghidra_core::Address;
-use std::collections::BTreeMap;
 
 // ============================================================================
 // SymbolType -- kind of symbol

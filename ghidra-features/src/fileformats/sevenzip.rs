@@ -6,7 +6,7 @@
 //! - 7z Format specification: <https://www.7-zip.org/7z.html>
 //! - LZMA SDK
 
-use nom::{bytes::complete::take, number::complete::{le_u16, le_u32, le_u64, le_u8}, IResult};
+use nom::{bytes::complete::take, number::complete::{le_u32, le_u64, le_u8}, IResult};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

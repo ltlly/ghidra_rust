@@ -272,7 +272,7 @@ impl SymbolTreeProvider {
         chunks
             .into_iter()
             .enumerate()
-            .map(|(i, chunk)| {
+            .map(|(_i, chunk)| {
                 let first = chunk.first().map(|e| e.name.clone()).unwrap_or_default();
                 let last = chunk.last().map(|e| e.name.clone()).unwrap_or_default();
                 GroupNode {

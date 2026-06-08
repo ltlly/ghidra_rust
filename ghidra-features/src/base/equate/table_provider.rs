@@ -13,7 +13,6 @@ use super::manager::EquateTable;
 use super::plugin::EquatePlugin;
 use super::table::{EquateReferenceTableModel, EquateTableModel};
 use ghidra_core::Address;
-use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // EquateTableProviderModel -- manages the equate table provider display

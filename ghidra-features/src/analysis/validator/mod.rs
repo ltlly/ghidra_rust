@@ -22,7 +22,7 @@
 /// Ported from `ghidra.app.plugin.core.analysis.validator`.
 pub mod program_validator;
 
-use crate::base::analyzer::{Address, AddressSet, Program, TaskMonitor, CancelledError};
+use crate::base::analyzer::{Program, TaskMonitor, CancelledError};
 
 // ---------------------------------------------------------------------------
 // ConditionStatus and ConditionResult

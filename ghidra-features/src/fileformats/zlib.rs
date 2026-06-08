@@ -6,7 +6,6 @@
 //! - RFC 1950 (ZLIB Compressed Data Format)
 //! - RFC 1951 (DEFLATE Compressed Data Format)
 
-use nom::number::complete::{le_u8, be_u16};
 
 // ═══════════════════════════════════════════════════════════════════════════════════
 // Constants

@@ -1,5 +1,6 @@
 //! File format parsers - ELF, PE/COFF, Mach-O, DEX, APK, Java class,
-//! ZIP, ISO 9660, XBE, and raw binary.
+//! ZIP, ISO 9660, XBE, Intel HEX, Motorola S-Records, COFF, DOS MZ, PEF,
+//! and raw binary.
 //!
 //! Ported from Ghidra's `ghidra.app.util.bin.format` package.
 //!
@@ -12,6 +13,7 @@ pub mod bplist;
 pub mod cart;
 pub mod classfile;
 pub mod coff;
+pub mod coff_file;
 pub mod cpio;
 pub mod cramfs;
 pub mod dex;
@@ -20,19 +22,23 @@ pub mod dump;
 pub mod elf;
 pub mod ext4;
 pub mod gzip;
+pub mod intel_hex;
 pub mod ios;
 pub mod iso;
 pub mod lzfse;
 pub mod lzss;
 pub mod macho;
+pub mod mz;
 pub mod nintendo;
 pub mod omf;
 pub mod omf51;
 pub mod pe;
 pub mod pe_full;
+pub mod pef;
 pub mod raw;
 pub mod sevenzip;
 pub mod sparse_image;
+pub mod srec;
 pub mod squashfs;
 pub mod tar;
 pub mod xar;

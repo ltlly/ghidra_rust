@@ -6,7 +6,7 @@
 
 use crate::addr::Address;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 
 // ============================================================================
 // VarnodeKey -- hash key for a varnode lookup

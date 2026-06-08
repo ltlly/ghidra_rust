@@ -198,6 +198,7 @@ impl ShiftType {
 ///
 /// Covers the full ARM, Thumb, Thumb-2, VFP, NEON, and Security instruction
 /// sets. Organized by functional category.
+#[allow(non_camel_case_types)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ArmMnemonic {
     // ======================================================================

@@ -225,8 +225,11 @@ impl HelpModuleCollection {
 /// Ported from `help.validator.location.HelpModuleLocationTestDouble`.
 #[derive(Debug, Clone)]
 pub struct HelpModuleLocationTestDouble {
+    /// The module name.
     pub name: String,
+    /// The module path.
     pub path: PathBuf,
+    /// Whether the module is a directory.
     pub is_dir: bool,
 }
 

@@ -109,6 +109,9 @@ pub enum ElfData {
     BigEndian,
 }
 
+/// Alias for [`ElfData`] used by the binary analysis command.
+pub type ElfDataEncoding = ElfData;
+
 impl ElfData {
     /// Parse from the EI_DATA byte.
     pub fn from_byte(b: u8) -> Option<Self> {
@@ -3386,8 +3389,7 @@ impl ElfFile {
 // ═══════════════════════════════════════════════════════════════════════════════════
 
 use crate::base::analyzer::{
-    Address, AddressRange, AddressSet, Function, FunctionManager, Language,
-    Listing, MemoryBlock, Program,
+    Address, AddressRange, AddressSet, Function, Language, MemoryBlock, Program,
 };
 
 /// ELF machine code to Ghidra processor name mapping.

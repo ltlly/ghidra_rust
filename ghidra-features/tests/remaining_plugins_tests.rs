@@ -17,7 +17,7 @@ use ghidra_core::Address;
 // ===========================================================================
 
 mod gtree_integration {
-    use super::*;
+    
     use ghidra_features::symboltree::gtree::{
         DisconnectedSymbolTreeProvider, GTreeNodeData, SymbolGTree,
         SymbolGTreeDragNDropHandler,

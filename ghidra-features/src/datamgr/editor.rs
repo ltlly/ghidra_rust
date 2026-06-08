@@ -10,10 +10,9 @@
 //! save/change detection, and handles the creation of new types.
 
 use ghidra_core::data::{
-    CategoryPath, DataType, DataTypeManager, DataTypePath, StandaloneDataTypeManager,
+    CategoryPath, DataTypeManager, DataTypePath,
 };
 use std::fmt;
-use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // EditorState
@@ -964,6 +963,8 @@ impl EnumEditorPanelState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+    use ghidra_core::data::types::DataType;
     use ghidra_core::data::{CategoryPath, StandaloneDataTypeManager};
 
     fn make_path(name: &str) -> DataTypePath {

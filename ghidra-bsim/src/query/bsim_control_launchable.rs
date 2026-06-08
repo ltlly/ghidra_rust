@@ -3,7 +3,6 @@
 //! Ports `ghidra.features.bsim.query.BSimControlLaunchable`.
 
 use crate::query::bsim_data_source::BSimDataSource;
-use crate::query::server_config::ServerConfig;
 
 /// Operations that can be performed on a BSim database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

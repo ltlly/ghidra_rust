@@ -16,7 +16,7 @@ use crate::graph::traits::{GDirectedGraph, GEdge};
 /// # Examples
 /// ```
 /// use ghidra_core::graph::hash_graph::HashDirectedGraph;
-/// use johnson = ghidra_core::graph::algo::johnson_circuits;
+/// use ghidra_core::graph::algo::johnson_circuits as johnson;
 /// ```
 pub struct JohnsonCircuitsAlgorithm<'a, V, E>
 where

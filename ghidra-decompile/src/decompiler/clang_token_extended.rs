@@ -13,7 +13,6 @@
 //! - `ClangTypeToken` -- token for data type names
 //! - `ClangLabelToken` -- token for label references
 
-use std::collections::HashMap;
 use std::fmt;
 
 // ============================================================================
@@ -537,7 +536,7 @@ impl ClangOpToken {
     pub fn precedence(&self) -> Option<u8> {
         match self.text.as_str() {
             "()" | "[]" | "." | "->" => Some(1),
-            "++" | "--" | "!" | "~" | "sizeof" | "&" | "*" => Some(2),
+            "++" | "--" | "!" | "~" | "sizeof" => Some(2),
             "*" | "/" | "%" => Some(3),
             "+" | "-" => Some(4),
             "<<" | ">>" => Some(5),

@@ -6,9 +6,7 @@
 //! File handlers allow plugins to add context-menu actions and handle
 //! focus/default-action events for files in the browser tree.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use super::GFile;
 

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use super::{Fsrl, FileSystemRef, GFileSystem, FileSystemService, OpenFsOptions};
+use super::{Fsrl, FileSystemRef, GFileSystem, FileSystemService};
 
 // ---------------------------------------------------------------------------
 // PluginState -- lifecycle state of the plugin

@@ -23,10 +23,6 @@
 //! println!("Header: {:?}", macho.header);
 //! ```
 
-use nom::bytes::complete::take;
-use nom::multi::count;
-use nom::number::complete::{be_i32, be_u32, le_i32, le_u32, le_u64};
-use nom::IResult;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -236,8 +232,7 @@ pub fn cpu_subtype_name(cputype: i32, cpusubtype: i32) -> String {
             _ => format!("UNKNOWN_SUBTYPE({})", cpusubtype),
         },
         CPU_TYPE_X86 | CPU_TYPE_X86_64 => match cpusubtype {
-            CPU_SUBTYPE_I386_ALL => "ALL".into(),
-            CPU_SUBTYPE_386 => "i386".into(),
+            CPU_SUBTYPE_I386_ALL => "ALL".into(), // CPU_SUBTYPE_386 has same value
             CPU_SUBTYPE_486 => "i486".into(),
             CPU_SUBTYPE_486SX => "i486SX".into(),
             CPU_SUBTYPE_586 => "i586 (Pentium)".into(),
@@ -526,8 +521,7 @@ pub fn load_command_name(cmd: u32) -> String {
         LC_REEXPORT_DYLIB_BASE => "LC_REEXPORT_DYLIB",
         LC_LAZY_LOAD_DYLIB => "LC_LAZY_LOAD_DYLIB",
         LC_ENCRYPTION_INFO => "LC_ENCRYPTION_INFO",
-        LC_DYLD_INFO => "LC_DYLD_INFO",
-        LC_DYLD_INFO_ONLY_BASE => "LC_DYLD_INFO_ONLY",
+        LC_DYLD_INFO => "LC_DYLD_INFO", // LC_DYLD_INFO_ONLY_BASE has same value (0x22)
         LC_LOAD_UPWARD_DYLIB_BASE => "LC_LOAD_UPWARD_DYLIB",
         LC_VERSION_MIN_MACOSX => "LC_VERSION_MIN_MACOSX",
         LC_VERSION_MIN_IPHONEOS => "LC_VERSION_MIN_IPHONEOS",
@@ -2138,8 +2132,8 @@ pub fn parse_fat(data: &[u8]) -> MachResult<FatBinary> {
         return Err(MachError::TruncatedData);
     }
 
-    let magic = u32::from_be_bytes(data[0..4].try_into().unwrap());
-    let num_arches = u32::from_be_bytes(data[4..8].try_into().unwrap());
+    let _magic = u32::from_be_bytes(data[0..4].try_into().unwrap());
+    let _num_arches = u32::from_be_bytes(data[4..8].try_into().unwrap());
 
     // Determine endianness: if magic reads as FAT_MAGIC in big-endian, it is BE;
     // otherwise try reading in little-endian to see if it matches FAT_CIGAM.
@@ -3264,7 +3258,7 @@ pub fn parse_requirements(superblob: &[u8]) -> MachResult<Vec<CodeSignatureRequi
             if blob_start + 12 > superblob.len() {
                 continue;
             }
-            let blob_magic =
+            let _blob_magic =
                 u32::from_be_bytes(superblob[blob_start..blob_start + 4].try_into().unwrap());
             let blob_len =
                 u32::from_be_bytes(superblob[blob_start + 4..blob_start + 8].try_into().unwrap());

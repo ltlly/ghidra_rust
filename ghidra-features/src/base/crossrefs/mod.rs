@@ -13,7 +13,7 @@
 pub mod xref_table;
 
 use ghidra_core::addr::Address;
-use ghidra_core::symbol::{RefType, Reference, ReferenceManager, SourceType, MNEMONIC};
+use ghidra_core::symbol::{RefType, Reference, ReferenceManager, SourceType};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fmt;
@@ -596,6 +596,7 @@ impl XRefDisplayRow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ghidra_core::symbol::MNEMONIC;
 
     fn addr(offset: u64) -> Address {
         Address::new(offset)

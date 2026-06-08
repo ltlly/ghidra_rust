@@ -5,8 +5,7 @@
 //! service layer types, and visual graph types.
 
 use ghidra_gui::graph::{
-    DefaultDirectedGraph, DefaultGEdge, GDirectedGraph, GEdge, GWeightedEdge, GraphPath,
-    g_vertex, edge_weight_metric,
+    DefaultDirectedGraph, DefaultGEdge, GDirectedGraph, GEdge, GWeightedEdge, GraphPath, edge_weight_metric,
     algo, job, mutable_wrapper, implicit_graph,
     service, viewer,
     filtering_visual_graph, grouping_visual_graph,

@@ -7,7 +7,7 @@
 //! external references, including library management and location
 //! lookup by name, address, or namespace.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
 use ghidra_core::addr::Address;
 use ghidra_core::symbol::SourceType;
@@ -158,6 +158,11 @@ impl ExternalManagerDB {
         self.libraries.keys().cloned().collect()
     }
 
+    /// Returns all external library names (trait-compatible name).
+    pub fn get_external_library_names(&self) -> Vec<String> {
+        self.get_library_names()
+    }
+
     /// Returns the number of libraries.
     pub fn library_count(&self) -> usize {
         self.libraries.len()
@@ -165,6 +170,11 @@ impl ExternalManagerDB {
 
     /// Returns info about a specific library.
     pub fn get_library_info(&self, name: &str) -> Option<&ExternalLibraryInfo> {
+        self.libraries.get(name)
+    }
+
+    /// Returns a reference to a library's info (trait-compatible name).
+    pub fn get_external_library(&self, name: &str) -> Option<&ExternalLibraryInfo> {
         self.libraries.get(name)
     }
 
@@ -257,6 +267,41 @@ impl ExternalManagerDB {
     // ------------------------------------------------------------------
     // External location management
     // ------------------------------------------------------------------
+
+    /// Add an external library name (trait-compatible name).
+    pub fn add_external_library_name(
+        &mut self,
+        name: &str,
+        source: SourceType,
+    ) -> ExtResult<()> {
+        self.add_library(name, source)?;
+        Ok(())
+    }
+
+    /// Check if a library has any external locations.
+    pub fn has_external_locations(&self, library_name: &str) -> bool {
+        self.locations.iter().any(|loc| loc.library_name() == library_name)
+    }
+
+    /// Add an external location (trait-compatible name that takes an ExternalLocationDB).
+    pub fn add_external_location(
+        &mut self,
+        location: ExternalLocationDB,
+    ) -> ExtResult<usize> {
+        let lib_name = location.library_name().to_string();
+        self.add_library(&lib_name, location.source())?;
+        self.locations.push(location);
+        Ok(self.locations.len() - 1)
+    }
+
+    /// Get the unique external location for a library name and label (trait-compatible).
+    pub fn get_external_location(
+        &self,
+        library_name: &str,
+        label: &str,
+    ) -> Option<&ExternalLocationDB> {
+        self.get_unique_external_location(library_name, label)
+    }
 
     /// Add an external function location.
     pub fn add_ext_function(

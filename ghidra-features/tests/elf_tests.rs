@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Tests for ELF format: header parsing, section headers, symbol tables, program headers.
 //!
 //! Tests cover:

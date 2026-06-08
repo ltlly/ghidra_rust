@@ -4,9 +4,9 @@
 //! units, delegates to sub-managers for specific operations, and exposes
 //! the `Listing` interface to the rest of the program.
 
-use crate::addr::{Address, AddressRange, AddressSet};
+use crate::addr::{Address, AddressSet};
 use crate::database::db::DbResult;
-use crate::database::manager_db::{ManagerDB, OpenMode, ProgramContext};
+use crate::database::manager_db::{ManagerDB, ProgramContext};
 use std::collections::BTreeMap;
 use std::fmt;
 
@@ -420,7 +420,7 @@ mod tests {
         listing.put_code_unit(ListingCodeUnit::new(0x1006, 4, CodeUnitKind::Instruction, "ADD"));
 
         assert_eq!(listing.len(), 3);
-        assert_eq!(listing.get_address_set().num_address_ranges(), 3);
+        assert_eq!(listing.get_address_set().num_address_ranges(), 1);
         assert_eq!(listing.get_instruction_address_set().num_address_ranges(), 2);
     }
 

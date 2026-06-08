@@ -519,7 +519,7 @@ pub struct SparseRecord {
     key: GhidraField,
     field_values: BTreeMap<usize, GhidraField>,
     column_count: usize,
-    field_names: Vec<String>,
+    _field_names: Vec<String>,
     dirty: bool,
 }
 
@@ -530,7 +530,7 @@ impl SparseRecord {
             key,
             field_values: BTreeMap::new(),
             column_count,
-            field_names,
+            _field_names: field_names,
             dirty: false,
         }
     }

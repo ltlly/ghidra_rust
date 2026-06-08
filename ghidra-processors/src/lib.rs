@@ -10,12 +10,20 @@
 pub mod aarch64;
 pub mod arm;
 pub mod avr;
+pub mod bpf;
 pub mod common;
+pub mod cr16;
+pub mod dalvik;
+pub mod hcs08;
 
 pub mod m68000;
+pub mod mc6800;
 
 #[path = "mcs51/mod.rs"]
 pub mod m8051;
+
+pub mod mos6502;
+pub mod i8085;
 
 pub mod cp1600;
 pub mod ebpf;
@@ -32,6 +40,7 @@ pub mod powerpc;
 pub mod riscv;
 pub mod sparc;
 pub mod superh;
+pub mod superh4;
 pub mod toy;
 pub mod tricore;
 pub mod v850;
@@ -123,21 +132,28 @@ impl ProcessorRegistry {
         self.processors.insert(name, entry);
     }
 
-    /// Register all known processor modules (26 processors).
+    /// Register all known processor modules (34 processors).
     #[allow(unused_mut)]
     pub fn register_all(&mut self) {
         self.register::<aarch64::Aarch64Module>();
         self.register::<arm::ArmModule>();
         self.register::<avr::AvrProcessor>();
+        self.register::<bpf::BpfProcessor>();
         self.register::<cp1600::Cp1600Processor>();
+        self.register::<cr16::Cr16cProcessor>();
+        self.register::<dalvik::DalvikProcessor>();
         self.register::<ebpf::EbpfProcessor>();
+        self.register::<hcs08::Hcs08Processor>();
         self.register::<hcs12::Hcs12Processor>();
         self.register::<hexagon::HexagonProcessor>();
+        self.register::<i8085::I8085Processor>();
         self.register::<jvm::JvmModule>();
         self.register::<loongarch::LoongArchProcessor>();
         self.register::<m68000::M68000Module>();
         self.register::<m8051::M8051Processor>();
+        self.register::<mc6800::Mc6800Processor>();
         self.register::<mips::MipsModule>();
+        self.register::<mos6502::Mos6502Processor>();
         self.register::<msp430::Msp430Processor>();
         self.register::<nds32::Nds32Processor>();
         self.register::<pa_risc::PaRiscProcessor>();
@@ -146,6 +162,7 @@ impl ProcessorRegistry {
         self.register::<riscv::RiscVModule>();
         self.register::<sparc::SparcModule>();
         self.register::<superh::SuperHProcessor>();
+        self.register::<superh4::SuperH4Processor>();
         self.register::<toy::ToyProcessor>();
         self.register::<tricore::TricoreProcessor>();
         self.register::<v850::V850Processor>();
@@ -345,7 +362,7 @@ mod tests {
         let mut registry = ProcessorRegistry::new();
         registry.register_all();
         let names = registry.list();
-        assert!(names.len() >= 25, "Expected at least 25 processors, got {}: {:?}", names.len(), names);
+        assert!(names.len() >= 30, "Expected at least 30 processors, got {}: {:?}", names.len(), names);
     }
 
     #[test]
@@ -404,7 +421,7 @@ mod tests {
     #[test]
     fn test_registry_len() {
         let registry = ProcessorRegistry::default();
-        assert!(registry.len() >= 25);
+        assert!(registry.len() >= 30);
         assert!(!registry.is_empty());
     }
 

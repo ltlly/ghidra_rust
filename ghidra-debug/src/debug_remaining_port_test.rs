@@ -9,7 +9,7 @@
 #[cfg(test)]
 mod tests {
     use crate::db::{
-        AddressSnapPropertyMap, AddrSnapPropertyRange, DbTraceAddressPropertyManager,
+        AddressSnapPropertyMap, DbTraceAddressPropertyManager,
         DbTraceStaticMappingManager, LinkContentHandler, PropertyMapValue,
         RangeQuery, SpaceBasedManager, TraceContentMetadata, TraceContentType,
         TracePropertyMap, known_properties,

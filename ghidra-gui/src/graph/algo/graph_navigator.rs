@@ -4,7 +4,6 @@
 //! walking a graph either top-down (source to sink) or bottom-up
 //! (sink to source).
 
-use std::collections::HashSet;
 use std::hash::Hash;
 
 use crate::graph::{GDirectedGraph, GEdge};

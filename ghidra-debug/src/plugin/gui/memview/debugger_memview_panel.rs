@@ -38,7 +38,7 @@ mod tests {
 
     #[test]
     fn test_creation() {
-        let obj = DebuggerMemviewPanel::new(4, "test".to_string());
+        let _obj = DebuggerMemviewPanel::new(4, "test".to_string());
         assert!(true);
     }
 

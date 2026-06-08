@@ -10,8 +10,6 @@ use std::sync::RwLock;
 
 use once_cell::sync::Lazy;
 
-use super::target_iface::TraceObjectInterface;
-
 /// The set of builtin interface categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum InterfaceCategory {

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use ghidra_core::Address;
 
-use super::locationreferences::{LocationReference, DescriptorKind};
+use super::locationreferences::LocationReference;
 
 // ---------------------------------------------------------------------------
 // LocationReferencesTableModel

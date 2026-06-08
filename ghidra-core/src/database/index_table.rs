@@ -172,7 +172,7 @@ impl GhidraIndexTable {
         self.delete_all(db)?;
         // Read all records from the primary table
         let conn = db.read()?;
-        let mut stmt = conn.prepare(&format!("SELECT * FROM {}", self.primary_table_name))?;
+        let stmt = conn.prepare(&format!("SELECT * FROM {}", self.primary_table_name))?;
         let column_index = self.column_index;
         let col_count = {
             let cols = stmt.column_names();
@@ -308,7 +308,7 @@ fn decode_pks(data: &[u8]) -> Vec<FieldValue> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::database::db::{Field, FieldType, Schema};
+    
 
     fn create_test_table(db: &Database, name: &str, col2_type: &str) {
         db.execute_batch(&format!(
@@ -355,7 +355,7 @@ mod tests {
         let conn = db.read().unwrap();
         let val: String = conn.query_row("SELECT val FROM users WHERE id=1", [], |r| r.get(0)).unwrap();
         let pk_val = FieldValue::Long(1);
-        let pk_bytes = encode_pk(&pk_val);
+        let _pk_bytes = encode_pk(&pk_val);
         drop(conn);
 
         // Manually add to index using parameterized query (use length-prefixed format)
@@ -390,6 +390,7 @@ mod tests {
         assert_eq!(idx.get_key_count(&db, &FieldValue::String("A".into())).unwrap(), 0);
     }
 
+    #[allow(dead_code)]
     fn hex_encode(bytes: &[u8]) -> String {
         bytes.iter().map(|b| format!("{:02x}", b)).collect()
     }

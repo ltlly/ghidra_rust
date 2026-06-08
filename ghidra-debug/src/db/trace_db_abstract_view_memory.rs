@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_view_memory_data_basic() {
-        let mut view = AbstractProgramViewMemoryData::new(10);
+        let view = AbstractProgramViewMemoryData::new(10);
         assert_eq!(view.get_snap(), 10);
         assert!(!view.is_address_set_valid());
         assert!(view.is_empty());

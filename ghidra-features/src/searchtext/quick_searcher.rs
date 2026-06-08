@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::search_types::{SearchDirection, TextSearchResult};
+use super::search_types::SearchDirection;
 
 // ---------------------------------------------------------------------------
 // QuickSearchProvider -- trait for quick search data sources

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Advanced highlight and token management types.
 //!
 //! Ports Ghidra's `ghidra.app.decompiler.ClangHighlightController`,
@@ -10,7 +11,7 @@ use std::collections::HashMap;
 
 use ghidra_core::addr::Address;
 
-use super::clang_node::{ClangNodeId, ClangNodeArena, ClangNodeKind, ClangTokenGroupData, SyntaxType};
+use super::clang_node::{ClangNodeId, ClangNodeArena, SyntaxType};
 
 // ============================================================================
 // HighlightToken
@@ -638,7 +639,7 @@ pub struct DecompilerController {
     /// The layout controller.
     layout_controller: ClangLayoutController,
     /// The color provider.
-    color_provider: Box<dyn ColorProvider>,
+    _color_provider: Box<dyn ColorProvider>,
     /// Whether the panel is in "editable" mode (allows renaming, retyping).
     editable: bool,
 }
@@ -650,7 +651,7 @@ impl DecompilerController {
             data: None,
             highlight_controller: ClangHighlightController::new(),
             layout_controller: ClangLayoutController::new(),
-            color_provider: Box::new(DefaultColorProvider),
+            _color_provider: Box::new(DefaultColorProvider),
             editable: true,
         }
     }
@@ -827,6 +828,7 @@ impl PanelToken {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::clang_node::{ClangNodeKind, ClangTokenGroupData};
 
     #[test]
     fn highlight_token_creation() {

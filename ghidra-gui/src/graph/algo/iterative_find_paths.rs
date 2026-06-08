@@ -10,7 +10,7 @@
 //! implementation uses an iterative stack-based approach that avoids
 //! deep recursion on large graphs.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::Hash;
 
 use crate::graph::{GDirectedGraph, GEdge, GraphPath};

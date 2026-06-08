@@ -2,7 +2,7 @@
 //!
 //! Port of Ghidra's `ghidra.app.decompiler.ClangLine`.
 
-use super::clang_node::{ClangNodeArena, ClangNodeId, SyntaxType};
+use super::clang_node::{ClangNodeArena, ClangNodeId};
 
 /// A line of C code.  This is an independent grouping of C tokens
 /// from the statement/vardecl/retype groups.

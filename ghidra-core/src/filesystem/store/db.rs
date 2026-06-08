@@ -95,7 +95,7 @@ impl PrivateDatabase {
     /// Create a new empty private database.
     pub fn create(data_dir: &Path, _buffer_size: i32, content_type: &str) -> StoreResult<Self> {
         fs::create_dir_all(data_dir)?;
-        let mut db = Self::new(data_dir.to_path_buf())?;
+        let db = Self::new(data_dir.to_path_buf())?;
         // Write a metadata file
         let meta_path = data_dir.join("db.meta");
         fs::write(&meta_path, format!("content_type={}\nversion=0\n", content_type))?;

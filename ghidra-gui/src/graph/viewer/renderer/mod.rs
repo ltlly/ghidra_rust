@@ -385,7 +385,7 @@ fn polygon_points(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graph::viewer::{Point2D, VisualVertex};
+    use crate::graph::viewer::VisualVertex;
 
     #[test]
     fn render_empty_graph() {
