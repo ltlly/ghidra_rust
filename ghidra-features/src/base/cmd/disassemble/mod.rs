@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod disassemble_command;
+
 /// Flow override types for branches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FlowOverride {

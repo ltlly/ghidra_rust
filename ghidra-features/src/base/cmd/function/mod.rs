@@ -5,6 +5,9 @@
 
 #![allow(dead_code)]
 
+pub mod create_function_cmd;
+pub mod delete_function_cmd;
+
 /// Source type for function names / parameters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceType {

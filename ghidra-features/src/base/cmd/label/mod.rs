@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod add_label_cmd;
+
 /// Source type for labels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceType {

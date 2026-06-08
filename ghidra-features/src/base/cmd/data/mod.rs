@@ -4,6 +4,8 @@
 
 #![allow(dead_code)]
 
+pub mod create_data_cmd;
+
 /// Command to create a data item at an address.
 #[derive(Debug)]
 pub struct CreateDataCmd {

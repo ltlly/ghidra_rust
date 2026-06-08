@@ -23,6 +23,7 @@
 
 pub mod cmd;
 pub mod plugin;
+pub mod rename_cmd;
 
 pub use cmd::{
     is_default_function_name, is_default_label_name, validate_symbol_name, RenameAndMoveCmd,

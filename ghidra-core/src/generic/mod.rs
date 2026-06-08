@@ -7,6 +7,8 @@
 
 pub mod system;
 pub mod task;
+pub mod task_trait;
+pub mod task_monitor;
 pub mod json;
 pub mod expressions;
 pub mod stl;
@@ -15,6 +17,14 @@ pub mod cache;
 pub mod iterators;
 pub mod algorithms;
 pub mod complex;
+pub mod domain_object;
+pub mod domain_folder;
+pub mod domain_file;
+pub mod domain_object_listener;
+pub mod undoable_domain_object;
+pub mod option_type;
+pub mod options;
+pub mod application_settings;
 
 pub use system::SystemInfo;
 pub use task::{

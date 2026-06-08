@@ -90,3 +90,11 @@ pub mod actions;
 /// Plugin component factories.
 /// Ported from `ghidra.app.factory`.
 pub mod factory;
+
+/// Auto-analysis framework with Analyzer trait, priorities, and manager.
+/// Ported from `ghidra.framework.analysis` and `ghidra.app.analyzers`.
+pub mod analysis;
+
+/// GoTo navigation service trait.
+/// Ported from `ghidra.app.services.GoToService`.
+pub mod goto;

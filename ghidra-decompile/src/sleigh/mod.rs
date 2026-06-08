@@ -52,11 +52,20 @@
 
 pub mod construct;
 pub mod context;
+pub mod context_symbol;
+pub mod constructor_symbol;
+pub mod flow_symbols;
+pub mod operand_symbol;
 pub mod pcode;
+pub mod sleigh_symbol;
 pub mod sla_compiler;
 pub mod slaspec_parser;
 pub mod sleigh;
+pub mod start_end_symbols;
+pub mod subtable_symbol;
+pub mod symbol_table;
 pub mod translator;
+pub mod varnode_symbol;
 
 // --- Re-exports of the most commonly used types ---
 
@@ -64,7 +73,12 @@ pub use construct::{
     ConstructTpl, Constructor, ContextOp, OperandSymbol, OperandVal, PatternEquation, TokenField,
 };
 pub use context::{ContextBit, ContextDatabase, ContextField, TrackedContext};
+pub use context_symbol::ContextSymbol;
+pub use constructor_symbol::{ConstructorSymbol, ContextChange, PrintPiece};
+pub use flow_symbols::{FlowDestSymbol, FlowRefSymbol};
+pub use operand_symbol::{OperandFlags, OperandSymbol as OperandSymbolNew};
 pub use pcode::{OpCode, PcodeOp, SpaceType, Varnode};
+pub use sleigh_symbol::{Location, SleighSymbol, SymbolType};
 pub use sla_compiler::{
     CompilerOptions, DecisionChild, DecisionNode, SlaCompiler, SlaFile, SlaHeader, SlaLoader,
     SerializedConstructor, SerializedContext, SerializedPcodeOp, SerializedRegister,
@@ -75,4 +89,8 @@ pub use sleigh::{
     AddressOfConstructor, DisassemblyResult, FlowState, SleighContext, SleighEngine,
     SleighInstructionContext,
 };
+pub use start_end_symbols::{EndSymbol, Next2Symbol, StartSymbol};
+pub use subtable_symbol::{DecisionNode as SubtableDecisionNode, SubtableSymbol};
+pub use symbol_table::{SymbolScope, SymbolTable};
 pub use translator::{ParseNode, ParseTree, ParserContext, ParserWalker, TranslateEngine};
+pub use varnode_symbol::VarnodeSymbol;

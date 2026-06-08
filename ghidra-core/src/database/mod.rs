@@ -11,7 +11,9 @@
 //! - [`DBRecord`] wraps a row with typed accessors
 //! - [`Transaction`] provides RAII-style commit/rollback
 //! - [`BufferFile`] stores large binary data
-//! - [`ChainedBuffer`] handles variable-length record chains//! - [`GhidraRecord`] is the port of Java `DBRecord` with Ghidra field system
+//! - [`ChainedBuffer`] handles variable-length record chains
+//! - [`LongKeyIndex`] manages long-key secondary indexes
+//! - [`GhidraRecord`] is the port of Java `DBRecord` with Ghidra field system
 //! - [`TableRecord`] is the port of Java `TableRecord` (table metadata)
 //! - [`SparseRecord`] is the port of Java `SparseRecord` (sparse columns)
 //! - [`GhidraField`] is the port of Java `Field` hierarchy (all field types)
@@ -41,15 +43,20 @@ pub mod transaction;
 
 // New modules porting Java DB framework types
 pub mod db_change_set;
+pub mod db_handle;
 pub mod db_parms;
+pub mod db_record;
 pub mod error;
 pub mod field;
 pub mod index_table;
 pub mod iterator;
+pub mod long_key_index;
 pub mod master_table;
 pub mod object_storage;
 pub mod record;
 pub mod record_translator;
+pub mod schema;
+pub mod table;
 pub mod table_statistics;
 
 // New modules porting Java SoftwareModeling database types
@@ -67,10 +74,16 @@ pub mod spec_extension;
 
 pub use buffer::{Buffer, ChainedBuffer as LegacyChainedBuffer};
 pub use db::{
-    convert_db_error, BufferFile, ChainedBuffer, DBHandle, DBListener, DBRecord, Database,
-    DbError, DbResult, Field, FieldType, FieldValue, GhidraTransaction, Index, IndexType,
-    LruCache, NoopDbListener, PooledConnection, Schema, Table, UndoEntry,
+    convert_db_error, BufferFile, ChainedBuffer, Database,
+    DbError, DbResult, FieldType, FieldValue, GhidraTransaction, Index, IndexType,
+    LruCache, NoopDbListener, UndoEntry, DBListener,
 };
+// Re-export from new modules
+pub use db_handle::{DBHandle, PooledConnection};
+pub use db_record::DBRecord;
+pub use long_key_index::LongKeyIndex;
+pub use schema::{Field, Schema};
+pub use table::Table;
 pub use transaction::{
     NoopTransactionListener, SavepointGuard, Transaction, TransactionListener, TransactionOpenMode,
 };

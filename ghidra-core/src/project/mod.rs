@@ -28,6 +28,14 @@
 //! | [`task`]         | `ghidra.framework.task` (GTask, GhidraTask, TaskScheduler, TaskMonitor) |
 //! | [`protocol`]     | `ghidra.framework.protocol.ghidra` (GhidraURL parsing) |
 //! | [`manager`]      | Project manager trait and related types        |
+//! | [`app_info`]     | `ghidra.framework.main.AppInfo` (application mode, version, install dir) |
+//! | [`console_service`] | `ghidra.framework.main.ConsoleService` (console output abstraction) |
+//! | [`default_project`] | `ghidra.framework.data.DefaultProject` (full-featured project impl) |
+//! | [`default_project_manager`] | `ghidra.framework.data.DefaultProjectManager` (filesystem-backed manager) |
+//! | [`default_project_data`] | `ghidra.framework.data.DefaultProjectData` (project data management) |
+//! | [`default_folder`] | `ghidra.framework.data.GhidraFolder` (filesystem-backed folder impl) |
+//! | [`project_data`] | `ghidra.framework.data` (ProjectData management, FileStatus, config) |
+//! | [`stored_undoable_domain_object`] | `ghidra.framework.data.StoredUndoableDomainObject` (undo/redo via snapshots) |
 
 pub mod cmd;
 pub mod data;
@@ -36,6 +44,16 @@ pub mod model;
 pub mod plugintool;
 pub mod protocol;
 pub mod task;
+
+// New modules ported from Java Framework/Project.
+pub mod app_info;
+pub mod console_service;
+pub mod default_folder;
+pub mod default_project;
+pub mod default_project_data;
+pub mod default_project_manager;
+pub mod project_data;
+pub mod stored_undoable_domain_object;
 
 use std::collections::{HashMap, VecDeque};
 use std::fmt;
