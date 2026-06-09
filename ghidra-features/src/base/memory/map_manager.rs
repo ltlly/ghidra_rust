@@ -16,6 +16,7 @@ use super::commands::{MergeBlocksCmd, MemoryCommand, SplitBlockCmd, Uninitialize
 ///
 /// The manager validates preconditions (block contiguity, type consistency,
 /// address validity) before delegating to the underlying memory commands.
+#[derive(Debug)]
 pub struct MemoryMapManager {
     /// Name of the program being managed (for error messages).
     program_name: String,

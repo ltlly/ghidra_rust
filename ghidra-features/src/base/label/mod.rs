@@ -10,6 +10,8 @@
 //! - [`LabelHistoryEntry`] / [`LabelHistoryTableModel`] -- label history display
 //! - [`LabelHistoryDialog`] -- dialog for displaying label history
 //! - [`AllHistoryAction`] -- action for searching all label history
+//! - [`AddEditDialog`] -- dialog for adding/editing labels
+//! - [`LabelDialogResult`] -- result of confirming the add/edit dialog
 //! - Action enablement functions matching Ghidra's `isEnabledForContext`
 //!
 //! # Architecture
@@ -27,6 +29,7 @@ pub mod actions;
 pub mod all_history_action;
 pub mod dialogs;
 pub mod history;
+pub mod label_dialog;
 pub mod label_history_dialog;
 pub mod label_plugin;
 pub mod operand_label;
@@ -40,6 +43,9 @@ pub use all_history_action::AllHistoryAction;
 pub use dialogs::{
     EditExternalLabelAction, LabelHistoryInputDialog, LabelHistoryPanel, LabelHistoryTask,
     SymbolChooserDialog,
+};
+pub use label_dialog::{
+    AddEditDialog, LabelDialogMode, LabelDialogResult, NamespaceCache, NamespaceOption,
 };
 pub use history::{
     LabelHistoryAction, LabelHistoryColumn, LabelHistoryEntry, LabelHistoryListener,

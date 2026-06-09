@@ -307,12 +307,20 @@ impl MemoryMapProvider {
             self.actions.move_block = true;
             self.actions.merge = false;
 
-            if let Some(block) = self.get_selected_block() {
-                let is_default = block.block_type == ghidra_core::mem::MemoryBlockType::Default;
+            // Extract block info before mutating self.actions to avoid borrow conflict.
+            let block_info: Option<(bool, u64)> = self.selected_rows.first().and_then(|&row| {
+                self.table_model.get_block(row).map(|block| {
+                    let is_default =
+                        block.block_type == ghidra_core::mem::MemoryBlockType::Default;
+                    (is_default, block.start().offset)
+                })
+            });
+
+            if let Some((is_default, start_offset)) = block_info {
                 self.actions.split = is_default;
 
                 if is_default {
-                    self.actions.expand_up = block.start().offset > 0;
+                    self.actions.expand_up = start_offset > 0;
                     // expand_down: not at max address (simplified check)
                     self.actions.expand_down = true;
                 } else {

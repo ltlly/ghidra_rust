@@ -30,6 +30,7 @@ pub mod data;
 pub mod clear;
 pub mod clipboard;
 pub mod colorizer;
+pub mod comment;
 pub mod comments;
 pub mod console;
 pub mod crossrefs;

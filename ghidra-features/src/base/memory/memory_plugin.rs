@@ -109,8 +109,7 @@ impl MemoryMapPlugin {
     ///
     /// This corresponds to `MemoryMapPlugin.programActivated` in Java.
     pub fn activate_program(&mut self, program: &Program) {
-        self.mem_manager
-            .set_program_name(program.name());
+        self.mem_manager = MemoryMapManager::new(program.get_name());
         self.provider.set_program(program);
     }
 
