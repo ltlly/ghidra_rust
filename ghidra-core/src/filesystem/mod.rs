@@ -14,6 +14,14 @@
 
 pub mod store;
 
+pub mod filesystem_trait;
+pub mod event_manager;
+pub mod folder_item;
+pub mod checkout_status;
+pub mod lock;
+pub mod local_filesystem;
+pub mod filesystem_error;
+
 use std::cmp::Ordering;
 use std::collections::{HashMap, VecDeque};
 use std::fmt;

@@ -11,8 +11,11 @@
 //!
 //! Also provides the generic graph framework ported from Ghidra's Java code:
 //! - Core traits: [`traits::GEdge`], [`traits::GDirectedGraph`], [`traits::GImplicitDirectedGraph`]
+//! - Unified graph trait: [`graph_trait::Graph`]
 //! - Default edge: [`default_edge::DefaultGEdge`]
 //! - Graph implementations: [`hash_graph::HashDirectedGraph`]
+//! - Abstract base: [`abstract_ghidra_graph::AbstractGhidraGraph`]
+//! - Graph adapter: [`graph_adapter::GGraphAdapter`]
 //! - Path types: [`graph_path::GraphPath`], [`graph_path::GraphPathSet`]
 //! - Edge metrics: [`edge_weight::GEdgeWeightMetric`]
 //! - Factory: [`factory::GraphFactory`]
@@ -41,16 +44,22 @@
 //! ## Graph Viewer (ported from `ghidra.graph.viewer`)
 //!
 //! - [`viewer::PathHighlightMode`], [`viewer::ViewState`], [`viewer::GraphViewerConfig`]
+//! - [`layout_provider::GLayoutProvider`], [`layout_provider::SimpleRowLayout`]
 //!
 //! ## Visual Graph Types (ported from `ghidra.graph.graphs`)
 //!
 //! - [`visual_graph::VisualGraph`], [`visual_graph::VisualVertex`], [`visual_graph::VisualEdge`]
+//! - [`abstract_visual_graph::AbstractVisualGraph`]: abstract visual graph with selection/focus/listeners
 //! - [`graphs::DefaultVisualGraph`]: base visual graph with selection/focus/listeners
 //! - [`graphs::FilteringVisualGraph`]: visual graph with vertex/edge filtering
 //! - [`graphs::GroupingVisualGraph`]: visual graph with vertex grouping
 //! - [`implicit_graph::GImplicitDirectedGraph`]: lazy/computed-on-demand graph trait
 //! - [`mutable_wrapper::MutableGDirectedGraphWrapper`]: additive overlay graph
 //! - [`graph_algorithms`]: static utility functions (sources, sinks, density, reachability)
+//!
+//! ## Export Utilities
+//!
+//! - [`export_csv_graph_url`]: CSV and URL graph export
 
 // Submodules for the generic graph framework
 pub mod traits;
@@ -73,6 +82,14 @@ pub mod graph_algorithms;
 pub mod graphs;
 pub mod grid;
 mod tests_new;
+
+// New modules ported from Ghidra's Java graph framework
+pub mod graph_trait;
+pub mod abstract_ghidra_graph;
+pub mod graph_adapter;
+pub mod abstract_visual_graph;
+pub mod layout_provider;
+pub mod export_csv_graph_url;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 

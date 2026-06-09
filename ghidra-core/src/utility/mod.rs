@@ -14,6 +14,8 @@
 //!   CancelledException, TimeoutException (port of `ghidra.util.exception`).
 //! - [`xml_parser`] -- XmlPullParser, XmlElement, XmlException
 //!   (port of `ghidra.xml`).
+//! - [`xml_utilities`] -- XmlUtilities, XmlWriter for XML generation, escaping,
+//!   pretty-printing, and validation (port of `ghidra.util.XmlUtilities`).
 //! - [`operating_system`] -- OperatingSystem enum (port of
 //!   `ghidra.framework.OperatingSystem`).
 //! - [`application`] -- ApplicationLayout, ApplicationProperties, GModule,
@@ -34,23 +36,39 @@
 //!   (port of `ghidra.util` stream types).
 //! - [`system_utilities`] -- SystemUtilities, FileUtilities,
 //!   ReflectionUtilities (port of `ghidra.util` and `utilities.util`).
+//! - [`string_utilities`] -- StringUtilities, StringBuilder
+//!   (port of `ghidra.util.StringUtilities`).
+//! - [`number_utilities`] -- NumberUtilities, FlexInteger
+//!   (port of `ghidra.util.NumberUtilities`).
+//! - [`binary_coded_decimal`] -- BcdUtils, BcdNumber
+//!   (port of `ghidra.util.BinaryCodedDecimal`).
+//! - [`color_utils`] -- ColorUtils, Color
+//!   (port of `ghidra.util.ColorUtils`).
+//! - [`html_utilities`] -- HTMLUtilities, HtmlBuilder
+//!   (port of `ghidra.util.HTMLUtilities`).
 //! - [`module_utils`] -- ModuleUtilities, ModuleManifestFile,
 //!   ClasspathFilter (port of `utility.module`).
 
 pub mod application;
+pub mod binary_coded_decimal;
+pub mod color_utils;
 pub mod concurrent;
 pub mod data_structures;
 pub mod exceptions;
 pub mod functional;
+pub mod html_utilities;
 pub mod module_utils;
 pub mod msg;
+pub mod number_utilities;
 pub mod operating_system;
 pub mod resource;
 pub mod service_provider;
 pub mod stream_utils;
+pub mod string_utilities;
 pub mod system_utilities;
 pub mod task_monitor;
 pub mod xml_parser;
+pub mod xml_utilities;
 
 use std::fmt;
 

@@ -7,7 +7,17 @@
 
 pub mod dmg;
 pub mod dyld_cache;
+pub mod dyld_cache_header;
+pub mod dyld_cache_image;
 
 // Re-exports
 pub use dmg::DmgHeader;
 pub use dyld_cache::DyldCacheHeader;
+pub use dyld_cache_header::{
+    DyldCacheAccelerateInfo, DyldCacheLocalSymbolsEntry, DyldCacheMappingAndSlideInfo,
+    DyldCacheMappingInfo, DyldCacheRangeEntry,
+};
+pub use dyld_cache_image::{
+    DyldCacheAcceleratorDof, DyldCacheAcceleratorInitializer, DyldCacheImageInfo,
+    DyldCacheImageInfoExtra, DyldCacheImageTextInfo,
+};

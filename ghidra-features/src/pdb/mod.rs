@@ -37,6 +37,10 @@ pub mod pdb_applicator_options;
 pub mod pdb_applicator_metrics;
 pub mod pdb_address_calculator;
 pub mod find_option;
+pub mod pdb_reader;
+pub mod default_pdb_import_options;
+pub mod pdb_plugin;
+pub mod msf_file;
 
 use std::fmt;
 
