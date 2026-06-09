@@ -27,6 +27,8 @@ use crate::loader::framework::MessageLog as LoaderMessageLog;
 
 pub mod binary_exporter;
 pub mod html_exporter;
+pub mod export_plugin;
+pub mod export_service;
 
 pub use binary_exporter::BinaryExporter;
 pub use html_exporter::HtmlExporter;

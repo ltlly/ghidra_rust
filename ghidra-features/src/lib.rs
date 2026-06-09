@@ -38,6 +38,12 @@ pub mod datamgr;
 pub mod byteviewer;
 pub mod demangler;
 pub mod codecompare;
+/// Source code compilation integration: compile plugin, provider, and
+/// compiler output parsing.  Manages build lifecycle, diagnostic message
+/// display, and source-location navigation.
+///
+/// Ported from Ghidra's `Features/Compile` concept.
+pub mod compile;
 pub mod debug;
 pub mod dex;
 pub mod dwarf;
@@ -236,6 +242,11 @@ pub mod batch_import;
 /// Program graph types and display options.
 /// Ported from `ghidra.graph`.
 pub mod graph_types;
+
+/// Save feature: saving modified domain files and tool configurations.
+/// Ported from `ghidra.framework.main.SaveDataDialog` and
+/// `ghidra.framework.plugintool.dialog.SaveToolConfigDialog`.
+pub mod save;
 
 /// Byte-based trie with Aho-Corasick multi-pattern search.
 /// Ported from `ghidra.util.search.trie`.

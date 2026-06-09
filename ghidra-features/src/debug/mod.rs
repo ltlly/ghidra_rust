@@ -29,6 +29,8 @@ pub mod change_set;
 pub mod control_mode;
 pub mod core_types;
 pub mod db_viewer;
+pub mod debug_plugin;
+pub mod debug_service;
 pub mod listing;
 pub mod memory;
 pub mod modules;
@@ -50,6 +52,18 @@ pub use change_set::TraceChangeSet;
 pub use control_mode::ControlMode;
 pub use core_types::{AddressSnap, Lifespan, TraceAddressSnapRange, TraceExecutionState, TraceSpan, SNAP_MAX, SNAP_MIN};
 pub use db_viewer::{DatabaseHandle, DatabaseKind, DatabaseRecord, DbTable, DbViewer, DbViewerState, TableStatistics, TableStatisticsCache};
+pub use debug_plugin::{
+    DebugPluginConfig, DebugPluginEvent, DebugPluginPackage, DebugPluginRegistration,
+    DebugPluginRegistry, DebugPluginState, DebugPluginStatus, standard_plugins,
+};
+pub use debug_service::{
+    BreakpointInfo, BreakpointKind, ConsoleEntry, ConsoleLevel, DebugBreakpointService,
+    DebugConsoleService, DebugControlService, DebugCoordinates, DebugEmulationService,
+    DebugListingService, DebugMappingService, DebugMemoryService, DebugRegisterService,
+    DebugServiceContainer, DebugServiceError, DebugServiceResult, DebugTargetService,
+    DebugTraceManagerService, EmulationResult, ExecutionState, MemoryRegionInfo, RegisterInfo,
+    StaticMappingEntry,
+};
 pub use listing::{CodeUnitType, CommentType, TraceCodeManager, TraceCodeSpace, TraceCodeUnit, TraceComment};
 pub use memory::{TraceMemoryBlock, TraceMemoryFlag, TraceMemoryManager, TraceMemoryRegion, TraceMemoryState};
 pub use modules::{TraceModule, TraceModuleManager, TraceSection};

@@ -24,6 +24,9 @@
 //! assert_eq!(results.len(), 1);
 //! ```
 
+pub mod import_plugin;
+pub mod import_service;
+
 use std::collections::HashMap;
 use std::fmt;
 use std::path::PathBuf;
