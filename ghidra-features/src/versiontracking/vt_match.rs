@@ -145,8 +145,8 @@ impl std::fmt::Display for VtMatchImpl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "[{}] {} <-> {} (sim={}, conf={})",
-            self.assoc_type, self.source_addr, self.dest_addr,
+            "[{}] 0x{:x} <-> 0x{:x} (sim={}, conf={})",
+            self.assoc_type, self.source_addr.offset, self.dest_addr.offset,
             self.sim_score, self.conf_score
         )
     }

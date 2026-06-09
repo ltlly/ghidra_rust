@@ -205,11 +205,15 @@ impl fmt::Display for VtMatchTag { fn fmt(&self, f: &mut fmt::Formatter<'_>) -> 
 #[derive(Debug, Clone)]
 pub struct VtMatchInfo {
     pub association_type: VtAssociationType,
+    pub tag: VtMatchTag,
     pub similarity_score: VtScore,
     pub confidence_score: VtScore,
+    pub source_address: u64,
+    pub destination_address: u64,
     pub source_length: u64,
     pub destination_length: u64,
     pub length_type: String,
+    pub match_set_id: u64,
 }
 
 #[cfg(test)]
