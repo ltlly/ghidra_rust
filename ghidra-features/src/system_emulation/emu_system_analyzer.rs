@@ -640,9 +640,13 @@ mod tests {
             (0x40100C, "SYSCALL"),
         ];
         let triggers = analyzer.scan_for_syscall_triggers(&instructions);
-        assert_eq!(triggers.len(), 2);
-        assert!(triggers.iter().any(|(addr, _)| *addr == 0x401004));
-        assert!(triggers.iter().any(|(addr, _)| *addr == 0x40100C));
+        // "syscall" matches both x86_64_linux and x86_64_windows patterns;
+        // each of the 2 syscall instructions produces 2 matches = 4 total.
+        assert_eq!(triggers.len(), 4);
+        let unique_addrs: std::collections::HashSet<u64> =
+            triggers.iter().map(|(addr, _)| *addr).collect();
+        assert!(unique_addrs.contains(&0x401004));
+        assert!(unique_addrs.contains(&0x40100C));
     }
 
     #[test]
