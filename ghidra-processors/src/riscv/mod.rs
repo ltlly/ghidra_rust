@@ -44,6 +44,7 @@
 //! - mstatus/mcause/mie/mip bit field definitions
 //! - ProcessorModule trait implementation
 
+pub mod language_provider;
 pub mod registers;
 
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};

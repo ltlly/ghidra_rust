@@ -41,6 +41,8 @@
 //! - IFF1 (Interrupt Flip-Flop):   0x001D  (1-bit, Z80)
 //! - IFF2 (IFF save):              0x001E  (1-bit, Z80)
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 

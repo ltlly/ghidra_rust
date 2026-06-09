@@ -31,6 +31,8 @@
 //! - RAMPD (RAM Page D):         0x002D  (8-bit, ATxmega)
 //! - EIMSK, EIFR (interrupt):    0x0030 - 0x0031 (8-bit each)
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 

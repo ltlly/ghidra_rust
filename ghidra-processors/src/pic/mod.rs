@@ -50,6 +50,8 @@
 //! - ACCB (40-bit accumulator B):     0x0068
 //! - ACCBH/ACCBL:                     0x0068/0x006A
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 

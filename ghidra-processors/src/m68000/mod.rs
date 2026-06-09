@@ -47,6 +47,8 @@
 //! - FPSR/FPCR/FPIAR:               0x0180            (32-bit each)
 //! - ColdFire MAC/EMAC:             0x0200 - 0x0268  (32-bit each)
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 

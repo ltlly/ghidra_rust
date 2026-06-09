@@ -36,6 +36,7 @@
 //! - FPU (%f0-63):                 0x0300 - 0x04FF
 //! - VIS extended:                  0x0500 - 0x057F
 
+pub mod language_provider;
 pub mod registers;
 
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};

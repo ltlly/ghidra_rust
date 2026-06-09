@@ -17,6 +17,8 @@
 //! - Scratch (RS, R):         0x08, 0x0C  (32-bit each)
 //! - Program Counter (PC):    0x10  (32-bit)
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 

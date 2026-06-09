@@ -31,6 +31,8 @@
 //! - System (MACH, MACL, PR, PC):   0x800+  (32-bit each)
 //! - FPSCR flags:                   0xA00  (8-bit each)
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 

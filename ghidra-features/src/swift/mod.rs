@@ -17,6 +17,11 @@
 //! -> MyModule.MyViewController.title : String { get }
 //! ```
 
+pub mod options;
+pub mod swift_analyzer;
+pub mod swift_demangler;
+pub mod swift_language_service;
+
 use std::fmt;
 use std::fmt::Write as FmtWrite;
 

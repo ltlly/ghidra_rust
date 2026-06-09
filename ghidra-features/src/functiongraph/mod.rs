@@ -2,17 +2,48 @@
 //!
 //! Provides widget-level data structures for the function graph viewer,
 //! graph layout algorithms (hierarchical, force-directed, circular, radial),
-//! and edge routing.
+//! edge routing, and the plugin/provider/view components that make up
+//! the function graph feature.
 //!
 //! # Submodules
 //!
 //! - [`mvc`] -- MVC data types (options, vertex types, group history, etc.)
+//! - [`function_graph`] -- Provider: the viewer component for a single graph.
+//! - [`function_graph_model`] -- Data model connecting a function to its graph.
+//! - [`function_graph_view`] -- View: rendering, hit-testing, zoom/pan.
+//! - [`function_graph_plugin`] -- Plugin: top-level entry point.
+//! - [`function_graph_options`] -- Plugin-level option management.
+//! - [`function_graph_layout`] -- Layout engines (hierarchical, force-directed,
+//!   circular, radial).
 
 pub mod mvc;
+
+/// Function Graph Plugin -- top-level plugin entry point.
+pub mod function_graph_plugin;
+/// Function Graph Options -- plugin-level option keys, categories, and
+/// [`FunctionGraphPluginOptions`].
+pub mod function_graph_options;
+/// Function Graph Layout -- layout engines and edge routing.
+pub mod function_graph_layout;
+/// Function Graph Provider -- the viewer provider for a single graph.
+pub mod function_graph;
+/// Function Graph View -- rendering, hit-testing, zoom/pan.
+pub mod function_graph_view;
+/// Function Graph Model -- data model connecting a function to its graph.
+pub mod function_graph_model;
 
 pub use mvc::{
     EdgeColorScheme, FGData, FGVertexType, FunctionGraphOptions, GroupHistoryInfo,
     NavigationHistoryMode, RelayoutOption, VertexInfo,
+};
+pub use function_graph::FunctionGraphProvider;
+pub use function_graph_model::FunctionGraphModel;
+pub use function_graph_view::FunctionGraphView;
+pub use function_graph_plugin::FunctionGraphPlugin;
+pub use function_graph_options::FunctionGraphPluginOptions;
+pub use function_graph_layout::{
+    CircularLayoutEngine, ForceDirectedLayoutEngine, HierarchicalLayoutEngine, LayoutEngine,
+    RadialLayoutEngine, create_layout_engine, create_layout_engine_with_direction, LayoutMetrics,
 };
 
 use ghidra_core::addr::Address;
