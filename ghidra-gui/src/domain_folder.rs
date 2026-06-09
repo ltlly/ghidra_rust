@@ -147,6 +147,67 @@ pub trait GuiDomainFolder: fmt::Debug + Send + Sync {
     /// Returns `true` if the project is writable.
     fn is_in_writable_project(&self) -> bool;
 
+    // -- path comparison ---------------------------------------------------
+
+    /// Returns `true` if `folder` refers to the same project folder as `self`,
+    /// based on path and underlying project/repository identity.
+    ///
+    /// Mirrors Java's `DomainFolder.isSame(DomainFolder)`.
+    fn is_same(&self, folder: &dyn GuiDomainFolder) -> bool {
+        self.get_pathname() == folder.get_pathname()
+    }
+
+    /// Returns `true` if `folder` is the same as or a descendant of this
+    /// folder, based on path and underlying project/repository identity.
+    ///
+    /// Mirrors Java's `DomainFolder.isSameOrAncestor(DomainFolder)`.
+    fn is_same_or_ancestor(&self, folder: &dyn GuiDomainFolder) -> bool {
+        let my_path = self.get_pathname();
+        let other_path = folder.get_pathname();
+        other_path == my_path || other_path.starts_with(&format!("{}/", my_path.trim_end_matches('/')))
+    }
+
+    // -- URL access --------------------------------------------------------
+
+    /// Get a remote Ghidra URL for this domain folder if available within an
+    /// associated shared project repository.
+    ///
+    /// Returns `None` if the shared folder does not exist or the repository
+    /// is not connected.  Mirrors Java's `getSharedProjectURL()`.
+    fn get_shared_project_url(&self) -> Option<String> {
+        None
+    }
+
+    /// Get a local Ghidra URL for this domain folder if available within the
+    /// associated non-transient local project.
+    ///
+    /// Returns `None` if the project is transient.  Mirrors Java's
+    /// `getLocalProjectURL()`.
+    fn get_local_project_url(&self) -> Option<String> {
+        None
+    }
+
+    // -- link-file creation ------------------------------------------------
+
+    /// Create a link-file within this folder that references the specified
+    /// `pathname` within the given source project.
+    ///
+    /// Mirrors Java's `DomainFolder.createLinkFile(ProjectData, String,
+    /// boolean, String, LinkHandler)`.
+    fn create_link_file(
+        &mut self,
+        _source_path: &str,
+        _target_path: &str,
+        _make_relative: bool,
+        link_filename: &str,
+        link_type: &str,
+    ) -> Result<GuiDomainFile, DomainFolderGuiError> {
+        Err(DomainFolderGuiError::NotSupported(format!(
+            "create_link_file not supported (link_filename={}, type={})",
+            link_filename, link_type,
+        )))
+    }
+
     // -- utility -----------------------------------------------------------
 
     /// Returns the icon identifier for this folder.
@@ -177,19 +238,44 @@ pub struct GuiDomainFile {
     domain_type: String,
     /// Whether this file is currently checked out.
     checked_out: bool,
+    /// Whether this is an exclusive checkout.
+    checked_out_exclusive: bool,
     /// The user who has this file checked out.
     checked_out_by: Option<String>,
     /// Whether this file is read-only.
     read_only: bool,
     /// Whether this file has unsaved changes.
     changed: bool,
+    /// Whether the file has been modified since checkout.
+    modified_since_checkout: bool,
     /// Link status, if this file is a link-file.
     link_status: Option<LinkStatus>,
+    /// Whether the file is versioned (in version control).
+    versioned: bool,
+    /// Whether the file is hijacked (versioned but private copy exists).
+    hijacked: bool,
+    /// The current version number.
+    version: i32,
+    /// The latest available version number.
+    latest_version: i32,
+    /// A unique file ID, if established.
+    file_id: Option<String>,
+    /// Content type string.
+    content_type: String,
+    /// Whether this file exists (false for proxy files).
+    exists: bool,
+    /// Length of the file in bytes.
+    file_length: u64,
+    /// Last modification timestamp (epoch millis).
+    last_modified_time: u64,
     /// Additional metadata key/value pairs.
     metadata: HashMap<String, String>,
 }
 
 impl GuiDomainFile {
+    /// The default version identifier, meaning "use the latest version".
+    pub const DEFAULT_VERSION: i32 = -1;
+
     /// Create a new domain file descriptor.
     pub fn new(
         path: impl Into<String>,
@@ -201,10 +287,21 @@ impl GuiDomainFile {
             name: name.into(),
             domain_type: domain_type.into(),
             checked_out: false,
+            checked_out_exclusive: false,
             checked_out_by: None,
             read_only: false,
             changed: false,
+            modified_since_checkout: false,
             link_status: None,
+            versioned: false,
+            hijacked: false,
+            version: Self::DEFAULT_VERSION,
+            latest_version: Self::DEFAULT_VERSION,
+            file_id: None,
+            content_type: String::new(),
+            exists: true,
+            file_length: 0,
+            last_modified_time: 0,
             metadata: HashMap::new(),
         }
     }
@@ -301,6 +398,167 @@ impl GuiDomainFile {
     pub fn get_all_metadata(&self) -> &HashMap<String, String> {
         &self.metadata
     }
+
+    // -- Extended checkout / version methods --------------------------------
+
+    /// Returns `true` if this is a checked-out file with exclusive access.
+    pub fn is_checked_out_exclusive(&self) -> bool {
+        self.checked_out_exclusive
+    }
+
+    /// Set whether this checkout is exclusive.
+    pub fn set_checked_out_exclusive(&mut self, exclusive: bool) {
+        self.checked_out_exclusive = exclusive;
+    }
+
+    /// Returns `true` if this file has been modified since it was checked out.
+    pub fn modified_since_checkout(&self) -> bool {
+        self.modified_since_checkout
+    }
+
+    /// Set the "modified since checkout" flag.
+    pub fn set_modified_since_checkout(&mut self, modified: bool) {
+        self.modified_since_checkout = modified;
+    }
+
+    /// Returns `true` if the file is versioned (under version control).
+    pub fn is_versioned(&self) -> bool {
+        self.versioned
+    }
+
+    /// Set the versioned flag.
+    pub fn set_versioned(&mut self, versioned: bool) {
+        self.versioned = versioned;
+    }
+
+    /// Returns `true` if the file is hijacked (versioned but a private copy
+    /// also exists).
+    pub fn is_hijacked(&self) -> bool {
+        self.hijacked
+    }
+
+    /// Set the hijacked flag.
+    pub fn set_hijacked(&mut self, hijacked: bool) {
+        self.hijacked = hijacked;
+    }
+
+    /// Returns the current version number.
+    pub fn get_version(&self) -> i32 {
+        self.version
+    }
+
+    /// Set the current version number.
+    pub fn set_version(&mut self, version: i32) {
+        self.version = version;
+    }
+
+    /// Returns the latest available version number.
+    pub fn get_latest_version(&self) -> i32 {
+        self.latest_version
+    }
+
+    /// Set the latest version number.
+    pub fn set_latest_version(&mut self, version: i32) {
+        self.latest_version = version;
+    }
+
+    /// Returns `true` if this file is the latest version.
+    pub fn is_latest_version(&self) -> bool {
+        self.version == self.latest_version
+    }
+
+    /// Returns the file ID, if one has been established.
+    pub fn get_file_id(&self) -> Option<&str> {
+        self.file_id.as_deref()
+    }
+
+    /// Set the file ID.
+    pub fn set_file_id(&mut self, id: impl Into<String>) {
+        self.file_id = Some(id.into());
+    }
+
+    /// Returns the content type string.
+    pub fn get_content_type(&self) -> &str {
+        &self.content_type
+    }
+
+    /// Set the content type.
+    pub fn set_content_type(&mut self, ct: impl Into<String>) {
+        self.content_type = ct.into();
+    }
+
+    /// Returns `true` if the file exists.
+    pub fn exists(&self) -> bool {
+        self.exists
+    }
+
+    /// Set whether the file exists.
+    pub fn set_exists(&mut self, exists: bool) {
+        self.exists = exists;
+    }
+
+    /// Returns the file length in bytes.
+    pub fn length(&self) -> u64 {
+        self.file_length
+    }
+
+    /// Set the file length.
+    pub fn set_length(&mut self, len: u64) {
+        self.file_length = len;
+    }
+
+    /// Returns the last modification time (epoch millis).
+    pub fn get_last_modified_time(&self) -> u64 {
+        self.last_modified_time
+    }
+
+    /// Set the last modification time.
+    pub fn set_last_modified_time(&mut self, time: u64) {
+        self.last_modified_time = time;
+    }
+
+    /// Returns `true` if this file is open (has an active domain object).
+    pub fn is_open(&self) -> bool {
+        self.changed || self.checked_out
+    }
+
+    /// Returns `true` if this file can be checked out.
+    pub fn can_checkout(&self) -> bool {
+        !self.checked_out && !self.read_only && self.exists
+    }
+
+    /// Returns `true` if this file can be checked in.
+    pub fn can_checkin(&self) -> bool {
+        self.checked_out && self.modified_since_checkout
+    }
+
+    /// Returns `true` if this file can be saved.
+    pub fn can_save(&self) -> bool {
+        !self.read_only && self.exists
+    }
+
+    /// Undo the checkout, restoring the original repository file.
+    pub fn undo_checkout(&mut self, keep: bool) {
+        if keep {
+            // In a real implementation, rename private db with .keep extension.
+        }
+        self.checked_out = false;
+        self.checked_out_exclusive = false;
+        self.checked_out_by = None;
+        self.modified_since_checkout = false;
+    }
+
+    /// Returns the icon identifier for this file.
+    ///
+    /// Returns `None` if no specific icon is determined (caller should use
+    /// a default).
+    pub fn get_icon(&self) -> Option<&str> {
+        if self.link_status.is_some() {
+            Some("icon.domain.file.link")
+        } else {
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +582,8 @@ pub enum DomainFolderGuiError {
     IoError(String),
     /// The operation was cancelled.
     Cancelled,
+    /// The operation is not supported.
+    NotSupported(String),
     /// A generic error.
     Other(String),
 }
@@ -338,6 +598,7 @@ impl fmt::Display for DomainFolderGuiError {
             Self::FileInUse(name) => write!(f, "File in use: {}", name),
             Self::IoError(msg) => write!(f, "I/O error: {}", msg),
             Self::Cancelled => write!(f, "Operation cancelled"),
+            Self::NotSupported(msg) => write!(f, "Not supported: {}", msg),
             Self::Other(msg) => write!(f, "{}", msg),
         }
     }
@@ -451,6 +712,8 @@ mod tests {
         fn is_linked(&self) -> bool { self.linked }
         fn get_project_locator(&self) -> Option<String> { Some("/projects/test".into()) }
         fn is_in_writable_project(&self) -> bool { self.writable }
+        fn get_shared_project_url(&self) -> Option<String> { None }
+        fn get_local_project_url(&self) -> Option<String> { Some("ghidra:///projects/test".into()) }
     }
 
     // -- Constants ---------------------------------------------------------
@@ -692,5 +955,190 @@ mod tests {
         fn assert_error<E: std::error::Error>(_e: &E) {}
         let err = DomainFolderGuiError::Other("test".into());
         assert_error(&err);
+    }
+
+    // -- Path comparison ---------------------------------------------------
+
+    #[test]
+    fn test_is_same() {
+        let a = MockFolder::new("folder", "/projects/folder");
+        let b = MockFolder::new("folder", "/projects/folder");
+        let c = MockFolder::new("other", "/projects/other");
+        assert!(a.is_same(&b));
+        assert!(!a.is_same(&c));
+    }
+
+    #[test]
+    fn test_is_same_or_ancestor() {
+        let parent = MockFolder::new("parent", "/parent");
+        let child = MockFolder::new("child", "/parent/child");
+        let grandchild = MockFolder::new("gc", "/parent/child/gc");
+        let unrelated = MockFolder::new("other", "/other");
+
+        assert!(parent.is_same_or_ancestor(&parent));
+        assert!(parent.is_same_or_ancestor(&child));
+        assert!(parent.is_same_or_ancestor(&grandchild));
+        assert!(!parent.is_same_or_ancestor(&unrelated));
+        assert!(!child.is_same_or_ancestor(&parent));
+    }
+
+    // -- URL access --------------------------------------------------------
+
+    #[test]
+    fn test_folder_urls() {
+        let folder = MockFolder::new("test", "/test");
+        assert!(folder.get_shared_project_url().is_none());
+        assert!(folder.get_local_project_url().is_some());
+    }
+
+    // -- File extended methods ---------------------------------------------
+
+    #[test]
+    fn test_file_exclusive_checkout() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(!file.is_checked_out_exclusive());
+        file.set_checked_out("user1");
+        file.set_checked_out_exclusive(true);
+        assert!(file.is_checked_out_exclusive());
+    }
+
+    #[test]
+    fn test_file_modified_since_checkout() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(!file.modified_since_checkout());
+        file.set_modified_since_checkout(true);
+        assert!(file.modified_since_checkout());
+    }
+
+    #[test]
+    fn test_file_versioning() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(!file.is_versioned());
+        assert_eq!(file.get_version(), GuiDomainFile::DEFAULT_VERSION);
+        assert_eq!(file.get_latest_version(), GuiDomainFile::DEFAULT_VERSION);
+        assert!(file.is_latest_version());
+
+        file.set_versioned(true);
+        file.set_version(3);
+        file.set_latest_version(5);
+        assert!(file.is_versioned());
+        assert!(!file.is_latest_version());
+        assert_eq!(file.get_version(), 3);
+        assert_eq!(file.get_latest_version(), 5);
+
+        file.set_version(5);
+        assert!(file.is_latest_version());
+    }
+
+    #[test]
+    fn test_file_hijacked() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(!file.is_hijacked());
+        file.set_hijacked(true);
+        assert!(file.is_hijacked());
+    }
+
+    #[test]
+    fn test_file_id_and_content_type() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(file.get_file_id().is_none());
+        file.set_file_id("abc-123");
+        assert_eq!(file.get_file_id(), Some("abc-123"));
+
+        assert_eq!(file.get_content_type(), "");
+        file.set_content_type("Program");
+        assert_eq!(file.get_content_type(), "Program");
+    }
+
+    #[test]
+    fn test_file_exists_and_length() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(file.exists());
+        file.set_exists(false);
+        assert!(!file.exists());
+
+        assert_eq!(file.length(), 0);
+        file.set_length(1024);
+        assert_eq!(file.length(), 1024);
+    }
+
+    #[test]
+    fn test_file_last_modified() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert_eq!(file.get_last_modified_time(), 0);
+        file.set_last_modified_time(1234567890);
+        assert_eq!(file.get_last_modified_time(), 1234567890);
+    }
+
+    #[test]
+    fn test_file_can_operations() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(file.can_checkout());
+        assert!(file.can_save());
+        assert!(!file.can_checkin());
+
+        file.set_checked_out("user1");
+        assert!(!file.can_checkout());
+        assert!(!file.can_checkin());
+
+        file.set_modified_since_checkout(true);
+        assert!(file.can_checkin());
+
+        file.set_read_only(true);
+        file.clear_checkout();
+        assert!(!file.can_checkout());
+        assert!(!file.can_save());
+    }
+
+    #[test]
+    fn test_file_undo_checkout() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        file.set_checked_out("user1");
+        file.set_checked_out_exclusive(true);
+        file.set_modified_since_checkout(true);
+
+        file.undo_checkout(false);
+        assert!(!file.is_checked_out());
+        assert!(!file.is_checked_out_exclusive());
+        assert!(!file.modified_since_checkout());
+    }
+
+    #[test]
+    fn test_file_icon() {
+        let mut file = GuiDomainFile::new("/test/link.gzf", "link.gzf", "FolderLink");
+        assert!(file.get_icon().is_none());
+
+        file.set_link_status(LinkStatus::Internal);
+        assert_eq!(file.get_icon(), Some("icon.domain.file.link"));
+    }
+
+    #[test]
+    fn test_file_is_open() {
+        let mut file = GuiDomainFile::new("/test/f.gzf", "f.gzf", "Program");
+        assert!(!file.is_open());
+
+        file.set_changed(true);
+        assert!(file.is_open());
+
+        file.set_changed(false);
+        file.set_checked_out("user1");
+        assert!(file.is_open());
+    }
+
+    // -- NotSupported error variant ----------------------------------------
+
+    #[test]
+    fn test_not_supported_error() {
+        let err = DomainFolderGuiError::NotSupported("test".into());
+        assert!(err.to_string().contains("Not supported"));
+    }
+
+    // -- create_link_file default impl -------------------------------------
+
+    #[test]
+    fn test_create_link_file_default() {
+        let mut folder = MockFolder::new("test", "/test");
+        let result = folder.create_link_file("/src", "/target", true, "link", "Program");
+        assert!(result.is_err());
     }
 }

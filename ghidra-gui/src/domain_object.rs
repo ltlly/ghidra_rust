@@ -17,6 +17,118 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 // ---------------------------------------------------------------------------
+// Options / property lists
+// ---------------------------------------------------------------------------
+
+/// A named group of key/value options on a domain object.
+///
+/// Mirrors Java's `Options` interface from `ghidra.framework.options`.
+/// Each domain object may expose multiple named option lists (e.g. "Display",
+/// "Listing Fields", etc.).
+#[derive(Debug, Clone, Default)]
+pub struct DomainOptions {
+    /// The name of this options group.
+    name: String,
+    /// The key/value pairs in this group.
+    entries: HashMap<String, OptionValue>,
+}
+
+/// A single option value within a [`DomainOptions`] list.
+#[derive(Debug, Clone)]
+pub enum OptionValue {
+    /// A boolean value.
+    Bool(bool),
+    /// An integer value.
+    Int(i64),
+    /// A floating-point value.
+    Double(f64),
+    /// A string value.
+    String(String),
+}
+
+impl DomainOptions {
+    /// Create a new options group.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            entries: HashMap::new(),
+        }
+    }
+
+    /// Returns the name of this options group.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Set a boolean option.
+    pub fn set_bool(&mut self, key: impl Into<String>, value: bool) {
+        self.entries.insert(key.into(), OptionValue::Bool(value));
+    }
+
+    /// Set an integer option.
+    pub fn set_int(&mut self, key: impl Into<String>, value: i64) {
+        self.entries.insert(key.into(), OptionValue::Int(value));
+    }
+
+    /// Set a double option.
+    pub fn set_double(&mut self, key: impl Into<String>, value: f64) {
+        self.entries.insert(key.into(), OptionValue::Double(value));
+    }
+
+    /// Set a string option.
+    pub fn set_string(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.entries.insert(key.into(), OptionValue::String(value.into()));
+    }
+
+    /// Get a boolean option.
+    pub fn get_bool(&self, key: &str) -> Option<bool> {
+        match self.entries.get(key)? {
+            OptionValue::Bool(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get an integer option.
+    pub fn get_int(&self, key: &str) -> Option<i64> {
+        match self.entries.get(key)? {
+            OptionValue::Int(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get a double option.
+    pub fn get_double(&self, key: &str) -> Option<f64> {
+        match self.entries.get(key)? {
+            OptionValue::Double(v) => Some(*v),
+            _ => None,
+        }
+    }
+
+    /// Get a string option.
+    pub fn get_string(&self, key: &str) -> Option<&str> {
+        match self.entries.get(key)? {
+            OptionValue::String(v) => Some(v.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Returns all option keys in this group.
+    pub fn keys(&self) -> Vec<&str> {
+        self.entries.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Returns the number of options in this group.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Returns `true` if this options group is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Event types
 // ---------------------------------------------------------------------------
 
@@ -233,6 +345,15 @@ pub trait GuiDomainObject: fmt::Debug + Send + Sync {
     /// Save the object to its backing store.
     fn save(&mut self, comment: &str) -> Result<(), DomainObjectGuiError>;
 
+    /// Save (serialize) the current content to a packed output file.
+    ///
+    /// Mirrors Java's `saveToPackedFile(File, TaskMonitor)`.
+    fn save_to_packed_file(&self, _output_path: &std::path::Path) -> Result<(), DomainObjectGuiError> {
+        Err(DomainObjectGuiError::NotSupported(
+            "save_to_packed_file is not supported".into(),
+        ))
+    }
+
     // -- consumer management -----------------------------------------------
 
     /// Release a consumer.  When the last consumer releases, the object
@@ -316,6 +437,14 @@ pub trait GuiDomainObject: fmt::Debug + Send + Sync {
     /// Returns all option names.
     fn get_options_names(&self) -> Vec<String>;
 
+    /// Get the options (property list) for the given name.
+    ///
+    /// Returns `None` if no options group with the given name exists.
+    /// Mirrors Java's `getOptions(String)`.
+    fn get_options(&self, _name: &str) -> Option<&DomainOptions> {
+        None
+    }
+
     // -- state -------------------------------------------------------------
 
     /// Returns `true` if the object has been closed.
@@ -343,6 +472,49 @@ pub trait GuiDomainObject: fmt::Debug + Send + Sync {
 
     /// Returns `true` if the last transaction was terminated.
     fn has_terminated_transaction(&self) -> bool;
+
+    /// Start a new transaction with an abort listener.
+    ///
+    /// When the transaction is aborted (rolled back), the provided listener
+    /// will be notified.  Mirrors Java's
+    /// `startTransaction(String, AbortedTransactionListener)`.
+    fn start_transaction_with_abort_listener(
+        &mut self,
+        description: &str,
+        _listener: Arc<dyn AbortedTransactionListener>,
+    ) -> u32 {
+        // Default implementation ignores the listener.
+        self.start_transaction(description)
+    }
+
+    // -- synchronized domain objects ---------------------------------------
+
+    /// Return the set of domain objects synchronized with this one via a
+    /// shared transaction manager, or an empty slice if none.
+    ///
+    /// Mirrors Java's `getSynchronizedDomainObjects()`.
+    fn get_synchronized_domain_objects(&self) -> &[String] {
+        &[]
+    }
+
+    /// Synchronize another domain object with this one using a shared
+    /// transaction manager.
+    ///
+    /// Mirrors Java's `addSynchronizedDomainObject(DomainObject)`.
+    fn add_synchronized_domain_object(&mut self, _domain_file_path: String) -> Result<(), DomainObjectGuiError> {
+        Err(DomainObjectGuiError::NotSupported(
+            "add_synchronized_domain_object is not supported".into(),
+        ))
+    }
+
+    /// Release this domain object from a shared transaction manager.
+    ///
+    /// Mirrors Java's `releaseSynchronizedDomainObject()`.
+    fn release_synchronized_domain_object(&mut self) -> Result<(), DomainObjectGuiError> {
+        Err(DomainObjectGuiError::NotSupported(
+            "release_synchronized_domain_object is not supported".into(),
+        ))
+    }
 
     // -- undo / redo -------------------------------------------------------
 
@@ -476,6 +648,13 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
 
     // -- Mock listener -----------------------------------------------------
+
+    #[derive(Debug)]
+    struct MockAbortedListener;
+
+    impl AbortedTransactionListener for MockAbortedListener {
+        fn transaction_aborted(&self) {}
+    }
 
     #[derive(Debug)]
     struct MockListener {
@@ -859,5 +1038,92 @@ mod tests {
         assert!(obj.is_sending_events());
         obj.set_events_enabled(false);
         assert!(!obj.is_sending_events());
+    }
+
+    // -- Options tests -----------------------------------------------------
+
+    #[test]
+    fn test_domain_options_basic() {
+        let mut opts = DomainOptions::new("Display");
+        assert_eq!(opts.name(), "Display");
+        assert!(opts.is_empty());
+
+        opts.set_bool("show_line_numbers", true);
+        opts.set_int("font_size", 14);
+        opts.set_double("zoom", 1.5);
+        opts.set_string("theme", "dark");
+
+        assert_eq!(opts.len(), 4);
+        assert_eq!(opts.get_bool("show_line_numbers"), Some(true));
+        assert_eq!(opts.get_int("font_size"), Some(14));
+        assert_eq!(opts.get_double("zoom"), Some(1.5));
+        assert_eq!(opts.get_string("theme"), Some("dark"));
+    }
+
+    #[test]
+    fn test_domain_options_missing_key() {
+        let opts = DomainOptions::new("Empty");
+        assert!(opts.get_bool("nope").is_none());
+        assert!(opts.get_int("nope").is_none());
+    }
+
+    #[test]
+    fn test_domain_options_type_mismatch() {
+        let mut opts = DomainOptions::new("Test");
+        opts.set_bool("flag", true);
+        // Asking for int on a bool key returns None.
+        assert!(opts.get_int("flag").is_none());
+    }
+
+    #[test]
+    fn test_domain_options_keys() {
+        let mut opts = DomainOptions::new("Test");
+        opts.set_bool("a", true);
+        opts.set_bool("b", false);
+        let keys = opts.keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"a"));
+        assert!(keys.contains(&"b"));
+    }
+
+    // -- save_to_packed_file default impl -----------------------------------
+
+    #[test]
+    fn test_save_to_packed_file_unsupported() {
+        let obj = MockGuiDomainObject::new("Test");
+        let result = obj.save_to_packed_file(std::path::Path::new("/tmp/out.bin"));
+        assert!(result.is_err());
+    }
+
+    // -- start_transaction_with_abort_listener ------------------------------
+
+    #[test]
+    fn test_start_transaction_with_abort_listener() {
+        let mut obj = MockGuiDomainObject::new("Test");
+        // The default implementation delegates to start_transaction.
+        let tx_id = obj.start_transaction_with_abort_listener(
+            "abort test",
+            Arc::new(MockAbortedListener),
+        );
+        assert!(tx_id > 0);
+        obj.end_transaction(tx_id, true);
+    }
+
+    // -- synchronized domain objects trait methods ---------------------------
+
+    #[test]
+    fn test_synchronized_domain_object_trait_defaults() {
+        let mut obj = MockGuiDomainObject::new("Test");
+        assert!(obj.get_synchronized_domain_objects().is_empty());
+        assert!(obj.add_synchronized_domain_object("/x".into()).is_err());
+        assert!(obj.release_synchronized_domain_object().is_err());
+    }
+
+    // -- get_options default ------------------------------------------------
+
+    #[test]
+    fn test_get_options_default() {
+        let obj = MockGuiDomainObject::new("Test");
+        assert!(obj.get_options("anything").is_none());
     }
 }
