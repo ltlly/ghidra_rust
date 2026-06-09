@@ -23,6 +23,16 @@ pub mod plugin;
 /// and `GraphDisplayBrokerListener`.
 pub mod display_listener;
 
+/// Main graph plugin for program visualization.
+///
+/// Ported from `ghidra.features.graph.GraphPlugin` (Features/Graph).
+pub mod graph_plugin;
+
+/// Graph display provider interface and manager.
+///
+/// Ported from `ghidra.features.graph.GraphProvider` (Features/Graph).
+pub mod graph_provider;
+
 use std::collections::HashMap;
 
 /// Option key for the active graph provider.

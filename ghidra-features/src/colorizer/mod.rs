@@ -22,6 +22,19 @@
 /// `SetColorCommand`, `ClearColorCommand`, and navigation actions.
 pub mod plugin;
 
+/// Colorizing service trait, provider, and null implementation.
+///
+/// Ported from `ghidra.app.plugin.core.colorizer.ColorizingService`
+/// and `ColorizingServiceProvider`.
+pub mod colorizer_service;
+
+/// Colorizing plugin orchestration, commands, and navigation actions.
+///
+/// Ported from `ghidra.app.plugin.core.colorizer.ColorizingPlugin`,
+/// `SetColorCommand`, `ClearColorCommand`,
+/// `NextColorRangeAction`, `PreviousColorRangeAction`.
+pub mod colorizer_plugin;
+
 use ghidra_core::Address;
 use std::collections::HashMap;
 

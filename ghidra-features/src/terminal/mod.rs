@@ -31,6 +31,20 @@ pub mod terminal_listener;
 /// `TerminalLayoutModel`.
 pub mod terminal_finder;
 
+/// Terminal plugin -- service provider for VT100 terminal emulation.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.terminal.TerminalPlugin`
+/// Java class.  Manages terminal provider instances, clipboard service
+/// wiring, and the terminal service lifecycle.
+pub mod terminal_plugin;
+
+/// Terminal provider -- UI component provider for a single terminal session.
+///
+/// Ported from Ghidra's `ghidra.app.plugin.core.terminal.TerminalProvider`
+/// Java class.  Provides find dialog, font sizing, actions, termination
+/// lifecycle, and clipboard integration.
+pub mod terminal_provider;
+
 use std::collections::VecDeque;
 
 /// Default terminal width in columns.

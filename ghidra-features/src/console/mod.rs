@@ -31,6 +31,8 @@
 //! assert_eq!(buffer.error_count(), 1);
 //! ```
 
+pub mod console_log;
+pub mod console_panel;
 pub mod console_plugin;
 pub mod console_service;
 
@@ -40,6 +42,8 @@ pub use crate::base::console::{
 };
 
 // Re-export the new submodules.
+pub use console_log::{ConsoleLog, ConsoleStyle, LogEntry};
+pub use console_panel::{ConsolePanel, FindState, PanelAction};
 pub use console_plugin::ConsolePluginFactory;
 pub use console_service::{ConsoleServiceFactory, ConsoleSession};
 
