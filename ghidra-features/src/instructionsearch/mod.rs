@@ -58,6 +58,19 @@ pub mod instruction_table;
 /// `InstructionSearchDialog`, and `InstructionSearchPlugin`.
 pub mod search_all_task;
 
+/// Full-featured instruction search plugin with program lifecycle,
+/// action context, provider coordination, and search history.
+///
+/// Ported from `ghidra.app.plugin.core.instructionsearch.InstructionSearchPlugin`
+/// (full Java implementation including program lifecycle management).
+pub mod instruction_search_plugin;
+
+/// Provider for the instruction search panel -- manages visibility,
+/// display state, and UI coordination.
+///
+/// Ported from `ghidra.app.plugin.core.instructionsearch.InstructionSearchProvider`.
+pub mod instruction_search_provider;
+
 pub use model::{InstructionMetadata, MaskContainer, MaskSettings, OperandMetadata};
 pub use api::InstructionSearchApi;
 pub use utils::InstructionSearchUtils;
@@ -65,6 +78,12 @@ pub use search_data::{InstructionSearchData, SearchState};
 pub use search_task::{SearchInstructionsTask, SearchAllInstructionsTask, SearchTaskState, SearchTaskProgress};
 pub use panel::{InstructionSearchPanelModel, InstructionTableRow, SearchPanelMode, SelectionMode};
 pub use yara::{InstructionSearchApiYara, YaraRule, YaraHexPattern};
+pub use instruction_search_plugin::{
+    InstructionSearchPluginFull, PluginConfig, PluginState, SearchHistoryEntry, SearchMode,
+};
+pub use instruction_search_provider::{
+    DisplayState, InstructionSearchProvider, ProviderVisibility,
+};
 
 use ghidra_core::Address;
 use serde::{Deserialize, Serialize};

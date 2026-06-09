@@ -7,6 +7,9 @@
 //! memory blocks, program tree groups). Each element type is handled by a
 //! [`SearchAndReplaceHandler`], and each match produces a [`QuickFix`] item.
 
+pub mod replace_plugin;
+pub mod replace_service;
+
 use regex::{Regex, RegexBuilder};
 use std::collections::HashSet;
 use std::fmt;
@@ -280,9 +283,13 @@ impl SearchAndReplaceQuery {
     }
 
     /// Perform the search, collecting matches from all selected handler types.
-    pub fn find_all(&self, handlers: &[Box<dyn SearchAndReplaceHandler>]) -> Vec<QuickFixItem> {
+    pub fn find_all<H: AsRef<dyn SearchAndReplaceHandler>>(
+        &self,
+        handlers: &[H],
+    ) -> Vec<QuickFixItem> {
         let mut results = Vec::new();
         for handler in handlers {
+            let handler = handler.as_ref();
             let handler_types = handler.search_and_replace_types();
             if self.selected_types.iter().any(|t| handler_types.contains(t)) {
                 match handler.find_all(self) {

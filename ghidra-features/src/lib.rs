@@ -80,6 +80,7 @@ pub mod symbolic_z3;
 pub mod system_emulation;
 pub mod symtable;
 pub mod table;
+pub mod tablechooser;
 pub mod versiontracking;
 
 // -- New modules ported from Ghidra's Features/ProgramGraph --
@@ -407,10 +408,9 @@ pub use base::services;
 /// Ported from `ghidra.app.nav`.
 pub use base::nav;
 
-/// Table chooser dialog framework.
-///
-/// Ported from `ghidra.app.tablechooser`.
-pub use base::tablechooser;
+// Table chooser dialog framework is provided by `pub mod tablechooser`
+// (line 83), which re-exports base types and adds plugin/dialog layers.
+// Access base types via `crate::base::tablechooser` if needed directly.
 
 /// Binary format analyzers that run during import.
 ///

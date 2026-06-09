@@ -48,6 +48,20 @@ pub mod run_task;
 /// `GhidraScriptProvider`, `GhidraScriptProperties`, and related types.
 pub mod ghidra_script;
 
+/// Script provider system: discovering, loading, compiling, and managing
+/// script types.
+///
+/// Ported from `ghidra.app.script.GhidraScriptProvider` and provider
+/// infrastructure (`JavaScriptProvider`, `JythonScriptProvider`, etc.).
+pub mod ghidra_script_provider;
+
+/// Script manager plugin: the main entry point for Ghidra script management.
+///
+/// Ported from `ghidra.app.plugin.core.script.GhidraScriptMgrPlugin`,
+/// `GhidraScriptComponentProvider`, `GhidraScriptEditorComponentProvider`,
+/// `GhidraScriptActionManager`, and related types.
+pub mod script_plugin;
+
 /// Detailed script metadata parsing from source file headers.
 ///
 /// Ported from `ghidra.app.script.ScriptInfo` (the full version with
