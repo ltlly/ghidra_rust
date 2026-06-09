@@ -35,13 +35,10 @@
 pub mod table_chooser_dialog;
 pub mod table_chooser_plugin;
 
-pub use table_chooser_dialog::{ColumnConfig, TableChooserDialogState};
-pub use table_chooser_plugin::{TableChooserDialogState as TableChooserPluginDialogState, TableChooserPlugin, TableChooserPluginOptions};
-
-// Re-export the renamed plugin dialog state to avoid ambiguity with the dialog state.
-// The plugin's TableChooserDialogState is a simple tracking struct;
-// the dialog's TableChooserDialogState is the full generic dialog model.
-// Users should prefer the dialog state for most use cases.
+pub use table_chooser_dialog::{ColumnConfig, ExecutionResult, TableChooserDialogState};
+pub use table_chooser_plugin::{
+    TableChooserDialogStateWrapper, TableChooserPlugin, TableChooserPluginOptions,
+};
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -86,5 +83,28 @@ mod tests {
     fn test_module_reexports_plugin_options() {
         let opts = TableChooserPluginOptions::new();
         assert!(opts.hex_display);
+    }
+
+    #[test]
+    fn test_module_reexports_execution_result() {
+        let result = ExecutionResult {
+            processed: 5,
+            removed: 3,
+            cancelled: false,
+        };
+        assert_eq!(result.processed, 5);
+        assert_eq!(result.removed, 3);
+    }
+
+    #[test]
+    fn test_module_reexports_dialog_state_wrapper() {
+        let wrapper = TableChooserDialogStateWrapper {
+            title: "W".into(),
+            row_count: 0,
+            column_count: 0,
+            visible: true,
+            busy: false,
+        };
+        assert_eq!(wrapper.title, "W");
     }
 }

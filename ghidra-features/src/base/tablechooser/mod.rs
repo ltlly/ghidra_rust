@@ -120,6 +120,10 @@ impl<T: AddressableRowObject> ColumnDisplay<T> for StringColumnDisplay<T> {
 // ---------------------------------------------------------------------------
 
 /// Trait for executing an action on selected rows in a table chooser.
+///
+/// Ported from `TableChooserExecutor.java`. Implementors provide a
+/// button name and one or both of `execute` (single-row) and
+/// `execute_in_bulk` (batch) to process selected items.
 pub trait TableChooserExecutor<T: AddressableRowObject>: fmt::Debug {
     /// The button text for the execute action.
     fn get_button_name(&self) -> &str;
@@ -129,6 +133,22 @@ pub trait TableChooserExecutor<T: AddressableRowObject>: fmt::Debug {
     /// Returns `true` if the row should be removed from the table after
     /// execution, `false` to keep it.
     fn execute(&self, row: &T) -> bool;
+
+    /// Bulk execution callback. Override this to process multiple rows
+    /// in a single pass (e.g. wrapped in a single transaction).
+    ///
+    /// Push items to be removed into `deleted`. Returns `true` if
+    /// bulk processing was performed; `false` to fall back to
+    /// per-row [`execute`](Self::execute) calls.
+    ///
+    /// The default implementation returns `false` (no bulk processing).
+    fn execute_in_bulk(
+        &self,
+        _rows: &[T],
+        _deleted: &mut Vec<T>,
+    ) -> bool {
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
