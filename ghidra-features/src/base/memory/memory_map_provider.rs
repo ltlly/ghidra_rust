@@ -493,6 +493,18 @@ impl MemoryMapComponentProvider {
         self.expand_selected_block(program, new_end, false)
     }
 
+    /// Check if expanding the selected block would expand file-backed regions.
+    ///
+    /// Corresponds to the `MemoryBlockSourceInfo.getFileBytes()` check in the
+    /// Java `MemoryMapProvider.expandBlock` method. When a block uses file
+    /// bytes, expanding it would create a zero-filled region, which may need
+    /// user confirmation.
+    pub fn would_expand_file_bytes(&self) -> bool {
+        self.view
+            .get_selected_block()
+            .map_or(false, |b| b.has_file_bytes())
+    }
+
     fn expand_selected_block(
         &mut self,
         program: &mut Program,
@@ -666,6 +678,80 @@ impl MemoryMapComponentProvider {
         new_base: Address,
     ) -> Result<(), String> {
         super::set_base_cmd::validate_image_base_change(program, new_base)
+    }
+
+    // ---- overlay space renaming ----
+
+    /// Rename an overlay address space.
+    ///
+    /// Corresponds to `MemoryMapProvider.renameOverlaySpace` in Java.
+    /// Only works when the selected block is an overlay block.
+    ///
+    /// In the Java source, the overlay space name is obtained from
+    /// `OverlayAddressSpace.getName()`. In the Rust port the overlay space
+    /// name is derived from the block name (Ghidra convention: the first
+    /// overlay block in a space shares the space name).
+    ///
+    /// # Returns
+    ///
+    /// `OperationResult::Success` if renamed, or `Failure` with a message.
+    pub fn rename_overlay_space(
+        &mut self,
+        program: &mut Program,
+        new_name: &str,
+    ) -> OperationResult {
+        if !self.check_exclusive_access() {
+            return OperationResult::Failure {
+                message: self.last_status.clone(),
+            };
+        }
+
+        let block = match self.view.get_selected_block() {
+            Some(b) => b.clone(),
+            None => {
+                return OperationResult::Failure {
+                    message: "No block selected".into(),
+                };
+            }
+        };
+
+        if !block.is_overlay() {
+            return OperationResult::Failure {
+                message: "Selected block is not an overlay block".into(),
+            };
+        }
+
+        if new_name.is_empty() {
+            return OperationResult::Failure {
+                message: "Overlay space name cannot be empty".into(),
+            };
+        }
+
+        // In Ghidra's convention, the overlay space name matches the block
+        // name for the first block in that overlay space.
+        let old_name = block.name.clone();
+
+        match self.manager.rename_block(program, &old_name, new_name) {
+            Ok(()) => {
+                self.view.refresh_map(program);
+                OperationResult::Success {
+                    message: format!(
+                        "Overlay space '{}' renamed to '{}'",
+                        old_name, new_name
+                    ),
+                }
+            }
+            Err(e) => OperationResult::Failure {
+                message: format!("Failed to rename overlay space: {}", e),
+            },
+        }
+    }
+
+    /// Check whether the selected block is an overlay block (for rename overlay).
+    pub fn can_rename_overlay_space(&self) -> bool {
+        self.view
+            .get_selected_block()
+            .map_or(false, |b| b.is_overlay())
     }
 
     // ---- navigation ----
@@ -1044,5 +1130,27 @@ mod tests {
         );
         assert!(matches!(result, OperationResult::Success { .. }));
         assert_eq!(provider.view().block_count(), 4);
+    }
+
+    #[test]
+    fn test_can_rename_overlay_space_no_selection() {
+        let provider = MemoryMapComponentProvider::new();
+        assert!(!provider.can_rename_overlay_space());
+    }
+
+    #[test]
+    fn test_would_expand_file_bytes_no_selection() {
+        let provider = MemoryMapComponentProvider::new();
+        assert!(!provider.would_expand_file_bytes());
+    }
+
+    #[test]
+    fn test_would_expand_file_bytes_default_block() {
+        let program = make_program();
+        let mut provider = MemoryMapComponentProvider::new();
+        provider.set_program(&program);
+        provider.view_mut().select_block(0);
+        // .text is a plain initialized block, not file-backed
+        assert!(!provider.would_expand_file_bytes());
     }
 }

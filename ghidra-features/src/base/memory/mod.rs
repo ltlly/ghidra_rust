@@ -40,7 +40,7 @@ pub use expand_block_model::{ExpandBlockModel, ExpandDirection};
 pub use map_manager::MemoryMapManager;
 pub use memory_map_model::{MemoryColumn, MemoryMapModel};
 pub use memory_map_plugin::{
-    ActionDescriptor, MemoryMapPlugin, MemoryMapPluginConfig, PluginState,
+    ActionDescriptor, GoToService, MemoryMapPlugin, MemoryMapPluginConfig, PluginState,
 };
 pub use memory_map_provider::{BlockOperation, MemoryMapComponentProvider, OperationResult};
 pub use memory_plugin::{MemoryEvent, MemoryMapPlugin as MemoryMapPluginLegacy};

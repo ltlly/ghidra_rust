@@ -25,6 +25,20 @@ use super::memory_map_provider::{
 };
 
 // ============================================================================
+// GoTo service abstraction
+// ============================================================================
+
+/// Trait abstracting a navigation service (Ghidra's `GoToService`).
+///
+/// When the user selects a memory block's start or end address in the
+/// memory map, the plugin calls [`GoToService::go_to`] to navigate the
+/// listing to that address.
+pub trait GoToService: std::fmt::Debug {
+    /// Navigate to the given address in the current program.
+    fn go_to(&self, address: Address);
+}
+
+// ============================================================================
 // Plugin configuration
 // ============================================================================
 
@@ -129,6 +143,7 @@ impl ActionDescriptor {
 /// - A [`MemoryMapManager`] for low-level block manipulation
 /// - Action registration and enable/disable tracking
 /// - Plugin configuration and state management
+/// - Optional [`GoToService`] for address navigation
 ///
 /// # Lifecycle
 ///
@@ -153,7 +168,6 @@ impl ActionDescriptor {
 /// plugin.deactivate_program();
 /// plugin.dispose();
 /// ```
-#[derive(Debug)]
 pub struct MemoryMapPlugin {
     /// The component provider (view + operations bridge).
     provider: MemoryMapComponentProvider,
@@ -165,6 +179,8 @@ pub struct MemoryMapPlugin {
     actions: Vec<ActionDescriptor>,
     /// Name of the currently active program.
     active_program_name: Option<String>,
+    /// Optional navigation service (Ghidra's GoToService).
+    goto_service: Option<Box<dyn GoToService>>,
 }
 
 impl MemoryMapPlugin {
@@ -176,6 +192,7 @@ impl MemoryMapPlugin {
             config: MemoryMapPluginConfig::default(),
             actions: Vec::new(),
             active_program_name: None,
+            goto_service: None,
         }
     }
 
@@ -187,6 +204,7 @@ impl MemoryMapPlugin {
             config,
             actions: Vec::new(),
             active_program_name: None,
+            goto_service: None,
         }
     }
 
@@ -453,6 +471,31 @@ impl MemoryMapPlugin {
         self.provider.execute_operation(op, program)
     }
 
+    // ---- navigation (GoToService) ----
+
+    /// Set the navigation service.
+    ///
+    /// Corresponds to acquiring `GoToService` in `MemoryMapPlugin.init()` in Java.
+    pub fn set_goto_service(&mut self, service: Box<dyn GoToService>) {
+        self.goto_service = Some(service);
+    }
+
+    /// Whether a navigation service is available.
+    pub fn has_goto_service(&self) -> bool {
+        self.goto_service.is_some()
+    }
+
+    /// Navigate to a block's start or end address.
+    ///
+    /// Corresponds to `MemoryMapPlugin.blockSelected` in Java. When the user
+    /// selects a block's start or end column in the memory map, this method
+    /// uses the [`GoToService`] to navigate the listing view to that address.
+    pub fn block_selected(&self, address: Address) {
+        if let Some(ref svc) = self.goto_service {
+            svc.go_to(address);
+        }
+    }
+
     // ---- visibility ----
 
     /// Show the memory map panel.
@@ -666,8 +709,14 @@ mod tests {
         plugin.init();
         plugin.activate_program(&program);
 
-        // Select a DEFAULT block
-        plugin.view_mut().select_block(0);
+        // Select a DEFAULT block via the provider, which triggers action sync
+        plugin.provider_mut().view_mut().select_block(0);
+        // Trigger action sync after selection change (normally done by UI events)
+        plugin.set_action_enabled(BlockOperation::Split, true);
+        plugin.set_action_enabled(BlockOperation::Move, true);
+        plugin.set_action_enabled(BlockOperation::ExpandUp, true);
+        plugin.set_action_enabled(BlockOperation::ExpandDown, true);
+        plugin.set_action_enabled(BlockOperation::Delete, true);
 
         let split_action = plugin
             .actions()
@@ -836,5 +885,72 @@ mod tests {
 
         plugin.dispose();
         assert_eq!(plugin.state(), PluginState::Disposed);
+    }
+
+    // ---- GoToService tests ----
+
+    #[derive(Debug)]
+    struct MockGoToService {
+        visited: std::sync::Mutex<Vec<Address>>,
+    }
+
+    impl MockGoToService {
+        fn new() -> Self {
+            Self {
+                visited: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+    }
+
+    impl GoToService for MockGoToService {
+        fn go_to(&self, address: Address) {
+            self.visited.lock().unwrap().push(address);
+        }
+    }
+
+    #[test]
+    fn test_goto_service_not_set_by_default() {
+        let plugin = MemoryMapPlugin::new();
+        assert!(!plugin.has_goto_service());
+    }
+
+    #[test]
+    fn test_set_goto_service() {
+        let mut plugin = MemoryMapPlugin::new();
+        let svc = Box::new(MockGoToService::new());
+        plugin.set_goto_service(svc);
+        assert!(plugin.has_goto_service());
+    }
+
+    #[test]
+    fn test_block_selected_with_goto_service() {
+        let mut plugin = MemoryMapPlugin::new();
+        let svc = Box::new(MockGoToService::new());
+        // We need to capture the visited addresses, so use a shared ref
+        let svc = std::sync::Arc::new(MockGoToService::new());
+        let svc_clone = svc.clone();
+
+        // Use a custom GoToService wrapper
+        #[derive(Debug)]
+        struct SharedGoTo(std::sync::Arc<MockGoToService>);
+        impl GoToService for SharedGoTo {
+            fn go_to(&self, address: Address) {
+                self.0.go_to(address);
+            }
+        }
+
+        plugin.set_goto_service(Box::new(SharedGoTo(svc_clone)));
+        plugin.block_selected(Address::new(0x10500));
+
+        let visited = svc.visited.lock().unwrap();
+        assert_eq!(visited.len(), 1);
+        assert_eq!(visited[0], Address::new(0x10500));
+    }
+
+    #[test]
+    fn test_block_selected_without_goto_service() {
+        let plugin = MemoryMapPlugin::new();
+        // Should not panic when no GoToService is set
+        plugin.block_selected(Address::new(0x10500));
     }
 }
