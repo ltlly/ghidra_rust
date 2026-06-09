@@ -27,6 +27,7 @@ pub mod association;
 pub mod bookmark;
 pub mod checksums;
 pub mod data;
+pub mod datamgr;
 pub mod clear;
 pub mod clipboard;
 pub mod colorizer;
@@ -132,3 +133,10 @@ pub mod listing;
 /// Provides: code browser plugin (lifecycle, events, navigation, providers),
 /// code browser view (cursor, selection, scrolling, fields).
 pub mod codebrowser;
+
+/// Program management -- lifecycle, events, and service interface.
+/// Ported from `ghidra.app.plugin.ProgramPlugin` and
+/// `ghidra.app.services.ProgramManager`.
+/// Provides: ProgramPlugin base class, ProgramManager trait, and
+/// InMemoryProgramManager implementation.
+pub mod program;

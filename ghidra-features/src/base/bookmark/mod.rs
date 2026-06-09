@@ -12,6 +12,8 @@
 //! - [`BookmarkEditCmd`] / [`BookmarkDeleteCmd`] -- undo-able commands
 //! - [`BookmarkNavigator`] -- marker management for listing display
 //! - [`BookmarkTableModel`] -- tabular data model with type filtering
+//! - [`BookmarkViewPlugin`] -- view-specific plugin extension for GUI coordination
+//! - [`BookmarkViewProvider`] -- view-specific provider for table display management
 //!
 //! # Architecture
 //!
@@ -20,8 +22,15 @@
 //! commands ([`BookmarkEditCmd`], [`BookmarkDeleteCmd`]). This mirrors
 //! Ghidra's Command pattern where mutations are encapsulated in command
 //! objects for undo/redo support.
+//!
+//! The view layer ([`BookmarkViewPlugin`], [`BookmarkViewProvider`]) extends
+//! the base plugin and provider with GUI-specific behaviors such as
+//! provider visibility management, filter dialogs, and selection-based
+//! operations.
 
 pub mod actions;
+pub mod bookmark_view_plugin;
+pub mod bookmark_view_provider;
 pub mod commands;
 pub mod dialog;
 pub mod mappers;
@@ -35,6 +44,8 @@ pub mod types;
 pub use actions::{
     BookmarkAction, BookmarkActionContext, BookmarkDeleteAction, MAX_DELETE_ACTIONS,
 };
+pub use bookmark_view_plugin::BookmarkViewPlugin;
+pub use bookmark_view_provider::BookmarkViewProvider;
 pub use commands::{
     AddressSet, BookmarkCommand, BookmarkDeleteBackgroundCmd, BookmarkDeleteCmd, BookmarkEditCmd,
 };

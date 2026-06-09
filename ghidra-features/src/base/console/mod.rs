@@ -6,6 +6,7 @@
 //! - [`ConsoleComponentProvider`] -- text-based console with message display,
 //!   error output, and search capabilities
 //! - [`ConsolePlugin`] -- plugin wrapper that integrates with the Ghidra tool
+//! - [`ConsoleProvider`] -- high-level provider with config, history, search
 //! - [`CodeCompletion`] -- code completion data structure
 //! - [`ConsoleWord`] -- word-at-cursor extraction for navigation
 //!
@@ -23,11 +24,13 @@
 pub mod code_completion;
 pub mod console_component_provider;
 pub mod console_plugin;
+pub mod console_provider;
 pub mod console_word;
 pub mod console_service;
 
 pub use code_completion::CodeCompletion;
 pub use console_component_provider::ConsoleComponentProvider;
 pub use console_plugin::ConsolePlugin;
+pub use console_provider::ConsoleProvider;
 pub use console_word::ConsoleWord;
 pub use console_service::ConsoleService;

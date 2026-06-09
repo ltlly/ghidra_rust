@@ -20,6 +20,7 @@ mod commands;
 mod expand_block_model;
 mod map_manager;
 mod memory_map_model;
+mod memory_map_plugin;
 mod memory_map_provider;
 mod memory_plugin;
 mod memory_provider;
@@ -38,8 +39,11 @@ pub use commands::{MergeBlocksCmd, MemoryCommand, SplitBlockCmd, UninitializedBl
 pub use expand_block_model::{ExpandBlockModel, ExpandDirection};
 pub use map_manager::MemoryMapManager;
 pub use memory_map_model::{MemoryColumn, MemoryMapModel};
+pub use memory_map_plugin::{
+    ActionDescriptor, MemoryMapPlugin, MemoryMapPluginConfig, PluginState,
+};
 pub use memory_map_provider::{BlockOperation, MemoryMapComponentProvider, OperationResult};
-pub use memory_plugin::{MemoryEvent, MemoryMapPlugin};
+pub use memory_plugin::{MemoryEvent, MemoryMapPlugin as MemoryMapPluginLegacy};
 pub use move_block_model::MoveBlockModel;
 pub use set_base_cmd::{validate_image_base_change, SetBaseCmd};
 pub use split_block_model::{SplitBlockModel, SplitResult, SplitValidationError};
