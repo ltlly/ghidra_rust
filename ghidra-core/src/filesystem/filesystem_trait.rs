@@ -1,14 +1,18 @@
 //! Project-level filesystem trait.
 //!
-//! Provides [`FileSystem`] which is the store-level filesystem abstraction
+//! Provides [`ProjectFileSystem`] which is the store-level filesystem abstraction
 //! corresponding to `ghidra.framework.store.FileSystem`. This is distinct
 //! from the binary-analysis `GFileSystem` trait (also named `FileSystem` in
 //! this crate) that lives in the parent module.
 //!
 //! This module re-exports [`FileSystemStore`] from `crate::filesystem::store`
-//! and adds a [`FileSystem`] alias plus convenience helpers for common
+//! and adds a [`ProjectFileSystem`] trait plus convenience helpers for common
 //! store-level filesystem operations such as creating, moving, and deleting
 //! files and folders.
+//!
+//! Also provides [`normalize_path`] for normalizing absolute store paths
+//! (handling `.` and `..` segments), corresponding to the Java
+//! `FileSystem.normalizePath()` static method.
 
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +30,78 @@ use crate::generic::task::TaskMonitor;
 pub type FsStoreResult<T> = Result<T, GhidraError>;
 
 // ============================================================================
-// FileSystem trait alias
+// Path normalization
+// ============================================================================
+
+/// Normalize an absolute store path, resolving `.` and `..` segments.
+///
+/// The path must start with `SEPARATOR` (`'/'`).  Segments of `".."` remove
+/// the previous segment.  Segments of `"."` are ignored.  Empty segments
+/// (from `"//"`) cause an error.
+///
+/// Corresponds to `ghidra.framework.store.FileSystem.normalizePath()`.
+///
+/// # Errors
+/// Returns [`GhidraError::InvalidData`] if:
+/// - the path does not start with `'/'`
+/// - a `".."` would escape above the root
+/// - the path contains an empty element (i.e., `"//"`)
+pub fn normalize_path(path: &str) -> Result<String, GhidraError> {
+    use crate::filesystem::store::SEPARATOR;
+
+    if !path.starts_with(SEPARATOR) {
+        return Err(GhidraError::InvalidData(format!(
+            "Absolute path required: {}",
+            path
+        )));
+    }
+
+    let split: Vec<&str> = path.split(SEPARATOR).collect();
+    let mut elements: Vec<String> = Vec::new();
+    elements.push(SEPARATOR.to_string());
+
+    for (i, e) in split.iter().enumerate().skip(1) {
+        if e.is_empty() {
+            return Err(GhidraError::InvalidData(format!(
+                "Invalid path with empty element: {}",
+                path
+            )));
+        }
+        if *e == ".." {
+            elements.pop();
+            if elements.is_empty() {
+                return Err(GhidraError::InvalidData(format!(
+                    "Invalid path: {}",
+                    path
+                )));
+            }
+        } else if *e == "." {
+            continue;
+        } else {
+            if i < split.len() - 1 {
+                elements.push(format!("{}{}", e, SEPARATOR));
+            } else {
+                elements.push(e.to_string());
+            }
+        }
+    }
+
+    if elements.is_empty() {
+        return Ok(SEPARATOR.to_string());
+    }
+
+    let mut buf = String::new();
+    for e in &elements {
+        buf.push_str(e);
+    }
+    if path.ends_with(SEPARATOR) {
+        buf.push_str(SEPARATOR);
+    }
+    Ok(buf)
+}
+
+// ============================================================================
+// ProjectFileSystem trait
 // ============================================================================
 
 /// A convenience alias for the store-level filesystem trait.
@@ -40,6 +115,14 @@ pub trait ProjectFileSystem: FileSystemStore {
     /// Returns true if this filesystem supports shared access.
     fn is_shared(&self) -> bool {
         false
+    }
+
+    /// Returns true if the filesystem is online / accessible.
+    ///
+    /// Default returns `true`.  Remote filesystems may override to return
+    /// `false` when the server is unreachable.
+    fn is_online(&self) -> bool {
+        true
     }
 
     /// Returns true if the filesystem is empty (contains no items at all).
@@ -115,6 +198,26 @@ pub trait ProjectFileSystem: FileSystemStore {
     fn has_item(&self, folder_path: &str, name: &str) -> StoreResult<bool> {
         self.file_exists(folder_path, name)
     }
+
+    /// Get all item names in a folder, excluding hidden items.
+    fn visible_item_names(&self, folder_path: &str) -> StoreResult<Vec<String>> {
+        self.item_names(folder_path, false)
+    }
+
+    /// Get all item names in a folder, including hidden items.
+    fn all_item_names(&self, folder_path: &str) -> StoreResult<Vec<String>> {
+        self.item_names(folder_path, true)
+    }
+
+    /// Move an item to a new folder with the same name.
+    fn move_item_to_folder(
+        &self,
+        parent_path: &str,
+        name: &str,
+        new_parent_path: &str,
+    ) -> StoreResult<()> {
+        self.move_item(parent_path, name, new_parent_path, name)
+    }
 }
 
 // Blanket implementation: any FileSystemStore automatically gets ProjectFileSystem.
@@ -127,6 +230,7 @@ impl<T: FileSystemStore + ?Sized> ProjectFileSystem for T {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filesystem::store::FolderItem;
     use std::collections::HashMap;
 
     /// A minimal mock filesystem for testing.
@@ -297,5 +401,70 @@ mod tests {
     fn test_project_filesystem_is_shared_default() {
         let fs = MockFs::new();
         assert!(!fs.is_shared());
+    }
+
+    #[test]
+    fn test_project_filesystem_is_online_default() {
+        let fs = MockFs::new();
+        assert!(fs.is_online());
+    }
+
+    #[test]
+    fn test_project_filesystem_visible_item_names() {
+        let fs = MockFs::new();
+        let names = fs.visible_item_names("/").unwrap();
+        assert!(names.is_empty());
+    }
+
+    // ------------------------------------------------------------------
+    // normalize_path tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_normalize_path_simple() {
+        assert_eq!(normalize_path("/a/b/c").unwrap(), "/a/b/c");
+    }
+
+    #[test]
+    fn test_normalize_path_dot_dot() {
+        assert_eq!(normalize_path("/a/b/../c").unwrap(), "/a/c");
+    }
+
+    #[test]
+    fn test_normalize_path_dot() {
+        assert_eq!(normalize_path("/a/./b").unwrap(), "/a/b");
+    }
+
+    #[test]
+    fn test_normalize_path_trailing_slash() {
+        assert_eq!(normalize_path("/a/b/").unwrap(), "/a/b/");
+    }
+
+    #[test]
+    fn test_normalize_path_root_only() {
+        assert_eq!(normalize_path("/").unwrap(), "/");
+    }
+
+    #[test]
+    fn test_normalize_path_not_absolute() {
+        assert!(normalize_path("a/b").is_err());
+    }
+
+    #[test]
+    fn test_normalize_path_empty_element() {
+        assert!(normalize_path("/a//b").is_err());
+    }
+
+    #[test]
+    fn test_normalize_path_escape_root() {
+        assert!(normalize_path("/../a").is_err());
+    }
+
+    #[test]
+    fn test_normalize_path_complex() {
+        assert_eq!(
+            normalize_path("/a/b/c/../../d").unwrap(),
+            "/a/d"
+        );
     }
 }

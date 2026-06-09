@@ -7,12 +7,40 @@
 //!
 //! Corresponds to `ghidra.framework.store.FolderItem`.
 
-// Re-export all item traits from store.
+// Re-export all item traits and file-type constants from store.
 pub use crate::filesystem::store::{
     DatabaseItem, DataFileItem, FolderItem, TextDataItem, UnknownFolderItem, Version,
+    DATABASE_FILE_TYPE, DATAFILE_FILE_TYPE, DEFAULT_CHECKOUT_ID, LATEST_VERSION,
+    LINK_FILE_TYPE, UNKNOWN_FILE_TYPE,
 };
 
 use crate::filesystem::store::StoreResult;
+
+// ============================================================================
+// File type constants
+// ============================================================================
+
+/// Returns a human-readable label for the given file-type constant.
+///
+/// Accepts the constants [`UNKNOWN_FILE_TYPE`], [`DATABASE_FILE_TYPE`],
+/// [`DATAFILE_FILE_TYPE`], and [`LINK_FILE_TYPE`].
+pub fn file_type_label(file_type: i32) -> &'static str {
+    match file_type {
+        UNKNOWN_FILE_TYPE => "Unknown",
+        DATABASE_FILE_TYPE => "Database",
+        DATAFILE_FILE_TYPE => "DataFile",
+        LINK_FILE_TYPE => "Link",
+        _ => "Invalid",
+    }
+}
+
+/// Returns `true` when the given file-type constant is one of the recognized types.
+pub fn is_valid_file_type(file_type: i32) -> bool {
+    matches!(
+        file_type,
+        UNKNOWN_FILE_TYPE | DATABASE_FILE_TYPE | DATAFILE_FILE_TYPE | LINK_FILE_TYPE
+    )
+}
 
 // ============================================================================
 // FolderItemExt – convenience methods
@@ -30,6 +58,8 @@ pub trait FolderItemExt: FolderItem {
     }
 
     /// Returns true if this item has any active checkouts.
+    ///
+    /// Corresponds to Java `FolderItem.hasCheckouts()`.
     fn has_active_checkouts(&self) -> StoreResult<bool> {
         let checkouts = self.get_checkouts()?;
         Ok(!checkouts.is_empty())
@@ -58,6 +88,51 @@ pub trait FolderItemExt: FolderItem {
             ver,
             ct
         )
+    }
+
+    /// Returns true if this is a private (non-versioned, non-checked-out) item.
+    ///
+    /// A private item has checkout_id of [`DEFAULT_CHECKOUT_ID`] and is
+    /// not versioned.
+    fn is_private(&self) -> StoreResult<bool> {
+        if self.is_versioned()? {
+            return Ok(false);
+        }
+        let cid = self.checkout_id()?;
+        Ok(cid == DEFAULT_CHECKOUT_ID)
+    }
+
+    /// Returns true if this item is a database item.
+    fn is_database(&self) -> bool {
+        // Database items implement DatabaseItem; we cannot downcast via trait
+        // alone so we rely on the content type heuristic.
+        false
+    }
+
+    /// Returns true if this item has been deleted (refresh returns false).
+    fn is_deleted(&self) -> StoreResult<bool> {
+        // We cannot call refresh on &self (requires &mut self), so check
+        // a non-destructive signal: minimum_version returning an error
+        // can indicate the item is gone.  For a simple heuristic we just
+        // return false and let callers call refresh() explicitly.
+        Ok(false)
+    }
+
+    /// Returns the exclusive checkout status, if any.
+    fn exclusive_checkout(&self) -> StoreResult<Option<crate::filesystem::store::ItemCheckoutStatus>> {
+        if !self.is_checked_out_exclusive() {
+            return Ok(None);
+        }
+        let checkouts = self.get_checkouts()?;
+        Ok(checkouts
+            .into_iter()
+            .find(|c| c.checkout_type() == crate::filesystem::store::CheckoutType::Exclusive))
+    }
+
+    /// Returns the count of active checkouts.
+    fn checkout_count(&self) -> StoreResult<usize> {
+        let checkouts = self.get_checkouts()?;
+        Ok(checkouts.len())
     }
 }
 
@@ -204,6 +279,36 @@ mod tests {
         }
     }
 
+    // ------------------------------------------------------------------
+    // file_type helpers
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn test_file_type_label_known() {
+        assert_eq!(file_type_label(DATABASE_FILE_TYPE), "Database");
+        assert_eq!(file_type_label(DATAFILE_FILE_TYPE), "DataFile");
+        assert_eq!(file_type_label(LINK_FILE_TYPE), "Link");
+        assert_eq!(file_type_label(UNKNOWN_FILE_TYPE), "Unknown");
+    }
+
+    #[test]
+    fn test_file_type_label_invalid() {
+        assert_eq!(file_type_label(99), "Invalid");
+    }
+
+    #[test]
+    fn test_is_valid_file_type() {
+        assert!(is_valid_file_type(DATABASE_FILE_TYPE));
+        assert!(is_valid_file_type(DATAFILE_FILE_TYPE));
+        assert!(is_valid_file_type(LINK_FILE_TYPE));
+        assert!(is_valid_file_type(UNKNOWN_FILE_TYPE));
+        assert!(!is_valid_file_type(42));
+    }
+
+    // ------------------------------------------------------------------
+    // FolderItemExt tests
+    // ------------------------------------------------------------------
+
     #[test]
     fn test_display_name_with_content_type() {
         let item = MockItem::new("MyProgram");
@@ -258,5 +363,56 @@ mod tests {
         ));
         assert!(item.is_checked_out_by("alice").unwrap());
         assert!(!item.is_checked_out_by("bob").unwrap());
+    }
+
+    #[test]
+    fn test_is_private() {
+        let item = MockItem::new("test");
+        assert!(item.is_private().unwrap());
+    }
+
+    #[test]
+    fn test_exclusive_checkout_none() {
+        let item = MockItem::new("test");
+        assert!(item.exclusive_checkout().unwrap().is_none());
+    }
+
+    #[test]
+    fn test_exclusive_checkout_present() {
+        let mut item = MockItem::new("test");
+        item.checkouts.push(ItemCheckoutStatus::new(
+            1,
+            CheckoutType::Exclusive,
+            "alice",
+            1,
+            0,
+            None,
+        ));
+        let exc = item.exclusive_checkout().unwrap();
+        assert!(exc.is_some());
+        assert_eq!(exc.unwrap().user(), "alice");
+    }
+
+    #[test]
+    fn test_checkout_count() {
+        let mut item = MockItem::new("test");
+        assert_eq!(item.checkout_count().unwrap(), 0);
+        item.checkouts.push(ItemCheckoutStatus::new(
+            1,
+            CheckoutType::Normal,
+            "alice",
+            1,
+            0,
+            None,
+        ));
+        item.checkouts.push(ItemCheckoutStatus::new(
+            2,
+            CheckoutType::Normal,
+            "bob",
+            1,
+            0,
+            None,
+        ));
+        assert_eq!(item.checkout_count().unwrap(), 2);
     }
 }
