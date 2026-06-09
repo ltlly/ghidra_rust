@@ -19,14 +19,26 @@
 //! - [`DiffProviderInfo`] -- metadata about a running diff provider
 //! - [`DiffPluginEvent`] -- events emitted by the plugin
 //! - [`DiffPluginListener`] -- trait for receiving plugin events
+//!
+//! # Plugin features (ported from Java)
+//!
+//! - Diff highlight management: tracking which addresses are highlighted as
+//!   different between the two programs
+//! - Program selection synchronization: mapping selections between program 1
+//!   and program 2
+//! - Diff navigation: next/previous diff, apply-and-go-next
+//! - Task state tracking: whether a diff or apply task is in progress
+//! - Select-all-diffs for bulk operations
+//! - Diff details at a given address
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use super::diff_controller::{AddressSet, DiffController};
+use super::diff_controller::{AddressRange, AddressSet, DiffController};
 use super::diff_service::DiffService;
-use super::merge_filter::ProgramMergeFilter;
+use super::diff_actions::DiffTaskListener;
+use super::merge_filter::{MergeAction, MergeCategory, ProgramMergeFilter};
 use super::{DiffResult, ProgramDiffFilter, ProgramSnapshot, diff_programs};
 
 // ---------------------------------------------------------------------------
@@ -212,6 +224,8 @@ pub struct ProgramDiffPlugin {
     active_provider_id: Option<u64>,
     /// Event listeners.
     listeners: Vec<Arc<dyn DiffPluginListener>>,
+    /// Whether a diff or apply task is currently in progress.
+    task_in_progress: bool,
 }
 
 impl ProgramDiffPlugin {
@@ -224,6 +238,7 @@ impl ProgramDiffPlugin {
             program2_snapshots: HashMap::new(),
             active_provider_id: None,
             listeners: Vec::new(),
+            task_in_progress: false,
         }
     }
 
@@ -406,6 +421,332 @@ impl ProgramDiffPlugin {
     /// Check if a provider has any differences.
     pub fn has_differences(&self, provider_id: u64) -> bool {
         self.diff_count(provider_id) > 0
+    }
+
+    // -- Diff navigation (ported from Java) ---------------------------------
+
+    /// Ensure differences are computed for the given provider.
+    ///
+    /// The [`DiffController`] lazily computes differences; this method
+    /// triggers computation if it hasn't happened yet.
+    fn ensure_computed(&mut self, provider_id: u64) {
+        if let Some(controller) = self.controllers.get_mut(&provider_id) {
+            controller.get_filtered_differences();
+        }
+    }
+
+    /// Navigate to the next difference for the active provider.
+    ///
+    /// Returns the address of the next difference, or `None` if there is
+    /// no next difference or no active provider.
+    ///
+    /// Ported from `ProgramDiffPlugin.nextDiff()`.
+    pub fn next_diff(&mut self, provider_id: u64) -> Option<u64> {
+        self.ensure_computed(provider_id);
+        let controller = self.controllers.get_mut(&provider_id)?;
+        if controller.has_next() {
+            controller.next();
+            controller.current_address()
+        } else {
+            None
+        }
+    }
+
+    /// Navigate to the previous difference for the active provider.
+    ///
+    /// Returns the address of the previous difference, or `None` if there is
+    /// no previous difference or no active provider.
+    ///
+    /// Ported from `ProgramDiffPlugin.previousDiff()`.
+    pub fn previous_diff(&mut self, provider_id: u64) -> Option<u64> {
+        self.ensure_computed(provider_id);
+        let controller = self.controllers.get_mut(&provider_id)?;
+        if controller.has_previous() {
+            controller.previous();
+            controller.current_address()
+        } else {
+            None
+        }
+    }
+
+    /// Check if there is a next difference for the given provider.
+    pub fn has_next_diff(&mut self, provider_id: u64) -> bool {
+        self.ensure_computed(provider_id);
+        self.controllers
+            .get(&provider_id)
+            .map_or(false, |c| c.has_next())
+    }
+
+    /// Check if there is a previous difference for the given provider.
+    pub fn has_previous_diff(&mut self, provider_id: u64) -> bool {
+        self.ensure_computed(provider_id);
+        self.controllers
+            .get(&provider_id)
+            .map_or(false, |c| c.has_previous())
+    }
+
+    // -- Diff highlight management (ported from Java) -----------------------
+
+    /// Get the diff highlight address set for a provider.
+    ///
+    /// The diff highlight represents the set of addresses where differences
+    /// have been found between the two programs (after filtering and ignoring).
+    ///
+    /// Ported from `ProgramDiffPlugin.setDiffHighlight()`.
+    pub fn get_diff_highlight(&mut self, provider_id: u64) -> AddressSet {
+        self.ensure_computed(provider_id);
+        if let Some(controller) = self.controllers.get_mut(&provider_id) {
+            controller.differences().clone()
+        } else {
+            AddressSet::new()
+        }
+    }
+
+    /// Get the diff highlight as a list of address ranges.
+    pub fn get_diff_highlight_ranges(&mut self, provider_id: u64) -> Vec<AddressRange> {
+        let highlight = self.get_diff_highlight(provider_id);
+        highlight.ranges().to_vec()
+    }
+
+    /// Get the range containing the given address from the diff highlight.
+    ///
+    /// Ported from the inner `getDiffHighlightBlock()` method.
+    pub fn get_diff_highlight_range_at(
+        &mut self,
+        provider_id: u64,
+        address: u64,
+    ) -> Option<AddressRange> {
+        let highlight = self.get_diff_highlight(provider_id);
+        for range in highlight.ranges() {
+            if range.contains(address) {
+                return Some(*range);
+            }
+        }
+        None
+    }
+
+    // -- Program selection sync (ported from Java) --------------------------
+
+    /// Set program 2 selection for a provider and return the corresponding
+    /// addresses in program 1's address space.
+    ///
+    /// In Ghidra, selections in the diff listing panel (program 2) need to
+    /// be mapped to program 1's address space for the primary listing.
+    /// This method performs that mapping using the diff controller.
+    ///
+    /// Ported from `ProgramDiffPlugin.setProgram2Selection()`.
+    pub fn set_program2_selection(
+        &mut self,
+        provider_id: u64,
+        p2_addresses: &AddressSet,
+    ) -> AddressSet {
+        // Intersect with the diff highlight to limit selection to diff regions
+        let highlight = self.get_diff_highlight(provider_id);
+        let intersection = highlight.intersect(p2_addresses);
+
+        // The addresses are already in the shared address space in this
+        // simplified model, so the mapping is identity.
+        intersection
+    }
+
+    /// Select all differences for a provider.
+    ///
+    /// Returns an address set covering all current differences.
+    ///
+    /// Ported from `ProgramDiffPlugin.selectAllDiffs()`.
+    pub fn select_all_diffs(&mut self, provider_id: u64) -> AddressSet {
+        self.get_diff_highlight(provider_id)
+    }
+
+    // -- Apply operations (ported from Java) --------------------------------
+
+    /// Apply differences in the given address set from program 2 to program 1.
+    ///
+    /// Returns the list of diff results that were applied (respecting the
+    /// merge filter).
+    ///
+    /// Ported from `ProgramDiffPlugin.applyDiff()`.
+    pub fn apply_diff(
+        &mut self,
+        provider_id: u64,
+        address_set: &AddressSet,
+    ) -> Vec<DiffResult> {
+        self.ensure_computed(provider_id);
+        if let Some(controller) = self.controllers.get(&provider_id) {
+            controller.apply(address_set)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Apply the current difference and advance to the next one.
+    ///
+    /// Returns the applied diff results and the address of the next
+    /// difference, if any.
+    ///
+    /// Ported from `ProgramDiffPlugin.applyDiffAndGoNext()`.
+    pub fn apply_diff_and_go_next(
+        &mut self,
+        provider_id: u64,
+    ) -> (Vec<DiffResult>, Option<u64>) {
+        // Get the current diff range to apply
+        let current = self
+            .controllers
+            .get(&provider_id)
+            .and_then(|c| c.current_address());
+
+        let applied = if let Some(addr) = current {
+            let mut apply_set = AddressSet::new();
+            apply_set.add_address(addr);
+            self.apply_diff(provider_id, &apply_set)
+        } else {
+            Vec::new()
+        };
+
+        let next = self.next_diff(provider_id);
+        (applied, next)
+    }
+
+    // -- Ignore operations (ported from Java) -------------------------------
+
+    /// Ignore differences in the given address set.
+    ///
+    /// The ignored addresses will be excluded from future diff results.
+    ///
+    /// Ported from `ProgramDiffPlugin.ignoreDiff()`.
+    pub fn ignore_diff(&mut self, provider_id: u64, address_set: &AddressSet) {
+        self.ensure_computed(provider_id);
+        if let Some(controller) = self.controllers.get_mut(&provider_id) {
+            controller.ignore(address_set);
+        }
+        // Notify listeners
+        self.fire_event(DiffPluginEvent::FilterChanged { provider_id });
+    }
+
+    /// Ignore the current difference and advance to the next one.
+    ///
+    /// Returns the address of the next difference, if any.
+    pub fn ignore_and_go_next(&mut self, provider_id: u64) -> Option<u64> {
+        let current = self
+            .controllers
+            .get(&provider_id)
+            .and_then(|c| c.current_address());
+
+        if let Some(addr) = current {
+            let mut ignore_set = AddressSet::new();
+            ignore_set.add_address(addr);
+            self.ignore_diff(provider_id, &ignore_set);
+        }
+
+        self.next_diff(provider_id)
+    }
+
+    // -- Task state tracking (ported from Java) -----------------------------
+
+    /// Check if a diff task is currently in progress.
+    pub fn is_task_in_progress(&self) -> bool {
+        self.task_in_progress
+    }
+
+    /// Set the diff task in-progress state.
+    pub fn set_task_in_progress(&mut self, in_progress: bool) {
+        self.task_in_progress = in_progress;
+    }
+
+    // -- Diff detail queries (ported from Java) -----------------------------
+
+    /// Get the count of address ranges in the diff highlight.
+    ///
+    /// Ported from the `getDiffCountInfo()` method which reports
+    /// "Diff address range X of Y".
+    pub fn diff_range_count(&mut self, provider_id: u64) -> usize {
+        self.get_diff_highlight_ranges(provider_id).len()
+    }
+
+    /// Get the 1-based index of the range containing the given address.
+    ///
+    /// Returns a string like "Diff address range 3 of 10." or `None` if
+    /// the address is not in any diff range.
+    ///
+    /// Ported from `ProgramDiffPlugin.getDiffCountInfo()`.
+    pub fn diff_count_info(&mut self, provider_id: u64, address: u64) -> Option<String> {
+        let ranges = self.get_diff_highlight_ranges(provider_id);
+        let range_count = ranges.len();
+        for (i, range) in ranges.iter().enumerate() {
+            if range.contains(address) {
+                return Some(format!(
+                    "Diff address range {} of {}.",
+                    i + 1,
+                    range_count
+                ));
+            }
+        }
+        None
+    }
+
+    // -- Merge filter management (ported from Java) -------------------------
+
+    /// Set the merge filter for a provider.
+    pub fn set_merge_filter(&mut self, provider_id: u64, filter: ProgramMergeFilter) {
+        if let Some(info) = self.providers.get_mut(&provider_id) {
+            info.merge_filter = filter.clone();
+        }
+        if let Some(controller) = self.controllers.get_mut(&provider_id) {
+            controller.set_merge_filter(filter);
+        }
+    }
+
+    /// Check if the merge filter has any non-ignore actions set.
+    ///
+    /// Ported from the private `applyIsSet()` method.
+    pub fn is_apply_set(&self, provider_id: u64) -> bool {
+        if let Some(controller) = self.controllers.get(&provider_id) {
+            let filter = controller.merge_filter();
+            for category in &[
+                MergeCategory::Bytes,
+                MergeCategory::CodeUnits,
+                MergeCategory::Data,
+                MergeCategory::Symbols,
+                MergeCategory::Equates,
+                MergeCategory::Functions,
+                MergeCategory::References,
+                MergeCategory::Bookmarks,
+                MergeCategory::Comments,
+                MergeCategory::Properties,
+            ] {
+                if filter.get_filter(*category) != MergeAction::Ignore {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    // -- Refresh (ported from Java) -----------------------------------------
+
+    /// Refresh the diff for a provider, recomputing all differences.
+    ///
+    /// If `keep_ignored` is true, previously ignored addresses remain ignored.
+    ///
+    /// Ported from the private `reloadDiff()` and `createDiff()` methods.
+    pub fn refresh_diff(&mut self, provider_id: u64, keep_ignored: bool) {
+        if let Some(controller) = self.controllers.get_mut(&provider_id) {
+            controller.refresh(keep_ignored);
+        }
+        self.fire_event(DiffPluginEvent::FilterChanged { provider_id });
+    }
+
+    // -- Diff controller access with listener support -----------------------
+
+    /// Set the diff controller for a provider, replacing any existing one.
+    ///
+    /// Ported from `ProgramDiffPlugin.setDiffController()`.
+    pub fn set_diff_controller(&mut self, provider_id: u64, controller: DiffController) {
+        if let Some(info) = self.providers.get_mut(&provider_id) {
+            info.diff_filter = *controller.diff_filter();
+            info.merge_filter = controller.merge_filter().clone();
+        }
+        self.controllers.insert(provider_id, controller);
     }
 }
 
@@ -669,5 +1010,309 @@ mod tests {
         };
         let debug_str = format!("{:?}", event);
         assert!(debug_str.contains("DiffStarted"));
+    }
+
+    // -- Navigation tests ---------------------------------------------------
+
+    #[test]
+    fn test_next_diff() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        assert!(plugin.has_next_diff(id));
+        let addr = plugin.next_diff(id);
+        assert!(addr.is_some());
+    }
+
+    #[test]
+    fn test_previous_diff() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        // No previous at start
+        assert!(!plugin.has_previous_diff(id));
+        assert!(plugin.previous_diff(id).is_none());
+
+        // After next, there should be a previous
+        plugin.next_diff(id);
+        assert!(plugin.has_previous_diff(id));
+    }
+
+    #[test]
+    fn test_next_diff_nonexistent_provider() {
+        let mut plugin = ProgramDiffPlugin::new();
+        assert!(plugin.next_diff(999).is_none());
+        assert!(!plugin.has_next_diff(999));
+        assert!(!plugin.has_previous_diff(999));
+    }
+
+    // -- Diff highlight tests -----------------------------------------------
+
+    #[test]
+    fn test_get_diff_highlight() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let highlight = plugin.get_diff_highlight(id);
+        assert!(!highlight.is_empty());
+        assert!(highlight.contains(0x1000));
+        assert!(highlight.contains(0x1001));
+        assert!(highlight.contains(0x1002));
+    }
+
+    #[test]
+    fn test_get_diff_highlight_ranges() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let ranges = plugin.get_diff_highlight_ranges(id);
+        assert!(!ranges.is_empty());
+    }
+
+    #[test]
+    fn test_get_diff_highlight_range_at() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let range = plugin.get_diff_highlight_range_at(id, 0x1000);
+        assert!(range.is_some());
+
+        // Address not in diff
+        let no_range = plugin.get_diff_highlight_range_at(id, 0x2000);
+        assert!(no_range.is_none());
+    }
+
+    #[test]
+    fn test_diff_highlight_nonexistent_provider() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let highlight = plugin.get_diff_highlight(999);
+        assert!(highlight.is_empty());
+    }
+
+    // -- Selection sync tests -----------------------------------------------
+
+    #[test]
+    fn test_select_all_diffs() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let all = plugin.select_all_diffs(id);
+        assert_eq!(all.num_addresses(), 3);
+    }
+
+    #[test]
+    fn test_set_program2_selection() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let mut p2_sel = AddressSet::new();
+        p2_sel.add_address(0x1000);
+        let mapped = plugin.set_program2_selection(id, &p2_sel);
+        assert!(mapped.contains(0x1000));
+    }
+
+    // -- Apply/Ignore tests -------------------------------------------------
+
+    #[test]
+    fn test_apply_diff() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x90, 0xC3]);
+        let prog2 = make_prog("p2", vec![0x90, 0xCB]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let mut apply_set = AddressSet::new();
+        apply_set.add_address(0x1001);
+        let applied = plugin.apply_diff(id, &apply_set);
+        assert_eq!(applied.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_diff_and_go_next() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let (applied, next) = plugin.apply_diff_and_go_next(id);
+        assert!(!applied.is_empty());
+        // next should be Some since there are 2 diffs
+        assert!(next.is_some());
+    }
+
+    #[test]
+    fn test_ignore_diff() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        // Get initial highlight count (uses controller with ignore support)
+        let highlight_before = plugin.get_diff_highlight(id);
+        let count_before = highlight_before.num_addresses();
+        assert_eq!(count_before, 3);
+
+        let mut ignore_set = AddressSet::new();
+        ignore_set.add_address(0x1000);
+        plugin.ignore_diff(id, &ignore_set);
+
+        // The highlight count should decrease (controller-based, respects ignores)
+        let highlight_after = plugin.get_diff_highlight(id);
+        assert!(highlight_after.num_addresses() < count_before);
+        assert!(!highlight_after.contains(0x1000));
+    }
+
+    #[test]
+    fn test_ignore_and_go_next() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let next = plugin.ignore_and_go_next(id);
+        assert!(next.is_some());
+    }
+
+    // -- Task state tests ---------------------------------------------------
+
+    #[test]
+    fn test_task_in_progress() {
+        let mut plugin = ProgramDiffPlugin::new();
+        assert!(!plugin.is_task_in_progress());
+        plugin.set_task_in_progress(true);
+        assert!(plugin.is_task_in_progress());
+        plugin.set_task_in_progress(false);
+        assert!(!plugin.is_task_in_progress());
+    }
+
+    // -- Diff detail tests --------------------------------------------------
+
+    #[test]
+    fn test_diff_range_count() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let count = plugin.diff_range_count(id);
+        assert!(count > 0);
+    }
+
+    #[test]
+    fn test_diff_count_info() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let info = plugin.diff_count_info(id, 0x1000);
+        assert!(info.is_some());
+        assert!(info.unwrap().contains("Diff address range"));
+    }
+
+    #[test]
+    fn test_diff_count_info_not_in_range() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00]);
+        let prog2 = make_prog("p2", vec![0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let info = plugin.diff_count_info(id, 0x2000);
+        assert!(info.is_none());
+    }
+
+    // -- Merge filter tests -------------------------------------------------
+
+    #[test]
+    fn test_set_merge_filter() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00]);
+        let prog2 = make_prog("p2", vec![0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let filter = ProgramMergeFilter::all_with_action(MergeAction::Replace);
+        plugin.set_merge_filter(id, filter);
+        assert!(plugin.is_apply_set(id));
+    }
+
+    #[test]
+    fn test_is_apply_set_default() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00]);
+        let prog2 = make_prog("p2", vec![0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        // Default merge filter has Replace on Bytes
+        assert!(plugin.is_apply_set(id));
+    }
+
+    // -- Refresh tests ------------------------------------------------------
+
+    #[test]
+    fn test_refresh_diff() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let count_before = plugin.diff_count(id);
+        plugin.refresh_diff(id, false);
+        let count_after = plugin.diff_count(id);
+        assert_eq!(count_before, count_after);
+    }
+
+    #[test]
+    fn test_refresh_diff_keep_ignored() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00, 0x00, 0x00]);
+        let prog2 = make_prog("p2", vec![0xFF, 0xFF, 0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        // Ignore one address
+        let mut ignore_set = AddressSet::new();
+        ignore_set.add_address(0x1000);
+        plugin.ignore_diff(id, &ignore_set);
+        let count_after_ignore = plugin.diff_count(id);
+
+        // Refresh keeping ignored
+        plugin.refresh_diff(id, true);
+        assert_eq!(plugin.diff_count(id), count_after_ignore);
+
+        // Refresh without keeping ignored
+        plugin.refresh_diff(id, false);
+        assert_eq!(plugin.diff_count(id), 3);
+    }
+
+    // -- set_diff_controller test -------------------------------------------
+
+    #[test]
+    fn test_set_diff_controller() {
+        let mut plugin = ProgramDiffPlugin::new();
+        let prog1 = make_prog("p1", vec![0x00]);
+        let prog2 = make_prog("p2", vec![0xFF]);
+        let id = plugin.start_diff(prog1, prog2).unwrap();
+
+        let new_controller = DiffController::new(
+            make_prog("p1b", vec![0x00]),
+            make_prog("p2b", vec![0xFF]),
+            None,
+            ProgramDiffFilter::BYTES,
+            ProgramMergeFilter::defaults(),
+        );
+        plugin.set_diff_controller(id, new_controller);
+        assert!(plugin.controller(id).is_some());
     }
 }

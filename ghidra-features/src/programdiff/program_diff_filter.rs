@@ -10,14 +10,368 @@
 //! - preset filter configurations (all, none, code-only, data-only, etc.)
 //! - filter builder pattern for constructing complex filters
 //! - display-oriented helpers for UI integration
+//! - fine-grained comment type filtering (EOL, pre, post, plate, repeatable)
+//! - function tag and source map diff filtering
 //!
 //! # Key types
 //!
 //! - [`FilterCategory`] -- enumeration of diff filter categories with labels
 //! - [`FilterPreset`] -- predefined filter configurations
 //! - [`ProgramDiffFilterBuilder`] -- builder for constructing filters
+//!
+//! # Extended filter flags
+//!
+//! The extended filter provides additional flags beyond the base
+//! [`ProgramDiffFilter`]:
+//!
+//! - [`ProgramDiffFilterEx::EOL_COMMENT`] -- end-of-line comment differences
+//! - [`ProgramDiffFilterEx::PRE_COMMENT`] -- pre-comment differences
+//! - [`ProgramDiffFilterEx::POST_COMMENT`] -- post-comment differences
+//! - [`ProgramDiffFilterEx::PLATE_COMMENT`] -- plate comment differences
+//! - [`ProgramDiffFilterEx::REPEATABLE_COMMENT`] -- repeatable comment differences
+//! - [`ProgramDiffFilterEx::FUNCTION_TAG`] -- function tag differences
+//! - [`ProgramDiffFilterEx::SOURCE_MAP`] -- source map differences
 
 use super::ProgramDiffFilter;
+
+// ---------------------------------------------------------------------------
+// ProgramDiffFilterEx -- extended filter with fine-grained comment types
+// ---------------------------------------------------------------------------
+
+/// Extended program diff filter with fine-grained comment type and additional
+/// category flags.
+///
+/// Ported from Ghidra's `ProgramDiffFilter` Java class constants for
+/// individual comment types (`EOL_COMMENT_DIFFS`, `PRE_COMMENT_DIFFS`,
+/// `POST_COMMENT_DIFFS`, `PLATE_COMMENT_DIFFS`, `REPEATABLE_COMMENT_DIFFS`),
+/// `FUNCTION_TAG_DIFFS`, and `SOURCE_MAP_DIFFS`.
+///
+/// This struct wraps a `u32` bitmask and provides individual constants for
+/// each comment type, as well as a `COMMENT_DIFFS` combination and
+/// `ALL_DIFFS` that includes all extended types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ProgramDiffFilterEx(u32);
+
+impl ProgramDiffFilterEx {
+    /// No filter flags set.
+    pub const NONE: Self = Self(0);
+    /// Program context (register) differences.
+    pub const PROGRAM_CONTEXT: Self = Self(1 << 0);
+    /// Byte differences.
+    pub const BYTE: Self = Self(1 << 1);
+    /// Code unit differences.
+    pub const CODE_UNIT: Self = Self(1 << 2);
+    /// End-of-line comment differences.
+    pub const EOL_COMMENT: Self = Self(1 << 3);
+    /// Pre-comment differences.
+    pub const PRE_COMMENT: Self = Self(1 << 4);
+    /// Post-comment differences.
+    pub const POST_COMMENT: Self = Self(1 << 5);
+    /// Plate comment differences.
+    pub const PLATE_COMMENT: Self = Self(1 << 6);
+    /// Repeatable comment differences.
+    pub const REPEATABLE_COMMENT: Self = Self(1 << 7);
+    /// Memory, variable, and external reference differences.
+    pub const REFERENCE: Self = Self(1 << 8);
+    /// Equate differences.
+    pub const EQUATE: Self = Self(1 << 9);
+    /// Symbol differences.
+    pub const SYMBOL: Self = Self(1 << 10);
+    /// Function differences.
+    pub const FUNCTION: Self = Self(1 << 11);
+    /// Bookmark differences.
+    pub const BOOKMARK: Self = Self(1 << 12);
+    /// User-defined property differences.
+    pub const USER_DEFINED: Self = Self(1 << 13);
+    /// Function tag differences.
+    pub const FUNCTION_TAG: Self = Self(1 << 14);
+    /// Source map differences.
+    pub const SOURCE_MAP: Self = Self(1 << 15);
+
+    /// Total number of primary difference types.
+    pub const NUM_PRIMARY_TYPES: usize = 16;
+
+    /// All comment diff types combined.
+    pub const COMMENT_DIFFS: Self = Self(
+        Self::EOL_COMMENT.0
+            | Self::PRE_COMMENT.0
+            | Self::POST_COMMENT.0
+            | Self::PLATE_COMMENT.0
+            | Self::REPEATABLE_COMMENT.0,
+    );
+
+    /// All defined diff types combined.
+    pub const ALL_DIFFS: Self = Self(
+        Self::BYTE.0
+            | Self::CODE_UNIT.0
+            | Self::COMMENT_DIFFS.0
+            | Self::REFERENCE.0
+            | Self::USER_DEFINED.0
+            | Self::SYMBOL.0
+            | Self::EQUATE.0
+            | Self::FUNCTION.0
+            | Self::BOOKMARK.0
+            | Self::FUNCTION_TAG.0
+            | Self::PROGRAM_CONTEXT.0
+            | Self::SOURCE_MAP.0,
+    );
+
+    /// Create a filter with no flags set.
+    pub const fn empty() -> Self {
+        Self::NONE
+    }
+
+    /// Create a filter with all flags set.
+    pub const fn all() -> Self {
+        Self::ALL_DIFFS
+    }
+
+    /// Create a filter from a raw bitmask, masked to valid types.
+    pub const fn from_bits(bits: u32) -> Self {
+        Self(bits & Self::ALL_DIFFS.0)
+    }
+
+    /// Get the raw bitmask.
+    pub const fn bits(&self) -> u32 {
+        self.0
+    }
+
+    /// Check if a flag is set.
+    pub const fn contains(&self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    /// Check if a flag is set (any bit overlap, matching Java's `getFilter`).
+    pub const fn has_any(&self, other: Self) -> bool {
+        (self.0 & other.0) != 0
+    }
+
+    /// Set a flag.
+    pub fn insert(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    /// Clear a flag.
+    pub fn remove(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+
+    /// Set or clear a flag based on a boolean.
+    pub fn set(&mut self, other: Self, enabled: bool) {
+        if enabled {
+            self.insert(other);
+        } else {
+            self.remove(other);
+        }
+    }
+
+    /// Check if no flags are set.
+    pub const fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
+
+    /// Set all defined types to true (Java `selectAll()`).
+    pub fn select_all(&mut self) {
+        self.0 = Self::ALL_DIFFS.0;
+    }
+
+    /// Set all defined types to false (Java `clearAll()`).
+    pub fn clear_all(&mut self) {
+        self.0 = 0;
+    }
+
+    /// Add another filter's flags to this one (Java `addToFilter()`).
+    pub fn add_to_filter(&mut self, other: &Self) {
+        self.0 |= other.0;
+    }
+
+    /// Get all primary (individual) diff type flags.
+    pub fn primary_types() -> &'static [ProgramDiffFilterEx] {
+        &[
+            Self::PROGRAM_CONTEXT,
+            Self::BYTE,
+            Self::CODE_UNIT,
+            Self::EOL_COMMENT,
+            Self::PRE_COMMENT,
+            Self::POST_COMMENT,
+            Self::PLATE_COMMENT,
+            Self::REPEATABLE_COMMENT,
+            Self::REFERENCE,
+            Self::EQUATE,
+            Self::SYMBOL,
+            Self::FUNCTION,
+            Self::BOOKMARK,
+            Self::USER_DEFINED,
+            Self::FUNCTION_TAG,
+            Self::SOURCE_MAP,
+        ]
+    }
+
+    /// Convert a type flag to its name (Java `typeToName()`).
+    pub fn type_to_name(ty: ProgramDiffFilterEx) -> &'static str {
+        match ty {
+            Self::PROGRAM_CONTEXT => "PROGRAM_CONTEXT_DIFFS",
+            Self::BYTE => "BYTE_DIFFS",
+            Self::CODE_UNIT => "CODE_UNIT_DIFFS",
+            Self::EOL_COMMENT => "EOL_COMMENT_DIFFS",
+            Self::PRE_COMMENT => "PRE_COMMENT_DIFFS",
+            Self::POST_COMMENT => "POST_COMMENT_DIFFS",
+            Self::PLATE_COMMENT => "PLATE_COMMENT_DIFFS",
+            Self::REPEATABLE_COMMENT => "REPEATABLE_COMMENT_DIFFS",
+            Self::REFERENCE => "REFERENCE_DIFFS",
+            Self::EQUATE => "EQUATE_DIFFS",
+            Self::SYMBOL => "SYMBOL_DIFFS",
+            Self::FUNCTION => "FUNCTION_DIFFS",
+            Self::BOOKMARK => "BOOKMARK_DIFFS",
+            Self::USER_DEFINED => "USER_DEFINED_DIFFS",
+            Self::FUNCTION_TAG => "FUNCTION_TAG_DIFFS",
+            Self::SOURCE_MAP => "SOURCE_MAP_DIFFS",
+            Self::COMMENT_DIFFS => "COMMENT_DIFFS",
+            Self::ALL_DIFFS => "ALL_DIFFS",
+            _ => "",
+        }
+    }
+
+    /// Convert this filter to a human-readable string (Java `toString()`).
+    pub fn to_display_string(&self) -> String {
+        let mut buf = String::from("ProgramDiffFilter:\n");
+        for &ty in Self::primary_types() {
+            buf.push_str(&format!(
+                "  {}={}\n",
+                Self::type_to_name(ty),
+                self.has_any(ty)
+            ));
+        }
+        buf
+    }
+}
+
+impl std::ops::BitOr for ProgramDiffFilterEx {
+    type Output = Self;
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl std::ops::BitAnd for ProgramDiffFilterEx {
+    type Output = Self;
+    fn bitand(self, rhs: Self) -> Self {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl std::ops::BitOrAssign for ProgramDiffFilterEx {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl Default for ProgramDiffFilterEx {
+    fn default() -> Self {
+        Self::empty()
+    }
+}
+
+/// Convert a base [`ProgramDiffFilter`] to an extended [`ProgramDiffFilterEx`].
+///
+/// Maps the coarser-grained base filter flags to their extended equivalents.
+/// The `COMMENTS` flag in the base filter expands to all individual comment
+/// types in the extended filter.
+pub fn to_extended_filter(base: ProgramDiffFilter) -> ProgramDiffFilterEx {
+    let mut ext = ProgramDiffFilterEx::empty();
+
+    if base.contains(ProgramDiffFilter::BYTES) {
+        ext.insert(ProgramDiffFilterEx::BYTE);
+    }
+    if base.contains(ProgramDiffFilter::CODE_UNITS) {
+        ext.insert(ProgramDiffFilterEx::CODE_UNIT);
+    }
+    if base.contains(ProgramDiffFilter::DATA_TYPES) {
+        ext.insert(ProgramDiffFilterEx::USER_DEFINED);
+    }
+    if base.contains(ProgramDiffFilter::SYMBOLS) {
+        ext.insert(ProgramDiffFilterEx::SYMBOL);
+    }
+    if base.contains(ProgramDiffFilter::EQUATES) {
+        ext.insert(ProgramDiffFilterEx::EQUATE);
+    }
+    if base.contains(ProgramDiffFilter::BOOKMARKS) {
+        ext.insert(ProgramDiffFilterEx::BOOKMARK);
+    }
+    if base.contains(ProgramDiffFilter::COMMENTS) {
+        ext.insert(ProgramDiffFilterEx::COMMENT_DIFFS);
+    }
+    if base.contains(ProgramDiffFilter::FUNCTIONS) {
+        ext.insert(ProgramDiffFilterEx::FUNCTION);
+    }
+    if base.contains(ProgramDiffFilter::REGISTERS) {
+        ext.insert(ProgramDiffFilterEx::PROGRAM_CONTEXT);
+    }
+    if base.contains(ProgramDiffFilter::PROPERTIES) {
+        ext.insert(ProgramDiffFilterEx::USER_DEFINED);
+    }
+    if base.contains(ProgramDiffFilter::REFERENCES) {
+        ext.insert(ProgramDiffFilterEx::REFERENCE);
+    }
+    if base.contains(ProgramDiffFilter::EXTERNALS) {
+        ext.insert(ProgramDiffFilterEx::REFERENCE);
+    }
+    if base.contains(ProgramDiffFilter::OPTIONS) {
+        ext.insert(ProgramDiffFilterEx::USER_DEFINED);
+    }
+    if base.contains(ProgramDiffFilter::RELOCATIONS) {
+        ext.insert(ProgramDiffFilterEx::SOURCE_MAP);
+    }
+
+    ext
+}
+
+/// Convert an extended [`ProgramDiffFilterEx`] back to a base [`ProgramDiffFilter`].
+///
+/// Individual comment types are combined into the base `COMMENTS` flag.
+/// Extended types without a direct base equivalent map to the closest match.
+pub fn to_base_filter(ext: ProgramDiffFilterEx) -> ProgramDiffFilter {
+    let mut base = ProgramDiffFilter::empty();
+
+    if ext.has_any(ProgramDiffFilterEx::BYTE) {
+        base.insert(ProgramDiffFilter::BYTES);
+    }
+    if ext.has_any(ProgramDiffFilterEx::CODE_UNIT) {
+        base.insert(ProgramDiffFilter::CODE_UNITS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::COMMENT_DIFFS) {
+        base.insert(ProgramDiffFilter::COMMENTS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::REFERENCE) {
+        base.insert(ProgramDiffFilter::REFERENCES);
+    }
+    if ext.has_any(ProgramDiffFilterEx::EQUATE) {
+        base.insert(ProgramDiffFilter::EQUATES);
+    }
+    if ext.has_any(ProgramDiffFilterEx::SYMBOL) {
+        base.insert(ProgramDiffFilter::SYMBOLS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::FUNCTION) {
+        base.insert(ProgramDiffFilter::FUNCTIONS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::BOOKMARK) {
+        base.insert(ProgramDiffFilter::BOOKMARKS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::USER_DEFINED) {
+        base.insert(ProgramDiffFilter::PROPERTIES);
+    }
+    if ext.has_any(ProgramDiffFilterEx::FUNCTION_TAG) {
+        base.insert(ProgramDiffFilter::FUNCTIONS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::PROGRAM_CONTEXT) {
+        base.insert(ProgramDiffFilter::REGISTERS);
+    }
+    if ext.has_any(ProgramDiffFilterEx::SOURCE_MAP) {
+        base.insert(ProgramDiffFilter::RELOCATIONS);
+    }
+
+    base
+}
 
 // ---------------------------------------------------------------------------
 // FilterCategory
@@ -840,5 +1194,229 @@ mod tests {
         assert!(detail.contains("[Functions]"));
         assert!(detail.contains("[References]"));
         assert!(detail.contains("[Metadata]"));
+    }
+
+    // -- ProgramDiffFilterEx tests ------------------------------------------
+
+    #[test]
+    fn test_ex_filter_empty_and_all() {
+        let empty = ProgramDiffFilterEx::empty();
+        assert!(empty.is_empty());
+        assert_eq!(empty.bits(), 0);
+
+        let all = ProgramDiffFilterEx::all();
+        assert!(!all.is_empty());
+        assert!(all.has_any(ProgramDiffFilterEx::BYTE));
+        assert!(all.has_any(ProgramDiffFilterEx::COMMENT_DIFFS));
+        assert!(all.has_any(ProgramDiffFilterEx::FUNCTION_TAG));
+        assert!(all.has_any(ProgramDiffFilterEx::SOURCE_MAP));
+    }
+
+    #[test]
+    fn test_ex_filter_comment_types() {
+        let mut f = ProgramDiffFilterEx::empty();
+        f.insert(ProgramDiffFilterEx::EOL_COMMENT);
+        assert!(f.has_any(ProgramDiffFilterEx::EOL_COMMENT));
+        assert!(!f.has_any(ProgramDiffFilterEx::PRE_COMMENT));
+        // has_any checks any overlap, so one comment type overlaps with COMMENT_DIFFS
+        assert!(f.has_any(ProgramDiffFilterEx::COMMENT_DIFFS));
+        // But contains checks ALL bits, so one type does NOT contain COMMENT_DIFFS
+        assert!(!f.contains(ProgramDiffFilterEx::COMMENT_DIFFS));
+
+        f.insert(ProgramDiffFilterEx::PRE_COMMENT);
+        f.insert(ProgramDiffFilterEx::POST_COMMENT);
+        f.insert(ProgramDiffFilterEx::PLATE_COMMENT);
+        f.insert(ProgramDiffFilterEx::REPEATABLE_COMMENT);
+        assert!(f.has_any(ProgramDiffFilterEx::COMMENT_DIFFS));
+        assert!(f.contains(ProgramDiffFilterEx::COMMENT_DIFFS));
+    }
+
+    #[test]
+    fn test_ex_filter_comment_diffs_combination() {
+        let f = ProgramDiffFilterEx::COMMENT_DIFFS;
+        assert!(f.has_any(ProgramDiffFilterEx::EOL_COMMENT));
+        assert!(f.has_any(ProgramDiffFilterEx::PRE_COMMENT));
+        assert!(f.has_any(ProgramDiffFilterEx::POST_COMMENT));
+        assert!(f.has_any(ProgramDiffFilterEx::PLATE_COMMENT));
+        assert!(f.has_any(ProgramDiffFilterEx::REPEATABLE_COMMENT));
+        assert!(!f.has_any(ProgramDiffFilterEx::BYTE));
+    }
+
+    #[test]
+    fn test_ex_filter_function_tag_and_source_map() {
+        let mut f = ProgramDiffFilterEx::empty();
+        f.insert(ProgramDiffFilterEx::FUNCTION_TAG);
+        f.insert(ProgramDiffFilterEx::SOURCE_MAP);
+        assert!(f.has_any(ProgramDiffFilterEx::FUNCTION_TAG));
+        assert!(f.has_any(ProgramDiffFilterEx::SOURCE_MAP));
+        assert!(!f.has_any(ProgramDiffFilterEx::BYTE));
+    }
+
+    #[test]
+    fn test_ex_filter_select_all_and_clear_all() {
+        let mut f = ProgramDiffFilterEx::empty();
+        assert!(f.is_empty());
+        f.select_all();
+        assert_eq!(f, ProgramDiffFilterEx::all());
+        f.clear_all();
+        assert!(f.is_empty());
+    }
+
+    #[test]
+    fn test_ex_filter_add_to_filter() {
+        let mut f1 = ProgramDiffFilterEx::BYTE;
+        let f2 = ProgramDiffFilterEx::SYMBOL | ProgramDiffFilterEx::EOL_COMMENT;
+        f1.add_to_filter(&f2);
+        assert!(f1.has_any(ProgramDiffFilterEx::BYTE));
+        assert!(f1.has_any(ProgramDiffFilterEx::SYMBOL));
+        assert!(f1.has_any(ProgramDiffFilterEx::EOL_COMMENT));
+    }
+
+    #[test]
+    fn test_ex_filter_from_bits() {
+        let f = ProgramDiffFilterEx::from_bits(ProgramDiffFilterEx::BYTE.0 | 0x80000000);
+        assert!(f.has_any(ProgramDiffFilterEx::BYTE));
+        // High bits should be masked off
+        assert_eq!(f.bits() & 0x80000000, 0);
+    }
+
+    #[test]
+    fn test_ex_filter_primary_types() {
+        let types = ProgramDiffFilterEx::primary_types();
+        assert_eq!(types.len(), 16);
+    }
+
+    #[test]
+    fn test_ex_filter_type_to_name() {
+        assert_eq!(
+            ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx::BYTE),
+            "BYTE_DIFFS"
+        );
+        assert_eq!(
+            ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx::EOL_COMMENT),
+            "EOL_COMMENT_DIFFS"
+        );
+        assert_eq!(
+            ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx::FUNCTION_TAG),
+            "FUNCTION_TAG_DIFFS"
+        );
+        assert_eq!(
+            ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx::SOURCE_MAP),
+            "SOURCE_MAP_DIFFS"
+        );
+        assert_eq!(
+            ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx::COMMENT_DIFFS),
+            "COMMENT_DIFFS"
+        );
+        assert_eq!(
+            ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx::ALL_DIFFS),
+            "ALL_DIFFS"
+        );
+        // Unknown type returns empty
+        assert_eq!(ProgramDiffFilterEx::type_to_name(ProgramDiffFilterEx(0)), "");
+    }
+
+    #[test]
+    fn test_ex_filter_to_display_string() {
+        let f = ProgramDiffFilterEx::BYTE | ProgramDiffFilterEx::EOL_COMMENT;
+        let s = f.to_display_string();
+        assert!(s.contains("BYTE_DIFFS=true"));
+        assert!(s.contains("EOL_COMMENT_DIFFS=true"));
+        assert!(s.contains("SYMBOL_DIFFS=false"));
+    }
+
+    #[test]
+    fn test_ex_filter_set() {
+        let mut f = ProgramDiffFilterEx::empty();
+        f.set(ProgramDiffFilterEx::BYTE, true);
+        assert!(f.has_any(ProgramDiffFilterEx::BYTE));
+        f.set(ProgramDiffFilterEx::BYTE, false);
+        assert!(!f.has_any(ProgramDiffFilterEx::BYTE));
+    }
+
+    #[test]
+    fn test_ex_filter_default() {
+        let f = ProgramDiffFilterEx::default();
+        assert!(f.is_empty());
+    }
+
+    #[test]
+    fn test_ex_filter_bitwise_ops() {
+        let f1 = ProgramDiffFilterEx::BYTE | ProgramDiffFilterEx::SYMBOL;
+        assert!(f1.has_any(ProgramDiffFilterEx::BYTE));
+        assert!(f1.has_any(ProgramDiffFilterEx::SYMBOL));
+
+        let f2 = f1 & ProgramDiffFilterEx::BYTE;
+        assert!(f2.has_any(ProgramDiffFilterEx::BYTE));
+        assert!(!f2.has_any(ProgramDiffFilterEx::SYMBOL));
+    }
+
+    #[test]
+    fn test_to_extended_filter_basic() {
+        let base = ProgramDiffFilter::BYTES | ProgramDiffFilter::SYMBOLS;
+        let ext = to_extended_filter(base);
+        assert!(ext.has_any(ProgramDiffFilterEx::BYTE));
+        assert!(ext.has_any(ProgramDiffFilterEx::SYMBOL));
+        assert!(!ext.has_any(ProgramDiffFilterEx::COMMENT_DIFFS));
+    }
+
+    #[test]
+    fn test_to_extended_filter_comments() {
+        let base = ProgramDiffFilter::COMMENTS;
+        let ext = to_extended_filter(base);
+        assert!(ext.has_any(ProgramDiffFilterEx::EOL_COMMENT));
+        assert!(ext.has_any(ProgramDiffFilterEx::PRE_COMMENT));
+        assert!(ext.has_any(ProgramDiffFilterEx::POST_COMMENT));
+        assert!(ext.has_any(ProgramDiffFilterEx::PLATE_COMMENT));
+        assert!(ext.has_any(ProgramDiffFilterEx::REPEATABLE_COMMENT));
+    }
+
+    #[test]
+    fn test_to_extended_filter_all() {
+        let base = ProgramDiffFilter::all();
+        let ext = to_extended_filter(base);
+        assert!(ext.has_any(ProgramDiffFilterEx::BYTE));
+        assert!(ext.has_any(ProgramDiffFilterEx::COMMENT_DIFFS));
+        assert!(ext.has_any(ProgramDiffFilterEx::REFERENCE));
+    }
+
+    #[test]
+    fn test_to_base_filter_basic() {
+        let ext = ProgramDiffFilterEx::BYTE | ProgramDiffFilterEx::SYMBOL;
+        let base = to_base_filter(ext);
+        assert!(base.contains(ProgramDiffFilter::BYTES));
+        assert!(base.contains(ProgramDiffFilter::SYMBOLS));
+        assert!(!base.contains(ProgramDiffFilter::COMMENTS));
+    }
+
+    #[test]
+    fn test_to_base_filter_comment_diffs() {
+        let ext = ProgramDiffFilterEx::COMMENT_DIFFS;
+        let base = to_base_filter(ext);
+        assert!(base.contains(ProgramDiffFilter::COMMENTS));
+    }
+
+    #[test]
+    fn test_to_base_filter_function_tag() {
+        let ext = ProgramDiffFilterEx::FUNCTION_TAG;
+        let base = to_base_filter(ext);
+        assert!(base.contains(ProgramDiffFilter::FUNCTIONS));
+    }
+
+    #[test]
+    fn test_to_base_filter_source_map() {
+        let ext = ProgramDiffFilterEx::SOURCE_MAP;
+        let base = to_base_filter(ext);
+        assert!(base.contains(ProgramDiffFilter::RELOCATIONS));
+    }
+
+    #[test]
+    fn test_roundtrip_base_to_extended_and_back() {
+        let original = ProgramDiffFilter::BYTES | ProgramDiffFilter::SYMBOLS | ProgramDiffFilter::COMMENTS;
+        let ext = to_extended_filter(original);
+        let back = to_base_filter(ext);
+        assert!(back.contains(ProgramDiffFilter::BYTES));
+        assert!(back.contains(ProgramDiffFilter::SYMBOLS));
+        assert!(back.contains(ProgramDiffFilter::COMMENTS));
     }
 }
