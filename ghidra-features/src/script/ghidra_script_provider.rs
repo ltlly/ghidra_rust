@@ -182,12 +182,96 @@ impl ScriptProvider {
         std::fs::remove_file(path).is_ok()
     }
 
+    /// Fix up a script name for searching in script directories.
+    ///
+    /// Ported from `GhidraScriptProvider.fixupName(String)`.
+    ///
+    /// For Java, this converts dot-separated package names to path separators
+    /// and strips inner class names. For other languages, returns the name as-is.
+    pub fn fixup_name(&self, script_name: &str) -> String {
+        match self.language {
+            ScriptLanguage::Java | ScriptLanguage::Groovy => {
+                let base = if script_name.ends_with(".java") {
+                    &script_name[..script_name.len() - 5]
+                } else if script_name.ends_with(".groovy") {
+                    &script_name[..script_name.len() - 7]
+                } else {
+                    script_name
+                };
+                let path = base.replace('.', "/");
+                // Strip inner class names (after '$')
+                let path = match path.find('$') {
+                    Some(pos) => &path[..pos],
+                    None => &path,
+                };
+                format!("{}{}", path, self.default_extension())
+            }
+            _ => script_name.to_string(),
+        }
+    }
+
     /// Read script source from a file path.
     pub fn read_source(&self, path: &Path) -> Result<String, ScriptProviderError> {
         std::fs::read_to_string(path).map_err(|e| ScriptProviderError::IoError {
             path: path.to_path_buf(),
             message: e.to_string(),
         })
+    }
+
+    /// Create a new script file from a template for this provider's language.
+    ///
+    /// Ported from `GhidraScriptProvider.createNewScript(ResourceFile, String)`.
+    ///
+    /// Returns the script content as a string.
+    pub fn create_new_script(&self, script_name: &str, category: &str) -> String {
+        let cat = if category.is_empty() { "_NEW_" } else { category };
+        let mut out = String::new();
+
+        // Write header
+        out.push_str(&self.write_header(cat));
+
+        match self.language {
+            ScriptLanguage::Java | ScriptLanguage::Groovy => {
+                let class_name = script_name
+                    .rsplit_once('.')
+                    .map(|(base, _)| base)
+                    .unwrap_or(script_name);
+
+                out.push_str("import ghidra.app.script.GhidraScript;\n");
+                out.push('\n');
+
+                // Add common ghidra.program.model imports
+                for pkg in &[
+                    "ghidra.program.model.listing",
+                    "ghidra.program.model.address",
+                    "ghidra.program.model.mem",
+                    "ghidra.program.model.symbol",
+                    "ghidra.program.model.data",
+                ] {
+                    out.push_str(&format!("import {}.*;\n", pkg));
+                }
+
+                out.push('\n');
+                out.push_str(&format!("public class {} extends GhidraScript {{\n", class_name));
+                out.push('\n');
+                out.push_str("    public void run() throws Exception {\n");
+                out.push_str(&self.write_body());
+                out.push_str("    }\n");
+                out.push('\n');
+                out.push_str("}\n");
+            }
+            ScriptLanguage::Python => {
+                out.push_str(&self.write_body());
+            }
+            ScriptLanguage::JavaScript => {
+                out.push_str(&self.write_body());
+            }
+            ScriptLanguage::Unsupported => {
+                out.push_str(&self.write_body());
+            }
+        }
+
+        out
     }
 }
 
@@ -237,7 +321,7 @@ impl ScriptProvider {
     /// Create a Groovy script provider.
     pub fn groovy() -> Self {
         Self::new(
-            ScriptLanguage::Java, // Groovy runs on JVM
+            ScriptLanguage::Groovy,
             ".groovy",
             "Groovy Ghidra Script",
             "//",
@@ -875,5 +959,67 @@ mod tests {
 
         cache.clear();
         assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_provider_fixup_name_java() {
+        let java = ScriptProvider::java();
+        // Dot-separated package names become path separators
+        assert_eq!(java.fixup_name("ghidra.app.MyScript.java"), "ghidra/app/MyScript.java");
+        // Inner class names are stripped
+        assert_eq!(java.fixup_name("MyScript$Inner.java"), "MyScript.java");
+        // Simple name unchanged
+        assert_eq!(java.fixup_name("MyScript.java"), "MyScript.java");
+    }
+
+    #[test]
+    fn test_provider_fixup_name_python() {
+        let python = ScriptProvider::python();
+        // Python names are not transformed
+        assert_eq!(python.fixup_name("my_script.py"), "my_script.py");
+    }
+
+    #[test]
+    fn test_provider_create_new_script_java() {
+        let java = ScriptProvider::java();
+        let script = java.create_new_script("MyAnalysis", "Analysis");
+        assert!(script.contains("//TODO write a description"));
+        assert!(script.contains("//@category Analysis"));
+        assert!(script.contains("import ghidra.app.script.GhidraScript;"));
+        assert!(script.contains("public class MyAnalysis extends GhidraScript"));
+        assert!(script.contains("public void run() throws Exception"));
+        assert!(script.contains("//TODO Add User Code Here"));
+    }
+
+    #[test]
+    fn test_provider_create_new_script_java_strips_extension() {
+        let java = ScriptProvider::java();
+        let script = java.create_new_script("MyScript.java", "Test");
+        assert!(script.contains("public class MyScript extends GhidraScript"));
+        assert!(!script.contains("public class MyScript.java"));
+    }
+
+    #[test]
+    fn test_provider_create_new_script_python() {
+        let python = ScriptProvider::python();
+        let script = python.create_new_script("myscript", "Utilities");
+        assert!(script.contains("#TODO write a description"));
+        assert!(script.contains("#@category Utilities"));
+        assert!(script.contains("#TODO Add User Code Here"));
+    }
+
+    #[test]
+    fn test_provider_create_new_script_empty_category() {
+        let java = ScriptProvider::java();
+        let script = java.create_new_script("Test", "");
+        assert!(script.contains("//@category _NEW_"));
+    }
+
+    #[test]
+    fn test_groovy_provider_uses_groovy_language() {
+        let groovy = ScriptProvider::groovy();
+        assert_eq!(groovy.language, ScriptLanguage::Groovy);
+        assert!(groovy.runtime_environment.is_some());
+        assert_eq!(groovy.runtime_environment.as_deref(), Some("Groovy"));
     }
 }
