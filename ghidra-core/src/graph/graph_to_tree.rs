@@ -64,7 +64,7 @@ where
 }
 
 /// Topological sort of vertices reachable from `root`, ignoring back edges.
-fn topological_sort<V, E>(
+pub fn topological_sort<V, E>(
     graph: &dyn GDirectedGraph<V, E>,
     root: &V,
     edge_priority: &dyn Fn(&E, &E) -> std::cmp::Ordering,

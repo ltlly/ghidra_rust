@@ -357,6 +357,277 @@ where
     visited
 }
 
+// ============================================================================
+// Additional convenience functions ported from Java GraphAlgorithms.java
+// ============================================================================
+
+/// Create a subgraph containing only the given vertices and all edges between them.
+///
+/// Port of `GraphAlgorithms.createSubGraph(GDirectedGraph, Collection)`.
+pub fn create_subgraph<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    vertices: &HashSet<V>,
+) -> Box<dyn GDirectedGraph<V, E>>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    g.create_subgraph(vertices)
+}
+
+/// Find strongly-connected components on a generic [`GDirectedGraph`].
+///
+/// Returns a set of sets, where each inner set is one SCC.
+///
+/// Port of `GraphAlgorithms.getStronglyConnectedComponents(GDirectedGraph)`.
+pub fn get_strongly_connected_components<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+) -> Vec<HashSet<V>>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::TarjanSCC;
+    let scc = TarjanSCC::new(g);
+    scc.get_connected_components().to_vec()
+}
+
+/// Returns the dominance tree of the given graph.
+///
+/// Port of `GraphAlgorithms.findDominanceTree(GDirectedGraph, TaskMonitor)`.
+pub fn find_dominance_tree<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+) -> super::hash_graph::HashDirectedGraph<V, super::default_edge::DefaultGEdge<V>>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::ChkDominanceAlgorithm;
+    let algo = ChkDominanceAlgorithm::compute(g);
+    algo.get_dominance_tree(g)
+}
+
+/// Returns all vertices dominated by `from`.
+///
+/// Port of `GraphAlgorithms.findDominance(GDirectedGraph, V, TaskMonitor)`.
+pub fn find_dominance<V, E>(g: &dyn GDirectedGraph<V, E>, from: &V) -> HashSet<V>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::ChkDominanceAlgorithm;
+    let algo = ChkDominanceAlgorithm::compute(g);
+    algo.get_dominated(from)
+}
+
+/// Returns all vertices that post-dominate `from`.
+///
+/// Port of `GraphAlgorithms.findPostDominance(GDirectedGraph, V, TaskMonitor)`.
+pub fn find_post_dominance<V, E>(g: &dyn GDirectedGraph<V, E>, from: &V) -> HashSet<V>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::ChkPostDominanceAlgorithm;
+    let algo = ChkPostDominanceAlgorithm::compute(g);
+    algo.get_post_dominated(from)
+}
+
+/// Find all circuits (cycles) in the graph.
+///
+/// Port of `GraphAlgorithms.findCircuits(GDirectedGraph, boolean, TaskMonitor)`.
+pub fn find_circuits<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    unique_circuits: bool,
+) -> Vec<Vec<V>>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::JohnsonCircuitsAlgorithm;
+    let mut algo = JohnsonCircuitsAlgorithm::new(g);
+    algo.compute(unique_circuits)
+}
+
+/// Find all paths from `start` to `end`.
+///
+/// Port of `GraphAlgorithms.findPaths(GDirectedGraph, V, V, Accumulator, TaskMonitor)`.
+pub fn find_paths<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    start: &V,
+    end: &V,
+) -> Vec<Vec<V>>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::find_paths_iterative;
+    find_paths_iterative(g, start, end)
+}
+
+/// Returns vertices in post-order (children before parents) using top-down traversal.
+///
+/// Port of `GraphAlgorithms.getVerticesInPostOrder(GDirectedGraph, GraphNavigator)`.
+pub fn get_vertices_in_post_order<V, E>(g: &dyn GDirectedGraph<V, E>) -> Vec<V>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::DepthFirstSorter;
+    DepthFirstSorter::post_order(g)
+}
+
+/// Returns vertices in pre-order (parents before children) using top-down traversal.
+///
+/// Port of `GraphAlgorithms.getVerticesInPreOrder(GDirectedGraph, GraphNavigator)`.
+pub fn get_vertices_in_pre_order<V, E>(g: &dyn GDirectedGraph<V, E>) -> Vec<V>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::DepthFirstSorter;
+    DepthFirstSorter::pre_order(g)
+}
+
+/// Compute complexity depth for each vertex.
+///
+/// For each vertex, the depth is the longest path from that vertex in a
+/// depth-first traversal. A vertex with a single childless successor has
+/// depth 1.
+///
+/// Port of `GraphAlgorithms.getComplexityDepth(GDirectedGraph)`.
+pub fn get_complexity_depth<V, E>(g: &dyn GDirectedGraph<V, E>) -> HashMap<V, usize>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    use super::algo::DepthFirstSorter;
+    let mut map = HashMap::new();
+    let post_order = DepthFirstSorter::post_order(g);
+    for v in post_order {
+        let max_child_level = get_max_child_level(g, &map, &v);
+        map.insert(v, max_child_level + 1);
+    }
+    map
+}
+
+/// Helper: get the maximum level among all successors.
+fn get_max_child_level<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    level_map: &HashMap<V, usize>,
+    v: &V,
+) -> usize
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    let mut max_level: usize = 0;
+    for child in g.get_successors(v) {
+        if let Some(&level) = level_map.get(&child) {
+            if level > max_level {
+                max_level = level;
+            }
+        }
+    }
+    max_level
+}
+
+/// Retain only edges whose endpoints are both in the given vertex set.
+///
+/// Port of `GraphAlgorithms.retainEdges(GDirectedGraph, Set)`.
+pub fn retain_edges<V, E>(g: &dyn GDirectedGraph<V, E>, vertices: &HashSet<V>) -> Vec<E>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    g.get_edges()
+        .into_iter()
+        .filter(|e| vertices.contains(e.start()) && vertices.contains(e.end()))
+        .collect()
+}
+
+/// Topological sort with edge comparator.
+///
+/// Port of `GraphAlgorithms.topologicalSort(GDirectedGraph, V, Comparator)`.
+pub fn topological_sort_with_comparator<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    root: &V,
+    edge_priority: &dyn Fn(&E, &E) -> std::cmp::Ordering,
+) -> Vec<V>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    super::graph_to_tree::topological_sort(g, root, edge_priority)
+}
+
+/// Convert a directed graph to a tree rooted at `root`.
+///
+/// Port of `GraphAlgorithms.toTree(GDirectedGraph, V, Comparator)`.
+pub fn to_tree<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    root: &V,
+    edge_priority: &dyn Fn(&E, &E) -> std::cmp::Ordering,
+) -> super::hash_graph::HashDirectedGraph<V, E>
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    super::graph_to_tree::to_tree(g, root, edge_priority)
+}
+
+/// Print the graph for debugging, starting from sources.
+///
+/// Port of `GraphAlgorithms.printGraph(GDirectedGraph, PrintStream)`.
+pub fn print_graph<V, E>(g: &dyn GDirectedGraph<V, E>) -> String
+where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    let sources = get_sources(g);
+    let mut printed = HashSet::new();
+    let mut out = String::new();
+    out.push_str("=================================\n");
+    for v in &sources {
+        recursive_print(g, v, &mut printed, 0, &mut out);
+        out.push_str("---------------------------------\n");
+    }
+    out.push_str("=================================\n");
+    out
+}
+
+/// Helper for recursive graph printing.
+fn recursive_print<V, E>(
+    g: &dyn GDirectedGraph<V, E>,
+    v: &V,
+    printed: &mut HashSet<V>,
+    depth: usize,
+    out: &mut String,
+) where
+    V: Clone + Debug + Eq + Hash + 'static,
+    E: GEdge<V> + 'static,
+{
+    for _ in 0..depth {
+        out.push('.');
+    }
+
+    if printed.contains(v) {
+        out.push_str(&format!("{:?}^ ({})\n", v, depth));
+        return;
+    }
+
+    out.push_str(&format!("{:?}", v));
+    if depth > 0 {
+        out.push_str(&format!(" ({})", depth));
+    }
+    out.push('\n');
+
+    printed.insert(v.clone());
+    for succ in g.get_successors(v) {
+        recursive_print(g, &succ, printed, depth + 1, out);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -551,5 +822,111 @@ mod tests {
         let g = make_chain_graph();
         let rtc = reverse_transitive_closure(&g, &[4]);
         assert_eq!(rtc.len(), 5); // all can reach 4
+    }
+
+    #[test]
+    fn test_create_subgraph() {
+        let g = make_diamond_graph();
+        let mut verts = HashSet::new();
+        verts.insert(0);
+        verts.insert(1);
+        verts.insert(3);
+        let sub = create_subgraph(&g, &verts);
+        // 0->1 and 1->3 should be in subgraph, but not 0->2 or 2->3
+        let edges = sub.get_edges();
+        assert_eq!(edges.len(), 2);
+        assert!(sub.contains_edge_between(&0, &1));
+        assert!(sub.contains_edge_between(&1, &3));
+        assert!(!sub.contains_edge_between(&0, &2));
+    }
+
+    #[test]
+    fn test_get_strongly_connected_components() {
+        // Chain graph has no cycles, each vertex is its own SCC
+        let g = make_chain_graph();
+        let sccs = get_strongly_connected_components(&g);
+        assert_eq!(sccs.len(), 5);
+    }
+
+    #[test]
+    fn test_find_dominance() {
+        let g = make_diamond_graph();
+        let dominated = find_dominance(&g, &0);
+        // 0 dominates all vertices
+        assert!(dominated.contains(&0));
+        assert!(dominated.contains(&1));
+        assert!(dominated.contains(&2));
+        assert!(dominated.contains(&3));
+    }
+
+    #[test]
+    fn test_find_circuits_chain() {
+        // Chain has no circuits
+        let g = make_chain_graph();
+        let circuits = find_circuits(&g, true);
+        assert!(circuits.is_empty());
+    }
+
+    #[test]
+    fn test_find_circuits_self_loop() {
+        let mut g = HashDirectedGraph::<i32, DefaultGEdge<i32>>::new();
+        g.add_vertex(0);
+        g.add_edge(DefaultGEdge::new(0, 0));
+        let circuits = find_circuits(&g, true);
+        assert!(!circuits.is_empty());
+    }
+
+    #[test]
+    fn test_find_paths() {
+        let g = make_diamond_graph();
+        let paths = find_paths(&g, &0, &3);
+        // Two paths: 0->1->3 and 0->2->3
+        assert_eq!(paths.len(), 2);
+    }
+
+    #[test]
+    fn test_get_vertices_in_post_order() {
+        let g = make_chain_graph();
+        let order = get_vertices_in_post_order(&g);
+        assert_eq!(order.len(), 5);
+        // 0 (source) should be last in post-order
+        assert_eq!(order[4], 0);
+    }
+
+    #[test]
+    fn test_get_vertices_in_pre_order() {
+        let g = make_chain_graph();
+        let order = get_vertices_in_pre_order(&g);
+        assert_eq!(order.len(), 5);
+        // 0 (source) should be first in pre-order
+        assert_eq!(order[0], 0);
+    }
+
+    #[test]
+    fn test_get_complexity_depth() {
+        let g = make_chain_graph();
+        let depths = get_complexity_depth(&g);
+        // Leaf (4) has depth 1, each parent has depth = child_depth + 1
+        assert_eq!(depths.get(&4), Some(&1));
+        assert_eq!(depths.get(&3), Some(&2));
+        assert_eq!(depths.get(&0), Some(&5));
+    }
+
+    #[test]
+    fn test_retain_edges() {
+        let g = make_diamond_graph();
+        let mut verts = HashSet::new();
+        verts.insert(0);
+        verts.insert(1);
+        let edges = retain_edges(&g, &verts);
+        // Only 0->1 is within the vertex set
+        assert_eq!(edges.len(), 1);
+    }
+
+    #[test]
+    fn test_print_graph() {
+        let g = make_chain_graph();
+        let output = print_graph(&g);
+        assert!(output.contains("=========="));
     }
 }
