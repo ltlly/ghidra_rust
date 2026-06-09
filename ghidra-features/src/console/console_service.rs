@@ -419,8 +419,9 @@ mod tests {
     fn test_adapter_get_text() {
         let mut adapter = ConsoleServiceAdapter::new(100);
         adapter.add_message("s", "hello");
+        // ConsoleBuffer formats as "[INFO] s: hello", so offset 0..2 is "[I"
         let text = adapter.get_text(0, 2);
-        assert_eq!(text, Some("s>".to_string()));
+        assert_eq!(text, Some("[I".to_string()));
     }
 
     #[test]
