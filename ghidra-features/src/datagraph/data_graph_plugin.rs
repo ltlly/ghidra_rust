@@ -27,6 +27,30 @@ const ACTION_COMPACT_FORMAT: &str = "Compact Format";
 /// Identifier string for the "Show Popups" toggle action.
 const ACTION_SHOW_POPUPS: &str = "Show Popups";
 
+/// Identifier string for the "Select Home Vertex" action.
+const ACTION_SELECT_HOME: &str = "Select Home Vertex";
+
+/// Identifier string for the "Relayout Graph" action.
+const ACTION_RELAYOUT: &str = "Relayout Graph";
+
+/// Identifier string for the "Incoming References" action.
+const ACTION_INCOMING_REFS: &str = "Incoming References";
+
+/// Identifier string for the "Outgoing References" action.
+const ACTION_OUTGOING_REFS: &str = "Outgoing References";
+
+/// Identifier string for the "Delete Vertices" action.
+const ACTION_DELETE_VERTICES: &str = "Delete Vertices";
+
+/// Identifier string for the "Set Original Vertex" action.
+const ACTION_SET_ORIGINAL_VERTEX: &str = "Set Original Vertex";
+
+/// Identifier string for the "Reset Vertex Location" action.
+const ACTION_RESET_LOCATION: &str = "Reset Vertex Location";
+
+/// Identifier string for the "Expand Fully" action.
+const ACTION_EXPAND_FULLY: &str = "Expand Fully";
+
 /// The location of a data item within a program, identified by its offset.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DataLocation {
@@ -124,6 +148,216 @@ impl DataGraphProviderState {
     }
 }
 
+// --------------------------------------------------------------------------
+// Action context types (ported from DegContext / DegSatelliteContext)
+// --------------------------------------------------------------------------
+
+/// Action context for the data exploration graph.
+///
+/// Ported from `datagraph.DegContext`.  Holds the vertex the user is
+/// interacting with and the set of currently selected vertices.
+#[derive(Debug, Clone)]
+pub struct DegContext {
+    /// The vertex under the mouse / focus, if any.
+    pub vertex_id: Option<u64>,
+    /// Set of selected vertex IDs.
+    pub selected_vertex_ids: HashSet<u64>,
+}
+
+impl DegContext {
+    /// Create a new context with no target vertex.
+    pub fn new(selected_vertex_ids: HashSet<u64>) -> Self {
+        Self {
+            vertex_id: None,
+            selected_vertex_ids,
+        }
+    }
+
+    /// Create a context with a specific target vertex.
+    pub fn with_vertex(vertex_id: u64, selected_vertex_ids: HashSet<u64>) -> Self {
+        Self {
+            vertex_id: Some(vertex_id),
+            selected_vertex_ids,
+        }
+    }
+
+    /// Whether satellite-view actions should be shown (true when no vertex
+    /// is targeted, matching the Java `shouldShowSatelliteActions` logic).
+    pub fn should_show_satellite_actions(&self) -> bool {
+        self.vertex_id.is_none()
+    }
+}
+
+/// Action context for the satellite graph view.
+///
+/// Ported from `datagraph.DegSatelliteContext`.
+#[derive(Debug, Clone)]
+pub struct DegSatelliteContext {
+    /// The provider ID this context belongs to.
+    pub provider_id: u64,
+}
+
+impl DegSatelliteContext {
+    pub fn new(provider_id: u64) -> Self {
+        Self { provider_id }
+    }
+}
+
+// --------------------------------------------------------------------------
+// Provider-level actions (ported from DataGraphProvider.createActions)
+// --------------------------------------------------------------------------
+
+/// Describes a single provider-level action that can be installed on the
+/// data graph provider toolbar or popup menu.
+#[derive(Debug, Clone)]
+pub struct ProviderAction {
+    /// Unique action name.
+    pub name: String,
+    /// Optional toolbar icon resource key.
+    pub icon_key: Option<String>,
+    /// Toolbar group for ordering.
+    pub group: String,
+    /// Human-readable description.
+    pub description: String,
+    /// Whether this is a toggle action.
+    pub is_toggle: bool,
+    /// Initial toggle state (only meaningful for toggle actions).
+    pub selected: bool,
+    /// Whether this is a popup-menu-only action.
+    pub popup_only: bool,
+    /// Menu path for popup menu entries.
+    pub popup_path: Option<String>,
+}
+
+impl ProviderAction {
+    /// Build the standard set of provider actions matching the Java
+    /// `DataGraphProvider.createActions` method.
+    pub fn default_actions() -> Vec<ProviderAction> {
+        vec![
+            ProviderAction {
+                name: ACTION_SELECT_HOME.into(),
+                icon_key: Some("icon.home".into()),
+                group: "A".into(),
+                description: "Selects and Centers Original Source Vertex".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: false,
+                popup_path: None,
+            },
+            ProviderAction {
+                name: ACTION_RELAYOUT.into(),
+                icon_key: Some("icon.plugin.datagraph.action.viewer.reset".into()),
+                group: "A".into(),
+                description: "Erases all manual vertex positioning information".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: false,
+                popup_path: None,
+            },
+            ProviderAction {
+                name: ACTION_COMPACT_FORMAT.into(),
+                icon_key: Some("icon.plugin.datagraph.action.viewer.vertex.format".into()),
+                group: "A".into(),
+                description: "Show Expanded information in data vertices.".into(),
+                is_toggle: true,
+                selected: true,
+                popup_only: false,
+                popup_path: None,
+            },
+            ProviderAction {
+                name: ACTION_NAVIGATE_IN.into(),
+                icon_key: Some("icon.navigate.on.incoming".into()),
+                group: "B".into(),
+                description: "Attempts to select vertex corresponding to tool location changes.".into(),
+                is_toggle: true,
+                selected: false,
+                popup_only: false,
+                popup_path: None,
+            },
+            ProviderAction {
+                name: ACTION_NAVIGATE_OUT.into(),
+                icon_key: Some("icon.navigate.on.outgoing".into()),
+                group: "B".into(),
+                description: "Selecting vertices or locations inside a vertex navigates the tool.".into(),
+                is_toggle: true,
+                selected: true,
+                popup_only: false,
+                popup_path: None,
+            },
+            ProviderAction {
+                name: ACTION_SHOW_POPUPS.into(),
+                icon_key: None,
+                group: "".into(),
+                description: "Toggles whether or not to show tooltips".into(),
+                is_toggle: true,
+                selected: true,
+                popup_only: true,
+                popup_path: Some("Display Popup Windows".into()),
+            },
+            ProviderAction {
+                name: ACTION_INCOMING_REFS.into(),
+                icon_key: None,
+                group: "A".into(),
+                description: "Show Vertices for known references to this vertex.".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: true,
+                popup_path: Some("Add All Incoming References".into()),
+            },
+            ProviderAction {
+                name: ACTION_OUTGOING_REFS.into(),
+                icon_key: None,
+                group: "A".into(),
+                description: "Show Vertices for known references to this vertex.".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: true,
+                popup_path: Some("Add All Outgoing References".into()),
+            },
+            ProviderAction {
+                name: ACTION_DELETE_VERTICES.into(),
+                icon_key: None,
+                group: "B".into(),
+                description: "Removes the selected vertices and their descendants from the graph".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: true,
+                popup_path: Some("Delete Selected Vertices".into()),
+            },
+            ProviderAction {
+                name: ACTION_SET_ORIGINAL_VERTEX.into(),
+                icon_key: None,
+                group: "B".into(),
+                description: "Reorient graph as though this was the first vertex shown".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: true,
+                popup_path: Some("Set Vertex as Original Source".into()),
+            },
+            ProviderAction {
+                name: ACTION_RESET_LOCATION.into(),
+                icon_key: Some("icon.refresh".into()),
+                group: "B".into(),
+                description: "Resets the vertex to the automated layout location.".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: true,
+                popup_path: Some("Restore Location".into()),
+            },
+            ProviderAction {
+                name: ACTION_EXPAND_FULLY.into(),
+                icon_key: None,
+                group: "C".into(),
+                description: "Expand all levels under selected row".into(),
+                is_toggle: false,
+                selected: false,
+                popup_only: true,
+                popup_path: Some("Expand Fully".into()),
+            },
+        ]
+    }
+}
+
 /// The main plugin for displaying data graphs.
 ///
 /// Ported from `datagraph.DataGraphPlugin`.
@@ -156,6 +390,20 @@ impl DataGraphPlugin {
             next_provider_id: 1,
             disposed: false,
         }
+    }
+
+    /// Restore plugin configuration from persisted key-value pairs.
+    ///
+    /// Ported from `DataGraphPlugin.readConfigState(SaveState)`.
+    pub fn read_config_state(&mut self, pairs: &[(&str, bool)]) {
+        self.options = DataGraphOptions::from_pairs(pairs);
+    }
+
+    /// Persist plugin configuration as key-value pairs.
+    ///
+    /// Ported from `DataGraphPlugin.writeConfigState(SaveState)`.
+    pub fn write_config_state(&self) -> Vec<(&'static str, bool)> {
+        self.options.to_pairs()
     }
 
     /// Get the plugin name.
@@ -236,6 +484,34 @@ impl DataGraphPlugin {
     /// code unit is a `Data`; here we simply check the type is non-empty.
     pub fn is_graph_action_enabled(type_name: &str) -> bool {
         !type_name.is_empty()
+    }
+
+    /// Whether incoming references can be shown for a vertex of the given
+    /// kind.  Matches Java `DataGraphProvider.canShowReferences`.
+    pub fn can_show_references(is_data_vertex: bool) -> bool {
+        is_data_vertex
+    }
+
+    /// Whether the selected vertices can be closed/deleted.
+    ///
+    /// A single selected vertex may only be deleted if it is not the root.
+    /// Matches Java `DataGraphProvider.canClose`.
+    pub fn can_close(selected: &[&DataObject]) -> bool {
+        if selected.is_empty() {
+            return false;
+        }
+        if selected.len() > 1 {
+            return true;
+        }
+        // Single vertex: can only close if not root.
+        !selected[0].is_root
+    }
+
+    /// Whether the graph can be reoriented around the given vertex.
+    ///
+    /// Matches Java `DataGraphProvider.canOrientGraphAround`.
+    pub fn can_orient_around(is_data_vertex: bool, is_root: bool) -> bool {
+        is_data_vertex && !is_root
     }
 
     /// Resolve the top-level data object by walking up through parent
@@ -359,5 +635,116 @@ mod tests {
         plugin.options_mut().set_compact_format(false);
         assert!(plugin.options().is_navigate_in());
         assert!(!plugin.options().use_compact_format());
+    }
+
+    // -- DegContext tests ---------------------------------------------------
+
+    #[test]
+    fn test_deg_context_no_vertex() {
+        let mut sel = HashSet::new();
+        sel.insert(1);
+        let ctx = DegContext::new(sel.clone());
+        assert!(ctx.vertex_id.is_none());
+        assert!(ctx.should_show_satellite_actions());
+        assert_eq!(ctx.selected_vertex_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_deg_context_with_vertex() {
+        let ctx = DegContext::with_vertex(5, HashSet::new());
+        assert_eq!(ctx.vertex_id, Some(5));
+        assert!(!ctx.should_show_satellite_actions());
+    }
+
+    // -- DegSatelliteContext tests ------------------------------------------
+
+    #[test]
+    fn test_deg_satellite_context() {
+        let ctx = DegSatelliteContext::new(42);
+        assert_eq!(ctx.provider_id, 42);
+    }
+
+    // -- Config persistence tests ------------------------------------------
+
+    #[test]
+    fn test_read_config_state() {
+        let mut plugin = DataGraphPlugin::new();
+        let pairs = vec![
+            ("Navigate In", true),
+            ("Navigate Out", false),
+            ("Compact Format", false),
+            ("Show Popups", false),
+        ];
+        plugin.read_config_state(&pairs);
+        assert!(plugin.options().is_navigate_in());
+        assert!(!plugin.options().is_navigate_out());
+        assert!(!plugin.options().use_compact_format());
+        assert!(!plugin.options().is_show_popups());
+    }
+
+    #[test]
+    fn test_write_config_state_round_trip() {
+        let mut plugin = DataGraphPlugin::new();
+        plugin.options_mut().set_navigate_in(true);
+        plugin.options_mut().set_navigate_out(false);
+
+        let pairs = plugin.write_config_state();
+        let mut plugin2 = DataGraphPlugin::new();
+        plugin2.read_config_state(&pairs);
+
+        assert!(plugin2.options().is_navigate_in());
+        assert!(!plugin2.options().is_navigate_out());
+    }
+
+    // -- Action predicate tests --------------------------------------------
+
+    #[test]
+    fn test_can_show_references() {
+        assert!(DataGraphPlugin::can_show_references(true));
+        assert!(!DataGraphPlugin::can_show_references(false));
+    }
+
+    #[test]
+    fn test_can_close() {
+        let root = DataObject::new(0x1000, "struct", 16);
+        let child = DataObject::child(0x1008, "int", 4, 0x1000);
+
+        // Empty selection cannot be closed.
+        assert!(!DataGraphPlugin::can_close(&[]));
+
+        // Root alone cannot be closed.
+        assert!(!DataGraphPlugin::can_close(&[&root]));
+
+        // Non-root alone can be closed.
+        assert!(DataGraphPlugin::can_close(&[&child]));
+
+        // Multiple selection can always be closed.
+        assert!(DataGraphPlugin::can_close(&[&root, &child]));
+    }
+
+    #[test]
+    fn test_can_orient_around() {
+        assert!(!DataGraphPlugin::can_orient_around(true, true));   // data root
+        assert!(DataGraphPlugin::can_orient_around(true, false));   // data non-root
+        assert!(!DataGraphPlugin::can_orient_around(false, false)); // not a data vertex
+    }
+
+    // -- ProviderAction tests ----------------------------------------------
+
+    #[test]
+    fn test_default_actions_count() {
+        let actions = ProviderAction::default_actions();
+        // 12 actions matching the Java DataGraphProvider.createActions
+        assert_eq!(actions.len(), 12);
+    }
+
+    #[test]
+    fn test_default_actions_have_names() {
+        let actions = ProviderAction::default_actions();
+        let names: Vec<&str> = actions.iter().map(|a| a.name.as_str()).collect();
+        assert!(names.contains(&ACTION_DISPLAY_DATA_GRAPH) || names.contains(&ACTION_SELECT_HOME));
+        assert!(names.contains(&ACTION_NAVIGATE_IN));
+        assert!(names.contains(&ACTION_NAVIGATE_OUT));
+        assert!(names.contains(&ACTION_SHOW_POPUPS));
     }
 }

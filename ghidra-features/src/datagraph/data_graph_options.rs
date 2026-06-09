@@ -91,6 +91,25 @@ impl DataGraphOptions {
         self.use_compact_format = value;
     }
 
+    /// Apply a closure to each option, useful for building UI toggle state.
+    pub fn for_each<F: FnMut(&str, bool)>(&self, mut f: F) {
+        for &(k, v) in &self.to_pairs() {
+            f(k, v);
+        }
+    }
+
+    /// Returns `true` if the given option value differs from the default.
+    pub fn is_changed_from_default(&self, key: &str) -> bool {
+        let defaults = Self::new();
+        match key {
+            keys::NAVIGATE_IN => self.navigate_in != defaults.navigate_in,
+            keys::NAVIGATE_OUT => self.navigate_out != defaults.navigate_out,
+            keys::COMPACT_FORMAT => self.use_compact_format != defaults.use_compact_format,
+            keys::SHOW_POPUPS => self.show_popups != defaults.show_popups,
+            _ => false,
+        }
+    }
+
     // -- serialisation helpers --------------------------------------------
 
     /// Serialize the options into a flat list of `(key, value_bool)` pairs,
@@ -191,5 +210,32 @@ mod tests {
         let a = DataGraphOptions::new();
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_for_each() {
+        let mut opts = DataGraphOptions::new();
+        opts.set_navigate_in(true);
+
+        let mut count = 0;
+        let mut found_nav_in = false;
+        opts.for_each(|k, v| {
+            count += 1;
+            if k == "Navigate In" && v {
+                found_nav_in = true;
+            }
+        });
+        assert_eq!(count, 4);
+        assert!(found_nav_in);
+    }
+
+    #[test]
+    fn test_is_changed_from_default() {
+        let mut opts = DataGraphOptions::new();
+        assert!(!opts.is_changed_from_default("Navigate In"));
+        opts.set_navigate_in(true);
+        assert!(opts.is_changed_from_default("Navigate In"));
+        assert!(!opts.is_changed_from_default("Navigate Out")); // unchanged
+        assert!(!opts.is_changed_from_default("Bogus Key"));    // unknown key
     }
 }
