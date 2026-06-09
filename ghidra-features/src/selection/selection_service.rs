@@ -652,6 +652,7 @@ mod tests {
         service.add_selection_listener(listener.clone());
         assert_eq!(service.listener_count(), 1);
 
+        let listener: Arc<dyn SelectionServiceListener> = listener;
         service.remove_selection_listener(&listener);
         assert_eq!(service.listener_count(), 0);
     }

@@ -963,8 +963,12 @@ mod tests {
         // Entries without function context
         hl.add_memento(memento("p", 0x1000));
         hl.add_memento(memento("p", 0x2000));
+        hl.add_memento(memento("p", 0x3000));
 
-        // Without function context, any entry counts as a boundary
+        // Move back one so current is at index 1 (middle entry).
+        hl.previous();
+
+        // Without function context, any entry counts as a boundary.
         assert!(hl.has_next_function(None));
         assert!(hl.has_previous_function(None));
     }
@@ -1077,11 +1081,16 @@ mod tests {
         plugin.add_new_location(1, memento("p", 0x2000));
         plugin.add_new_location(1, memento("p", 0x3000));
 
-        assert!(plugin.has_next_function(1));
+        // At funcC (last entry) -- no next function, but there are previous ones.
+        assert!(!plugin.has_next_function(1));
         assert!(plugin.has_previous_function(1));
 
         let prev_fn = plugin.previous_function(1).unwrap();
         assert_eq!(prev_fn.address, 0x2000);
+
+        // Now at funcB -- can go both forward (funcC) and backward (funcA).
+        assert!(plugin.has_next_function(1));
+        assert!(plugin.has_previous_function(1));
     }
 
     #[test]
