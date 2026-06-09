@@ -397,21 +397,262 @@ pub enum ActionType {
 }
 
 // ---------------------------------------------------------------------------
+// KeyBindingType — controls key binding support per action
+// ---------------------------------------------------------------------------
+
+/// Controls whether and how an action supports key bindings.
+///
+/// Port of Ghidra's `KeyBindingType` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum KeyBindingType {
+    /// The action has its own individual key binding (default).
+    #[default]
+    Individual,
+    /// The action shares a key binding (e.g. multiple providers can each
+    /// have the same shortcut).
+    Shared,
+    /// The action does not support key bindings at all.
+    Unsupported,
+}
+
+impl KeyBindingType {
+    /// Returns `true` if this type supports user-assigned key bindings.
+    pub fn supports_key_bindings(&self) -> bool {
+        matches!(self, KeyBindingType::Individual | KeyBindingType::Shared)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MenuBarData / PopupMenuData / ToolBarData — action presentation metadata
+// ---------------------------------------------------------------------------
+
+/// Data for placing an action in a menu bar.
+///
+/// Port of Ghidra's `MenuBarData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuBarData {
+    /// Menu path hierarchy, e.g. `["File", "Export"]`.
+    pub menu_path: Vec<String>,
+    /// The menu item name (last element of path if not overridden).
+    pub menu_item_name: Option<String>,
+    /// Icon identifier for the menu item.
+    pub icon: Option<String>,
+    /// Group for ordering within the menu level.
+    pub group: String,
+    /// Sub-group for finer ordering.
+    pub sub_group: String,
+    /// Mnemonic character (e.g. 'F' for File).
+    pub mnemonic: Option<char>,
+}
+
+impl MenuBarData {
+    /// Create new menu bar data with a path.
+    pub fn new(menu_path: Vec<String>) -> Self {
+        Self {
+            menu_path,
+            menu_item_name: None,
+            icon: None,
+            group: String::new(),
+            sub_group: String::new(),
+            mnemonic: None,
+        }
+    }
+
+    /// Create with a simple single-level path.
+    pub fn simple(name: impl Into<String>) -> Self {
+        Self::new(vec![name.into()])
+    }
+
+    /// The effective display name for the menu item.
+    pub fn effective_name(&self) -> &str {
+        self.menu_item_name
+            .as_deref()
+            .or_else(|| self.menu_path.last().map(|s| s.as_str()))
+            .unwrap_or("")
+    }
+
+    /// The full menu path as a joined string.
+    pub fn path_string(&self) -> String {
+        self.menu_path.join(" > ")
+    }
+}
+
+/// Data for placing an action in a popup (context) menu.
+///
+/// Port of Ghidra's `PopupMenuData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PopupMenuData {
+    /// Menu path hierarchy.
+    pub menu_path: Vec<String>,
+    /// The menu item name.
+    pub menu_item_name: Option<String>,
+    /// Icon identifier.
+    pub icon: Option<String>,
+    /// Group for ordering.
+    pub group: String,
+    /// Sub-group for finer ordering.
+    pub sub_group: String,
+}
+
+impl PopupMenuData {
+    /// Create new popup menu data with a path.
+    pub fn new(menu_path: Vec<String>) -> Self {
+        Self {
+            menu_path,
+            menu_item_name: None,
+            icon: None,
+            group: String::new(),
+            sub_group: String::new(),
+        }
+    }
+
+    /// The effective display name for the menu item.
+    pub fn effective_name(&self) -> &str {
+        self.menu_item_name
+            .as_deref()
+            .or_else(|| self.menu_path.last().map(|s| s.as_str()))
+            .unwrap_or("")
+    }
+}
+
+/// Data for placing an action on a toolbar.
+///
+/// Port of Ghidra's `ToolBarData`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolBarData {
+    /// Icon identifier for the toolbar button.
+    pub icon: String,
+    /// The toolbar group this action belongs to.
+    pub group: String,
+    /// Sub-group for finer ordering within the group.
+    pub sub_group: String,
+}
+
+impl ToolBarData {
+    /// Create new toolbar data with an icon.
+    pub fn new(icon: impl Into<String>) -> Self {
+        Self {
+            icon: icon.into(),
+            group: String::new(),
+            sub_group: String::new(),
+        }
+    }
+
+    /// Set the toolbar group.
+    pub fn with_group(mut self, group: impl Into<String>) -> Self {
+        self.group = group.into();
+        self
+    }
+
+    /// Set the sub-group.
+    pub fn with_sub_group(mut self, sub_group: impl Into<String>) -> Self {
+        self.sub_group = sub_group.into();
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property change event
+// ---------------------------------------------------------------------------
+
+/// Well-known property names that can change on a `DockingAction`.
+///
+/// Port of Ghidra's property name constants on `DockingActionIf`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ActionProperty {
+    /// The enabled state changed.
+    Enabled,
+    /// The key binding data changed.
+    KeyBindingData,
+    /// The menu bar data changed.
+    MenuBarData,
+    /// The popup menu data changed.
+    PopupMenuData,
+    /// The toolbar data changed.
+    ToolBarData,
+    /// The description changed.
+    Description,
+    /// A custom property name.
+    Custom(String),
+}
+
+impl fmt::Display for ActionProperty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActionProperty::Enabled => write!(f, "enabled"),
+            ActionProperty::KeyBindingData => write!(f, "KeyBindingData"),
+            ActionProperty::MenuBarData => write!(f, "MenuBarData"),
+            ActionProperty::PopupMenuData => write!(f, "PopupMenuData"),
+            ActionProperty::ToolBarData => write!(f, "ToolBarData"),
+            ActionProperty::Description => write!(f, "description"),
+            ActionProperty::Custom(name) => write!(f, "{}", name),
+        }
+    }
+}
+
+/// A property change event fired by a `DockingAction`.
+///
+/// Port of `java.beans.PropertyChangeEvent` usage in Ghidra's
+/// `DockingAction.firePropertyChanged`.
+#[derive(Debug, Clone)]
+pub struct ActionPropertyChangeEvent {
+    /// The property that changed.
+    pub property: ActionProperty,
+    /// The old value (as a string representation).
+    pub old_value: Option<String>,
+    /// The new value (as a string representation).
+    pub new_value: Option<String>,
+}
+
+/// A callback that receives property change events from an action.
+pub struct PropertyChangeCallback(Arc<dyn Fn(&ActionPropertyChangeEvent) + Send + Sync>);
+
+impl PropertyChangeCallback {
+    /// Wrap a closure into a property change callback.
+    pub fn new<F: Fn(&ActionPropertyChangeEvent) + Send + Sync + 'static>(f: F) -> Self {
+        Self(Arc::new(f))
+    }
+
+    /// Invoke the callback with the given event.
+    pub fn invoke(&self, event: &ActionPropertyChangeEvent) {
+        (self.0)(event)
+    }
+}
+
+impl fmt::Debug for PropertyChangeCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PropertyChangeCallback").finish()
+    }
+}
+
+impl Clone for PropertyChangeCallback {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+// ---------------------------------------------------------------------------
 // DockingAction
 // ---------------------------------------------------------------------------
 
 /// A named, optionally-keybound action that can appear in menus, toolbars,
 /// and popup (context) menus.
-#[derive(Debug, Clone)]
+///
+/// Port of Ghidra's `docking.action.DockingAction` abstract class.
+#[derive(Clone)]
 pub struct DockingAction {
     /// Programmatic identifier (used for lookup and serialization).
     pub name: String,
+    /// The owner of this action (typically a plugin name).
+    pub owner: String,
     /// Human-readable label shown in menus and toolbars.
     pub display_name: String,
     /// Longer help text / tooltip.
     pub description: String,
     /// Optional keyboard shortcut.
     pub key_binding: Option<KeyBinding>,
+    /// Controls key binding support for this action.
+    pub key_binding_type: KeyBindingType,
     /// Menu path hierarchy, e.g. `["File", "Export"]`.
     pub menu_path: Vec<String>,
     /// Optional icon identifier (resource name or path).
@@ -425,20 +666,68 @@ pub struct DockingAction {
     /// Optional context-aware callback (receives current address,
     /// selection, function, etc.).
     pub context_callback: Option<ContextActionCallback>,
+    /// Menu bar data for placing the action in the tool's menu bar.
+    pub menu_bar_data: Option<MenuBarData>,
+    /// Popup menu data for placing the action in context menus.
+    pub popup_menu_data: Option<PopupMenuData>,
+    /// Toolbar data for placing the action on the toolbar.
+    pub tool_bar_data: Option<ToolBarData>,
+    /// Dynamic predicate for enabled state (evaluated against context).
+    enabled_predicate: Option<Arc<dyn Fn(&ActionContextInfo) -> bool + Send + Sync>>,
+    /// Dynamic predicate for popup inclusion.
+    popup_predicate: Option<Arc<dyn Fn(&ActionContextInfo) -> bool + Send + Sync>>,
+    /// Dynamic predicate for valid context.
+    valid_context_predicate: Option<Arc<dyn Fn(&ActionContextInfo) -> bool + Send + Sync>>,
+    /// Property change listeners.
+    property_listeners: Vec<PropertyChangeCallback>,
+    /// Help location identifier.
+    pub help_location: Option<String>,
 }
 
-// PartialEq must be implemented manually because ActionCallback is not
-// Comparable. We ignore the callback field for equality checks.
+impl fmt::Debug for DockingAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DockingAction")
+            .field("name", &self.name)
+            .field("owner", &self.owner)
+            .field("display_name", &self.display_name)
+            .field("description", &self.description)
+            .field("key_binding", &self.key_binding)
+            .field("key_binding_type", &self.key_binding_type)
+            .field("menu_path", &self.menu_path)
+            .field("icon", &self.icon)
+            .field("enabled", &self.enabled)
+            .field("action_type", &self.action_type)
+            .field("callback", &self.callback)
+            .field("context_callback", &self.context_callback)
+            .field("menu_bar_data", &self.menu_bar_data)
+            .field("popup_menu_data", &self.popup_menu_data)
+            .field("tool_bar_data", &self.tool_bar_data)
+            .field("enabled_predicate", &self.enabled_predicate.as_ref().map(|_| "<fn>"))
+            .field("popup_predicate", &self.popup_predicate.as_ref().map(|_| "<fn>"))
+            .field("valid_context_predicate", &self.valid_context_predicate.as_ref().map(|_| "<fn>"))
+            .field("help_location", &self.help_location)
+            .finish()
+    }
+}
+
+// PartialEq must be implemented manually because ActionCallback and closures
+// are not comparable. We ignore callback and predicate fields for equality checks.
 impl PartialEq for DockingAction {
     fn eq(&self, other: &Self) -> bool {
         self.name == other.name
+            && self.owner == other.owner
             && self.display_name == other.display_name
             && self.description == other.description
             && self.key_binding == other.key_binding
+            && self.key_binding_type == other.key_binding_type
             && self.menu_path == other.menu_path
             && self.icon == other.icon
             && self.enabled == other.enabled
             && self.action_type == other.action_type
+            && self.menu_bar_data == other.menu_bar_data
+            && self.popup_menu_data == other.popup_menu_data
+            && self.tool_bar_data == other.tool_bar_data
+            && self.help_location == other.help_location
     }
 }
 
@@ -451,15 +740,51 @@ impl DockingAction {
     pub fn new(name: impl Into<String>, display_name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
+            owner: String::new(),
             display_name: display_name.into(),
             description: String::new(),
             key_binding: None,
+            key_binding_type: KeyBindingType::Individual,
             menu_path: Vec::new(),
             icon: None,
             enabled: true,
             action_type: ActionType::Global,
             callback: None,
             context_callback: None,
+            menu_bar_data: None,
+            popup_menu_data: None,
+            tool_bar_data: None,
+            enabled_predicate: None,
+            popup_predicate: None,
+            valid_context_predicate: None,
+            property_listeners: Vec::new(),
+            help_location: None,
+        }
+    }
+
+    /// Create a global action with an owner.
+    pub fn with_owner(
+        name: impl Into<String>,
+        owner: impl Into<String>,
+        display_name: impl Into<String>,
+    ) -> Self {
+        Self {
+            owner: owner.into(),
+            ..Self::new(name, display_name)
+        }
+    }
+
+    /// Create a global action with a specific key binding type.
+    pub fn with_key_binding_type(
+        name: impl Into<String>,
+        owner: impl Into<String>,
+        display_name: impl Into<String>,
+        key_binding_type: KeyBindingType,
+    ) -> Self {
+        Self {
+            owner: owner.into(),
+            key_binding_type,
+            ..Self::new(name, display_name)
         }
     }
 
@@ -549,6 +874,194 @@ impl DockingAction {
     pub fn with_context_callback(mut self, callback: ContextActionCallback) -> Self {
         self.context_callback = Some(callback);
         self
+    }
+
+    /// Assign menu bar data.
+    pub fn with_menu_bar_data(mut self, data: MenuBarData) -> Self {
+        self.menu_bar_data = Some(data);
+        self
+    }
+
+    /// Assign popup menu data.
+    pub fn with_popup_menu_data(mut self, data: PopupMenuData) -> Self {
+        self.popup_menu_data = Some(data);
+        self
+    }
+
+    /// Assign toolbar data.
+    pub fn with_tool_bar_data(mut self, data: ToolBarData) -> Self {
+        self.tool_bar_data = Some(data);
+        self
+    }
+
+    /// Set the owner (plugin name).
+    pub fn set_owner(&mut self, owner: impl Into<String>) {
+        self.owner = owner.into();
+    }
+
+    /// The full name: `"name (owner)"`.
+    pub fn full_name(&self) -> String {
+        if self.owner.is_empty() {
+            self.name.clone()
+        } else {
+            format!("{} ({})", self.name, self.owner)
+        }
+    }
+
+    /// Set a dynamic predicate for the enabled state.
+    ///
+    /// When set, the predicate is evaluated against the current context
+    /// info instead of using the static `enabled` flag.
+    ///
+    /// Port of Ghidra's `DockingAction.enabledWhen(Predicate)`.
+    pub fn enabled_when<F: Fn(&ActionContextInfo) -> bool + Send + Sync + 'static>(
+        mut self,
+        predicate: F,
+    ) -> Self {
+        self.enabled_predicate = Some(Arc::new(predicate));
+        self
+    }
+
+    /// Set a dynamic predicate for popup menu inclusion.
+    ///
+    /// Port of Ghidra's `DockingAction.popupWhen(Predicate)`.
+    pub fn popup_when<F: Fn(&ActionContextInfo) -> bool + Send + Sync + 'static>(
+        mut self,
+        predicate: F,
+    ) -> Self {
+        self.popup_predicate = Some(Arc::new(predicate));
+        self
+    }
+
+    /// Set a dynamic predicate for valid context.
+    ///
+    /// Port of Ghidra's `DockingAction.validContextWhen(Predicate)`.
+    pub fn valid_context_when<F: Fn(&ActionContextInfo) -> bool + Send + Sync + 'static>(
+        mut self,
+        predicate: F,
+    ) -> Self {
+        self.valid_context_predicate = Some(Arc::new(predicate));
+        self
+    }
+
+    /// Add a property change listener.
+    ///
+    /// Port of Ghidra's `DockingAction.addPropertyChangeListener`.
+    pub fn add_property_listener(&mut self, listener: PropertyChangeCallback) {
+        self.property_listeners.push(listener);
+    }
+
+    /// Fire a property change event to all registered listeners.
+    pub fn fire_property_changed(
+        &self,
+        property: ActionProperty,
+        old_value: Option<String>,
+        new_value: Option<String>,
+    ) {
+        let event = ActionPropertyChangeEvent {
+            property,
+            old_value,
+            new_value,
+        };
+        for listener in &self.property_listeners {
+            listener.invoke(&event);
+        }
+    }
+
+    /// Set description and fire a property change event.
+    pub fn set_description(&mut self, description: impl Into<String>) {
+        let new_desc = description.into();
+        if self.description == new_desc {
+            return;
+        }
+        let old = std::mem::replace(&mut self.description, new_desc.clone());
+        self.fire_property_changed(ActionProperty::Description, Some(old), Some(new_desc));
+    }
+
+    /// Set the menu bar data and fire a property change event.
+    pub fn set_menu_bar_data(&mut self, data: Option<MenuBarData>) {
+        let old = std::mem::replace(&mut self.menu_bar_data, data.clone());
+        self.fire_property_changed(
+            ActionProperty::MenuBarData,
+            old.map(|d| d.path_string()),
+            data.map(|d| d.path_string()),
+        );
+    }
+
+    /// Set the popup menu data and fire a property change event.
+    pub fn set_popup_menu_data(&mut self, data: Option<PopupMenuData>) {
+        let old = self.popup_menu_data.take();
+        self.fire_property_changed(
+            ActionProperty::PopupMenuData,
+            old.map(|d| d.effective_name().to_owned()),
+            data.as_ref().map(|d| d.effective_name().to_owned()),
+        );
+        self.popup_menu_data = data;
+    }
+
+    /// Set the toolbar data and fire a property change event.
+    pub fn set_tool_bar_data(&mut self, data: Option<ToolBarData>) {
+        let old = self.tool_bar_data.take();
+        self.fire_property_changed(
+            ActionProperty::ToolBarData,
+            old.map(|d| d.icon),
+            data.as_ref().map(|d| d.icon.clone()),
+        );
+        self.tool_bar_data = data;
+    }
+
+    /// Set the help location.
+    pub fn set_help_location(&mut self, location: impl Into<String>) {
+        self.help_location = Some(location.into());
+    }
+
+    /// Whether this action should be added to a window.
+    ///
+    /// Port of Ghidra's `DockingActionIf.shouldAddToWindow`.
+    /// Actions with menu bar or toolbar data are candidates for window
+    /// placement; actions without either are popup-only and never added
+    /// to a window's top-level chrome.
+    pub fn should_add_to_window(&self, is_main_window: bool) -> bool {
+        if self.menu_bar_data.is_none() && self.tool_bar_data.is_none() {
+            return false;
+        }
+        is_main_window
+    }
+
+    /// Whether the action is enabled for the given context.
+    ///
+    /// If a dynamic `enabled_predicate` has been set, it is evaluated;
+    /// otherwise the static `enabled` flag is returned.
+    pub fn is_enabled_for_context(&self, ctx: &ActionContextInfo) -> bool {
+        if let Some(pred) = &self.enabled_predicate {
+            pred(ctx)
+        } else {
+            self.enabled
+        }
+    }
+
+    /// Whether the action should appear in a popup for the given context.
+    ///
+    /// If a dynamic `popup_predicate` has been set, it is evaluated;
+    /// otherwise falls back to `is_enabled_for_context`.
+    pub fn is_add_to_popup(&self, ctx: &ActionContextInfo) -> bool {
+        if let Some(pred) = &self.popup_predicate {
+            pred(ctx)
+        } else {
+            self.is_enabled_for_context(ctx)
+        }
+    }
+
+    /// Whether the action is valid for the given context.
+    ///
+    /// If a dynamic `valid_context_predicate` has been set, it is evaluated;
+    /// otherwise returns `true`.
+    pub fn is_valid_context(&self, ctx: &ActionContextInfo) -> bool {
+        if let Some(pred) = &self.valid_context_predicate {
+            pred(ctx)
+        } else {
+            true
+        }
     }
 
     // ---------------------------------------------------------------
@@ -1537,5 +2050,175 @@ mod tests {
         assert!(action.is_enabled());
         action.set_enabled(false);
         assert!(!action.is_enabled());
+    }
+
+    // -- New feature tests --
+
+    #[test]
+    fn test_key_binding_type() {
+        assert!(KeyBindingType::Individual.supports_key_bindings());
+        assert!(KeyBindingType::Shared.supports_key_bindings());
+        assert!(!KeyBindingType::Unsupported.supports_key_bindings());
+    }
+
+    #[test]
+    fn test_action_owner() {
+        let action =
+            DockingAction::with_owner("my-action", "MyPlugin", "My Action");
+        assert_eq!(action.owner, "MyPlugin");
+        assert_eq!(action.full_name(), "my-action (MyPlugin)");
+
+        let action = DockingAction::new("a", "A");
+        assert_eq!(action.owner, "");
+        assert_eq!(action.full_name(), "a");
+    }
+
+    #[test]
+    fn test_action_with_key_binding_type() {
+        let action = DockingAction::with_key_binding_type(
+            "a",
+            "Plugin",
+            "Action",
+            KeyBindingType::Shared,
+        );
+        assert_eq!(action.key_binding_type, KeyBindingType::Shared);
+    }
+
+    #[test]
+    fn test_menu_bar_data() {
+        let mut data = MenuBarData::new(vec!["Edit".into(), "Undo".into()]);
+        data.group = "EditGroup".into();
+        assert_eq!(data.effective_name(), "Undo");
+        assert_eq!(data.path_string(), "Edit > Undo");
+
+        let data = MenuBarData::simple("File");
+        assert_eq!(data.effective_name(), "File");
+    }
+
+    #[test]
+    fn test_popup_menu_data() {
+        let data = PopupMenuData::new(vec!["Copy".into()]);
+        assert_eq!(data.effective_name(), "Copy");
+    }
+
+    #[test]
+    fn test_toolbar_data() {
+        let data = ToolBarData::new("icon/save.png")
+            .with_group("File")
+            .with_sub_group("primary");
+        assert_eq!(data.icon, "icon/save.png");
+        assert_eq!(data.group, "File");
+    }
+
+    #[test]
+    fn test_action_with_menu_bar_data() {
+        let data = MenuBarData::new(vec!["Edit".into(), "Undo".into()]);
+        let action = DockingAction::new("undo", "Undo").with_menu_bar_data(data);
+        assert!(action.menu_bar_data.is_some());
+        assert_eq!(
+            action.menu_bar_data.as_ref().unwrap().effective_name(),
+            "Undo"
+        );
+    }
+
+    #[test]
+    fn test_action_with_tool_bar_data() {
+        let data = ToolBarData::new("icon/undo.png");
+        let action = DockingAction::new("undo", "Undo").with_tool_bar_data(data);
+        assert!(action.tool_bar_data.is_some());
+    }
+
+    #[test]
+    fn test_should_add_to_window() {
+        let action = DockingAction::new("a", "A");
+        // No menu bar or toolbar data -> never added to a window.
+        assert!(!action.should_add_to_window(true));
+        assert!(!action.should_add_to_window(false));
+
+        let action = DockingAction::new("b", "B")
+            .with_menu_bar_data(MenuBarData::simple("B"));
+        // Has menu bar data -> added to main window.
+        assert!(action.should_add_to_window(true));
+        // Not added to non-main windows.
+        assert!(!action.should_add_to_window(false));
+    }
+
+    #[test]
+    fn test_enabled_when_predicate() {
+        let action = DockingAction::new("a", "A")
+            .enabled_when(|ctx| ctx.has_address());
+        let ctx_empty = ActionContextInfo::empty();
+        let ctx_with_addr = ActionContextInfo::with_address("0x1000");
+
+        assert!(!action.is_enabled_for_context(&ctx_empty));
+        assert!(action.is_enabled_for_context(&ctx_with_addr));
+    }
+
+    #[test]
+    fn test_popup_when_predicate() {
+        let action = DockingAction::new("a", "A")
+            .popup_when(|ctx| ctx.has_selection());
+        let ctx = ActionContextInfo::empty();
+        assert!(!action.is_add_to_popup(&ctx));
+
+        let ctx = ActionContextInfo::builder()
+            .selection("0x1000", "0x2000")
+            .build();
+        assert!(action.is_add_to_popup(&ctx));
+    }
+
+    #[test]
+    fn test_valid_context_when_predicate() {
+        let action = DockingAction::new("a", "A")
+            .valid_context_when(|ctx| ctx.has_function());
+        let ctx = ActionContextInfo::empty();
+        assert!(!action.is_valid_context(&ctx));
+
+        let ctx = ActionContextInfo::builder().function("main").build();
+        assert!(action.is_valid_context(&ctx));
+    }
+
+    #[test]
+    fn test_property_change_event() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let fired = Arc::new(AtomicBool::new(false));
+        let fired2 = fired.clone();
+
+        let mut action = DockingAction::new("a", "A");
+        action.add_property_listener(PropertyChangeCallback::new(move |_evt| {
+            fired2.store(true, Ordering::SeqCst);
+        }));
+
+        action.set_description("new desc");
+        assert!(fired.load(Ordering::SeqCst));
+        assert_eq!(action.description, "new desc");
+    }
+
+    #[test]
+    fn test_set_description_no_change() {
+        let mut action = DockingAction::new("a", "A").with_description("desc");
+        // Setting the same description should not fire.
+        action.set_description("desc");
+        assert_eq!(action.description, "desc");
+    }
+
+    #[test]
+    fn test_full_name_display() {
+        let action =
+            DockingAction::with_owner("test", "TestPlugin", "Test");
+        assert_eq!(action.full_name(), "test (TestPlugin)");
+    }
+
+    #[test]
+    fn test_action_partial_eq_with_new_fields() {
+        let a = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        let b = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        assert_eq!(a, b);
+
+        let c = DockingAction::new("a", "A")
+            .with_tool_bar_data(ToolBarData::new("icon.png"));
+        assert_ne!(a, c);
     }
 }

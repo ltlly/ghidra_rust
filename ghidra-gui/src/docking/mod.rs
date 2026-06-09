@@ -109,8 +109,10 @@ pub mod window_position;
 // Re-export the most commonly-used types at the docking module level for
 // convenience.
 pub use action::{
-    ActionCallback, ActionContext, ActionContextInfo, ActionType,
-    ContextActionCallback, DockingAction, GuiActionManager, Key, KeyBinding, Modifiers, UndoEntry,
+    ActionCallback, ActionContext, ActionContextInfo, ActionProperty, ActionPropertyChangeEvent,
+    ActionType, ContextActionCallback, DockingAction, GuiActionManager, Key, KeyBinding,
+    KeyBindingType, MenuBarData, Modifiers, PopupMenuData, PropertyChangeCallback, ToolBarData,
+    UndoEntry,
 };
 pub use actions::{
     ClosurePopupProvider, DockingActionProxy, DockingToolActions, MenuBarManager,

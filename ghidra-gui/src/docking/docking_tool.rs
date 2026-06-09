@@ -87,6 +87,56 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
     /// Whether a component is visible.
     fn is_component_visible(&self, provider: &ProviderType, name: &str) -> bool;
 
+    /// Show or hide a component provider.
+    ///
+    /// Port of Ghidra's `Tool.showComponentProvider`.
+    fn show_component_provider(&mut self, provider: ProviderType, name: &str, visible: bool) {
+        if visible {
+            self.show_component(provider, name);
+        } else {
+            self.hide_component(provider, name);
+        }
+    }
+
+    /// Bring a component provider to the front (e.g. within a tab group).
+    ///
+    /// Port of Ghidra's `Tool.toFront(ComponentProvider)`.
+    fn to_front(&mut self, _provider: ProviderType, _name: &str) {}
+
+    /// Whether the tool itself is visible.
+    ///
+    /// Port of Ghidra's `Tool.isVisible()`.
+    fn is_tool_visible(&self) -> bool {
+        true
+    }
+
+    /// Set the tool's visibility.
+    ///
+    /// Port of Ghidra's `Tool.setVisible`.
+    fn set_tool_visible(&mut self, _visible: bool) {}
+
+    /// Bring the tool window to the front.
+    ///
+    /// Port of Ghidra's `Tool.toFront()`.
+    fn tool_to_front(&mut self) {}
+
+    /// Get the active component provider (the one with focus).
+    ///
+    /// Port of Ghidra's `Tool.getActiveComponentProvider`.
+    fn get_active_component_provider(&self) -> Option<(ProviderType, String)> {
+        self.get_focused()
+    }
+
+    /// Whether the given component provider is currently active (has focus).
+    ///
+    /// Port of Ghidra's `Tool.isActive(ComponentProvider)`.
+    fn is_active(&self, provider: &ProviderType, name: &str) -> bool {
+        self.get_focused()
+            .as_ref()
+            .map(|(p, n)| p == provider && n == name)
+            .unwrap_or(false)
+    }
+
     // -- Layout --
 
     /// Serialize the current layout to a string.
@@ -117,6 +167,37 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
     /// Set the current action context.
     fn set_context(&mut self, context: DockingActionContext);
 
+    /// Notify the tool that a provider's context has changed.
+    ///
+    /// Port of Ghidra's `Tool.contextChanged(ComponentProvider)`.
+    fn context_changed(&mut self, _provider: Option<(ProviderType, String)>) {}
+
+    // -- Status bar --
+
+    /// Set the status information text.
+    ///
+    /// Port of Ghidra's `Tool.setStatusInfo`.
+    fn set_status_info(&mut self, _text: &str) {}
+
+    /// Set the status information with an optional beep.
+    ///
+    /// Port of Ghidra's `Tool.setStatusInfo(text, beep)`.
+    fn set_status_info_with_beep(&mut self, text: &str, _beep: bool) {
+        self.set_status_info(text);
+    }
+
+    /// Get the current status info text.
+    ///
+    /// Port of Ghidra's `Tool.getStatusInfo`.
+    fn get_status_info(&self) -> &str {
+        ""
+    }
+
+    /// Clear the status info text.
+    ///
+    /// Port of Ghidra's `Tool.clearStatusInfo`.
+    fn clear_status_info(&mut self) {}
+
     // -- Services --
 
     /// Register a service with the tool.
@@ -139,12 +220,72 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
     /// Remove a tool-wide property.
     fn remove_property(&mut self, key: &str) -> Option<String>;
 
+    // -- Config state --
+
+    /// Mark the tool's configuration as changed.
+    ///
+    /// Port of Ghidra's `Tool.setConfigChanged`.
+    fn set_config_changed(&mut self, _changed: bool) {}
+
+    /// Whether the tool's configuration has unsaved changes.
+    ///
+    /// Port of Ghidra's `Tool.hasConfigChanged`.
+    fn has_config_changed(&self) -> bool {
+        false
+    }
+
+    // -- Local actions --
+
+    /// Add a local action associated with a component provider.
+    ///
+    /// Port of Ghidra's `Tool.addLocalAction`.
+    fn add_local_action(&mut self, provider: ProviderType, name: &str, action: DockingAction);
+
+    /// Remove a local action from a component provider.
+    ///
+    /// Port of Ghidra's `Tool.removeLocalAction`.
+    fn remove_local_action(&mut self, provider: ProviderType, name: &str, action_name: &str);
+
+    /// Get all local actions for a component provider.
+    ///
+    /// Port of Ghidra's `Tool.getLocalActions`.
+    fn get_local_actions(&self, provider: &ProviderType, name: &str) -> Vec<&DockingAction>;
+
+    /// Get all global actions registered with the tool.
+    ///
+    /// Port of Ghidra's `Tool.getGlobalActions`.
+    fn get_global_actions(&self) -> Vec<&DockingAction>;
+
+    /// Get all actions (global + local) in the tool.
+    ///
+    /// Port of Ghidra's `Tool.getAllActions`.
+    fn get_all_actions(&self) -> Vec<&DockingAction>;
+
+    /// Get all actions owned by the given owner name.
+    ///
+    /// Port of Ghidra's `Tool.getDockingActionsByOwnerName`.
+    fn get_actions_by_owner(&self, owner: &str) -> Vec<&DockingAction>;
+
+    // -- Dialog --
+
+    /// Show a dialog component provider.
+    ///
+    /// Port of Ghidra's `Tool.showDialog`.
+    fn show_dialog(&mut self, _title: &str) {}
+
     // -- Window position --
 
     /// Get the default window position for a component provider.
     fn default_position_for(&self, _provider: &ProviderType) -> WindowPosition {
         WindowPosition::Center
     }
+
+    // -- Menu groups --
+
+    /// Set the menu group for a cascaded sub-menu.
+    ///
+    /// Port of Ghidra's `Tool.setMenuGroup`.
+    fn set_menu_group(&mut self, _menu_path: &[&str], _group: &str, _sub_group: &str) {}
 
     // -- Lifecycle --
 
@@ -219,6 +360,12 @@ mod tests {
         fn set_property(&mut self, _key: &str, _value: &str) {}
         fn get_property(&self, _key: &str) -> Option<&str> { None }
         fn remove_property(&mut self, _key: &str) -> Option<String> { None }
+        fn add_local_action(&mut self, _p: ProviderType, _n: &str, _a: DockingAction) {}
+        fn remove_local_action(&mut self, _p: ProviderType, _n: &str, _action_name: &str) {}
+        fn get_local_actions(&self, _p: &ProviderType, _n: &str) -> Vec<&DockingAction> { Vec::new() }
+        fn get_global_actions(&self) -> Vec<&DockingAction> { Vec::new() }
+        fn get_all_actions(&self) -> Vec<&DockingAction> { Vec::new() }
+        fn get_actions_by_owner(&self, _owner: &str) -> Vec<&DockingAction> { Vec::new() }
         fn close(&mut self) { self.closed = true; }
         fn is_closed(&self) -> bool { self.closed }
         fn dispose(&mut self) { self.closed = true; }

@@ -97,6 +97,15 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
     /// Hide the provider.
     fn hide(&mut self);
 
+    /// Set visibility (convenience: show or hide).
+    fn set_visible(&mut self, visible: bool) {
+        if visible {
+            self.show();
+        } else {
+            self.hide();
+        }
+    }
+
     /// Toggle visibility.
     fn toggle(&mut self) {
         if self.is_visible() {
@@ -111,14 +120,59 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
         Vec::new()
     }
 
+    /// Add a local action to this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.addLocalAction`.
+    fn add_local_action(&mut self, _action: DockingAction) {}
+
+    /// Remove a local action from this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.removeLocalAction`.
+    fn remove_local_action(&mut self, _action_name: &str) {}
+
+    /// Remove all local actions from this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.removeAllLocalActions`.
+    fn remove_all_local_actions(&mut self) {}
+
     /// Called when this provider gains focus.
     fn focus_gained(&self) {}
 
     /// Called when this provider loses focus.
     fn focus_lost(&self) {}
 
+    /// Called when this provider becomes the active component.
+    ///
+    /// Port of Ghidra's `ComponentProvider.componentActivated`.
+    fn component_activated(&self) {}
+
+    /// Called when this provider is no longer the active component.
+    ///
+    /// Port of Ghidra's `ComponentProvider.componentDeactivated`.
+    fn component_deactivated(&self) {}
+
+    /// Called when the provider's component is being shown.
+    ///
+    /// Port of Ghidra's `ComponentProvider.componentShown`.
+    fn component_shown(&self) {}
+
+    /// Called when the provider's component is being hidden.
+    ///
+    /// Port of Ghidra's `ComponentProvider.componentHidden`.
+    fn component_hidden(&self) {}
+
     /// Called when the action context changes.
     fn context_changed(&self, _context: &DockingActionContext) {}
+
+    /// Whether this provider is a transient (temporary) provider.
+    ///
+    /// Transient providers are removed from the tool when closed,
+    /// rather than merely hidden.
+    ///
+    /// Port of Ghidra's `ComponentProvider.isTransient`.
+    fn is_transient(&self) -> bool {
+        false
+    }
 
     /// Whether this provider supports temporary (transient) windows.
     fn supports_temporary_window(&self) -> bool {
@@ -140,6 +194,26 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
         false
     }
 
+    /// The window group this provider belongs to.
+    ///
+    /// Providers in the same group are stacked together when first shown.
+    /// The default group is `"Default"`.
+    ///
+    /// Port of Ghidra's `ComponentProvider.getWindowGroup`.
+    fn window_group(&self) -> &str {
+        "Default"
+    }
+
+    /// The sub-menu group for the Window menu.
+    ///
+    /// If non-null, the provider's "Show" action appears in a sub-menu
+    /// of the Window menu named by this value.
+    ///
+    /// Port of Ghidra's `ComponentProvider.getWindowSubMenuName`.
+    fn window_sub_menu_name(&self) -> Option<&str> {
+        None
+    }
+
     /// Help location identifier for the help system.
     fn help_location(&self) -> Option<&str> {
         None
@@ -148,6 +222,28 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
     /// Whether this provider can be closed by the user.
     fn closeable(&self) -> bool {
         true
+    }
+
+    /// Whether this provider's window can be used as a parent for
+    /// system dialogs.
+    ///
+    /// Port of Ghidra's `ComponentProvider.canBeParent`.
+    fn can_be_parent(&self) -> bool {
+        true
+    }
+
+    /// Whether this provider is a snapshot of a primary provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.isSnapshot`.
+    fn is_snapshot(&self) -> bool {
+        false
+    }
+
+    /// The tab text shown when stacked with other providers.
+    ///
+    /// Defaults to `window_title()` if not overridden.
+    fn tab_text(&self) -> &str {
+        self.window_title()
     }
 
     /// Clean up resources when the provider is disposed.
@@ -261,6 +357,56 @@ mod tests {
         p.toggle();
         assert!(p.is_visible());
         p.toggle();
+        assert!(!p.is_visible());
+    }
+
+    #[test]
+    fn test_provider_new_defaults() {
+        #[derive(Debug)]
+        struct MockProvider;
+        impl ComponentProvider for MockProvider {
+            fn name(&self) -> &str { "mock" }
+            fn window_title(&self) -> &str { "Mock" }
+            fn is_visible(&self) -> bool { false }
+            fn show(&mut self) {}
+            fn hide(&mut self) {}
+            fn instance_key(&self) -> (ProviderType, String) {
+                (ProviderType::Console, "mock".to_owned())
+            }
+            fn provider_type(&self) -> ProviderType { ProviderType::Console }
+        }
+
+        let p = MockProvider;
+        // New defaults for the Java-migrated methods.
+        assert!(!p.is_transient());
+        assert_eq!(p.window_group(), "Default");
+        assert!(p.window_sub_menu_name().is_none());
+        assert!(p.can_be_parent());
+        assert!(!p.is_snapshot());
+        assert!(p.sub_title().is_empty());
+        assert_eq!(p.tab_text(), "Mock");
+    }
+
+    #[test]
+    fn test_provider_set_visible() {
+        #[derive(Debug)]
+        struct MockProvider { visible: bool }
+        impl ComponentProvider for MockProvider {
+            fn name(&self) -> &str { "mock" }
+            fn window_title(&self) -> &str { "Mock" }
+            fn is_visible(&self) -> bool { self.visible }
+            fn show(&mut self) { self.visible = true; }
+            fn hide(&mut self) { self.visible = false; }
+            fn instance_key(&self) -> (ProviderType, String) {
+                (ProviderType::Console, "mock".to_owned())
+            }
+            fn provider_type(&self) -> ProviderType { ProviderType::Console }
+        }
+
+        let mut p = MockProvider { visible: false };
+        p.set_visible(true);
+        assert!(p.is_visible());
+        p.set_visible(false);
         assert!(!p.is_visible());
     }
 }
