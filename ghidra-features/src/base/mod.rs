@@ -108,7 +108,27 @@ pub mod goto;
 /// Ported from `ghidra.app.plugin.core.programtree`.
 pub mod programtree;
 
+/// Symbol tree plugin for browsing program symbols in a tree hierarchy.
+/// Ported from `ghidra.app.plugin.core.symboltree`.
+pub mod symboltree;
+
+/// BytesView feature -- raw memory byte viewer.
+/// Ported from `ghidra.app.plugin.core.byteviewer` Java packages.
+/// Contains: plugin lifecycle, provider with display, navigation, and clipboard.
+pub mod bytes;
+
 /// Base GUI plugins.
 /// Ported from `ghidra.app.plugin.core` Java packages.
 /// Contains: codebrowser, listing, symboltree, bytes, comment, decompile, terminal.
 pub mod plugin;
+
+/// Listing display management.
+/// Ported from `ghidra.app.plugin.core.listing` package.
+/// Provides: listing plugin, listing provider, field layout, formatting.
+pub mod listing;
+
+/// Code browser -- the main program listing display window.
+/// Ported from `ghidra.app.plugin.core.codebrowser` package.
+/// Provides: code browser plugin (lifecycle, events, navigation, providers),
+/// code browser view (cursor, selection, scrolling, fields).
+pub mod codebrowser;

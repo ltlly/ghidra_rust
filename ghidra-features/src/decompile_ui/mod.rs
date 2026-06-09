@@ -58,12 +58,14 @@ pub mod convert_constant_action;
 pub mod controller;
 pub mod decomp_interface;
 pub mod decompile_exception;
+pub mod decompile_plugin;
 pub mod decompile_process;
 pub mod decompiler_location;
 pub mod decompiler_manager;
 pub mod decompiler_margin_service;
 pub mod decompiler_options;
 pub mod decompiler_options_listener;
+pub mod decompiler_provider;
 pub mod decompiler_service_listener;
 pub mod decompiler_utils;
 pub mod display_type_casts;
@@ -329,4 +331,26 @@ pub use abstract_action::{
 // -- Re-exports from select_all_action (select all text in panel) --
 pub use select_all_action::{
     EventTrigger, SelectAllAction as SelectAllPanelAction, SelectAllResult,
+};
+
+// -- Re-exports from decompile_plugin (plugin annotations + lifecycle) --
+pub use decompile_plugin::{
+    DecompilePluginExtension, PluginCategory, PluginEventKind, PluginLifecycle, PluginMetadata,
+    PluginStatus, ServiceBinding, ServiceRegistrationManager, SpecExtensionRegistry,
+};
+
+// -- Re-exports from decompiler_provider (provider infrastructure) --
+// Note: DecompilerCallbackHandler, DecompilerLocationMemento, and
+// DecompilerMarginProvider are already exported from callback_handler.rs,
+// location_memento.rs, and decompiler_margin_service.rs respectively.
+// We re-export the new types with distinct names to avoid conflicts.
+pub use decompiler_provider::{
+    ActionContextRequest, ComponentProviderAdapter,
+    DecompilerCallbackHandler as DecompilerCallbackHandlerExt,
+    DecompilerHighlightService as DecompilerHighlightServiceTrait,
+    DecompilerHighlighterHandle, DecompilerLocationMemento as DecompilerLocationMementoExt,
+    DecompilerMarginProvider as DecompilerMarginProviderTrait,
+    DecompilerMarginService as DecompilerMarginServiceTrait, FollowUpWorkQueue, HighlightMatcher,
+    LocationMemento, OptionsChangeListener, ProviderSaveState, ServiceListener,
+    OptionCategory as ProviderOptionCategory,
 };
