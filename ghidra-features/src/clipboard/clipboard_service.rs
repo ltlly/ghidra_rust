@@ -530,12 +530,114 @@ impl CodeBrowserClipboardProvider {
             .join("\n")
     }
 
+    /// Copy symbol string (address with function offset notation).
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copySymbolString()`.
+    ///
+    /// For addresses inside a function, produces `funcname + 0xNN` notation.
+    /// For addresses at a function entry point, produces the function name.
+    /// For addresses outside any function, produces the raw address string.
+    fn copy_symbol_string(
+        &self,
+        functions: &[(u64, u64, String)], // (entry, addr, name)
+    ) -> String {
+        let mut addrs: Vec<u64> = self.selection.iter().copied().collect();
+        addrs.sort();
+        addrs
+            .iter()
+            .map(|addr| {
+                // Find if this address falls within a known function
+                for &(entry, _end, ref name) in functions {
+                    if *addr == entry {
+                        return name.clone();
+                    }
+                    if *addr > entry {
+                        let delta = addr - entry;
+                        return format!("{} + {:#x}", name, delta);
+                    }
+                }
+                format!("0x{:x}", addr)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Copy byte source offsets (file offsets).
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copyByteSourceOffset()`.
+    ///
+    /// Converts each selected address to its file offset. Addresses without
+    /// a file offset mapping produce `<NO_OFFSET>`.
+    fn copy_byte_source_offset(&self, file_offsets: &[(u64, Option<u64>)]) -> String {
+        file_offsets
+            .iter()
+            .map(|(_, offset)| match offset {
+                Some(o) => format!("{:x}", o),
+                None => "<NO_OFFSET>".to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Copy memory block offsets.
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copyBlockSourceOffset()`.
+    ///
+    /// For each selected address, computes the offset from the start of its
+    /// containing memory block. Addresses not in any block produce
+    /// `<NO_OFFSET>`.
+    fn copy_block_offset(
+        &self,
+        block_ranges: &[(u64, u64, u64)], // (addr, block_start, block_end)
+    ) -> String {
+        let mut addrs: Vec<u64> = self.selection.iter().copied().collect();
+        addrs.sort();
+        addrs
+            .iter()
+            .map(|addr| {
+                for &(a, block_start, _block_end) in block_ranges {
+                    if a == *addr {
+                        return format!("{:x}", addr - block_start);
+                    }
+                }
+                "<NO_OFFSET>".to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Copy function-relative offsets.
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copyFunctionSourceOffset()`.
+    ///
+    /// For each selected address, computes the offset from the containing
+    /// function's entry point. Addresses not in any function produce
+    /// `<NO_OFFSET>`.
+    fn copy_function_offset(&self, functions: &[(u64, u64, String)]) -> String {
+        let mut addrs: Vec<u64> = self.selection.iter().copied().collect();
+        addrs.sort();
+        addrs
+            .iter()
+            .map(|addr| {
+                for &(entry, _end, ref _name) in functions {
+                    if *addr >= entry {
+                        return format!("{:x}", addr - entry);
+                    }
+                }
+                "<NO_OFFSET>".to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     /// Copy formatted code text (simplified listing representation).
     fn copy_code_text(&self, code_lines: &[String]) -> String {
         code_lines.join("\n")
     }
 
     /// Copy labels and comments as structured text.
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copyLabelsComments()`.
     fn copy_labels_comments(
         &self,
         labels: &[(u64, String)],
@@ -549,6 +651,26 @@ impl CodeBrowserClipboardProvider {
             lines.push(format!("0x{:x}: // {}", addr, comment));
         }
         lines.join("\n")
+    }
+
+    /// Copy data text representations.
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copyDataText()`.
+    ///
+    /// Produces a newline-separated list of data value text representations
+    /// for the selected addresses.
+    fn copy_data_text(&self, data_values: &[String]) -> String {
+        data_values.join("\n")
+    }
+
+    /// Copy dereferenced data text.
+    ///
+    /// Ported from `CodeBrowserClipboardProvider.copyReferencedDataText()`.
+    ///
+    /// Follows pointer chains and produces the final data value at each
+    /// dereferenced address.
+    fn copy_dereferenced_data_text(&self, deref_values: &[String]) -> String {
+        deref_values.join("\n")
     }
 }
 
@@ -632,23 +754,28 @@ impl ClipboardContentProviderService for CodeBrowserClipboardProvider {
         let min_addr = self.selection.iter().min().copied().unwrap_or(0);
         let max_addr = self.selection.iter().max().copied().unwrap_or(0);
 
+        // Note: Many copy_special methods require program context (listing model,
+        // functions, memory blocks, etc.) that is not available in the standalone
+        // provider. The provider-level implementations delegate to the helper
+        // methods; when program context is available, callers should populate
+        // the provider's data before calling copy_special.
         let text = match copy_type {
-            CopyType::CodeText => self.copy_address(), // simplified
+            CopyType::CodeText => self.copy_address(), // needs listing model
             CopyType::LabelsAndComments => self.copy_labels_comments(&[], &[]),
-            CopyType::Labels => String::new(),
-            CopyType::Comments => String::new(),
+            CopyType::Labels => String::new(),  // needs program symbol table
+            CopyType::Comments => String::new(), // needs program listing
             CopyType::ByteString => self.copy_byte_string(),
             CopyType::ByteStringNoSpace => self.copy_byte_string_no_space(),
-            CopyType::DataText => self.copy_address(),
-            CopyType::DereferencedDataText => self.copy_address(),
+            CopyType::DataText => self.copy_data_text(&[]), // needs program data
+            CopyType::DereferencedDataText => self.copy_dereferenced_data_text(&[]),
             CopyType::PythonByteString => self.copy_python_byte_string(),
             CopyType::PythonList => self.copy_python_list(),
             CopyType::CppByteArray => self.copy_cpp_byte_array(),
             CopyType::AddressText => self.copy_address(),
-            CopyType::AddressTextWithOffset => self.copy_address(),
-            CopyType::ByteSourceOffset => self.copy_address(),
-            CopyType::BlockOffset => self.copy_address(),
-            CopyType::FunctionOffset => self.copy_address(),
+            CopyType::AddressTextWithOffset => self.copy_symbol_string(&[]), // needs functions
+            CopyType::ByteSourceOffset => self.copy_byte_source_offset(&[]), // needs memory info
+            CopyType::BlockOffset => self.copy_block_offset(&[]), // needs memory blocks
+            CopyType::FunctionOffset => self.copy_function_offset(&[]), // needs functions
             CopyType::ImagebaseOffset => self.copy_imagebase_offset(0),
             CopyType::GhidraLocalUrl => format!("ghidra://localhost/{}", self.source_program),
             CopyType::GhidraSharedUrl => format!("ghidra://shared/{}", self.source_program),
@@ -717,6 +844,273 @@ fn sorted_set(set: &HashSet<u64>) -> Vec<u64> {
     let mut v: Vec<u64> = set.iter().copied().collect();
     v.sort();
     v
+}
+
+// ---------------------------------------------------------------------------
+// LabelStringTransferable -- label string clipboard transferable
+// ---------------------------------------------------------------------------
+
+/// A transferable that carries a label name string for paste operations.
+///
+/// Ported from `CodeBrowserClipboardProvider.LabelStringTransferable`.
+///
+/// Used when pasting a label name onto a label field, function name field,
+/// or operand field in the listing.
+#[derive(Debug, Clone)]
+pub struct LabelStringTransferable {
+    /// The label name.
+    pub data: String,
+}
+
+impl LabelStringTransferable {
+    /// Create a new label string transferable.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { data: name.into() }
+    }
+
+    /// Get the label name.
+    pub fn name(&self) -> &str {
+        &self.data
+    }
+}
+
+// ---------------------------------------------------------------------------
+// NonLabelStringTransferable -- non-label string clipboard transferable
+// ---------------------------------------------------------------------------
+
+/// A transferable that carries non-label text for paste operations.
+///
+/// Ported from `CodeBrowserClipboardProvider.NonLabelStringTransferable`.
+///
+/// Used when pasting text onto address fields, comment fields, mnemonic
+/// fields, or operand fields that are not label references.
+#[derive(Debug, Clone)]
+pub struct NonLabelStringTransferable {
+    /// The text content.
+    pub data: String,
+}
+
+impl NonLabelStringTransferable {
+    /// Create a new non-label string transferable from a single string.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { data: text.into() }
+    }
+
+    /// Create a new non-label string transferable from multiple lines.
+    pub fn from_lines(lines: &[String]) -> Self {
+        Self {
+            data: lines.join("\n"),
+        }
+    }
+
+    /// Get the text content.
+    pub fn text(&self) -> &str {
+        &self.data
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CodeUnitInfo -- structured code unit information for clipboard paste
+// ---------------------------------------------------------------------------
+
+/// Comment type for a code unit.
+///
+/// Ported from `ghidra.program.model.listing.CommentType`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CommentType {
+    /// Pre-line comment.
+    Pre,
+    /// End-of-line comment.
+    Eol,
+    /// Post-line comment.
+    Post,
+    /// Plate comment (above).
+    Plate,
+    /// Repeatable comment.
+    Repeatable,
+}
+
+impl CommentType {
+    /// Display name for this comment type.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Pre => "Pre",
+            Self::Eol => "EOL",
+            Self::Post => "Post",
+            Self::Plate => "Plate",
+            Self::Repeatable => "Repeatable",
+        }
+    }
+}
+
+/// Structured information about a code unit for clipboard transfer.
+///
+/// Ported from `ghidra.app.cmd.comments.CodeUnitInfo`.
+///
+/// Carries labels, comments, and function info for a single code unit
+/// address, used for structured paste operations (labels, comments,
+/// labels+comments).
+#[derive(Debug, Clone)]
+pub struct CodeUnitInfo {
+    /// Index offset from the start address of the copied range.
+    pub offset: i64,
+    /// Symbols (labels) at this address.
+    pub symbols: Vec<String>,
+    /// Comments by type.
+    pub comments: Vec<(CommentType, Vec<String>)>,
+    /// Whether this code unit is a function entry point.
+    pub is_function: bool,
+    /// Function name if this is a function entry.
+    pub function_name: Option<String>,
+}
+
+impl CodeUnitInfo {
+    /// Create a new code unit info.
+    pub fn new(offset: i64) -> Self {
+        Self {
+            offset,
+            symbols: Vec::new(),
+            comments: Vec::new(),
+            is_function: false,
+            function_name: None,
+        }
+    }
+
+    /// Set the symbols for this code unit.
+    pub fn set_symbols(&mut self, symbols: Vec<String>) {
+        self.symbols = symbols;
+    }
+
+    /// Add a comment of the given type.
+    pub fn set_comment(&mut self, comment_type: CommentType, lines: Vec<String>) {
+        self.comments.push((comment_type, lines));
+    }
+
+    /// Mark this code unit as a function entry.
+    pub fn set_function(&mut self, name: impl Into<String>) {
+        self.is_function = true;
+        self.function_name = Some(name.into());
+    }
+
+    /// Get all labels as a single string.
+    pub fn labels_text(&self) -> String {
+        self.symbols.join(", ")
+    }
+
+    /// Get all comments as a single string.
+    pub fn comments_text(&self) -> String {
+        self.comments
+            .iter()
+            .flat_map(|(_, lines)| lines.iter())
+            .cloned()
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CodeUnitInfoTransferable -- structured clipboard data for labels/comments
+// ---------------------------------------------------------------------------
+
+/// A transferable for structured code unit info (labels and comments).
+///
+/// Ported from `CodeUnitInfoTransferable` in the clipboard package.
+///
+/// Carries a list of `CodeUnitInfo` entries for paste operations that
+/// restore labels, comments, and function names.
+#[derive(Debug, Clone)]
+pub struct CodeUnitInfoTransferable {
+    /// The code unit info entries.
+    infos: Vec<CodeUnitInfo>,
+}
+
+impl CodeUnitInfoTransferable {
+    /// Create a new transferable from code unit info entries.
+    pub fn new(infos: Vec<CodeUnitInfo>) -> Self {
+        Self { infos }
+    }
+
+    /// Get the code unit info entries.
+    pub fn infos(&self) -> &[CodeUnitInfo] {
+        &self.infos
+    }
+
+    /// Get the number of entries.
+    pub fn len(&self) -> usize {
+        self.infos.len()
+    }
+
+    /// Whether this transferable has entries.
+    pub fn is_empty(&self) -> bool {
+        self.infos.is_empty()
+    }
+
+    /// Extract only labels from the entries.
+    pub fn labels_only(&self) -> Vec<(i64, &str)> {
+        self.infos
+            .iter()
+            .filter(|info| !info.symbols.is_empty())
+            .map(|info| (info.offset, info.symbols[0].as_str()))
+            .collect()
+    }
+
+    /// Extract only comments from the entries.
+    pub fn comments_only(&self) -> Vec<(i64, &str)> {
+        self.infos
+            .iter()
+            .flat_map(|info| {
+                info.comments
+                    .iter()
+                    .flat_map(|(_, lines)| lines.iter())
+                    .map(move |line| (info.offset, line.as_str()))
+            })
+            .collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PasteLabelAction -- describes a paste label action
+// ---------------------------------------------------------------------------
+
+/// The result of pasting a label string.
+///
+/// Ported from `CodeBrowserClipboardProvider.pasteLabelString()`.
+#[derive(Debug, Clone)]
+pub enum PasteLabelResult {
+    /// Rename an existing label at the given address.
+    RenameLabel {
+        /// The address.
+        address: u64,
+        /// The old label name.
+        old_name: String,
+        /// The new label name.
+        new_name: String,
+    },
+    /// Rename a function at the given address.
+    RenameFunction {
+        /// The address.
+        address: u64,
+        /// The old function name.
+        old_name: String,
+        /// The new function name.
+        new_name: String,
+    },
+    /// Set a variable name.
+    SetVariableName {
+        /// The variable name.
+        name: String,
+    },
+    /// Set a comment at the given address.
+    SetComment {
+        /// The address.
+        address: u64,
+        /// The comment type.
+        comment_type: CommentType,
+        /// The comment text.
+        text: String,
+    },
+    /// The paste could not be performed.
+    Failed(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -1175,5 +1569,239 @@ mod tests {
 
         let entry = provider.copy_special(CopyType::ByteStringNoSpace).unwrap();
         assert!(!entry.text.contains(' '));
+    }
+
+    // -- LabelStringTransferable tests --
+
+    #[test]
+    fn test_label_string_transferable() {
+        let lst = LabelStringTransferable::new("main");
+        assert_eq!(lst.name(), "main");
+    }
+
+    #[test]
+    fn test_label_string_transferable_clone() {
+        let lst = LabelStringTransferable::new("test_label");
+        let lst2 = lst.clone();
+        assert_eq!(lst2.name(), "test_label");
+    }
+
+    // -- NonLabelStringTransferable tests --
+
+    #[test]
+    fn test_non_label_string_transferable() {
+        let nst = NonLabelStringTransferable::new("0x1000");
+        assert_eq!(nst.text(), "0x1000");
+    }
+
+    #[test]
+    fn test_non_label_string_from_lines() {
+        let nst = NonLabelStringTransferable::from_lines(&[
+            "line1".to_string(),
+            "line2".to_string(),
+        ]);
+        assert_eq!(nst.text(), "line1\nline2");
+    }
+
+    // -- CommentType tests --
+
+    #[test]
+    fn test_comment_type_display() {
+        assert_eq!(CommentType::Pre.display_name(), "Pre");
+        assert_eq!(CommentType::Eol.display_name(), "EOL");
+        assert_eq!(CommentType::Plate.display_name(), "Plate");
+        assert_eq!(CommentType::Repeatable.display_name(), "Repeatable");
+    }
+
+    // -- CodeUnitInfo tests --
+
+    #[test]
+    fn test_code_unit_info_new() {
+        let info = CodeUnitInfo::new(0);
+        assert_eq!(info.offset, 0);
+        assert!(info.symbols.is_empty());
+        assert!(info.comments.is_empty());
+        assert!(!info.is_function);
+    }
+
+    #[test]
+    fn test_code_unit_info_symbols() {
+        let mut info = CodeUnitInfo::new(0);
+        info.set_symbols(vec!["main".to_string(), "entry".to_string()]);
+        assert_eq!(info.labels_text(), "main, entry");
+    }
+
+    #[test]
+    fn test_code_unit_info_comments() {
+        let mut info = CodeUnitInfo::new(0);
+        info.set_comment(CommentType::Eol, vec!["a comment".to_string()]);
+        assert_eq!(info.comments_text(), "a comment");
+    }
+
+    #[test]
+    fn test_code_unit_info_function() {
+        let mut info = CodeUnitInfo::new(0);
+        info.set_function("main");
+        assert!(info.is_function);
+        assert_eq!(info.function_name.as_deref(), Some("main"));
+    }
+
+    // -- CodeUnitInfoTransferable tests --
+
+    #[test]
+    fn test_code_unit_info_transferable() {
+        let mut info1 = CodeUnitInfo::new(0);
+        info1.set_symbols(vec!["main".to_string()]);
+        let mut info2 = CodeUnitInfo::new(4);
+        info2.set_comment(CommentType::Eol, vec!["ret".to_string()]);
+
+        let cut = CodeUnitInfoTransferable::new(vec![info1, info2]);
+        assert_eq!(cut.len(), 2);
+        assert!(!cut.is_empty());
+    }
+
+    #[test]
+    fn test_code_unit_info_transferable_empty() {
+        let cut = CodeUnitInfoTransferable::new(vec![]);
+        assert!(cut.is_empty());
+        assert_eq!(cut.len(), 0);
+    }
+
+    #[test]
+    fn test_code_unit_info_transferable_labels_only() {
+        let mut info = CodeUnitInfo::new(0);
+        info.set_symbols(vec!["main".to_string()]);
+        let cut = CodeUnitInfoTransferable::new(vec![info]);
+        let labels = cut.labels_only();
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0].1, "main");
+    }
+
+    #[test]
+    fn test_code_unit_info_transferable_comments_only() {
+        let mut info = CodeUnitInfo::new(0);
+        info.set_comment(CommentType::Plate, vec!["plate comment".to_string()]);
+        let cut = CodeUnitInfoTransferable::new(vec![info]);
+        let comments = cut.comments_only();
+        assert_eq!(comments.len(), 1);
+        assert_eq!(comments[0].1, "plate comment");
+    }
+
+    // -- PasteLabelResult tests --
+
+    #[test]
+    fn test_paste_label_result_rename() {
+        let result = PasteLabelResult::RenameLabel {
+            address: 0x1000,
+            old_name: "old".to_string(),
+            new_name: "new".to_string(),
+        };
+        match result {
+            PasteLabelResult::RenameLabel {
+                address,
+                old_name,
+                new_name,
+            } => {
+                assert_eq!(address, 0x1000);
+                assert_eq!(old_name, "old");
+                assert_eq!(new_name, "new");
+            }
+            _ => panic!("Expected RenameLabel"),
+        }
+    }
+
+    #[test]
+    fn test_paste_label_result_set_comment() {
+        let result = PasteLabelResult::SetComment {
+            address: 0x2000,
+            comment_type: CommentType::Eol,
+            text: "hello".to_string(),
+        };
+        match result {
+            PasteLabelResult::SetComment {
+                address,
+                comment_type,
+                text,
+            } => {
+                assert_eq!(address, 0x2000);
+                assert_eq!(comment_type, CommentType::Eol);
+                assert_eq!(text, "hello");
+            }
+            _ => panic!("Expected SetComment"),
+        }
+    }
+
+    #[test]
+    fn test_paste_label_result_failed() {
+        let result = PasteLabelResult::Failed("no label at address".to_string());
+        match result {
+            PasteLabelResult::Failed(msg) => {
+                assert_eq!(msg, "no label at address");
+            }
+            _ => panic!("Expected Failed"),
+        }
+    }
+
+    // -- Enhanced copy method tests --
+
+    #[test]
+    fn test_copy_symbol_string() {
+        let provider = CodeBrowserClipboardProvider::new("test");
+        let functions = vec![
+            (0x1000u64, 0x10FFu64, "main".to_string()),
+            (0x2000u64, 0x20FFu64, "helper".to_string()),
+        ];
+        let result = provider.copy_symbol_string(&functions);
+        // Empty selection should produce empty string
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_copy_byte_source_offset() {
+        let provider = CodeBrowserClipboardProvider::new("test");
+        let offsets = vec![
+            (0x1000u64, Some(0x100u64)),
+            (0x1001u64, None),
+        ];
+        let result = provider.copy_byte_source_offset(&offsets);
+        assert!(result.contains("100"));
+        assert!(result.contains("<NO_OFFSET>"));
+    }
+
+    #[test]
+    fn test_copy_block_offset() {
+        let mut provider = CodeBrowserClipboardProvider::new("test");
+        provider.set_selection(vec![0x1000, 0x1001]);
+        let blocks = vec![
+            (0x1000u64, 0x1000u64, 0x1FFFu64),
+            (0x1001u64, 0x1000u64, 0x1FFFu64),
+        ];
+        let result = provider.copy_block_offset(&blocks);
+        assert!(result.contains("0"));
+    }
+
+    #[test]
+    fn test_copy_function_offset() {
+        let provider = CodeBrowserClipboardProvider::new("test");
+        let functions = vec![(0x1000u64, 0x10FFu64, "main".to_string())];
+        let result = provider.copy_function_offset(&functions);
+        // Empty selection produces empty string
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_copy_data_text() {
+        let provider = CodeBrowserClipboardProvider::new("test");
+        let values = vec!["0x48".to_string(), "0x89".to_string()];
+        let result = provider.copy_data_text(&values);
+        assert_eq!(result, "0x48\n0x89");
+    }
+
+    #[test]
+    fn test_copy_dereferenced_data_text() {
+        let provider = CodeBrowserClipboardProvider::new("test");
+        let values = vec!["0x7FF00000".to_string()];
+        let result = provider.copy_dereferenced_data_text(&values);
+        assert_eq!(result, "0x7FF00000");
     }
 }

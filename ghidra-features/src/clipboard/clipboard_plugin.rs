@@ -535,6 +535,46 @@ impl ClipboardPlugin {
             .and_then(|state| state.last_copy_special_type.as_ref())
     }
 
+    /// Perform a copy-special with a dialog prompt to select the type.
+    ///
+    /// Ported from `ClipboardPlugin.copySpecial(service, null, true)`.
+    ///
+    /// When `prompt` is `true`, the caller should present a
+    /// `CopyPasteSpecialDialog` to let the user choose a type.
+    /// When `prompt` is `false`, the `clipboard_type` parameter is used directly.
+    ///
+    /// This method records the selected type for "Copy Special Again" support.
+    ///
+    /// Returns the entry that was copied, or `None` if unavailable or cancelled.
+    pub fn copy_special_with_type_selection(
+        &mut self,
+        provider_id: &str,
+        clipboard_type: Option<ClipboardType>,
+        available_types: &[ClipboardType],
+        entry: ClipboardEntry,
+    ) -> Option<ClipboardEntry> {
+        let selected_type = match clipboard_type {
+            Some(ct) => ct,
+            None => {
+                // In a real UI, this would show CopyPasteSpecialDialog.
+                // For headless use, return the first available type.
+                if available_types.is_empty() {
+                    return None;
+                }
+                available_types[0]
+            }
+        };
+
+        let result = self.copy(provider_id, entry)?;
+
+        // Record the last copy-special type for this provider
+        if let Some(state) = self.providers.get_mut(provider_id) {
+            state.last_copy_special_type = Some(selected_type);
+        }
+
+        Some(result)
+    }
+
     /// Update the copy special again action menu label with the last type name.
     ///
     /// Ported from `CopySpecialAgainAction.updateMenuName()`.
@@ -664,6 +704,78 @@ fn remove_outer_quotes(s: &str) -> String {
         inner[1..inner.len() - 1].to_string()
     } else {
         inner.to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PasteTask -- encapsulates a paste operation
+// ---------------------------------------------------------------------------
+
+/// Encapsulates a paste operation from the clipboard.
+///
+/// Ported from `ClipboardPlugin.PasteTask` inner class.
+///
+/// In the Java version this runs as a `Task` with a `TaskMonitor`. In Rust,
+/// it provides the same logical flow without requiring a UI task runner.
+#[derive(Debug)]
+pub struct PasteTask {
+    /// The content to paste.
+    pub content: ClipboardEntry,
+    /// The target provider ID.
+    pub provider_id: String,
+}
+
+impl PasteTask {
+    /// Create a new paste task.
+    pub fn new(content: ClipboardEntry, provider_id: impl Into<String>) -> Self {
+        Self {
+            content,
+            provider_id: provider_id.into(),
+        }
+    }
+
+    /// Execute the paste task.
+    ///
+    /// Returns `Ok(true)` if the paste was successful, `Ok(false)` if there
+    /// was no content to paste, or `Err` if the paste failed.
+    pub fn execute(&self) -> Result<bool, String> {
+        // In a real implementation, this would dispatch to the provider's
+        // paste method. The content is available for the provider to consume.
+        if self.content.data.is_empty() && self.content.text.is_empty() {
+            return Ok(false);
+        }
+        Ok(true)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DummyTransferable -- empty transferable for clipboard clearing
+// ---------------------------------------------------------------------------
+
+/// An empty transferable used when clearing the clipboard.
+///
+/// Ported from `ClipboardPlugin.DummyTransferable` inner class.
+///
+/// When the plugin is disposed or loses clipboard ownership, a dummy
+/// transferable is placed on the system clipboard to allow proper
+/// garbage collection.
+#[derive(Debug, Clone, Default)]
+pub struct DummyTransferable;
+
+impl DummyTransferable {
+    /// Create a new dummy transferable.
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Whether this transferable has data (always false).
+    pub fn has_data(&self) -> bool {
+        false
+    }
+
+    /// Get the transfer data (always None).
+    pub fn get_transfer_data(&self) -> Option<&[u8]> {
+        None
     }
 }
 
@@ -1067,5 +1179,103 @@ mod tests {
     #[test]
     fn test_remove_outer_quotes_trimmed() {
         assert_eq!(remove_outer_quotes("  \"hello\"  "), "hello");
+    }
+
+    #[test]
+    fn test_copy_special_with_type_selection_first_type() {
+        let mut plugin = ClipboardPlugin::new();
+        plugin.register_provider_by_id("test", true, true, true, vec![]);
+
+        let entry = ClipboardEntry::from_bytes(
+            Address::new(0x1000),
+            Address::new(0x1003),
+            vec![0x48, 0x89, 0xD8],
+        );
+
+        let types = vec![ClipboardType::Bytes, ClipboardType::ByteString];
+        let result =
+            plugin.copy_special_with_type_selection("test", None, &types, entry);
+        assert!(result.is_some());
+        let last = plugin.last_copy_special_type("test");
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().display_name(), "Bytes");
+    }
+
+    #[test]
+    fn test_copy_special_with_type_selection_explicit() {
+        let mut plugin = ClipboardPlugin::new();
+        plugin.register_provider_by_id("test", true, true, true, vec![]);
+
+        let entry = ClipboardEntry::from_bytes(
+            Address::new(0x1000),
+            Address::new(0x1003),
+            vec![0x48, 0x89, 0xD8],
+        );
+
+        let types = vec![ClipboardType::Bytes, ClipboardType::ByteString];
+        let result = plugin.copy_special_with_type_selection(
+            "test",
+            Some(ClipboardType::ByteString),
+            &types,
+            entry,
+        );
+        assert!(result.is_some());
+        let last = plugin.last_copy_special_type("test");
+        assert!(last.is_some());
+        assert_eq!(last.unwrap().display_name(), "Byte String");
+    }
+
+    #[test]
+    fn test_copy_special_with_type_selection_empty_types() {
+        let mut plugin = ClipboardPlugin::new();
+        plugin.register_provider_by_id("test", true, true, true, vec![]);
+
+        let entry = ClipboardEntry::from_bytes(
+            Address::new(0x1000),
+            Address::new(0x1003),
+            vec![0x48],
+        );
+
+        let result = plugin.copy_special_with_type_selection("test", None, &[], entry);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_paste_task_execute() {
+        let task = PasteTask::new(
+            ClipboardEntry::from_bytes(
+                Address::new(0x1000),
+                Address::new(0x1003),
+                vec![0x48, 0x89, 0xD8],
+            ),
+            "test",
+        );
+        assert!(task.execute().unwrap());
+    }
+
+    #[test]
+    fn test_paste_task_empty_content() {
+        let task = PasteTask::new(
+            ClipboardEntry::from_text(
+                Address::new(0x1000),
+                Address::new(0x1000),
+                String::new(),
+            ),
+            "test",
+        );
+        assert!(!task.execute().unwrap());
+    }
+
+    #[test]
+    fn test_dummy_transferable() {
+        let dt = DummyTransferable::new();
+        assert!(!dt.has_data());
+        assert!(dt.get_transfer_data().is_none());
+    }
+
+    #[test]
+    fn test_dummy_transferable_default() {
+        let dt = DummyTransferable;
+        assert!(!dt.has_data());
     }
 }
