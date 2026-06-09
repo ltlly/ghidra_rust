@@ -10,6 +10,8 @@
 // Re-export everything from the store listener module.
 pub use crate::filesystem::store::listener::*;
 
+use std::sync::Arc;
+
 // ============================================================================
 // SimpleFileSystemListener – callback-based listener
 // ============================================================================

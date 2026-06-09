@@ -123,6 +123,7 @@ pub struct UndoRedoState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::domain_object_listener::DomainObjectListener;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
     use std::time::SystemTime;

@@ -7,6 +7,8 @@ pub mod bytes_view;
 pub mod chooser;
 pub mod decompiler_view;
 pub mod docking;
+pub mod domain_folder;
+pub mod domain_object;
 pub mod graph;
 pub mod gui_event;
 pub mod gui_test;

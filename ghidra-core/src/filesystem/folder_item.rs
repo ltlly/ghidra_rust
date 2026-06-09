@@ -74,7 +74,6 @@ mod tests {
     use crate::filesystem::store::{
         CheckoutType, ItemCheckoutStatus, DEFAULT_CHECKOUT_ID,
     };
-    use crate::error::GhidraError;
     use crate::generic::task::TaskMonitor;
     use std::path::Path;
 

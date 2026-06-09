@@ -129,6 +129,7 @@ impl TaskMonitor for SilentTaskMonitor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt;
     use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 
     struct TestMonitor {

@@ -386,6 +386,7 @@ impl From<GhidraError> for FileSystemException {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::error::Error;
 
     #[test]
     fn test_not_found_display() {

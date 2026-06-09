@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::error::GhidraError;
 use crate::filesystem::store::{
-    DataFileItem, FileSystemStore, StoreResult, TextDataItem,
+    DataFileItem, FileSystemStore, FolderItem, StoreResult, TextDataItem,
 };
 use crate::generic::task::TaskMonitor;
 
