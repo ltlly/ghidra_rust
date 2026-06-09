@@ -4,6 +4,9 @@
 
 #![allow(dead_code)]
 
+pub mod set_comment_cmd;
+pub mod set_plate_comment_cmd;
+
 /// Comment types corresponding to Ghidra's comment categories.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CommentType {

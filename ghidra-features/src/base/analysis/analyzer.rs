@@ -293,6 +293,16 @@ impl FunctionManager {
     pub fn get_functions(&self, _forward: bool) -> impl Iterator<Item = &Function> {
         self.functions.iter()
     }
+
+    /// Add a function entry.  Used by analyzers that discover new functions.
+    pub fn add_function(&mut self, func: Function) {
+        self.functions.push(func);
+    }
+
+    /// Number of functions.
+    pub fn num_functions(&self) -> usize {
+        self.functions.len()
+    }
 }
 
 /// A function entry.
@@ -2029,7 +2039,7 @@ mod tests {
     #[test]
     fn test_flow_type() {
         assert!(FlowType::Call.is_call());
-        assert!(FlowType::ConditionalJump.is_jump());
+        assert!(FlowType::ConditionalBranch.is_jump());
         assert!(FlowType::Return.is_terminal());
         assert!(FlowType::Fallthrough.has_fallthrough());
     }

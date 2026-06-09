@@ -4,6 +4,9 @@
 
 #![allow(dead_code)]
 
+pub mod add_memory_block_cmd;
+pub mod remove_memory_block_cmd;
+
 /// Memory block permissions.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MemoryPermissions {

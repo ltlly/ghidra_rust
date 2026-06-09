@@ -19,6 +19,7 @@
 //! - [`navigation`] — next/previous navigation actions for code elements
 //! - [`reloc`] — relocation fixup handlers for binary rebasing
 //! - [`select`] — flow-based code selection actions
+//! - [`plugin`] — base GUI plugins (codebrowser, listing, symboltree, bytes, comment, decompile, terminal)
 
 pub mod analyzer;
 pub mod assembler;
@@ -98,3 +99,8 @@ pub mod analysis;
 /// GoTo navigation service trait.
 /// Ported from `ghidra.app.services.GoToService`.
 pub mod goto;
+
+/// Base GUI plugins.
+/// Ported from `ghidra.app.plugin.core` Java packages.
+/// Contains: codebrowser, listing, symboltree, bytes, comment, decompile, terminal.
+pub mod plugin;

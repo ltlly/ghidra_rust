@@ -4,6 +4,9 @@
 
 #![allow(dead_code)]
 
+pub mod add_mem_ref_cmd;
+pub mod add_external_ref_cmd;
+
 /// Reference types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RefType {

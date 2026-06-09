@@ -47,6 +47,8 @@
 pub mod state;
 pub mod lib_z3;
 pub mod gui;
+pub mod symbolic_summary_z3_analyzer;
+pub mod symbolic_summary_z3_plugin;
 
 // ---------------------------------------------------------------------------
 // SymValueZ3

@@ -4,6 +4,9 @@
 
 #![allow(dead_code)]
 
+pub mod add_module_cmd;
+pub mod create_module_cmd;
+
 /// Command to create the default program tree.
 #[derive(Debug)]
 pub struct CreateDefaultTreeCmd {

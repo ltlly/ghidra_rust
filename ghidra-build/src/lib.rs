@@ -21,7 +21,11 @@
 //! the IDAPro Python scripts are not ported, as they are platform-specific
 //! (Eclipse RCP / IDA Python) and not applicable to Rust.
 
+pub mod build_database;
+pub mod build_database_factory;
 pub mod doclets;
+pub mod language_spec;
+pub mod language_spec_factory;
 pub mod launch;
 pub mod markdown;
 pub mod skeleton;
