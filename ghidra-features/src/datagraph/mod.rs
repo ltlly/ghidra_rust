@@ -11,6 +11,8 @@
 //! - **Column/Row models**: Table models for data display.
 
 pub mod data_exploration_graph;
+pub mod data_graph_options;
+pub mod data_graph_plugin;
 pub mod deg_vertex;
 pub mod deg_edge;
 pub mod deg_layout;
@@ -19,6 +21,8 @@ pub mod panel;
 pub mod exploration_graph;
 
 pub use data_exploration_graph::*;
+pub use data_graph_options::*;
+pub use data_graph_plugin::*;
 pub use deg_vertex::*;
 pub use deg_edge::*;
 pub use deg_layout::*;

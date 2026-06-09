@@ -24,6 +24,9 @@
 //! - [`apply_settings`] -- diff apply settings and option management
 //! - [`diff_actions`] -- bulk diff actions (ignore all, merge all, replace all)
 //! - [`memory_comparator`] -- program memory layout comparison
+//! - [`program_diff_plugin`] -- main diff plugin managing providers and events
+//! - [`program_diff_filter`] -- advanced filter categories, groups, presets, and builder
+//! - [`diff_apply_panel`] -- UI logic for configuring and applying differences
 
 pub mod diff_controller;
 pub mod diff_service;
@@ -31,6 +34,9 @@ pub mod merge_filter;
 pub mod apply_settings;
 pub mod diff_actions;
 pub mod memory_comparator;
+pub mod program_diff_plugin;
+pub mod program_diff_filter;
+pub mod diff_apply_panel;
 
 use std::collections::BTreeMap;
 

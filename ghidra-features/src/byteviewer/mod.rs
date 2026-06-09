@@ -27,6 +27,9 @@
 //! - [`format`] -- the [`DataFormatModel`](format::DataFormatModel) trait hierarchy
 //!   and all concrete format model implementations
 
+pub mod byte_viewer_component;
+pub mod byte_viewer_layout_model;
+pub mod byte_viewer_plugin;
 pub mod format;
 
 use num_bigint::BigInt;

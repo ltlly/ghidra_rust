@@ -1,8 +1,17 @@
-//! SARIF 2.1.0 export for Ghidra Rust.
+//! SARIF 2.1.0 support for Ghidra Rust.
 //!
 //! Implements the [Static Analysis Results Interchange Format (SARIF) Version 2.1.0]
-//! (https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) for exporting
-//! analysis results from Ghidra Rust.
+//! (https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html) for reading,
+//! writing, and visualizing SARIF analysis results.
+//!
+//! # Sub-modules
+//!
+//! - [`sarif_plugin`] -- Plugin, service, and controller ported from
+//!   `SarifPlugin.java`, `SarifService.java`, `SarifController.java`,
+//!   `SarifProgramOptions.java`, and `SarifGraphDisplayListener.java`.
+//! - [`sarif_exporter`] -- Exporter and loader ported from
+//!   `SarifExporter.java`, `SarifLoader.java`, `SarifWriterTask.java`,
+//!   and `SarifUtils.java`.
 //!
 //! # SARIF Compliance
 //!
@@ -25,6 +34,9 @@
 //! let json = exporter.to_json().unwrap();
 //! fs::write("results.sarif", json).unwrap();
 //! ```
+
+pub mod sarif_plugin;
+pub mod sarif_exporter;
 
 use serde::{Deserialize, Serialize};
 use std::io;

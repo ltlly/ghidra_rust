@@ -16,6 +16,8 @@
 //! - [`ConsoleWord`] -- word-at-cursor extraction for navigation
 //! - [`ConsoleMessage`] -- individual message entry with timestamp and type
 //! - [`ConsoleBuffer`] -- ring-buffer console output accumulator
+//! - [`ConsoleServiceFactory`] -- factory for creating console service instances
+//! - [`ConsoleSession`] -- session-based console with scoped logging
 //!
 //! # Example
 //!
@@ -29,10 +31,17 @@
 //! assert_eq!(buffer.error_count(), 1);
 //! ```
 
+pub mod console_plugin;
+pub mod console_service;
+
 // Re-export core console types from base module.
 pub use crate::base::console::{
     CodeCompletion, ConsoleComponentProvider, ConsolePlugin, ConsoleService, ConsoleWord,
 };
+
+// Re-export the new submodules.
+pub use console_plugin::ConsolePluginFactory;
+pub use console_service::{ConsoleServiceFactory, ConsoleSession};
 
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
