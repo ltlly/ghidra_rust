@@ -36,6 +36,19 @@ pub mod function_data_view;
 pub mod storage_editor;
 pub mod extra_actions;
 
+/// Function plugin service layer -- lifecycle, event handling, action
+/// enablement, favourite data types, and menu structure.
+///
+/// Ported from `FunctionPlugin.java` (higher-level coordination).
+pub mod function_plugin;
+
+/// Function editor dialog controller -- orchestrates the editing workflow
+/// for function properties (name, return type, calling convention,
+/// parameters, attributes).
+///
+/// Ported from `FunctionEditorDialog.java`.
+pub mod function_editor_dialog;
+
 /// Function creation, deletion, and editing actions (CreateFunctionAction,
 /// DeleteFunctionAction, EditFunctionAction, etc.).
 ///

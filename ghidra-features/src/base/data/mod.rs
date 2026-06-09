@@ -20,9 +20,13 @@ pub mod settings;
 pub mod dialogs;
 pub mod recently_used;
 pub mod rename_dialog;
+pub mod data_plugin;
+pub mod data_settings_dialog;
 
 pub use plugin::*;
 pub use actions::*;
 pub use actions_ext::*;
 pub use settings::*;
 pub use dialogs::*;
+pub use data_plugin::*;
+pub use data_settings_dialog::*;

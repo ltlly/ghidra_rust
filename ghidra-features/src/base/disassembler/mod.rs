@@ -24,6 +24,8 @@ mod repeat_tracker;
 mod plugin;
 mod auto_table;
 mod static_disassemble;
+mod disassembler_plugin;
+mod disassembler_dialog;
 
 pub use core::*;
 pub use queue::*;
@@ -36,3 +38,5 @@ pub use repeat_tracker::*;
 pub use plugin::*;
 pub use auto_table::*;
 pub use static_disassemble::*;
+pub use disassembler_plugin::*;
+pub use disassembler_dialog::*;

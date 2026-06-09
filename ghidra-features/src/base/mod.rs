@@ -54,6 +54,7 @@ pub mod select;
 pub mod stack;
 pub mod subroutine;
 pub mod symbol;
+pub mod symboltable;
 
 // -- New modules ported from Ghidra's Features/Base app packages --
 /// Plugin events for program lifecycle, location, selection, and highlighting.
@@ -100,6 +101,10 @@ pub mod analysis;
 /// GoTo navigation service trait.
 /// Ported from `ghidra.app.services.GoToService`.
 pub mod goto;
+
+/// Program tree views for organizing program structure.
+/// Ported from `ghidra.app.plugin.core.programtree`.
+pub mod programtree;
 
 /// Base GUI plugins.
 /// Ported from `ghidra.app.plugin.core` Java packages.
