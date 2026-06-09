@@ -33,6 +33,7 @@ pub mod macho_loader;
 pub mod coff_loader;
 pub mod mz_loader;
 pub mod hex_loader;
+pub mod objc_loader;
 
 // Re-export framework types
 pub use framework::*;

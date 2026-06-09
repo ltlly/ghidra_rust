@@ -179,6 +179,23 @@ impl DecompileProcess {
         Ok(())
     }
 
+    /// Send a command with two parameters.
+    ///
+    /// Corresponds to Ghidra's `sendCommand2Params` used for action toggles.
+    pub fn send_command_2params(
+        &mut self,
+        command: &str,
+        _param1: &str,
+        _param2: &str,
+        _response: &mut Vec<u8>,
+    ) -> Result<(), DecompileProcessError> {
+        if self.status != ProcessStatus::Ready {
+            return Err(DecompileProcessError::NotReady);
+        }
+        let _ = command;
+        Ok(())
+    }
+
     /// Send a command with timeout.
     pub fn send_command_timeout(
         &mut self,

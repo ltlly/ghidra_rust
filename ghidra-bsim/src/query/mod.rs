@@ -54,6 +54,9 @@ pub mod row_key_sql;
 pub mod query_database_exception;
 pub mod b_sim_client_factory;
 
+// BSim query service (wraps FunctionDatabase with query-level logic)
+pub mod bsim_query_service;
+
 
 /// Error type for BSim query operations.
 #[derive(Debug, thiserror::Error)]

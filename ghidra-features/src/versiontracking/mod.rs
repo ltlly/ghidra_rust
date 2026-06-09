@@ -24,17 +24,24 @@
 //! - [`vt_session`] - VTSession trait and implementation
 //! - [`vt_match_db`] - Database-backed VTMatch
 //! - [`vt_session_db`] - Database-backed VTSession
+//! - [`vt_match_info`] - Match info extensions and builder
+//! - [`address_correlator`] - Program-level address correlator
+//! - [`hash_correlator`] - Hash-based function correlator
+//! - [`name_correlator`] - Name-based function and data correlator
 
 pub mod abstract_vt_correlator;
+pub mod address_correlator;
 pub mod association;
 pub mod correlator;
 pub mod db;
 pub mod error;
+pub mod hash_correlator;
 pub mod helpers;
 pub mod impl_module;
 pub mod markup;
 pub mod match_set;
 pub mod markuptype;
+pub mod name_correlator;
 pub mod options;
 pub mod session;
 pub mod stringable;
@@ -42,6 +49,7 @@ pub mod types;
 pub mod vt_correlator;
 pub mod vt_match;
 pub mod vt_match_db;
+pub mod vt_match_info;
 pub mod vt_match_set;
 pub mod vt_session;
 pub mod vt_session_db;

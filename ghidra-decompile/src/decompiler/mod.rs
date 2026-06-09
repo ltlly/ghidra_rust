@@ -124,6 +124,10 @@ pub mod pcode_graph_tasks;
 // Extended Clang token types (ClangCommentToken, ClangCaseToken, ClangFieldToken, etc.)
 pub mod clang_token_extended;
 
+// ClangToken and ClangTokenGroup convenience modules
+pub mod clang_token;
+pub mod clang_token_group;
+
 // ============================================================================
 // Re-exports for convenience
 // ============================================================================

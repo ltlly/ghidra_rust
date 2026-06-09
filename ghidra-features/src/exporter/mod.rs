@@ -25,6 +25,12 @@ use crate::base::analyzer::{
 };
 use crate::loader::framework::MessageLog as LoaderMessageLog;
 
+pub mod binary_exporter;
+pub mod html_exporter;
+
+pub use binary_exporter::BinaryExporter;
+pub use html_exporter::HtmlExporter;
+
 // ---------------------------------------------------------------------------
 // MemoryModel -- byte-level storage for export
 // ---------------------------------------------------------------------------
@@ -238,70 +244,6 @@ impl fmt::Display for ExportOptionValue {
             ExportOptionValue::Integer(v) => write!(f, "{}", v),
             ExportOptionValue::HexInteger(v) => write!(f, "0x{:x}", v),
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// BinaryExporter
-// ---------------------------------------------------------------------------
-
-/// Exports memory blocks as raw bytes.
-///
-/// Ported from `ghidra.app.util.exporter.BinaryExporter`.
-pub struct BinaryExporter;
-
-impl BinaryExporter {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for BinaryExporter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Exporter for BinaryExporter {
-    fn name(&self) -> &str {
-        "Raw Bytes"
-    }
-
-    fn default_extension(&self) -> &str {
-        "bin"
-    }
-
-    fn export(
-        &self,
-        program: &Program,
-        addr_set: Option<&AddressSet>,
-        memory: Option<&MemoryModel>,
-        writer: &mut dyn Write,
-        log: &mut LoaderMessageLog,
-    ) -> Result<bool, ExporterError> {
-        let set = match addr_set {
-            Some(s) => s.clone(),
-            None => program.memory.clone(),
-        };
-
-        let mem = memory.ok_or_else(|| {
-            ExporterError::MemoryAccess("No memory model provided for binary export".into())
-        })?;
-
-        let mut total = 0u64;
-        for range in set.iter() {
-            let mut addr = range.start;
-            while addr.offset <= range.end.offset {
-                if let Some(byte) = mem.get_byte(&addr) {
-                    writer.write_all(&[byte])?;
-                    total += 1;
-                }
-                addr = addr.add(1);
-            }
-        }
-
-        log.append_msg(format!("Exported {} bytes to binary", total));
-        Ok(true)
     }
 }
 
@@ -881,123 +823,6 @@ fn escape_xml(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
-}
-
-// ---------------------------------------------------------------------------
-// HtmlExporter
-// ---------------------------------------------------------------------------
-
-/// Exports the program listing as an HTML document.
-///
-/// Ported from `ghidra.app.util.exporter.HtmlExporter`.
-pub struct HtmlExporter {
-    options: ProgramTextOptions,
-    pub address_color: String,
-    pub mnemonic_color: String,
-    pub comment_color: String,
-}
-
-impl HtmlExporter {
-    pub fn new() -> Self {
-        Self {
-            options: ProgramTextOptions::default(),
-            address_color: "#808080".into(),
-            mnemonic_color: "#0000FF".into(),
-            comment_color: "#008000".into(),
-        }
-    }
-}
-
-impl Default for HtmlExporter {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Exporter for HtmlExporter {
-    fn name(&self) -> &str {
-        "HTML"
-    }
-
-    fn default_extension(&self) -> &str {
-        "html"
-    }
-
-    fn export(
-        &self,
-        program: &Program,
-        addr_set: Option<&AddressSet>,
-        memory: Option<&MemoryModel>,
-        writer: &mut dyn Write,
-        log: &mut LoaderMessageLog,
-    ) -> Result<bool, ExporterError> {
-        let set = match addr_set {
-            Some(s) => s.clone(),
-            None => program.memory.clone(),
-        };
-
-        writeln!(writer, "<!DOCTYPE html>")?;
-        writeln!(writer, "<html>")?;
-        writeln!(writer, "<head>")?;
-        writeln!(writer, "  <meta charset=\"UTF-8\">")?;
-        writeln!(
-            writer,
-            "  <title>{} - Ghidra Export</title>",
-            escape_html(&program.name)
-        )?;
-        writeln!(writer, "  <style>")?;
-        writeln!(writer, "    body {{ font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 10px; }}")?;
-        writeln!(writer, "    .addr {{ color: {}; }}", self.address_color)?;
-        writeln!(
-            writer,
-            "    .mnemonic {{ color: {}; font-weight: bold; }}",
-            self.mnemonic_color
-        )?;
-        writeln!(writer, "    .comment {{ color: {}; }}", self.comment_color)?;
-        writeln!(writer, "    .bytes {{ color: #808080; }}")?;
-        writeln!(writer, "    pre {{ margin: 0; }}")?;
-        writeln!(writer, "  </style>")?;
-        writeln!(writer, "</head>")?;
-        writeln!(writer, "<body>")?;
-        writeln!(
-            writer,
-            "<h2>Listing: {}</h2>",
-            escape_html(&program.name)
-        )?;
-        writeln!(writer, "<pre>")?;
-
-        for range in set.iter() {
-            let mut addr = range.start;
-            while addr.offset <= range.end.offset {
-                if let Some(byte) = memory.and_then(|m| m.get_byte(&addr)) {
-                    write!(writer, "<span class=\"addr\">{:08x}</span>  ", addr.offset)?;
-                    write!(writer, "<span class=\"bytes\">{:02x}</span>  ", byte)?;
-                    if let Some(sym) = program.symbols.get(&addr) {
-                        write!(
-                            writer,
-                            "<span class=\"mnemonic\">{}</span>",
-                            escape_html(sym)
-                        )?;
-                    }
-                    writeln!(writer)?;
-                }
-                addr = addr.add(1);
-            }
-        }
-
-        writeln!(writer, "</pre>")?;
-        writeln!(writer, "</body>")?;
-        writeln!(writer, "</html>")?;
-
-        log.append_msg("Exported program as HTML");
-        Ok(true)
-    }
-}
-
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 // ---------------------------------------------------------------------------
@@ -2440,49 +2265,6 @@ mod tests {
     }
 
     #[test]
-    fn test_binary_exporter() {
-        let prog = make_test_program();
-        let mem = make_test_memory();
-        let exporter = BinaryExporter::new();
-        assert_eq!(exporter.name(), "Raw Bytes");
-        assert_eq!(exporter.default_extension(), "bin");
-
-        let mut output = Vec::new();
-        let mut log = LoaderMessageLog::new();
-        let result = exporter.export(&prog, None, Some(&mem), &mut output, &mut log);
-        assert!(result.is_ok());
-        assert_eq!(output.len(), 32);
-        assert_eq!(output[0], 0);
-        assert_eq!(output[31], 31);
-    }
-
-    #[test]
-    fn test_binary_exporter_no_memory() {
-        let prog = make_test_program();
-        let exporter = BinaryExporter::new();
-        let mut output = Vec::new();
-        let mut log = LoaderMessageLog::new();
-        let result = exporter.export(&prog, None, None, &mut output, &mut log);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_binary_exporter_restricted() {
-        let prog = make_test_program();
-        let mem = make_test_memory();
-        let exporter = BinaryExporter::new();
-
-        let mut set = AddressSet::new();
-        set.add_range(AddressRange::new(Address::new(0x400000), Address::new(0x400003)));
-
-        let mut output = Vec::new();
-        let mut log = LoaderMessageLog::new();
-        let result = exporter.export(&prog, Some(&set), Some(&mem), &mut output, &mut log);
-        assert!(result.is_ok());
-        assert_eq!(output.len(), 4);
-    }
-
-    #[test]
     fn test_ascii_exporter() {
         let prog = make_test_program();
         let mem = make_test_memory();
@@ -2560,24 +2342,6 @@ mod tests {
         let text = String::from_utf8(output).unwrap();
         assert!(text.contains("<?xml"));
         assert!(text.contains("<PROGRAM>"));
-        assert!(text.contains("test_binary"));
-        assert!(text.contains("_start"));
-    }
-
-    #[test]
-    fn test_html_exporter() {
-        let prog = make_test_program();
-        let mem = make_test_memory();
-        let exporter = HtmlExporter::new();
-        assert_eq!(exporter.name(), "HTML");
-
-        let mut output = Vec::new();
-        let mut log = LoaderMessageLog::new();
-        let result = exporter.export(&prog, None, Some(&mem), &mut output, &mut log);
-        assert!(result.is_ok());
-
-        let text = String::from_utf8(output).unwrap();
-        assert!(text.contains("<!DOCTYPE html>"));
         assert!(text.contains("test_binary"));
         assert!(text.contains("_start"));
     }
@@ -2678,12 +2442,6 @@ mod tests {
         assert_eq!(escape_xml("a<b>c"), "a&lt;b&gt;c");
         assert_eq!(escape_xml("a&b"), "a&amp;b");
         assert_eq!(escape_xml("\"test\""), "&quot;test&quot;");
-    }
-
-    #[test]
-    fn test_escape_html() {
-        assert_eq!(escape_html("a<b>c"), "a&lt;b&gt;c");
-        assert_eq!(escape_html("a&b"), "a&amp;b");
     }
 
     #[test]

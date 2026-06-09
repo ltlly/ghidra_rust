@@ -31,6 +31,7 @@ pub mod source_language_spec;
 pub mod method_resolver;
 pub mod objc2_protocol_full;
 pub mod objc_binary_utils;
+pub mod objc_loader;
 
 use std::collections::HashSet;
 use std::fmt;

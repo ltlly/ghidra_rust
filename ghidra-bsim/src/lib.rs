@@ -29,6 +29,8 @@
 
 pub mod query;
 pub mod gui;
+pub mod bsim_plugin;
+pub mod bsim_service;
 
 // Re-export key types
 pub use query::description::{
@@ -100,3 +102,7 @@ pub use query::bsim_data_source::BSimDataSource;
 pub use query::sf_results_update_listener::{
     CollectingResultsListener, NoOpResultsListener, SFResultsUpdateListener,
 };
+// Plugin and service types
+pub use bsim_plugin::BSimPlugin;
+pub use bsim_service::{BSimService, ConnectionId};
+pub use query::bsim_query_service::BSimQueryService;
