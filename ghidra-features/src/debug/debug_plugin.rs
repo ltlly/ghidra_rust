@@ -1154,6 +1154,543 @@ impl DebugPluginUiState {
 }
 
 // ---------------------------------------------------------------------------
+// Logical Breakpoint State Machine
+// ---------------------------------------------------------------------------
+
+/// The mode of a logical breakpoint's program bookmark.
+///
+/// Ported from Ghidra's `LogicalBreakpoint.ProgramMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BreakpointProgramMode {
+    /// A placeholder when the program bookmark state is not applicable.
+    None,
+    /// The breakpoint is mapped but not bookmarked.
+    Missing,
+    /// The breakpoint's program bookmark is enabled.
+    Enabled,
+    /// The breakpoint's program bookmark is disabled.
+    Disabled,
+}
+
+/// The mode of a logical breakpoint's trace/target locations.
+///
+/// Ported from Ghidra's `LogicalBreakpoint.TraceMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BreakpointTraceMode {
+    /// No traces involved.
+    None,
+    /// The breakpoint is missing from one or more mapped locations.
+    Missing,
+    /// All mapped locations are placed and enabled.
+    Enabled,
+    /// All mapped locations are placed and disabled.
+    Disabled,
+    /// Has both enabled and disabled locations.
+    Mixed,
+}
+
+impl BreakpointTraceMode {
+    /// Convert a boolean to trace breakpoint mode.
+    pub fn from_bool(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    /// Compose two trace modes (for locations of the same logical breakpoint).
+    pub fn combine(self, that: Self) -> Self {
+        match (self, that) {
+            (Self::None, other) | (other, Self::None) => match other {
+                Self::None => Self::None,
+                Self::Enabled | Self::Disabled => other,
+                Self::Mixed => Self::Mixed,
+                Self::Missing => Self::Missing,
+            },
+            (Self::Missing, _) | (_, Self::Missing) => Self::Missing,
+            (Self::Enabled, Self::Enabled) => Self::Enabled,
+            (Self::Disabled, Self::Disabled) => Self::Disabled,
+            _ => Self::Mixed,
+        }
+    }
+}
+
+/// The perspective from which to view a logical breakpoint state.
+///
+/// Ported from Ghidra's `LogicalBreakpoint.Perspective`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BreakpointPerspective {
+    /// View from the logical (program bookmark) perspective.
+    Logical,
+    /// View from the trace (target) perspective.
+    Trace,
+}
+
+/// The mode of a logical breakpoint.
+///
+/// Ported from Ghidra's `LogicalBreakpoint.Mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BreakpointMode {
+    /// All locations are enabled.
+    Enabled,
+    /// All locations are disabled.
+    Disabled,
+    /// Has both enabled and disabled trace locations.
+    Mixed,
+}
+
+impl BreakpointMode {
+    /// Compose modes at the same address.
+    pub fn same_address(self, that: Self) -> Self {
+        if self == that {
+            self
+        } else {
+            Self::Mixed
+        }
+    }
+}
+
+/// The consistency of a logical breakpoint.
+///
+/// Ported from Ghidra's `LogicalBreakpoint.Consistency`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum BreakpointConsistency {
+    /// The bookmark and locations all agree.
+    Normal,
+    /// Has a bookmark but one or more trace locations is missing.
+    Ineffective,
+    /// Has a trace location but is not bookmarked, or the bookmark disagrees.
+    Inconsistent,
+}
+
+impl BreakpointConsistency {
+    /// Compose consistencies at the same address.
+    pub fn same_address(self, that: Self) -> Self {
+        std::cmp::max(self, that)
+    }
+}
+
+/// The state of a logical breakpoint.
+///
+/// Ported from Ghidra's `LogicalBreakpoint.State`.
+/// This is the cross product of [`BreakpointMode`] and [`BreakpointConsistency`]
+/// with an additional `None` option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum BreakpointState {
+    /// Placeholder state, usually indicating the breakpoint should not exist.
+    None,
+    /// The breakpoint is enabled, and all locations and its bookmark agree.
+    Enabled,
+    /// The breakpoint is disabled, and all locations and its bookmark agree.
+    Disabled,
+    /// Multiple logical breakpoints at this address, all saved and effective, mixed mode.
+    Mixed,
+    /// Saved as enabled, but one or more trace locations are absent.
+    IneffectiveEnabled,
+    /// Saved as disabled, and one or more trace locations are absent.
+    IneffectiveDisabled,
+    /// Multiple breakpoints, all saved, at least one ineffective, mixed mode.
+    IneffectiveMixed,
+    /// Enabled, all locations agree, but bookmark is absent or disagrees.
+    InconsistentEnabled,
+    /// Disabled, all locations agree, but bookmark is absent or disagrees.
+    InconsistentDisabled,
+    /// Terribly inconsistent: locations disagree, bookmark may be absent.
+    InconsistentMixed,
+}
+
+impl BreakpointState {
+    /// Construct a state from mode and consistency fields.
+    pub fn from_fields(mode: Option<BreakpointMode>, consistency: Option<BreakpointConsistency>) -> Self {
+        match (mode, consistency) {
+            (None, None) | (None, _) | (_, None) => Self::None,
+            (Some(BreakpointMode::Enabled), Some(BreakpointConsistency::Normal)) => Self::Enabled,
+            (Some(BreakpointMode::Enabled), Some(BreakpointConsistency::Ineffective)) => Self::IneffectiveEnabled,
+            (Some(BreakpointMode::Enabled), Some(BreakpointConsistency::Inconsistent)) => Self::InconsistentEnabled,
+            (Some(BreakpointMode::Disabled), Some(BreakpointConsistency::Normal)) => Self::Disabled,
+            (Some(BreakpointMode::Disabled), Some(BreakpointConsistency::Ineffective)) => Self::IneffectiveDisabled,
+            (Some(BreakpointMode::Disabled), Some(BreakpointConsistency::Inconsistent)) => Self::InconsistentDisabled,
+            (Some(BreakpointMode::Mixed), Some(BreakpointConsistency::Normal)) => Self::Mixed,
+            (Some(BreakpointMode::Mixed), Some(BreakpointConsistency::Ineffective)) => Self::IneffectiveMixed,
+            (Some(BreakpointMode::Mixed), Some(BreakpointConsistency::Inconsistent)) => Self::InconsistentMixed,
+        }
+    }
+
+    /// Get the mode component.
+    pub fn mode(&self) -> Option<BreakpointMode> {
+        match self {
+            Self::None => None,
+            Self::Enabled | Self::IneffectiveEnabled | Self::InconsistentEnabled => Some(BreakpointMode::Enabled),
+            Self::Disabled | Self::IneffectiveDisabled | Self::InconsistentDisabled => Some(BreakpointMode::Disabled),
+            Self::Mixed | Self::IneffectiveMixed | Self::InconsistentMixed => Some(BreakpointMode::Mixed),
+        }
+    }
+
+    /// Get the consistency component.
+    pub fn consistency(&self) -> Option<BreakpointConsistency> {
+        match self {
+            Self::None => None,
+            Self::Enabled | Self::Disabled | Self::Mixed => Some(BreakpointConsistency::Normal),
+            Self::IneffectiveEnabled | Self::IneffectiveDisabled | Self::IneffectiveMixed => Some(BreakpointConsistency::Ineffective),
+            Self::InconsistentEnabled | Self::InconsistentDisabled | Self::InconsistentMixed => Some(BreakpointConsistency::Inconsistent),
+        }
+    }
+
+    /// Check if the breakpoint is in the normal consistency state.
+    pub fn is_normal(&self) -> bool {
+        self.consistency() == Some(BreakpointConsistency::Normal)
+    }
+
+    /// Check if the breakpoint is enabled (mixed counts as partially enabled).
+    pub fn is_enabled(&self) -> bool {
+        self.mode() != Some(BreakpointMode::Disabled)
+    }
+
+    /// Check if the breakpoint is disabled (mixed counts as partially disabled).
+    pub fn is_disabled(&self) -> bool {
+        self.mode() != Some(BreakpointMode::Enabled)
+    }
+
+    /// Check if the breakpoint is effective (present on target).
+    pub fn is_effective(&self) -> bool {
+        self.consistency() != Some(BreakpointConsistency::Ineffective)
+    }
+
+    /// Check if the breakpoint is ineffective.
+    pub fn is_ineffective(&self) -> bool {
+        self.consistency() == Some(BreakpointConsistency::Ineffective)
+    }
+
+    /// Compose states at the same address.
+    pub fn same_address(self, that: Self) -> Self {
+        if matches!(self, Self::None) {
+            return that;
+        }
+        if matches!(that, Self::None) {
+            return self;
+        }
+        let mode = self.mode().unwrap().same_address(that.mode().unwrap());
+        let consistency = self.consistency().unwrap().same_address(that.consistency().unwrap());
+        Self::from_fields(Some(mode), Some(consistency))
+    }
+
+    /// Get the toggled state (what should happen when toggling the breakpoint).
+    pub fn get_toggled(self, mapped: bool) -> Self {
+        if mapped && self.is_ineffective() {
+            Self::Enabled
+        } else if self.is_disabled() {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    /// Compose states from multiple breakpoints at the same address.
+    pub fn same_address_of(states: &[Self]) -> Self {
+        states.iter().copied().fold(Self::None, |acc, s| acc.same_address(s))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Trace RMI Types
+// ---------------------------------------------------------------------------
+
+/// The status of a TraceRmi connection.
+///
+/// Ported from Ghidra's `TraceRmiConnection` lifecycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TraceRmiConnectionState {
+    /// The connection is being established.
+    Connecting,
+    /// The connection is active and ready.
+    Active,
+    /// The connection is busy (transaction open).
+    Busy,
+    /// The connection has been closed.
+    Closed,
+    /// The connection encountered an error.
+    Error,
+}
+
+impl Default for TraceRmiConnectionState {
+    fn default() -> Self {
+        Self::Connecting
+    }
+}
+
+/// A remote parameter descriptor for a TraceRmi method.
+///
+/// Ported from Ghidra's `RemoteParameter`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteParameter {
+    /// The parameter name.
+    pub name: String,
+    /// The schema type name.
+    pub type_name: String,
+    /// Whether this parameter is required.
+    pub required: bool,
+    /// Default value (as a string).
+    pub default_value: Option<String>,
+    /// Human-readable display name.
+    pub display: String,
+    /// Description of the parameter.
+    pub description: String,
+}
+
+impl RemoteParameter {
+    /// Create a new required remote parameter.
+    pub fn required(name: impl Into<String>, type_name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_name: type_name.into(),
+            required: true,
+            default_value: None,
+            display: String::new(),
+            description: String::new(),
+        }
+    }
+
+    /// Create a new optional remote parameter with a default.
+    pub fn optional(name: impl Into<String>, type_name: impl Into<String>, default: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            type_name: type_name.into(),
+            required: false,
+            default_value: Some(default.into()),
+            display: String::new(),
+            description: String::new(),
+        }
+    }
+
+    /// Set the display name.
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        self.display = display.into();
+        self
+    }
+
+    /// Set the description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
+}
+
+/// A remote method registered by a back-end debugger.
+///
+/// Ported from Ghidra's `RemoteMethod`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteMethodDescriptor {
+    /// The method name (e.g., "resume", "step_into").
+    pub name: String,
+    /// The associated action name.
+    pub action_name: Option<String>,
+    /// A title to display in the UI.
+    pub display: String,
+    /// A description of the method.
+    pub description: String,
+    /// The method's parameters.
+    pub parameters: BTreeMap<String, RemoteParameter>,
+    /// The return type schema name, if any.
+    pub ret_type: Option<String>,
+}
+
+impl RemoteMethodDescriptor {
+    /// Create a new remote method descriptor.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            action_name: None,
+            display: String::new(),
+            description: String::new(),
+            parameters: BTreeMap::new(),
+            ret_type: None,
+        }
+    }
+
+    /// Set the action name.
+    pub fn with_action(mut self, action: impl Into<String>) -> Self {
+        self.action_name = Some(action.into());
+        self
+    }
+
+    /// Set the display name.
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        self.display = display.into();
+        self
+    }
+
+    /// Set the description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
+
+    /// Add a parameter.
+    pub fn with_parameter(mut self, param: RemoteParameter) -> Self {
+        self.parameters.insert(param.name.clone(), param);
+        self
+    }
+
+    /// Set the return type.
+    pub fn with_ret_type(mut self, ret_type: impl Into<String>) -> Self {
+        self.ret_type = Some(ret_type.into());
+        self
+    }
+}
+
+/// A registry of remote methods provided by a back-end debugger.
+///
+/// Ported from Ghidra's `RemoteMethodRegistry`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RemoteMethodRegistry {
+    methods: BTreeMap<String, RemoteMethodDescriptor>,
+}
+
+impl RemoteMethodRegistry {
+    /// Create a new empty registry.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a method.
+    pub fn register(&mut self, method: RemoteMethodDescriptor) {
+        self.methods.insert(method.name.clone(), method);
+    }
+
+    /// Get a method by name.
+    pub fn get(&self, name: &str) -> Option<&RemoteMethodDescriptor> {
+        self.methods.get(name)
+    }
+
+    /// Get all methods.
+    pub fn all(&self) -> &BTreeMap<String, RemoteMethodDescriptor> {
+        &self.methods
+    }
+
+    /// Get methods by action name.
+    pub fn get_by_action(&self, action: &str) -> Vec<&RemoteMethodDescriptor> {
+        self.methods
+            .values()
+            .filter(|m| m.action_name.as_deref() == Some(action))
+            .collect()
+    }
+
+    /// Get the number of registered methods.
+    pub fn len(&self) -> usize {
+        self.methods.len()
+    }
+
+    /// Check if the registry is empty.
+    pub fn is_empty(&self) -> bool {
+        self.methods.is_empty()
+    }
+}
+
+/// A launch parameter for a TraceRmi connection.
+///
+/// Ported from Ghidra's `LaunchParameter`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LaunchParameter {
+    /// The parameter name.
+    pub name: String,
+    /// The display name.
+    pub display: String,
+    /// Description of the parameter.
+    pub description: String,
+    /// Whether this parameter is required.
+    pub required: bool,
+    /// The parameter type name (e.g., "string", "int", "boolean").
+    pub type_name: String,
+    /// Available choices, if constrained.
+    pub choices: Vec<String>,
+    /// Default value as a string.
+    pub default_value: Option<String>,
+}
+
+impl LaunchParameter {
+    /// Create a new launch parameter.
+    pub fn new(
+        name: impl Into<String>,
+        type_name: impl Into<String>,
+        display: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            display: display.into(),
+            description: String::new(),
+            required: false,
+            type_name: type_name.into(),
+            choices: Vec::new(),
+            default_value: None,
+        }
+    }
+
+    /// Mark this parameter as required.
+    pub fn required(mut self) -> Self {
+        self.required = true;
+        self
+    }
+
+    /// Set the description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
+
+    /// Set constrained choices.
+    pub fn with_choices(mut self, choices: Vec<String>) -> Self {
+        self.choices = choices;
+        self
+    }
+
+    /// Set the default value.
+    pub fn with_default(mut self, default: impl Into<String>) -> Self {
+        self.default_value = Some(default.into());
+        self
+    }
+}
+
+/// A launch offer for a TraceRmi connection.
+///
+/// Ported from Ghidra's `TraceRmiLaunchOffer`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceRmiLaunchOffer {
+    /// The connector type (e.g., "gdb", "lldb").
+    pub connector_type: String,
+    /// Human-readable description.
+    pub description: String,
+    /// The parameters for this launch offer.
+    pub parameters: BTreeMap<String, LaunchParameter>,
+    /// The environment name (e.g., "local", "remote").
+    pub environment: String,
+}
+
+impl TraceRmiLaunchOffer {
+    /// Create a new launch offer.
+    pub fn new(connector_type: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            connector_type: connector_type.into(),
+            description: description.into(),
+            parameters: BTreeMap::new(),
+            environment: "local".into(),
+        }
+    }
+
+    /// Add a launch parameter.
+    pub fn with_parameter(mut self, param: LaunchParameter) -> Self {
+        self.parameters.insert(param.name.clone(), param);
+        self
+    }
+
+    /// Set the environment.
+    pub fn with_environment(mut self, env: impl Into<String>) -> Self {
+        self.environment = env.into();
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Standard Debug Plugin Configurations
 // ---------------------------------------------------------------------------
 
@@ -1752,5 +2289,212 @@ mod tests {
         let json = serde_json::to_string(&entry).unwrap();
         let back: ToolbarEntry = serde_json::from_str(&json).unwrap();
         assert_eq!(back.action_name, "Stop");
+    }
+
+    #[test]
+    fn test_breakpoint_trace_mode_combine() {
+        assert_eq!(BreakpointTraceMode::None.combine(BreakpointTraceMode::Enabled), BreakpointTraceMode::Enabled);
+        assert_eq!(BreakpointTraceMode::Enabled.combine(BreakpointTraceMode::Enabled), BreakpointTraceMode::Enabled);
+        assert_eq!(BreakpointTraceMode::Enabled.combine(BreakpointTraceMode::Disabled), BreakpointTraceMode::Mixed);
+        assert_eq!(BreakpointTraceMode::Mixed.combine(BreakpointTraceMode::Enabled), BreakpointTraceMode::Mixed);
+        assert_eq!(BreakpointTraceMode::Missing.combine(BreakpointTraceMode::Enabled), BreakpointTraceMode::Missing);
+    }
+
+    #[test]
+    fn test_breakpoint_trace_mode_from_bool() {
+        assert_eq!(BreakpointTraceMode::from_bool(true), BreakpointTraceMode::Enabled);
+        assert_eq!(BreakpointTraceMode::from_bool(false), BreakpointTraceMode::Disabled);
+    }
+
+    #[test]
+    fn test_breakpoint_state_from_fields() {
+        let state = BreakpointState::from_fields(
+            Some(BreakpointMode::Enabled),
+            Some(BreakpointConsistency::Normal),
+        );
+        assert_eq!(state, BreakpointState::Enabled);
+        assert!(state.is_enabled());
+        assert!(!state.is_disabled());
+        assert!(state.is_normal());
+        assert!(state.is_effective());
+
+        let state = BreakpointState::from_fields(
+            Some(BreakpointMode::Disabled),
+            Some(BreakpointConsistency::Ineffective),
+        );
+        assert_eq!(state, BreakpointState::IneffectiveDisabled);
+        assert!(!state.is_enabled());
+        assert!(state.is_ineffective());
+    }
+
+    #[test]
+    fn test_breakpoint_state_same_address() {
+        let a = BreakpointState::Enabled;
+        let b = BreakpointState::None;
+        assert_eq!(a.same_address(b), BreakpointState::Enabled);
+        assert_eq!(b.same_address(a), BreakpointState::Enabled);
+
+        let c = BreakpointState::Disabled;
+        assert_eq!(a.same_address(c), BreakpointState::Mixed);
+    }
+
+    #[test]
+    fn test_breakpoint_state_same_address_of() {
+        let states = vec![
+            BreakpointState::Enabled,
+            BreakpointState::None,
+            BreakpointState::None,
+        ];
+        assert_eq!(BreakpointState::same_address_of(&states), BreakpointState::Enabled);
+    }
+
+    #[test]
+    fn test_breakpoint_state_toggled() {
+        assert_eq!(BreakpointState::Enabled.get_toggled(true), BreakpointState::Disabled);
+        assert_eq!(BreakpointState::Disabled.get_toggled(true), BreakpointState::Enabled);
+        assert_eq!(BreakpointState::IneffectiveEnabled.get_toggled(true), BreakpointState::Enabled);
+        assert_eq!(BreakpointState::IneffectiveEnabled.get_toggled(false), BreakpointState::Disabled);
+    }
+
+    #[test]
+    fn test_breakpoint_state_serde() {
+        let state = BreakpointState::InconsistentMixed;
+        let json = serde_json::to_string(&state).unwrap();
+        let back: BreakpointState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, back);
+    }
+
+    #[test]
+    fn test_breakpoint_consistency_ordering() {
+        assert!(BreakpointConsistency::Normal < BreakpointConsistency::Ineffective);
+        assert!(BreakpointConsistency::Ineffective < BreakpointConsistency::Inconsistent);
+        assert_eq!(
+            BreakpointConsistency::Normal.same_address(BreakpointConsistency::Inconsistent),
+            BreakpointConsistency::Inconsistent
+        );
+    }
+
+    #[test]
+    fn test_remote_parameter() {
+        let param = RemoteParameter::required("address", "string")
+            .with_display("Target Address")
+            .with_description("The IP address to connect to");
+        assert!(param.required);
+        assert_eq!(param.name, "address");
+        assert_eq!(param.type_name, "string");
+
+        let opt = RemoteParameter::optional("port", "int", "2345");
+        assert!(!opt.required);
+        assert_eq!(opt.default_value.as_deref(), Some("2345"));
+    }
+
+    #[test]
+    fn test_remote_method_descriptor() {
+        let method = RemoteMethodDescriptor::new("resume")
+            .with_action("Resume")
+            .with_display("Resume Execution")
+            .with_description("Resume the target")
+            .with_parameter(RemoteParameter::required("thread", "Thread"));
+        assert_eq!(method.name, "resume");
+        assert_eq!(method.parameters.len(), 1);
+        assert!(method.parameters.contains_key("thread"));
+    }
+
+    #[test]
+    fn test_remote_method_descriptor_serde() {
+        let method = RemoteMethodDescriptor::new("step_into")
+            .with_display("Step Into");
+        let json = serde_json::to_string(&method).unwrap();
+        let back: RemoteMethodDescriptor = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "step_into");
+    }
+
+    #[test]
+    fn test_remote_method_registry() {
+        let mut registry = RemoteMethodRegistry::new();
+        assert!(registry.is_empty());
+
+        registry.register(
+            RemoteMethodDescriptor::new("resume")
+                .with_action("Resume")
+                .with_display("Resume"),
+        );
+        registry.register(
+            RemoteMethodDescriptor::new("step_into")
+                .with_action("Step")
+                .with_display("Step Into"),
+        );
+        registry.register(
+            RemoteMethodDescriptor::new("step_over")
+                .with_action("Step")
+                .with_display("Step Over"),
+        );
+
+        assert_eq!(registry.len(), 3);
+        assert!(registry.get("resume").is_some());
+
+        let step_methods = registry.get_by_action("Step");
+        assert_eq!(step_methods.len(), 2);
+    }
+
+    #[test]
+    fn test_remote_method_registry_serde() {
+        let mut registry = RemoteMethodRegistry::new();
+        registry.register(RemoteMethodDescriptor::new("test"));
+        let json = serde_json::to_string(&registry).unwrap();
+        let back: RemoteMethodRegistry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.len(), 1);
+    }
+
+    #[test]
+    fn test_launch_parameter() {
+        let param = LaunchParameter::new("host", "string", "Host")
+            .required()
+            .with_description("Remote host address")
+            .with_default("localhost");
+        assert!(param.required);
+        assert_eq!(param.default_value.as_deref(), Some("localhost"));
+
+        let choice_param = LaunchParameter::new("arch", "string", "Architecture")
+            .with_choices(vec!["x86".into(), "x86_64".into(), "arm".into()]);
+        assert_eq!(choice_param.choices.len(), 3);
+    }
+
+    #[test]
+    fn test_launch_parameter_serde() {
+        let param = LaunchParameter::new("test", "string", "Test");
+        let json = serde_json::to_string(&param).unwrap();
+        let back: LaunchParameter = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "test");
+    }
+
+    #[test]
+    fn test_trace_rmi_launch_offer() {
+        let offer = TraceRmiLaunchOffer::new("gdb", "GNU Debugger")
+            .with_environment("remote")
+            .with_parameter(
+                LaunchParameter::new("host", "string", "Host").required(),
+            )
+            .with_parameter(
+                LaunchParameter::new("port", "int", "Port").with_default("2345"),
+            );
+        assert_eq!(offer.connector_type, "gdb");
+        assert_eq!(offer.environment, "remote");
+        assert_eq!(offer.parameters.len(), 2);
+    }
+
+    #[test]
+    fn test_trace_rmi_connection_state() {
+        let state = TraceRmiConnectionState::default();
+        assert_eq!(state, TraceRmiConnectionState::Connecting);
+        assert_ne!(TraceRmiConnectionState::Active, TraceRmiConnectionState::Closed);
+    }
+
+    #[test]
+    fn test_trace_rmi_connection_state_serde() {
+        let state = TraceRmiConnectionState::Active;
+        let json = serde_json::to_string(&state).unwrap();
+        let back: TraceRmiConnectionState = serde_json::from_str(&json).unwrap();
+        assert_eq!(state, back);
     }
 }

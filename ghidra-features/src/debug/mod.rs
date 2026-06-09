@@ -53,24 +53,28 @@ pub use control_mode::ControlMode;
 pub use core_types::{AddressSnap, Lifespan, TraceAddressSnapRange, TraceExecutionState, TraceSpan, SNAP_MAX, SNAP_MIN};
 pub use db_viewer::{DatabaseHandle, DatabaseKind, DatabaseRecord, DbTable, DbViewer, DbViewerState, TableStatistics, TableStatisticsCache};
 pub use debug_plugin::{
-    DebugPluginAction, DebugPluginActionRegistry, DebugPluginConfig, DebugPluginDependency,
-    DebugPluginEvent, DebugPluginLoadResult, DebugPluginLoader, DebugPluginMetrics,
-    DebugPluginPackage, DebugPluginPriority, DebugPluginRegistration, DebugPluginRegistry,
-    DebugPluginSession, DebugPluginSessionState, DebugPluginState, DebugPluginStatus,
-    DebugPluginToolAdapter, DebugPluginUiState, MenuEntry, ToolbarEntry, standard_plugins,
+    BreakpointConsistency, BreakpointMode, BreakpointPerspective, BreakpointProgramMode,
+    BreakpointState, BreakpointTraceMode, DebugPluginAction, DebugPluginActionRegistry,
+    DebugPluginConfig, DebugPluginDependency, DebugPluginEvent, DebugPluginLoadResult,
+    DebugPluginLoader, DebugPluginMetrics, DebugPluginPackage, DebugPluginPriority,
+    DebugPluginRegistration, DebugPluginRegistry, DebugPluginSession, DebugPluginSessionState,
+    DebugPluginState, DebugPluginStatus, DebugPluginToolAdapter, DebugPluginUiState,
+    LaunchParameter, MenuEntry, RemoteMethodDescriptor, RemoteMethodRegistry, RemoteParameter,
+    ToolbarEntry, TraceRmiConnectionState, TraceRmiLaunchOffer, standard_plugins,
 };
 pub use debug_service::{
-    AutoMapMode, AutoMappingEntry, AutoMappingProposal, BreakpointInfo, BreakpointKind,
-    ConsoleEntry, ConsoleLevel, DebugAutoMappingService, DebugBreakpointService,
-    DebugConsoleService, DebugControlService, DebugCoordinates, DebugEmulationService,
-    DebugListingService, DebugMappingService, DebugMemoryService, DebugModelService,
-    DebugPlatformService, DebugProcessService, DebugRegisterService, DebugServiceContainer,
-    DebugServiceError, DebugServiceResult, DebugSnapService, DebugSourceService,
-    DebugStackService, DebugTargetService, DebugTraceManagerService, DebugVariableService,
-    DebugWatchesService, EmulationResult, ExecutionState, MemoryRegionInfo, ModelSchema,
-    PlatformOffer, PlatformOpinion, ProcessInfo, RegisterInfo, SnapInfo, SourceLocation,
-    StackFrameInfo, StaticMappingEntry, ThreadInfo, VariableInfo, VariableStorage,
-    WatchExpression, WatchFormat,
+    AddressMapEntry, AutoMapMode, AutoMappingEntry, AutoMappingProposal, BreakpointInfo,
+    BreakpointKind, ConsoleEntry, ConsoleLevel, DebugAddressTranslator, DebugAutoMappingService,
+    DebugBreakpointService, DebugConsoleService, DebugControlService, DebugCoordinates,
+    DebugEmulationService, DebugListingService, DebugMappingService, DebugMemoryService,
+    DebugModelService, DebugPlatformMapper, DebugPlatformService, DebugProcessService,
+    DebugRegisterService, DebugServiceContainer, DebugServiceError, DebugServiceResult,
+    DebugSnapService, DebugSourceService, DebugStackService, DebugTargetService,
+    DebugTraceManagerService, DebugVariableService, DebugWatchesService, DisassemblyResult,
+    EmulationResult, ExecutionState, MappedAddressRange, MapProposal, MemoryRegionInfo,
+    ModelSchema, PlatformOffer, PlatformOpinion, ProcessInfo, RegisterInfo, SnapInfo,
+    SourceLocation, StackFrameInfo, StaticMappingEntry, TerminalSession, ThreadInfo,
+    TraceLocation, VariableInfo, VariableStorage, WatchExpression, WatchFormat, WatchRow,
 };
 pub use listing::{CodeUnitType, CommentType, TraceCodeManager, TraceCodeSpace, TraceCodeUnit, TraceComment};
 pub use memory::{TraceMemoryBlock, TraceMemoryFlag, TraceMemoryManager, TraceMemoryRegion, TraceMemoryState};

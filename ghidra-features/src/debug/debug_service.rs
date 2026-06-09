@@ -1528,6 +1528,454 @@ pub trait DebugModelService {
 }
 
 // ---------------------------------------------------------------------------
+// Disassembly Result
+// ---------------------------------------------------------------------------
+
+/// Result of a disassembly operation.
+///
+/// Ported from Ghidra's `DisassemblyResult` in `ghidra.debug.api.platform`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DisassemblyResult {
+    /// Whether at least one instruction was disassembled.
+    pub at_least_one: bool,
+    /// Error message, if the disassembly failed.
+    pub error_message: Option<String>,
+}
+
+impl DisassemblyResult {
+    /// A successful result with at least one instruction.
+    pub const SUCCESS: Self = Self {
+        at_least_one: true,
+        error_message: None,
+    };
+
+    /// A cancelled result (no instructions disassembled, no error).
+    pub const CANCELLED: Self = Self {
+        at_least_one: false,
+        error_message: None,
+    };
+
+    /// Create a failed result with an error message.
+    pub fn failed(message: impl Into<String>) -> Self {
+        Self {
+            at_least_one: false,
+            error_message: Some(message.into()),
+        }
+    }
+
+    /// Create a result from whether at least one instruction was disassembled.
+    pub fn success(at_least_one: bool) -> Self {
+        if at_least_one {
+            Self::SUCCESS
+        } else {
+            Self::CANCELLED
+        }
+    }
+
+    /// Check if the disassembly succeeded (no error).
+    pub fn is_success(&self) -> bool {
+        self.error_message.is_none()
+    }
+
+    /// Check if at least one instruction was disassembled.
+    pub fn is_at_least_one(&self) -> bool {
+        self.at_least_one
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Map Entry
+// ---------------------------------------------------------------------------
+
+/// A single address mapping entry between a trace and a program.
+///
+/// Ported from Ghidra's `MapEntry` in `ghidra.debug.api.modules`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AddressMapEntry {
+    /// The trace key.
+    pub trace_key: String,
+    /// Trace address range start.
+    pub trace_start: u64,
+    /// Trace address range end.
+    pub trace_end: u64,
+    /// Start snap.
+    pub snap_start: i64,
+    /// End snap.
+    pub snap_end: i64,
+    /// The program URL.
+    pub program_url: String,
+    /// Program address range start.
+    pub program_start: u64,
+    /// Program address range end.
+    pub program_end: u64,
+    /// The source object name (module, section, etc.).
+    pub source_name: Option<String>,
+}
+
+impl AddressMapEntry {
+    /// Create a new address map entry.
+    pub fn new(
+        trace_key: impl Into<String>,
+        trace_start: u64,
+        trace_end: u64,
+        program_url: impl Into<String>,
+        program_start: u64,
+        program_end: u64,
+    ) -> Self {
+        Self {
+            trace_key: trace_key.into(),
+            trace_start,
+            trace_end,
+            snap_start: 0,
+            snap_end: i64::MAX,
+            program_url: program_url.into(),
+            program_start,
+            program_end,
+            source_name: None,
+        }
+    }
+
+    /// Set the snap range.
+    pub fn with_snap_range(mut self, start: i64, end: i64) -> Self {
+        self.snap_start = start;
+        self.snap_end = end;
+        self
+    }
+
+    /// Set the source name.
+    pub fn with_source_name(mut self, name: impl Into<String>) -> Self {
+        self.source_name = Some(name.into());
+        self
+    }
+
+    /// Get the mapping length.
+    pub fn mapping_length(&self) -> u64 {
+        self.trace_end - self.trace_start
+    }
+
+    /// Translate a trace address to a program address.
+    pub fn trace_to_program(&self, trace_addr: u64) -> Option<u64> {
+        if trace_addr >= self.trace_start && trace_addr <= self.trace_end {
+            let offset = trace_addr - self.trace_start;
+            Some(self.program_start + offset)
+        } else {
+            None
+        }
+    }
+
+    /// Translate a program address to a trace address.
+    pub fn program_to_trace(&self, program_addr: u64) -> Option<u64> {
+        if program_addr >= self.program_start && program_addr <= self.program_end {
+            let offset = program_addr - self.program_start;
+            Some(self.trace_start + offset)
+        } else {
+            None
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Map Proposal
+// ---------------------------------------------------------------------------
+
+/// A proposal for mapping a trace object to a program object.
+///
+/// Ported from Ghidra's `MapProposal` in `ghidra.debug.api.modules`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapProposal {
+    /// The trace key.
+    pub trace_key: String,
+    /// The program URL.
+    pub program_url: String,
+    /// The computed entries for this proposal.
+    pub entries: Vec<AddressMapEntry>,
+    /// A confidence score (0.0 to 1.0).
+    pub score: f64,
+    /// The source type (e.g., "module", "section", "region").
+    pub source_type: String,
+}
+
+impl MapProposal {
+    /// Create a new map proposal.
+    pub fn new(
+        trace_key: impl Into<String>,
+        program_url: impl Into<String>,
+        score: f64,
+        source_type: impl Into<String>,
+    ) -> Self {
+        Self {
+            trace_key: trace_key.into(),
+            program_url: program_url.into(),
+            entries: Vec::new(),
+            score,
+            source_type: source_type.into(),
+        }
+    }
+
+    /// Add an entry to the proposal.
+    pub fn add_entry(&mut self, entry: AddressMapEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Flatten multiple proposals into a single collection of entries.
+    pub fn flatten(proposals: &[Self]) -> Vec<&AddressMapEntry> {
+        proposals.iter().flat_map(|p| p.entries.iter()).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Debugger Address Translator
+// ---------------------------------------------------------------------------
+
+/// A location in a trace at a specific snap.
+///
+/// Ported from Ghidra's `TraceLocation`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceLocation {
+    /// The trace key.
+    pub trace_key: String,
+    /// The address.
+    pub address: u64,
+    /// The snap.
+    pub snap: i64,
+}
+
+impl TraceLocation {
+    /// Create a new trace location.
+    pub fn new(trace_key: impl Into<String>, address: u64, snap: i64) -> Self {
+        Self {
+            trace_key: trace_key.into(),
+            address,
+            snap,
+        }
+    }
+}
+
+/// A mapped address range for cross-view translation.
+///
+/// Ported from Ghidra's `MappedAddressRange`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MappedAddressRange {
+    /// Source address start.
+    pub from_start: u64,
+    /// Source address end.
+    pub from_end: u64,
+    /// Destination address start.
+    pub to_start: u64,
+    /// Destination address end.
+    pub to_end: u64,
+}
+
+impl MappedAddressRange {
+    /// Create a new mapped address range.
+    pub fn new(from_start: u64, from_end: u64, to_start: u64, to_end: u64) -> Self {
+        Self {
+            from_start,
+            from_end,
+            to_start,
+            to_end,
+        }
+    }
+
+    /// Get the length of the mapping.
+    pub fn length(&self) -> u64 {
+        self.from_end - self.from_start
+    }
+}
+
+/// Service for translating addresses between static (program) and dynamic (trace) views.
+///
+/// Ported from Ghidra's `DebuggerAddressTranslator`.
+pub trait DebugAddressTranslator {
+    /// Get all open programs mapped to the given trace at the given snap.
+    fn get_open_mapped_programs_at_snap(&self, trace_key: &str, snap: i64) -> Vec<String>;
+
+    /// Map a trace location to a program location.
+    fn get_open_mapped_location(&self, loc: &TraceLocation) -> Option<(String, u64)>;
+
+    /// Map a program location back to trace locations.
+    fn get_open_mapped_trace_locations(
+        &self,
+        program_url: &str,
+        program_addr: u64,
+    ) -> Vec<TraceLocation>;
+
+    /// Map a program location back to a specific trace.
+    fn get_open_mapped_trace_location(
+        &self,
+        trace_key: &str,
+        program_url: &str,
+        program_addr: u64,
+        snap: i64,
+    ) -> Option<TraceLocation>;
+
+    /// Get all destination address ranges given a source trace address set.
+    fn get_open_mapped_views_from_trace(
+        &self,
+        trace_key: &str,
+        addresses: &[(u64, u64)],
+        snap: i64,
+    ) -> Vec<(String, Vec<MappedAddressRange>)>;
+
+    /// Get all source address ranges given a destination program address set.
+    fn get_open_mapped_views_from_program(
+        &self,
+        program_url: &str,
+        addresses: &[(u64, u64)],
+    ) -> Vec<(String, i64, Vec<MappedAddressRange>)>;
+}
+
+// ---------------------------------------------------------------------------
+// Debugger Platform Mapper
+// ---------------------------------------------------------------------------
+
+/// An object for interpreting a trace according to a chosen platform.
+///
+/// Ported from Ghidra's `DebuggerPlatformMapper`.
+/// Platform selection allows the mapper to choose relevant languages,
+/// compiler specifications, data organization, etc., based on the current
+/// debugger context.
+pub trait DebugPlatformMapper {
+    /// Get the language ID for a given object and snap.
+    fn get_language(&self, object_path: &str, snap: i64) -> Option<String>;
+
+    /// Get the compiler spec ID for a given object and snap.
+    fn get_compiler_spec(&self, object_path: &str, snap: i64) -> Option<String>;
+
+    /// Prepare the given trace for interpretation under this mapper.
+    /// Returns the resulting platform object path.
+    fn add_to_trace(&mut self, new_focus: &str, snap: i64) -> DebugServiceResult<String>;
+
+    /// When focus changes, decide if this mapper should remain active.
+    fn can_interpret(&self, new_focus: &str, snap: i64) -> bool;
+
+    /// Disassemble starting at a given address and snap, limited to a given address set.
+    fn disassemble(
+        &self,
+        thread_key: Option<i64>,
+        object_path: &str,
+        start: u64,
+        restricted: &[(u64, u64)],
+        snap: i64,
+    ) -> DisassemblyResult;
+}
+
+// ---------------------------------------------------------------------------
+// Watch Row
+// ---------------------------------------------------------------------------
+
+/// A row in the Watches table.
+///
+/// Ported from Ghidra's `WatchRow` in `ghidra.debug.api.watch`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchRow {
+    /// The Sleigh expression.
+    pub expression: String,
+    /// The data type name for interpreting the value.
+    pub data_type: Option<String>,
+    /// The address of the value (memory or register).
+    pub address: Option<u64>,
+    /// The raw value bytes.
+    pub value: Option<Vec<u8>>,
+    /// The raw value as a hex string.
+    pub raw_value_string: Option<String>,
+    /// The value as displayed by the data type.
+    pub value_string: Option<String>,
+    /// Whether the value is known (not stale).
+    pub known: bool,
+    /// Whether the value has changed since last evaluation.
+    pub changed: bool,
+    /// Error message, if evaluation failed.
+    pub error_message: Option<String>,
+    /// User-defined comment.
+    pub comment: String,
+    /// The nearest symbol name.
+    pub symbol: Option<String>,
+    /// The display format.
+    pub format: WatchFormat,
+}
+
+impl WatchRow {
+    /// Create a new watch row.
+    pub fn new(expression: impl Into<String>) -> Self {
+        Self {
+            expression: expression.into(),
+            data_type: None,
+            address: None,
+            value: None,
+            raw_value_string: None,
+            value_string: None,
+            known: false,
+            changed: false,
+            error_message: None,
+            comment: String::new(),
+            symbol: None,
+            format: WatchFormat::Hex,
+        }
+    }
+
+    /// Check if the value was successfully evaluated.
+    pub fn is_valid(&self) -> bool {
+        self.error_message.is_none() && self.value.is_some()
+    }
+
+    /// Check if the raw value can be edited.
+    pub fn is_raw_value_editable(&self) -> bool {
+        self.address.is_some() && self.error_message.is_none()
+    }
+
+    /// Check if the typed value can be edited.
+    pub fn is_value_editable(&self) -> bool {
+        self.data_type.is_some() && self.is_raw_value_editable()
+    }
+
+    /// Get the length of the value in bytes.
+    pub fn value_length(&self) -> usize {
+        self.value.as_ref().map_or(0, |v| v.len())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal Session
+// ---------------------------------------------------------------------------
+
+/// A terminal session for interactive debugger I/O.
+///
+/// Ported from Ghidra's `TerminalSession`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TerminalSession {
+    /// The session ID.
+    pub session_id: String,
+    /// The trace key this session is associated with.
+    pub trace_key: String,
+    /// The command that was launched.
+    pub command: String,
+    /// Whether the session is active.
+    pub active: bool,
+}
+
+impl TerminalSession {
+    /// Create a new terminal session.
+    pub fn new(
+        session_id: impl Into<String>,
+        trace_key: impl Into<String>,
+        command: impl Into<String>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            trace_key: trace_key.into(),
+            command: command.into(),
+            active: true,
+        }
+    }
+
+    /// Check if the session is active.
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Debug Service Container
 // ---------------------------------------------------------------------------
 
@@ -2006,5 +2454,170 @@ mod tests {
         let back: ModelSchema = serde_json::from_str(&json).unwrap();
         assert_eq!(back.name, "Test");
         assert_eq!(back.version, 2);
+    }
+
+    #[test]
+    fn test_disassembly_result() {
+        let success = DisassemblyResult::SUCCESS;
+        assert!(success.is_success());
+        assert!(success.is_at_least_one());
+        assert!(success.error_message.is_none());
+
+        let cancelled = DisassemblyResult::CANCELLED;
+        assert!(cancelled.is_success());
+        assert!(!cancelled.is_at_least_one());
+
+        let failed = DisassemblyResult::failed("bad address");
+        assert!(!failed.is_success());
+        assert!(!failed.is_at_least_one());
+        assert_eq!(failed.error_message.as_deref(), Some("bad address"));
+
+        let from_bool = DisassemblyResult::success(true);
+        assert!(from_bool.is_success());
+        assert!(from_bool.is_at_least_one());
+    }
+
+    #[test]
+    fn test_disassembly_result_serde() {
+        let result = DisassemblyResult::failed("test error");
+        let json = serde_json::to_string(&result).unwrap();
+        let back: DisassemblyResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.error_message.as_deref(), Some("test error"));
+    }
+
+    #[test]
+    fn test_address_map_entry() {
+        let entry = AddressMapEntry::new("trace1", 0x400000, 0x401000, "file:///test.gzf", 0x1000, 0x2000)
+            .with_snap_range(0, 100)
+            .with_source_name(".text");
+        assert_eq!(entry.mapping_length(), 0x1000);
+        assert_eq!(entry.source_name.as_deref(), Some(".text"));
+
+        assert_eq!(entry.trace_to_program(0x400500), Some(0x1500));
+        assert_eq!(entry.program_to_trace(0x1500), Some(0x400500));
+        assert_eq!(entry.trace_to_program(0x300000), None);
+        assert_eq!(entry.program_to_trace(0x5000), None);
+    }
+
+    #[test]
+    fn test_address_map_entry_serde() {
+        let entry = AddressMapEntry::new("t1", 0, 0x1000, "p1", 0x400000, 0x401000);
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: AddressMapEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.trace_key, "t1");
+        assert_eq!(back.program_start, 0x400000);
+    }
+
+    #[test]
+    fn test_map_proposal() {
+        let mut proposal = MapProposal::new("trace1", "file:///test.gzf", 0.95, "module");
+        proposal.add_entry(
+            AddressMapEntry::new("trace1", 0x400000, 0x401000, "file:///test.gzf", 0x1000, 0x2000),
+        );
+        assert_eq!(proposal.entries.len(), 1);
+        assert_eq!(proposal.score, 0.95);
+    }
+
+    #[test]
+    fn test_map_proposal_flatten() {
+        let mut p1 = MapProposal::new("t1", "p1", 0.9, "module");
+        p1.add_entry(AddressMapEntry::new("t1", 0, 0x1000, "p1", 0x400000, 0x401000));
+        let mut p2 = MapProposal::new("t1", "p1", 0.8, "section");
+        p2.add_entry(AddressMapEntry::new("t1", 0x1000, 0x2000, "p1", 0x401000, 0x402000));
+
+        let proposals = [p1, p2];
+        let flat = MapProposal::flatten(&proposals);
+        assert_eq!(flat.len(), 2);
+    }
+
+    #[test]
+    fn test_map_proposal_serde() {
+        let proposal = MapProposal::new("t1", "p1", 0.5, "region");
+        let json = serde_json::to_string(&proposal).unwrap();
+        let back: MapProposal = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.score, 0.5);
+    }
+
+    #[test]
+    fn test_trace_location() {
+        let loc = TraceLocation::new("trace1", 0x400000, 42);
+        assert_eq!(loc.trace_key, "trace1");
+        assert_eq!(loc.address, 0x400000);
+        assert_eq!(loc.snap, 42);
+    }
+
+    #[test]
+    fn test_trace_location_serde() {
+        let loc = TraceLocation::new("t1", 0x1000, 0);
+        let json = serde_json::to_string(&loc).unwrap();
+        let back: TraceLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.address, 0x1000);
+    }
+
+    #[test]
+    fn test_mapped_address_range() {
+        let range = MappedAddressRange::new(0x400000, 0x401000, 0x1000, 0x2000);
+        assert_eq!(range.length(), 0x1000);
+    }
+
+    #[test]
+    fn test_mapped_address_range_serde() {
+        let range = MappedAddressRange::new(0, 0x100, 0x400000, 0x400100);
+        let json = serde_json::to_string(&range).unwrap();
+        let back: MappedAddressRange = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.from_start, 0);
+    }
+
+    #[test]
+    fn test_watch_row() {
+        let row = WatchRow::new("RAX");
+        assert_eq!(row.expression, "RAX");
+        assert!(!row.is_valid());
+        assert!(!row.is_raw_value_editable());
+        assert_eq!(row.value_length(), 0);
+        assert!(row.error_message.is_none());
+
+        let mut row_with_val = WatchRow::new("RBX");
+        row_with_val.address = Some(0x1000);
+        row_with_val.value = Some(vec![0x42, 0x00, 0x00, 0x00]);
+        assert!(row_with_val.is_valid());
+        assert!(row_with_val.is_raw_value_editable());
+        assert_eq!(row_with_val.value_length(), 4);
+    }
+
+    #[test]
+    fn test_watch_row_editable() {
+        let mut row = WatchRow::new("RAX");
+        row.address = Some(0x100);
+        row.data_type = Some("int".into());
+        assert!(row.is_value_editable());
+
+        row.error_message = Some("eval error".into());
+        assert!(!row.is_value_editable());
+        assert!(!row.is_raw_value_editable());
+    }
+
+    #[test]
+    fn test_watch_row_serde() {
+        let row = WatchRow::new("test");
+        let json = serde_json::to_string(&row).unwrap();
+        let back: WatchRow = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.expression, "test");
+    }
+
+    #[test]
+    fn test_terminal_session() {
+        let session = TerminalSession::new("term-1", "trace1", "/bin/bash");
+        assert_eq!(session.session_id, "term-1");
+        assert_eq!(session.command, "/bin/bash");
+        assert!(session.is_active());
+    }
+
+    #[test]
+    fn test_terminal_session_serde() {
+        let session = TerminalSession::new("s1", "t1", "cmd");
+        let json = serde_json::to_string(&session).unwrap();
+        let back: TerminalSession = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.session_id, "s1");
     }
 }
