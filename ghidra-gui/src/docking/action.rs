@@ -572,6 +572,8 @@ pub enum ActionProperty {
     ToolBarData,
     /// The description changed.
     Description,
+    /// The global context changed.
+    GlobalContext,
     /// A custom property name.
     Custom(String),
 }
@@ -585,6 +587,7 @@ impl fmt::Display for ActionProperty {
             ActionProperty::PopupMenuData => write!(f, "PopupMenuData"),
             ActionProperty::ToolBarData => write!(f, "ToolBarData"),
             ActionProperty::Description => write!(f, "description"),
+            ActionProperty::GlobalContext => write!(f, "globalContext"),
             ActionProperty::Custom(name) => write!(f, "{}", name),
         }
     }
@@ -682,6 +685,21 @@ pub struct DockingAction {
     property_listeners: Vec<PropertyChangeCallback>,
     /// Help location identifier.
     pub help_location: Option<String>,
+    /// The context class name this action operates on.
+    ///
+    /// Port of Ghidra's `DockingAction.getContextClass()`.  When set, the
+    /// action can work with a specific `ActionContext` subclass.
+    pub context_class: Option<String>,
+    /// Whether this action supports default context.
+    ///
+    /// Port of Ghidra's `DockingAction.supportsDefaultContext()`.  When true,
+    /// the action can operate on a default context if the active (focused)
+    /// provider's context is not valid for this action.
+    pub supports_default_context: bool,
+    /// Optional owner description (defaults to owner name if not set).
+    ///
+    /// Port of Ghidra's `DockingActionIf.getOwnerDescription()`.
+    pub owner_description: Option<String>,
 }
 
 impl fmt::Debug for DockingAction {
@@ -706,6 +724,9 @@ impl fmt::Debug for DockingAction {
             .field("popup_predicate", &self.popup_predicate.as_ref().map(|_| "<fn>"))
             .field("valid_context_predicate", &self.valid_context_predicate.as_ref().map(|_| "<fn>"))
             .field("help_location", &self.help_location)
+            .field("context_class", &self.context_class)
+            .field("supports_default_context", &self.supports_default_context)
+            .field("owner_description", &self.owner_description)
             .finish()
     }
 }
@@ -728,6 +749,9 @@ impl PartialEq for DockingAction {
             && self.popup_menu_data == other.popup_menu_data
             && self.tool_bar_data == other.tool_bar_data
             && self.help_location == other.help_location
+            && self.context_class == other.context_class
+            && self.supports_default_context == other.supports_default_context
+            && self.owner_description == other.owner_description
     }
 }
 
@@ -759,6 +783,9 @@ impl DockingAction {
             valid_context_predicate: None,
             property_listeners: Vec::new(),
             help_location: None,
+            context_class: None,
+            supports_default_context: false,
+            owner_description: None,
         }
     }
 
@@ -1013,6 +1040,48 @@ impl DockingAction {
     /// Set the help location.
     pub fn set_help_location(&mut self, location: impl Into<String>) {
         self.help_location = Some(location.into());
+    }
+
+    /// Set the owner description.
+    ///
+    /// Port of Ghidra's `DockingActionIf.getOwnerDescription()`.
+    pub fn set_owner_description(&mut self, desc: impl Into<String>) {
+        self.owner_description = Some(desc.into());
+    }
+
+    /// Get the owner description, falling back to the owner name.
+    ///
+    /// Port of Ghidra's `DockingActionIf.getOwnerDescription()`.
+    pub fn owner_description(&self) -> &str {
+        self.owner_description
+            .as_deref()
+            .unwrap_or(&self.owner)
+    }
+
+    /// Set the context class this action operates on.
+    ///
+    /// Port of Ghidra's `DockingAction.setContextClass(Class, boolean)`.
+    pub fn set_context_class(
+        &mut self,
+        class_name: impl Into<String>,
+        supports_default: bool,
+    ) {
+        self.context_class = Some(class_name.into());
+        self.supports_default_context = supports_default;
+    }
+
+    /// Get the context class name this action operates on.
+    ///
+    /// Port of Ghidra's `DockingActionIf.getContextClass()`.
+    pub fn context_class_name(&self) -> Option<&str> {
+        self.context_class.as_deref()
+    }
+
+    /// Whether this action supports default context.
+    ///
+    /// Port of Ghidra's `DockingActionIf.supportsDefaultContext()`.
+    pub fn supports_default_context(&self) -> bool {
+        self.supports_default_context
     }
 
     /// Whether this action should be added to a window.

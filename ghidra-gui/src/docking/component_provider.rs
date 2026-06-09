@@ -254,6 +254,135 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
 
     /// The component provider enum value for this provider.
     fn provider_type(&self) -> super::component::ComponentProvider;
+
+    // -- Tool integration --
+
+    /// Whether this provider is currently in (registered with) a tool.
+    ///
+    /// Port of Ghidra's `ComponentProvider.isInTool()`.
+    fn is_in_tool(&self) -> bool {
+        false
+    }
+
+    /// Add this provider to the tool.
+    ///
+    /// Port of Ghidra's `ComponentProvider.addToTool()`.
+    fn add_to_tool(&mut self) {}
+
+    /// Remove this provider from the tool.
+    ///
+    /// Port of Ghidra's `ComponentProvider.removeFromTool()`.
+    fn remove_from_tool(&mut self) {}
+
+    /// Close this component.
+    ///
+    /// Port of Ghidra's `ComponentProvider.closeComponent()`.  Transient
+    /// providers are removed from the tool; non-transient providers are
+    /// merely hidden.
+    fn close_component(&mut self) {
+        if self.is_transient() {
+            self.remove_from_tool();
+        } else {
+            self.set_visible(false);
+        }
+    }
+
+    /// Notify the tool that this provider's own context has changed (no args).
+    ///
+    /// Port of Ghidra's `ComponentProvider.contextChanged()`.
+    fn notify_context_changed(&self) {}
+
+    // -- Title management --
+
+    /// Set the window title.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setTitle(String)`.
+    fn set_window_title(&mut self, _title: &str) {}
+
+    /// Set the sub-title.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setSubTitle(String)`.
+    fn set_sub_title(&mut self, _sub_title: &str) {}
+
+    /// Set the tab text.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setTabText(String)`.
+    fn set_tab_text(&mut self, _tab_text: &str) {}
+
+    // -- Transient / toolbar --
+
+    /// Mark this provider as transient.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setTransient()`.
+    fn set_transient(&mut self) {}
+
+    /// Signal that this provider's show action should appear in the toolbar.
+    ///
+    /// Port of Ghidra's `ComponentProvider.addToToolbar()`.
+    fn add_to_toolbar(&mut self) {}
+
+    // -- Position --
+
+    /// The intra-group position (how this provider is placed relative to
+    /// other members of the same window group).
+    ///
+    /// Port of Ghidra's `ComponentProvider.getIntraGroupPosition()`.
+    fn intra_group_position(&self) -> WindowPosition {
+        WindowPosition::Center
+    }
+
+    /// Set the intra-group position.
+    fn set_intra_group_position(&mut self, _position: WindowPosition) {}
+
+    /// Set the window group.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setWindowGroup(String)`.
+    fn set_window_group(&mut self, _group: &str) {}
+
+    /// Set the window menu group.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setWindowMenuGroup(String)`.
+    fn set_window_menu_group(&mut self, _group: &str) {}
+
+    /// The context type class name this provider supports.
+    ///
+    /// Port of Ghidra's `ComponentProvider.getContextType()`.
+    fn context_type(&self) -> Option<&str> {
+        None
+    }
+
+    // -- Focus --
+
+    /// Whether this provider is the currently focused provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.isFocusedProvider()`.
+    fn is_focused_provider(&self) -> bool {
+        false
+    }
+
+    /// Request focus for this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.requestFocus()`.
+    fn request_focus(&self) {}
+
+    /// Whether the provider is currently showing (visible and displayable).
+    ///
+    /// Port of Ghidra's `ComponentProvider.isShowing()`.
+    fn is_showing(&self) -> bool {
+        self.is_visible()
+    }
+
+    /// Whether this provider is the active provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.isActive()`.
+    fn is_active(&self) -> bool {
+        false
+    }
+
+    /// Notify the provider that its component has been made displayable.
+    ///
+    /// Port of Ghidra's `ComponentProvider.componentMadeDisplayable()`.
+    fn component_made_displayable(&self) {}
 }
 
 // ---------------------------------------------------------------------------

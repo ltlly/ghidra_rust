@@ -148,6 +148,9 @@ pub use action_context::DockingActionContext;
 pub use component_provider::ComponentProvider as ComponentProviderTrait;
 pub use dialog_component_provider::DialogComponentProvider as DialogComponentProviderTrait;
 pub use dockable_component::DockableComponent;
-pub use docking_tool::DockingTool as DockingToolTrait;
+pub use docking_tool::{
+    DockingTool as DockingToolTrait, DockingContextListener as ToolContextListener,
+    PopupActionProvider,
+};
 pub use drop_target_handler::{DropRegionVisual, DropTargetHandler};
 pub use window_position::{DockEdge, WindowPositionInfo};

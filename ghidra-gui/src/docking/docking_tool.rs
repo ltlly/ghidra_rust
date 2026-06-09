@@ -15,6 +15,32 @@ use super::action_context::DockingActionContext;
 use super::component::{ComponentProvider as ProviderType, WindowPosition};
 
 // ---------------------------------------------------------------------------
+// PopupActionProvider — callback for contributing popup actions
+// ---------------------------------------------------------------------------
+
+/// A provider that contributes actions to popup (context) menus.
+///
+/// Port of Ghidra's `PopupActionProvider` interface.  Registered with the
+/// tool, it is called each time a popup menu is about to be shown so that
+/// it can add context-sensitive actions.
+pub trait PopupActionProvider: std::fmt::Debug + Send + Sync {
+    /// Contribute popup actions for the given context.
+    fn contribute_popup_actions(&self, context: &DockingActionContext) -> Vec<DockingAction>;
+}
+
+// ---------------------------------------------------------------------------
+// DockingContextListener — listener for context changes
+// ---------------------------------------------------------------------------
+
+/// A listener notified when the tool's action context changes.
+///
+/// Port of Ghidra's `DockingContextListener` interface.
+pub trait DockingContextListener: std::fmt::Debug + Send + Sync {
+    /// Called when the tool's context has changed.
+    fn context_changed(&self, context: &DockingActionContext);
+}
+
+// ---------------------------------------------------------------------------
 // DockingTool trait
 // ---------------------------------------------------------------------------
 
@@ -72,6 +98,35 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
 
     /// Trigger an action by name with context.
     fn trigger_action(&self, name: &str, context: &DockingActionContext) -> bool;
+
+    // -- Component providers (Port of Ghidra's Tool.addComponentProvider/removeComponentProvider) --
+
+    /// Add a component provider to the tool, optionally making it visible.
+    ///
+    /// Port of Ghidra's `Tool.addComponentProvider`.
+    fn add_component_provider(&mut self, provider: ProviderType, name: &str, show: bool);
+
+    /// Remove a component provider from the tool.
+    ///
+    /// Port of Ghidra's `Tool.removeComponentProvider`.
+    fn remove_component_provider(&mut self, provider: ProviderType, name: &str);
+
+    /// Get a component provider by name.
+    ///
+    /// Port of Ghidra's `Tool.getComponentProvider`.
+    fn get_component_provider(&self, name: &str) -> Option<(ProviderType, String)>;
+
+    /// Update the title of a component provider.
+    ///
+    /// Port of Ghidra's `Tool.updateTitle`.
+    fn update_title(&mut self, _provider: ProviderType, _name: &str) {}
+
+    /// Get the parent window for a component provider.
+    ///
+    /// Port of Ghidra's `Tool.getProviderWindow`.
+    fn get_provider_window(&self, _provider: &ProviderType, _name: &str) -> Option<String> {
+        None
+    }
 
     // -- Components --
 
@@ -171,6 +226,46 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
     ///
     /// Port of Ghidra's `Tool.contextChanged(ComponentProvider)`.
     fn context_changed(&mut self, _provider: Option<(ProviderType, String)>) {}
+
+    /// Add a context listener.
+    ///
+    /// Port of Ghidra's `Tool.addContextListener`.
+    fn add_context_listener(&mut self, _listener: Box<dyn DockingContextListener>) {}
+
+    /// Remove a context listener.
+    ///
+    /// Port of Ghidra's `Tool.removeContextListener`.
+    fn remove_context_listener(&mut self, _listener_id: &str) {}
+
+    // -- Popup action providers --
+
+    /// Add a popup action provider.
+    ///
+    /// Port of Ghidra's `Tool.addPopupActionProvider`.
+    fn add_popup_action_provider(&mut self, _provider: Box<dyn PopupActionProvider>) {}
+
+    /// Remove a popup action provider.
+    ///
+    /// Port of Ghidra's `Tool.removePopupActionProvider`.
+    fn remove_popup_action_provider(&mut self, _provider_id: &str) {}
+
+    // -- Window manager --
+
+    /// Get the window manager identifier.
+    ///
+    /// Port of Ghidra's `Tool.getWindowManager()`.
+    fn window_manager_id(&self) -> Option<&str> {
+        None
+    }
+
+    // -- Tool actions manager --
+
+    /// Get the tool actions manager identifier.
+    ///
+    /// Port of Ghidra's `Tool.getToolActions()`.
+    fn tool_actions_id(&self) -> Option<&str> {
+        None
+    }
 
     // -- Status bar --
 
@@ -342,6 +437,9 @@ mod tests {
         fn find_action(&self, _name: &str) -> Option<&DockingAction> { None }
         fn set_action_enabled(&mut self, _name: &str, _enabled: bool) -> bool { false }
         fn trigger_action(&self, _name: &str, _ctx: &DockingActionContext) -> bool { false }
+        fn add_component_provider(&mut self, _p: ProviderType, _n: &str, _show: bool) {}
+        fn remove_component_provider(&mut self, _p: ProviderType, _n: &str) {}
+        fn get_component_provider(&self, _name: &str) -> Option<(ProviderType, String)> { None }
         fn show_component(&mut self, _p: ProviderType, _n: &str) {}
         fn hide_component(&mut self, _p: ProviderType, _n: &str) {}
         fn toggle_component(&mut self, _p: ProviderType, _n: &str) {}
