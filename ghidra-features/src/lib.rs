@@ -83,6 +83,15 @@ pub mod table;
 pub mod tablechooser;
 pub mod versiontracking;
 
+/// Undo/Redo framework: undo/redo stack with style-edit coalescing,
+/// undo service interface, and undo plugin with dynamic actions.
+///
+/// Ported from `docking.UndoRedoKeeper`,
+/// `ghidra.framework.plugintool.util.UndoRedoToolState`,
+/// `ghidra.app.services.UndoService`, and
+/// `ghidra.app.plugin.core.progmgr.UndoAction` / `RedoAction`.
+pub mod undo;
+
 // -- New modules ported from Ghidra's Features/ProgramGraph --
 /// Program graph generation: block flow, code flow, call graphs, and data reference graphs.
 /// Ported from `ghidra.graph.program` (Features/ProgramGraph).
@@ -116,6 +125,7 @@ pub mod module;
 pub mod clipboard;
 pub mod clear;
 pub mod select;
+pub mod selection;
 pub mod highlight;
 pub mod flowarrow;
 pub mod colorizer;

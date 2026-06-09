@@ -15,6 +15,7 @@
 pub mod bookmark_action;
 pub mod function_action;
 pub mod function_utils;
+pub mod history;
 pub mod instruction_action;
 pub mod locationreferences;
 pub mod location_service;

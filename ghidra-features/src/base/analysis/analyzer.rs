@@ -363,6 +363,8 @@ pub struct Program {
     pub function_manager: FunctionManager,
     pub bookmarks: Vec<(Address, BookmarkType, String, String)>,
     pub executable_format: Option<String>,
+    /// Whether the program has been fully analyzed.
+    analyzed: bool,
 }
 
 impl Program {
@@ -377,7 +379,18 @@ impl Program {
             function_manager: FunctionManager::default(),
             bookmarks: Vec::new(),
             executable_format: None,
+            analyzed: false,
         }
+    }
+
+    /// Whether the program has been marked as analyzed.
+    pub fn is_analyzed(&self) -> bool {
+        self.analyzed
+    }
+
+    /// Mark the program as analyzed.
+    pub fn mark_analyzed(&mut self) {
+        self.analyzed = true;
     }
 
     pub fn set_bookmark(

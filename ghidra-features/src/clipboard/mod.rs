@@ -10,6 +10,8 @@
 //! # Submodules
 //!
 //! - [`service`] -- clipboard service interfaces and clipboard type definitions
+//! - [`clipboard_plugin`] -- the main `ClipboardPlugin` orchestrator
+//! - [`clipboard_service`] -- content provider service trait and implementations
 //!
 //! # Key Types
 //!
@@ -25,6 +27,18 @@
 /// `ghidra.app.util.ClipboardType`, and
 /// `ghidra.app.plugin.core.clipboard.ClipboardPlugin`.
 pub mod service;
+
+/// Clipboard plugin: lifecycle, options, provider registration, and
+/// copy/paste orchestration.
+///
+/// Ported from `ghidra.app.plugin.core.clipboard.ClipboardPlugin`.
+pub mod clipboard_plugin;
+
+/// Clipboard content provider service trait and code browser provider.
+///
+/// Ported from `ghidra.app.services.ClipboardContentProviderService` and
+/// `ghidra.app.plugin.core.clipboard.CodeBrowserClipboardProvider`.
+pub mod clipboard_service;
 
 use ghidra_core::Address;
 

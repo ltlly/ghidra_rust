@@ -15,7 +15,11 @@
 //! - [`string_analyzer`] -- detects and creates string data definitions
 //! - [`demangler_analyzer`] -- demangles C++/Rust/Java symbol names
 //! - [`pseudo_disassembler`] -- speculative disassembler for analysis passes
+//! - [`analysis_background_command`] -- mergeable background task for auto-analysis
+//! - [`analysis_panel`] -- UI model for configuring analyzer enablement and options
 
+pub mod analysis_background_command;
+pub mod analysis_panel;
 pub mod analysis_priority;
 pub mod analyzer;
 pub mod auto_analysis_manager;
