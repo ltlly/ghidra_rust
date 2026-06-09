@@ -933,6 +933,7 @@ mod tests {
     #[test]
     fn test_lisa_plugin_add_cfg() {
         let mut plugin = LisaPlugin::new();
+        plugin.options_mut().config.cfg_depth = 1;
         let mut func = FunctionInfo::new(0x401000, "main");
         func.add_callee(0x402000);
         plugin.register_function(func);
@@ -1022,6 +1023,12 @@ mod tests {
         let mut plugin = LisaPlugin::new();
         plugin.register_function(FunctionInfo::new(0x401000, "main"));
         plugin.current_function = Some(0x401000);
+
+        // Register a p-code op so the frontend has instructions (required by analyzer).
+        plugin
+            .analyzer_mut()
+            .frontend_mut()
+            .register(0x401000, vec![PcodeOp::new("COPY", 0x401000, 0, vec![0], Some(8), 8)]);
 
         let results = plugin.perform_analysis();
         assert!(results.is_some());
