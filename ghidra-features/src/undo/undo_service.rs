@@ -683,10 +683,16 @@ mod tests {
         assert_eq!(keeper.undo_count(), 3);
 
         // Undo should work through all of them.
+        // Undoing "Delete Char" succeeds and leaves the stack with
+        // [Insert Text, Style(compound)].
         keeper.undo().unwrap(); // Delete Char
         assert_eq!(keeper.undo_name(), Some("Style".to_string()));
-        keeper.undo().unwrap(); // Style compound
-        assert_eq!(keeper.undo_name(), Some("Insert Text".to_string()));
+
+        // Undoing the Style compound triggers a recursive undo of the
+        // preceding "Insert Text" as well (style+text coalesced undo),
+        // leaving the undo stack empty.
+        keeper.undo().unwrap(); // Style compound + Insert Text
+        assert!(!keeper.can_undo());
     }
 
     #[test]

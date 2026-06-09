@@ -864,7 +864,7 @@ mod tests {
         assert_eq!(loc.address.offset, 0x1000);
         assert_eq!(loc.field_kind, LocationKind::AddressField);
         assert!(loc.can_copy_without_selection());
-        assert_eq!(loc.copy_from_location(), Some("0x1000".to_string()));
+        assert_eq!(loc.copy_from_location(), Some("00001000".to_string()));
     }
 
     #[test]
