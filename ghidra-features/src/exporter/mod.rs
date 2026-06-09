@@ -32,6 +32,11 @@ pub mod export_service;
 
 pub use binary_exporter::BinaryExporter;
 pub use html_exporter::HtmlExporter;
+pub use export_plugin::ExporterPlugin as ExporterPluginExt;
+pub use export_plugin::PluginExportOption;
+pub use export_service::ExportService;
+pub use export_service::ExportBatchItem;
+pub use export_service::ExportBatchResult;
 
 // ---------------------------------------------------------------------------
 // MemoryModel -- byte-level storage for export
