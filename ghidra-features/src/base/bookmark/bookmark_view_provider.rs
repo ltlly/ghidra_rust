@@ -146,6 +146,7 @@ impl BookmarkViewProvider {
     /// Reloads the model from the given program.
     pub fn reload(&mut self, mgr: Option<&BookmarkManager>) {
         if let Some(mgr) = mgr {
+            self.model.initialize(mgr);
             self.model.load(mgr);
             self.provider_model.populate(mgr);
         } else {
@@ -598,9 +599,11 @@ mod tests {
         let (mut provider, _mgr) = make_provider_with_data();
         let state = provider.get_filter_state();
         provider.hide_all_types();
+        provider.model.load(&_mgr);
         assert_eq!(provider.row_count(), 0);
 
         provider.restore_filter_state(&state);
+        provider.model.initialize(&_mgr);
         provider.model.load(&_mgr);
         assert_eq!(provider.row_count(), 4);
     }

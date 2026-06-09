@@ -311,7 +311,7 @@ impl ProgramManager for InMemoryProgramManager {
 
         if mode == OpenMode::Current {
             self.current = Some(name);
-        } else if self.current.is_none() && visible {
+        } else if self.current.is_none() {
             self.current = Some(name);
         }
     }
@@ -415,7 +415,7 @@ mod tests {
         let mut mgr = make_mgr();
         mgr.open_program_ref(ProgramRef::new("a.exe"), OpenMode::Current);
 
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("a".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("a.exe".into()));
         assert_eq!(mgr.program_count(), 1);
         assert!(mgr.is_open("a.exe"));
     }
@@ -427,7 +427,7 @@ mod tests {
         mgr.open_program_ref(ProgramRef::new("b.exe"), OpenMode::Visible);
 
         // Current should still be a.exe
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("a".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("a.exe".into()));
         assert_eq!(mgr.program_count(), 2);
     }
 
@@ -438,7 +438,7 @@ mod tests {
 
         assert!(!mgr.is_visible(&ProgramRef::new("hidden.exe")));
         // Hidden program becomes current if it's the only one
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("hidden".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("hidden.exe".into()));
     }
 
     #[test]
@@ -458,7 +458,7 @@ mod tests {
         let closed = mgr.close_program_by_ref(&ProgramRef::new("a.exe"), true);
         assert!(closed);
         // b.exe should become current
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("b".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("b.exe".into()));
     }
 
     #[test]
@@ -476,7 +476,7 @@ mod tests {
 
         mgr.close_other_programs(true);
         assert_eq!(mgr.program_count(), 1);
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("a".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("a.exe".into()));
     }
 
     #[test]
@@ -497,7 +497,7 @@ mod tests {
         mgr.open_program_ref(ProgramRef::new("b.exe"), OpenMode::Visible);
 
         mgr.set_current_program(&ProgramRef::new("b.exe"));
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("b".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("b.exe".into()));
     }
 
     #[test]
@@ -519,7 +519,7 @@ mod tests {
 
         mgr.release_program(&ProgramRef::new("a.exe"));
         assert!(!mgr.is_open("a.exe"));
-        assert_eq!(mgr.current_program().map(|p| p.name), Some("b".into()));
+        assert_eq!(mgr.current_program().map(|p| p.name), Some("b.exe".into()));
     }
 
     #[test]

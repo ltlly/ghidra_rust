@@ -23,7 +23,7 @@
 //! # Example
 //!
 //! ```
-//! use ghidra_features::base::program::program_plugin::{ProgramPlugin, ProgramHandle};
+//! use ghidra_features::base::program::program_plugin::{ProgramPlugin, ProgramPluginEvent, ProgramHandle};
 //!
 //! let mut plugin = ProgramPlugin::new("MyPlugin");
 //! plugin.init();

@@ -31,6 +31,6 @@ pub mod console_service;
 pub use code_completion::CodeCompletion;
 pub use console_component_provider::ConsoleComponentProvider;
 pub use console_plugin::ConsolePlugin;
-pub use console_provider::ConsoleProvider;
+pub use console_provider::{ConsoleProvider, ConsoleProviderConfig};
 pub use console_word::ConsoleWord;
 pub use console_service::ConsoleService;

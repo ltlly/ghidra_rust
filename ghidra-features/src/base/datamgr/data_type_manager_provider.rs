@@ -426,7 +426,7 @@ impl DataTypeManagerProvider {
             filter: FilterState::new(),
             sort_mode: SortMode::default(),
             next_id: 1,
-            changed: false,
+            changed: true,
         }
     }
 
