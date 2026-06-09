@@ -346,15 +346,16 @@ mod tests {
     #[test]
     fn test_lookup_by_hash() {
         let mut svc = open_service();
-        let func = BSimFunctionDescription::new("exe1", "f1", 0x1000);
+        let func = BSimFunctionDescription::new("exe1", "f1", 0x1000)
+            .with_hash("abc123");
         svc.ingest(&[func]).unwrap();
 
-        // StubFunctionDatabase stores by function_hash; the default hash
-        // is derived from the fields, so we can look it up.
-        let found = svc.lookup_by_hash("exe1:f1:0x1000").unwrap();
-        // The stub matches on the `function_hash` field which is
-        // "exe1:f1:0x1000" by default.
+        let found = svc.lookup_by_hash("abc123").unwrap();
         assert!(found.is_some());
+        assert_eq!(found.unwrap().function_name, "f1");
+
+        let missing = svc.lookup_by_hash("no_such_hash").unwrap();
+        assert!(missing.is_none());
     }
 
     #[test]
