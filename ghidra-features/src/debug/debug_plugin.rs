@@ -446,6 +446,226 @@ impl DebugPluginRegistry {
 }
 
 // ---------------------------------------------------------------------------
+// Debug Plugin Priority
+// ---------------------------------------------------------------------------
+
+/// Loading priority for debug plugins.
+///
+/// Ported from Ghidra's plugin loading order in
+/// `ghidra.app.plugin.core.debug`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum DebugPluginPriority {
+    /// Must be loaded before all others (e.g., trace manager).
+    Highest,
+    /// Loaded early (e.g., target service, control service).
+    High,
+    /// Normal loading priority.
+    Normal,
+    /// Loaded after most plugins (e.g., UI panels).
+    Low,
+    /// Loaded last (e.g., optional enhancements).
+    Lowest,
+}
+
+impl Default for DebugPluginPriority {
+    fn default() -> Self {
+        Self::Normal
+    }
+}
+
+impl DebugPluginPriority {
+    /// Numeric value for ordering (lower = loaded earlier).
+    pub fn as_u32(&self) -> u32 {
+        match self {
+            Self::Highest => 0,
+            Self::High => 25,
+            Self::Normal => 50,
+            Self::Low => 75,
+            Self::Lowest => 100,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Debug Plugin Dependency
+// ---------------------------------------------------------------------------
+
+/// A dependency between two debug plugins.
+///
+/// Ported from Ghidra's `@PluginDependency` annotation data.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DebugPluginDependency {
+    /// The class name of the depended-upon plugin.
+    pub plugin_class: String,
+    /// Whether this dependency is required or optional.
+    pub required: bool,
+    /// Human-readable reason for the dependency.
+    pub reason: String,
+}
+
+impl DebugPluginDependency {
+    /// Create a required dependency.
+    pub fn required(plugin_class: impl Into<String>) -> Self {
+        Self {
+            plugin_class: plugin_class.into(),
+            required: true,
+            reason: String::new(),
+        }
+    }
+
+    /// Create an optional dependency.
+    pub fn optional(plugin_class: impl Into<String>) -> Self {
+        Self {
+            plugin_class: plugin_class.into(),
+            required: false,
+            reason: String::new(),
+        }
+    }
+
+    /// Add a reason for the dependency.
+    pub fn with_reason(mut self, reason: impl Into<String>) -> Self {
+        self.reason = reason.into();
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Debug Plugin Loader
+// ---------------------------------------------------------------------------
+
+/// The result of loading a single plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DebugPluginLoadResult {
+    /// The plugin class name.
+    pub class_name: String,
+    /// Whether loading succeeded.
+    pub success: bool,
+    /// Error message if loading failed.
+    pub error: Option<String>,
+    /// Time taken to load in milliseconds.
+    pub load_time_ms: u64,
+}
+
+/// Orchestrates the loading of debug plugins in dependency order.
+///
+/// Ported from Ghidra's `PluginManager` plugin loading lifecycle.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct DebugPluginLoader {
+    /// Plugins waiting to be loaded, by class name.
+    pending: BTreeMap<String, DebugPluginRegistration>,
+    /// Dependencies for each plugin.
+    dependencies: BTreeMap<String, Vec<DebugPluginDependency>>,
+    /// Load results.
+    results: Vec<DebugPluginLoadResult>,
+    /// Whether loading is in progress.
+    loading: bool,
+}
+
+impl DebugPluginLoader {
+    /// Create a new plugin loader.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queue a plugin for loading with its dependencies.
+    pub fn queue_plugin(
+        &mut self,
+        registration: DebugPluginRegistration,
+        deps: Vec<DebugPluginDependency>,
+    ) {
+        let class_name = registration.config.class_name.clone();
+        self.dependencies.insert(class_name.clone(), deps);
+        self.pending.insert(class_name, registration);
+    }
+
+    /// Get the plugins in dependency-sorted order.
+    ///
+    /// Plugins with no unmet dependencies come first.
+    pub fn loading_order(&self) -> Vec<String> {
+        let mut resolved: BTreeSet<String> = BTreeSet::new();
+        let mut order = Vec::new();
+        let mut remaining: BTreeMap<String, Vec<String>> = self
+            .dependencies
+            .iter()
+            .map(|(k, deps)| {
+                (
+                    k.clone(),
+                    deps.iter()
+                        .filter(|d| d.required && self.pending.contains_key(&d.plugin_class))
+                        .map(|d| d.plugin_class.clone())
+                        .collect(),
+                )
+            })
+            .collect();
+
+        // Topological sort with iterative resolution.
+        loop {
+            let before = resolved.len();
+            for (class, deps) in remaining.iter_mut() {
+                if resolved.contains(class) {
+                    continue;
+                }
+                if deps.iter().all(|d| resolved.contains(d.as_str())) {
+                    resolved.insert(class.clone());
+                    order.push(class.clone());
+                }
+            }
+            if resolved.len() == before {
+                break;
+            }
+        }
+
+        // Append any remaining plugins with circular deps at the end.
+        for class in self.pending.keys() {
+            if !resolved.contains(class.as_str()) {
+                order.push(class.clone());
+            }
+        }
+
+        order
+    }
+
+    /// Mark a plugin load result.
+    pub fn record_result(&mut self, result: DebugPluginLoadResult) {
+        self.results.push(result);
+    }
+
+    /// Get all load results.
+    pub fn results(&self) -> &[DebugPluginLoadResult] {
+        &self.results
+    }
+
+    /// Check if all required dependencies for a plugin are satisfied.
+    pub fn dependencies_satisfied(&self, class_name: &str) -> bool {
+        if let Some(deps) = self.dependencies.get(class_name) {
+            deps.iter().all(|d| !d.required || self.pending.contains_key(&d.plugin_class))
+        } else {
+            true
+        }
+    }
+
+    /// Get the number of pending plugins.
+    pub fn pending_count(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Pop a plugin from the pending queue.
+    pub fn pop_pending(&mut self, class_name: &str) -> Option<DebugPluginRegistration> {
+        self.pending.remove(class_name)
+    }
+
+    /// Check if loading is in progress.
+    pub fn is_loading(&self) -> bool {
+        self.loading
+    }
+
+    /// Set the loading flag.
+    pub fn set_loading(&mut self, loading: bool) {
+        self.loading = loading;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Standard Debug Plugin Configurations
 // ---------------------------------------------------------------------------
 
@@ -709,5 +929,116 @@ mod tests {
         let json = serde_json::to_string(&event).unwrap();
         let back: DebugPluginEvent = serde_json::from_str(&json).unwrap();
         assert_eq!(event, back);
+    }
+
+    #[test]
+    fn test_debug_plugin_priority() {
+        assert!(DebugPluginPriority::Highest < DebugPluginPriority::Normal);
+        assert!(DebugPluginPriority::Normal < DebugPluginPriority::Lowest);
+        assert_eq!(DebugPluginPriority::Highest.as_u32(), 0);
+        assert_eq!(DebugPluginPriority::Normal.as_u32(), 50);
+        assert_eq!(DebugPluginPriority::default(), DebugPluginPriority::Normal);
+    }
+
+    #[test]
+    fn test_debug_plugin_dependency() {
+        let dep = DebugPluginDependency::required("TraceManagerPlugin")
+            .with_reason("Needs trace manager for data access");
+        assert!(dep.required);
+        assert_eq!(dep.plugin_class, "TraceManagerPlugin");
+        assert!(dep.reason.contains("trace manager"));
+
+        let opt = DebugPluginDependency::optional("ConsolePlugin");
+        assert!(!opt.required);
+    }
+
+    #[test]
+    fn test_debug_plugin_dependency_serde() {
+        let dep = DebugPluginDependency::required("ControlPlugin");
+        let json = serde_json::to_string(&dep).unwrap();
+        let back: DebugPluginDependency = serde_json::from_str(&json).unwrap();
+        assert_eq!(dep, back);
+    }
+
+    #[test]
+    fn test_debug_plugin_loader() {
+        let mut loader = DebugPluginLoader::new();
+        assert!(!loader.is_loading());
+        assert_eq!(loader.pending_count(), 0);
+
+        let config_a = DebugPluginConfig::new("PluginA");
+        let reg_a = DebugPluginRegistration::new(config_a);
+        loader.queue_plugin(reg_a, vec![]);
+
+        let config_b = DebugPluginConfig::new("PluginB");
+        let reg_b = DebugPluginRegistration::new(config_b);
+        loader.queue_plugin(
+            reg_b,
+            vec![DebugPluginDependency::required("PluginA")],
+        );
+
+        assert_eq!(loader.pending_count(), 2);
+
+        let order = loader.loading_order();
+        assert_eq!(order.len(), 2);
+        // PluginA has no deps, should come first.
+        assert_eq!(order[0], "PluginA");
+        assert_eq!(order[1], "PluginB");
+    }
+
+    #[test]
+    fn test_debug_plugin_loader_dependencies_satisfied() {
+        let mut loader = DebugPluginLoader::new();
+
+        let config_a = DebugPluginConfig::new("PluginA");
+        let reg_a = DebugPluginRegistration::new(config_a);
+        loader.queue_plugin(reg_a, vec![]);
+
+        let config_b = DebugPluginConfig::new("PluginB");
+        let reg_b = DebugPluginRegistration::new(config_b);
+        loader.queue_plugin(
+            reg_b,
+            vec![DebugPluginDependency::required("PluginA")],
+        );
+
+        assert!(loader.dependencies_satisfied("PluginB"));
+
+        let config_c = DebugPluginConfig::new("PluginC");
+        let reg_c = DebugPluginRegistration::new(config_c);
+        loader.queue_plugin(
+            reg_c,
+            vec![DebugPluginDependency::required("MissingPlugin")],
+        );
+
+        assert!(!loader.dependencies_satisfied("PluginC"));
+    }
+
+    #[test]
+    fn test_debug_plugin_loader_record_result() {
+        let mut loader = DebugPluginLoader::new();
+        loader.record_result(DebugPluginLoadResult {
+            class_name: "PluginA".into(),
+            success: true,
+            error: None,
+            load_time_ms: 15,
+        });
+        assert_eq!(loader.results().len(), 1);
+        assert!(loader.results()[0].success);
+    }
+
+    #[test]
+    fn test_debug_plugin_loader_pop_pending() {
+        let mut loader = DebugPluginLoader::new();
+        let config = DebugPluginConfig::new("PluginA");
+        let reg = DebugPluginRegistration::new(config);
+        loader.queue_plugin(reg, vec![]);
+        assert_eq!(loader.pending_count(), 1);
+
+        let popped = loader.pop_pending("PluginA");
+        assert!(popped.is_some());
+        assert_eq!(popped.unwrap().config.class_name, "PluginA");
+        assert_eq!(loader.pending_count(), 0);
+
+        assert!(loader.pop_pending("Missing").is_none());
     }
 }

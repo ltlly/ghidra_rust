@@ -708,6 +708,332 @@ pub trait DebugEmulationService {
 }
 
 // ---------------------------------------------------------------------------
+// Watch Expression Service
+// ---------------------------------------------------------------------------
+
+/// Display format for watch expression values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum WatchFormat {
+    /// Hexadecimal.
+    Hex,
+    /// Decimal.
+    Decimal,
+    /// Binary.
+    Binary,
+    /// Octal.
+    Octal,
+    /// ASCII character representation.
+    Char,
+    /// Floating point.
+    Float,
+    /// String.
+    String,
+    /// Auto-detect.
+    Auto,
+}
+
+impl Default for WatchFormat {
+    fn default() -> Self {
+        Self::Hex
+    }
+}
+
+/// A watch expression entry.
+///
+/// Ported from Ghidra's `DebuggerWatchesService`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchExpression {
+    /// The expression string (e.g., register name, memory address).
+    pub expression: String,
+    /// The current value, if evaluated.
+    pub current_value: Option<String>,
+    /// The display format.
+    pub format: WatchFormat,
+    /// Whether this expression is enabled.
+    pub enabled: bool,
+    /// User-provided label.
+    pub label: Option<String>,
+}
+
+impl WatchExpression {
+    /// Create a new watch expression.
+    pub fn new(expression: impl Into<String>) -> Self {
+        Self {
+            expression: expression.into(),
+            current_value: None,
+            format: WatchFormat::Hex,
+            enabled: true,
+            label: None,
+        }
+    }
+
+    /// Create a watch expression with a specific format.
+    pub fn with_format(expression: impl Into<String>, format: WatchFormat) -> Self {
+        Self {
+            format,
+            ..Self::new(expression)
+        }
+    }
+
+    /// Set the label.
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+}
+
+/// Service for managing watch expressions.
+///
+/// Ported from Ghidra's `DebuggerWatchesService`.
+pub trait DebugWatchesService {
+    /// Add a watch expression.
+    fn add_watch(&mut self, expression: WatchExpression);
+
+    /// Remove a watch expression by index.
+    fn remove_watch(&mut self, index: usize) -> DebugServiceResult<()>;
+
+    /// Get all watch expressions.
+    fn watches(&self) -> &[WatchExpression];
+
+    /// Update the value of a watch expression.
+    fn update_value(&mut self, index: usize, value: String);
+
+    /// Clear all watch expressions.
+    fn clear(&mut self);
+
+    /// Set the format for a watch expression.
+    fn set_format(&mut self, index: usize, format: WatchFormat);
+
+    /// Toggle a watch expression on/off.
+    fn toggle_watch(&mut self, index: usize);
+}
+
+// ---------------------------------------------------------------------------
+// Platform Service
+// ---------------------------------------------------------------------------
+
+/// Information about an available debugger platform.
+///
+/// Ported from Ghidra's `DebuggerPlatformService`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformOffer {
+    /// The platform name (e.g., "gdb", "lldb", "dbgeng").
+    pub name: String,
+    /// Human-readable description.
+    pub description: String,
+    /// The connector type identifier.
+    pub connector_type: String,
+    /// Supported architecture IDs.
+    pub supported_languages: Vec<String>,
+    /// Whether this platform can launch targets.
+    pub can_launch: bool,
+    /// Whether this platform can attach to running processes.
+    pub can_attach: bool,
+    /// Whether this platform supports connection to remote targets.
+    pub can_connect_remote: bool,
+}
+
+impl PlatformOffer {
+    /// Create a new platform offer.
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        connector_type: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            connector_type: connector_type.into(),
+            supported_languages: Vec::new(),
+            can_launch: false,
+            can_attach: false,
+            can_connect_remote: false,
+        }
+    }
+}
+
+/// Platform opinion about what language/platform to use for a given target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformOpinion {
+    /// The language ID.
+    pub language_id: String,
+    /// The compiler spec ID.
+    pub compiler_spec_id: String,
+    /// Confidence score (0.0 to 1.0).
+    pub confidence: f64,
+    /// The source of this opinion.
+    pub source: String,
+}
+
+impl PlatformOpinion {
+    /// Create a new platform opinion.
+    pub fn new(
+        language_id: impl Into<String>,
+        compiler_spec_id: impl Into<String>,
+        confidence: f64,
+        source: impl Into<String>,
+    ) -> Self {
+        Self {
+            language_id: language_id.into(),
+            compiler_spec_id: compiler_spec_id.into(),
+            confidence,
+            source: source.into(),
+        }
+    }
+}
+
+/// Service for managing debugger platform connections.
+///
+/// Ported from Ghidra's `DebuggerPlatformService`.
+pub trait DebugPlatformService {
+    /// Get available platform offers.
+    fn available_platforms(&self) -> Vec<PlatformOffer>;
+
+    /// Get opinions about what language to use for a target.
+    fn get_opinions(
+        &self,
+        connector_type: &str,
+        target_info: &str,
+    ) -> Vec<PlatformOpinion>;
+
+    /// Register a new platform offer.
+    fn register_platform(&mut self, offer: PlatformOffer);
+
+    /// Get the current platform for a connection.
+    fn current_platform(&self, connection_key: i64) -> Option<&PlatformOffer>;
+}
+
+// ---------------------------------------------------------------------------
+// Auto Mapping Service
+// ---------------------------------------------------------------------------
+
+/// Auto-mapping mode for program-to-trace mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AutoMapMode {
+    /// No automatic mapping.
+    None,
+    /// Map by module name.
+    ByModule,
+    /// Map by section name.
+    BySection,
+    /// Map by region.
+    ByRegion,
+    /// One-to-one mapping.
+    OneToOne,
+}
+
+impl Default for AutoMapMode {
+    fn default() -> Self {
+        Self::ByModule
+    }
+}
+
+/// A single entry in an auto-mapping proposal.
+///
+/// Ported from Ghidra's `DebuggerAutoMappingService`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoMappingEntry {
+    /// Program address range start.
+    pub program_min: u64,
+    /// Program address range end.
+    pub program_max: u64,
+    /// Trace address range start.
+    pub trace_min: u64,
+    /// Trace address range end.
+    pub trace_max: u64,
+    /// Start snap for this mapping.
+    pub snap_start: i64,
+    /// End snap for this mapping.
+    pub snap_end: i64,
+    /// The matched module/section name, if any.
+    pub matched_name: Option<String>,
+}
+
+impl AutoMappingEntry {
+    /// Create a new auto-mapping entry.
+    pub fn new(
+        program_min: u64,
+        program_max: u64,
+        trace_min: u64,
+        trace_max: u64,
+    ) -> Self {
+        Self {
+            program_min,
+            program_max,
+            trace_min,
+            trace_max,
+            snap_start: 0,
+            snap_end: i64::MAX,
+            matched_name: None,
+        }
+    }
+
+    /// Set the matched name.
+    pub fn with_matched_name(mut self, name: impl Into<String>) -> Self {
+        self.matched_name = Some(name.into());
+        self
+    }
+}
+
+/// A proposal for automatically mapping a program to a trace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutoMappingProposal {
+    /// The program URL.
+    pub program_url: String,
+    /// The trace key.
+    pub trace_key: String,
+    /// Proposed address mappings.
+    pub entries: Vec<AutoMappingEntry>,
+    /// Confidence score (0.0 to 1.0).
+    pub confidence: f64,
+}
+
+impl AutoMappingProposal {
+    /// Create a new auto-mapping proposal.
+    pub fn new(
+        program_url: impl Into<String>,
+        trace_key: impl Into<String>,
+        confidence: f64,
+    ) -> Self {
+        Self {
+            program_url: program_url.into(),
+            trace_key: trace_key.into(),
+            entries: Vec::new(),
+            confidence,
+        }
+    }
+
+    /// Add an entry to the proposal.
+    pub fn add_entry(&mut self, entry: AutoMappingEntry) {
+        self.entries.push(entry);
+    }
+}
+
+/// Service for automatic mapping between programs and traces.
+///
+/// Ported from Ghidra's `DebuggerAutoMappingService`.
+pub trait DebugAutoMappingService {
+    /// Propose automatic mappings for a program.
+    fn propose_mappings(
+        &self,
+        program_url: &str,
+        trace_key: &str,
+    ) -> Vec<AutoMappingProposal>;
+
+    /// Execute a mapping proposal.
+    fn execute_mapping(&mut self, proposal: &AutoMappingProposal) -> DebugServiceResult<()>;
+
+    /// Auto-map all open programs to a trace.
+    fn auto_map_all(&mut self, trace_key: &str) -> DebugServiceResult<Vec<AutoMappingProposal>>;
+
+    /// Get the current auto-map mode.
+    fn auto_map_mode(&self) -> AutoMapMode;
+
+    /// Set the auto-map mode.
+    fn set_auto_map_mode(&mut self, mode: AutoMapMode);
+}
+
+// ---------------------------------------------------------------------------
 // Debug Service Container
 // ---------------------------------------------------------------------------
 
@@ -906,5 +1232,109 @@ mod tests {
         let back: BreakpointInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.address, 0x400000);
         assert!(back.is_software());
+    }
+
+    #[test]
+    fn test_watch_format() {
+        assert_eq!(WatchFormat::default(), WatchFormat::Hex);
+        assert_ne!(WatchFormat::Hex, WatchFormat::Decimal);
+        assert_ne!(WatchFormat::Binary, WatchFormat::Float);
+    }
+
+    #[test]
+    fn test_watch_expression() {
+        let expr = WatchExpression::new("RAX");
+        assert_eq!(expr.expression, "RAX");
+        assert!(expr.enabled);
+        assert_eq!(expr.format, WatchFormat::Hex);
+        assert!(expr.label.is_none());
+        assert!(expr.current_value.is_none());
+    }
+
+    #[test]
+    fn test_watch_expression_builder() {
+        let expr = WatchExpression::with_format("RSP", WatchFormat::Decimal)
+            .with_label("Stack Pointer");
+        assert_eq!(expr.format, WatchFormat::Decimal);
+        assert_eq!(expr.label.as_deref(), Some("Stack Pointer"));
+    }
+
+    #[test]
+    fn test_watch_expression_serde() {
+        let expr = WatchExpression::new("RAX");
+        let json = serde_json::to_string(&expr).unwrap();
+        let back: WatchExpression = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.expression, "RAX");
+    }
+
+    #[test]
+    fn test_platform_offer() {
+        let offer = PlatformOffer::new("gdb", "GNU Debugger", "gdb-remote");
+        assert_eq!(offer.name, "gdb");
+        assert_eq!(offer.connector_type, "gdb-remote");
+        assert!(!offer.can_launch);
+    }
+
+    #[test]
+    fn test_platform_offer_serde() {
+        let offer = PlatformOffer::new("lldb", "LLDB Debugger", "lldb-remote");
+        let json = serde_json::to_string(&offer).unwrap();
+        let back: PlatformOffer = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "lldb");
+    }
+
+    #[test]
+    fn test_platform_opinion() {
+        let opinion = PlatformOpinion::new(
+            "x86:LE:64:default",
+            "default",
+            0.9,
+            "ELF header",
+        );
+        assert_eq!(opinion.language_id, "x86:LE:64:default");
+        assert!(opinion.confidence > 0.5);
+    }
+
+    #[test]
+    fn test_auto_map_mode() {
+        assert_eq!(AutoMapMode::default(), AutoMapMode::ByModule);
+        assert_ne!(AutoMapMode::None, AutoMapMode::ByModule);
+        assert_ne!(AutoMapMode::BySection, AutoMapMode::OneToOne);
+    }
+
+    #[test]
+    fn test_auto_mapping_entry() {
+        let entry = AutoMappingEntry::new(0, 0x1000, 0x400000, 0x401000)
+            .with_matched_name(".text");
+        assert_eq!(entry.program_min, 0);
+        assert_eq!(entry.trace_max, 0x401000);
+        assert_eq!(entry.matched_name.as_deref(), Some(".text"));
+        assert_eq!(entry.snap_end, i64::MAX);
+    }
+
+    #[test]
+    fn test_auto_mapping_entry_serde() {
+        let entry = AutoMappingEntry::new(0, 0x1000, 0x400000, 0x401000);
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: AutoMappingEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.program_min, 0);
+    }
+
+    #[test]
+    fn test_auto_mapping_proposal() {
+        let mut proposal = AutoMappingProposal::new("file:///test.gzf", "trace1", 0.95);
+        assert_eq!(proposal.confidence, 0.95);
+        assert!(proposal.entries.is_empty());
+
+        proposal.add_entry(AutoMappingEntry::new(0, 0x1000, 0x400000, 0x401000));
+        assert_eq!(proposal.entries.len(), 1);
+    }
+
+    #[test]
+    fn test_auto_mapping_proposal_serde() {
+        let proposal = AutoMappingProposal::new("file:///test.gzf", "trace1", 0.9);
+        let json = serde_json::to_string(&proposal).unwrap();
+        let back: AutoMappingProposal = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.program_url, "file:///test.gzf");
     }
 }

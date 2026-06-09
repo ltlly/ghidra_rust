@@ -425,7 +425,7 @@ mod tests {
     fn test_shared_service() {
         let shared = new_shared_service();
         {
-            let mut s = shared.write().unwrap();
+            let s = shared.write().unwrap();
             assert_eq!(s.connection_count(), 0);
         }
     }
