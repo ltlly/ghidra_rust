@@ -16,6 +16,8 @@
 pub mod addresstype;
 pub mod entropy;
 pub mod navigation;
+pub mod overview_plugin;
+pub mod overview_provider;
 
 use std::collections::HashMap;
 

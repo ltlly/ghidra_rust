@@ -16,6 +16,8 @@ pub mod databasesearcher;
 pub mod dialog;
 pub mod iterators;
 pub mod plugin;
+pub mod search_text_plugin;
+pub mod search_text_provider;
 pub mod search_types;
 pub mod quick_searcher;
 

@@ -51,6 +51,17 @@ pub mod location_descriptors;
 /// range-navigation option classes.
 pub mod navigation_settings;
 
+/// Top-level navigation plugin coordinating all navigation actions.
+///
+/// Ported from `ghidra.app.plugin.core.navigation.NavigationPlugin`.
+pub mod navigation_plugin;
+
+/// GoTo address/label service for address and label navigation.
+///
+/// Ported from `ghidra.app.services.GoToService` and
+/// `ghidra.app.plugin.core.navigation.GoToAddressLabelPlugin`.
+pub mod goto_address_label_service;
+
 use std::collections::HashMap;
 
 

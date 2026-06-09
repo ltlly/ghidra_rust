@@ -39,6 +39,16 @@ pub mod qualified;
 /// Ported from `ghidra.app.plugin.core.select.programtree`.
 pub mod programtree_sel;
 
+/// Top-level selection plugin.
+///
+/// Ported from `ghidra.app.plugin.core.select.SelectPlugin`.
+pub mod select_plugin;
+
+/// Address set editor provider.
+///
+/// Ported from `ghidra.app.plugin.core.select.AddressSetEditorProvider`.
+pub mod address_set_editor_provider;
+
 use ghidra_core::Address;
 use std::collections::BTreeSet;
 

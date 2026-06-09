@@ -19,6 +19,17 @@
 /// Ported from Ghidra's `ghidra.app.plugin.core.marker` Java package.
 pub mod plugin;
 
+/// Marker Manager Plugin -- the main plugin orchestrating marker services.
+///
+/// Ported from `ghidra.app.plugin.core.marker.MarkerManagerPlugin`.
+pub mod marker_plugin;
+
+/// Marker providers -- margin and overview rendering.
+///
+/// Ported from `ghidra.app.plugin.core.marker.MarkerMarginProvider` and
+/// `ghidra.app.plugin.core.marker.MarkerOverviewProvider`.
+pub mod marker_provider;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 // ============================================================================
