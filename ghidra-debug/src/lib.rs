@@ -67,4 +67,5 @@ pub mod services;
 pub mod stack;
 pub mod target;
 pub mod taint_analysis;
+pub mod trace;
 pub mod util;

@@ -19,6 +19,9 @@ pub mod path_filter_expr;
 pub mod path_matcher;
 pub mod path_pattern;
 pub mod schema_context;
+pub mod target_execution_stateful;
+pub mod target_method;
+pub mod target_object;
 pub mod trace_object;
 pub mod visitors;
 
@@ -26,6 +29,13 @@ pub use key_path::KeyPath;
 pub use path_filter_expr::PathFilterExpr;
 pub use path_matcher::{NoneFilter, PathFilter, PathMatcher};
 pub use path_pattern::{Align, PathPattern};
+pub use target_execution_stateful::{ExecutionStateTransition, TargetExecutionStateful};
+pub use target_method::{
+    InvokeArguments, InvokeResult, InvokeValue, TargetMethod, TargetMethodParameter,
+};
+pub use target_object::{
+    InterfaceSet, TargetEntry, TargetObject, TargetObjectManager, TargetValue,
+};
 pub use trace_object::{ObjectEntry, ObjectValue, TraceObject, TraceObjectManager};
 pub use visitors::{
     AllPathsVisitor, AncestorsRelativeVisitor, AncestorsRootVisitor,

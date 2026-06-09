@@ -25,6 +25,7 @@
 //!   boundary detection, calling convention detection
 
 pub mod instructions;
+pub mod language_provider;
 pub mod loader;
 pub mod registers;
 

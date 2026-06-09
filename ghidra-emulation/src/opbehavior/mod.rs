@@ -12,6 +12,9 @@ pub mod binary;
 pub mod unary;
 pub mod special;
 pub mod factory;
+pub mod op_behavior;
+pub mod op_behavior_int_add;
+pub mod op_behavior_int_sub;
 
 // Integer arithmetic operations
 pub mod int_add;
@@ -71,3 +74,8 @@ pub use binary::BinaryOpBehavior;
 pub use unary::UnaryOpBehavior;
 pub use special::SpecialOpBehavior;
 pub use factory::OpBehaviorFactory;
+pub use op_behavior::{
+    BinaryOpBehaviorAdapter, OpBehavior, OpBehaviorKind, UnaryOpBehaviorAdapter,
+};
+pub use op_behavior_int_add::UnifiedOpBehaviorIntAdd;
+pub use op_behavior_int_sub::UnifiedOpBehaviorIntSub;

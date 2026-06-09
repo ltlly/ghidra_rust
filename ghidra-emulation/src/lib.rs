@@ -49,10 +49,14 @@
 //! - `RegisterDefinition` -- from `ghidra.program.model.lang.Register`
 //! - `ConditionEvaluator` -- breakpoint condition evaluation
 
+pub mod break_table;
+pub mod break_table_callback;
 pub mod breakpoints;
+pub mod emulate_instruction_state_modifier;
 pub mod executor;
 pub mod memstate;
 pub mod memory;
+pub mod memory_state;
 pub mod opbehavior;
 pub mod pcode_arithmetic;
 pub mod pcode_program;
@@ -64,11 +68,17 @@ use ghidra_core::program::lang::Language;
 use ghidra_decompile::pcode::{PcodeOperation, Varnode};
 use std::collections::HashMap;
 
+pub use break_table::{BreakTable, EmulateContext};
+pub use break_table_callback::{BreakTableCallBack, ContextualBreakTable, DEFAULT_NAME};
 pub use breakpoints::{BreakpointAction, BreakpointInfo, BreakpointKind, BreakpointManager};
+pub use emulate_instruction_state_modifier::{
+    EmulateInstructionStateModifier, EmulateInstructionStateModifierBuilder, PcodeOpBehaviorOther,
+};
 pub use executor::{MemoryAccessCallback, PcodeExecutor, PcodeFrame, UseropLibrary};
 pub use memory::{
     EmulatedMemory, MemoryError, MemorySegment, MemoryWriteEntry, MemoryWriteTracker,
 };
+pub use memory_state::{DefaultMemoryState, MemoryState, MemoryStateError};
 pub use pcode_arithmetic::{BytesPcodeArithmetic, PcodeArithmetic, Purpose};
 pub use pcode_program::PcodeProgram;
 pub use state::{AccessReason, EmulatorState, RegisterDefinition, StateSnapshot};

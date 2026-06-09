@@ -25,6 +25,7 @@
 //!   mnemonics), condition codes, shift types, extend types, addressing modes
 
 pub mod instructions;
+pub mod language_provider;
 pub mod loader;
 pub mod registers;
 

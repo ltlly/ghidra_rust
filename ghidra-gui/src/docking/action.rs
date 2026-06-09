@@ -1032,6 +1032,144 @@ impl GuiActionManager {
 }
 
 // ---------------------------------------------------------------------------
+// Action trait — the Ghidra Action interface
+// ---------------------------------------------------------------------------
+
+/// The core action interface for the docking framework.
+///
+/// Port of Ghidra's `docking.Action` interface.  Every action that appears
+/// in a menu, toolbar, or context menu implements this trait.  The single
+/// required method is `action_performed(context)` which carries the
+/// program state the action needs.
+///
+/// This trait complements the concrete [`DockingAction`] struct.  Use
+/// `DockingAction` for simple callback-based actions; implement this
+/// trait for richer action types (proxies, scripted actions, etc.).
+pub trait Action: fmt::Debug + Send + Sync {
+    /// The programmatic name of the action (used for lookup, serialization).
+    fn name(&self) -> &str;
+
+    /// Human-readable display name shown in menus and toolbars.
+    fn display_name(&self) -> &str;
+
+    /// Longer description / tooltip text.
+    fn description(&self) -> &str {
+        ""
+    }
+
+    /// Whether the action is currently enabled.
+    fn is_enabled(&self) -> bool {
+        true
+    }
+
+    /// Enable or disable the action.
+    fn set_enabled(&mut self, _enabled: bool) {}
+
+    /// Whether the action supports the given context.
+    ///
+    /// Called by the framework before presenting the action in a context
+    /// menu.  Return `false` to hide the action.
+    fn is_valid_context(&self, _context: &super::action_context::DockingActionContext) -> bool {
+        true
+    }
+
+    /// Execute the action with the given context.
+    ///
+    /// This is the primary entry point called when the user triggers the
+    /// action (via menu click, toolbar button, or keyboard shortcut).
+    fn action_performed(&self, context: &super::action_context::DockingActionContext);
+
+    /// The component provider this action is associated with, if any.
+    ///
+    /// Global actions return `None`; local actions return the provider
+    /// they belong to.
+    fn owner_provider(&self) -> Option<super::component::ComponentProvider> {
+        None
+    }
+
+    /// Whether this action is a toggle (two-state) action.
+    fn is_toggle(&self) -> bool {
+        false
+    }
+
+    /// For toggle actions, the current selected state.
+    fn is_selected(&self) -> bool {
+        false
+    }
+
+    /// For toggle actions, set the selected state.
+    fn set_selected(&mut self, _selected: bool) {}
+
+    /// Whether this action is a menu (has child actions).
+    fn is_menu(&self) -> bool {
+        false
+    }
+
+    /// Child actions if this is a menu action.
+    fn children(&self) -> Vec<&dyn Action> {
+        Vec::new()
+    }
+
+    /// Whether this action can be added to a popup (context) menu.
+    fn is_add_to_popup(&self, context: &super::action_context::DockingActionContext) -> bool {
+        self.is_valid_context(context)
+    }
+
+    /// Menu path hierarchy for positioning in the menu bar.
+    fn menu_path(&self) -> &[&str] {
+        &[]
+    }
+
+    /// The menu bar group this action belongs to (for ordering).
+    fn menu_bar_group(&self) -> &str {
+        ""
+    }
+
+    /// Priority within the menu bar group (lower = earlier).
+    fn menu_bar_priority(&self) -> u32 {
+        100
+    }
+
+    /// Whether this action should be disposed when its owner component is
+    /// disposed.
+    fn dispose_on_owner_dispose(&self) -> bool {
+        true
+    }
+
+    /// Clean up resources when the action is no longer needed.
+    fn dispose(&self) {}
+}
+
+/// Extension trait for actions that support keyboard shortcuts.
+pub trait KeyBindableAction: Action {
+    /// The key binding for this action, if any.
+    fn key_binding(&self) -> Option<KeyBinding>;
+
+    /// Whether this action matches the given key-stroke.
+    fn matches_key(&self, modifiers: &Modifiers, key: &Key) -> bool {
+        self.key_binding()
+            .as_ref()
+            .map(|kb| &kb.modifiers == modifiers && &kb.key == key)
+            .unwrap_or(false)
+    }
+}
+
+/// Extension trait for toggle (two-state) actions.
+pub trait ToggleAction: Action {
+    /// Get the current toggle state.
+    fn toggle_state(&self) -> bool;
+
+    /// Set the toggle state.
+    fn set_toggle_state(&mut self, selected: bool);
+
+    /// Flip the toggle state.
+    fn toggle(&mut self) {
+        let current = self.toggle_state();
+        self.set_toggle_state(!current);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1330,5 +1468,74 @@ mod tests {
 
         let applicable = mgr.applicable_actions(&ActionContext::Program);
         assert_eq!(applicable.len(), 1); // global only
+    }
+
+    // -- Action trait tests --
+
+    /// A test implementation of the `Action` trait.
+    #[derive(Debug)]
+    struct TestTraitAction {
+        action_name: String,
+        action_display: String,
+        enabled: bool,
+        invoked: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl TestTraitAction {
+        fn new(name: &str, display: &str) -> (Self, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+            let flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let action = Self {
+                action_name: name.to_owned(),
+                action_display: display.to_owned(),
+                enabled: true,
+                invoked: flag.clone(),
+            };
+            (action, flag)
+        }
+    }
+
+    impl super::Action for TestTraitAction {
+        fn name(&self) -> &str { &self.action_name }
+        fn display_name(&self) -> &str { &self.action_display }
+        fn is_enabled(&self) -> bool { self.enabled }
+        fn set_enabled(&mut self, enabled: bool) { self.enabled = enabled; }
+        fn action_performed(&self, _ctx: &super::super::action_context::DockingActionContext) {
+            self.invoked.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn test_action_trait_basic() {
+        let (action, flag) = TestTraitAction::new("test", "Test Action");
+        assert_eq!(action.name(), "test");
+        assert_eq!(action.display_name(), "Test Action");
+        assert!(action.is_enabled());
+
+        let ctx = super::super::action_context::DockingActionContext::new();
+        action.action_performed(&ctx);
+        assert!(flag.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_action_trait_defaults() {
+        let (action, _flag) = TestTraitAction::new("test", "Test");
+        assert!(action.description().is_empty());
+        assert!(!action.is_toggle());
+        assert!(!action.is_selected());
+        assert!(!action.is_menu());
+        assert!(action.children().is_empty());
+        assert!(action.owner_provider().is_none());
+        assert!(action.menu_path().is_empty());
+        assert!(action.menu_bar_group().is_empty());
+        assert_eq!(action.menu_bar_priority(), 100);
+        assert!(action.dispose_on_owner_dispose());
+    }
+
+    #[test]
+    fn test_action_trait_set_enabled() {
+        let (mut action, _flag) = TestTraitAction::new("test", "Test");
+        assert!(action.is_enabled());
+        action.set_enabled(false);
+        assert!(!action.is_enabled());
     }
 }

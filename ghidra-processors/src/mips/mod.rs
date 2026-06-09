@@ -34,6 +34,7 @@
 //! - Processor variant and language definitions
 //! - ProcessorModule trait implementation
 
+pub mod language_provider;
 pub mod registers;
 
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};

@@ -106,6 +106,16 @@ impl MemoryBank {
         self.pages.get(&aligned_addr)
     }
 
+    /// Get a mutable page at the given aligned address, if it exists.
+    pub fn get_page_mut(&mut self, aligned_addr: u64) -> Option<&mut MemoryPage> {
+        self.pages.get_mut(&aligned_addr)
+    }
+
+    /// Get the fault handler reference.
+    pub fn fault_handler(&self) -> &dyn MemoryFaultHandler {
+        self.fault_handler.as_ref()
+    }
+
     /// Write a chunk of bytes to the memory bank.
     ///
     /// # Arguments

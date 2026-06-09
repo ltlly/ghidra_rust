@@ -41,6 +41,8 @@
 //! - Processor variant and language definitions
 //! - ProcessorModule trait implementation
 
+pub mod language_provider;
+
 use crate::common::{Endian, Language, ProcessorModule, Register, RegisterBank};
 use ghidra_core::listing::InstructionMnemonic;
 use std::collections::HashMap;

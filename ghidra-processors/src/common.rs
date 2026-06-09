@@ -217,6 +217,41 @@ pub trait ProcessorModule {
 }
 
 // ---------------------------------------------------------------------------
+// LanguageProvider trait (port of LanguageProvider.java)
+// ---------------------------------------------------------------------------
+
+/// Service for providing processor-specific languages.
+///
+/// Each processor module can implement this trait to supply its set of
+/// language definitions, look up languages by ID, describe the processor
+/// family, and report whether a given language is supported.
+pub trait LanguageProvider {
+    /// The processor name (e.g. "x86", "ARM", "AARCH64").
+    fn processor_name() -> &'static str;
+
+    /// Human-readable description of the processor.
+    fn processor_description() -> &'static str;
+
+    /// Processor family name (e.g. "x86", "ARM", "MIPS").
+    fn family() -> &'static str;
+
+    /// All language descriptions offered by this provider.
+    fn language_descriptions() -> Vec<LanguageDescription>;
+
+    /// All language definitions offered by this provider.
+    fn languages() -> Vec<Language>;
+
+    /// Return the [`Language`] with the given ID, or `None` if not found.
+    fn get_language(language_id: &str) -> Option<Language>;
+
+    /// Return `true` if the given language ID is supported.
+    fn is_language_loaded(language_id: &str) -> bool;
+
+    /// Return the default language for this processor.
+    fn default_language() -> Language;
+}
+
+// ---------------------------------------------------------------------------
 // LanguageID (port of LanguageID.java)
 // ---------------------------------------------------------------------------
 

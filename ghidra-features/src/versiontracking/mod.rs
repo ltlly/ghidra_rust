@@ -17,7 +17,15 @@
 //! - [`stringable`] - Value serialization
 //! - [`markuptype`] - Markup type definitions
 //! - [`helpers`] - Utility functions
+//! - [`abstract_vt_correlator`] - Abstract base for VT program correlators
+//! - [`vt_correlator`] - VTProgramCorrelator trait and factory
+//! - [`vt_match`] - VTMatch trait and implementation
+//! - [`vt_match_set`] - VTMatchSet trait and implementation
+//! - [`vt_session`] - VTSession trait and implementation
+//! - [`vt_match_db`] - Database-backed VTMatch
+//! - [`vt_session_db`] - Database-backed VTSession
 
+pub mod abstract_vt_correlator;
 pub mod association;
 pub mod correlator;
 pub mod db;
@@ -31,6 +39,12 @@ pub mod options;
 pub mod session;
 pub mod stringable;
 pub mod types;
+pub mod vt_correlator;
+pub mod vt_match;
+pub mod vt_match_db;
+pub mod vt_match_set;
+pub mod vt_session;
+pub mod vt_session_db;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;

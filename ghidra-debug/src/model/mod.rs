@@ -325,3 +325,11 @@ pub use builtin_interface_factory::{
     global_factory, is_builtin_interface, BuiltinInterfaceFactory,
     InterfaceCategory, InterfaceRegistration,
 };
+
+// Observer and recorder modules ported from Framework-TraceModeling
+pub mod model_observer;
+pub mod trace_recorder;
+pub use model_observer::{
+    CollectingObserver, ModelChangeKind, ModelChangeRecord, ModelObservable, ModelObserver,
+};
+pub use trace_recorder::{RecordedEvent, TraceRecorder};

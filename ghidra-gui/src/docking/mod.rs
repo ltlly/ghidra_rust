@@ -86,11 +86,17 @@
 //! ```
 
 pub mod action;
+pub mod action_context;
 pub mod actions;
 pub mod component;
+pub mod component_provider;
 pub mod context;
 pub mod dialog;
+pub mod dialog_component_provider;
+pub mod dockable_component;
+pub mod docking_tool;
 pub mod drop;
+pub mod drop_target_handler;
 pub mod keybinding;
 pub mod layout;
 pub mod menu;
@@ -98,6 +104,7 @@ pub mod plugin;
 pub mod statusbar;
 pub mod tool;
 pub mod window_manager;
+pub mod window_position;
 
 // Re-export the most commonly-used types at the docking module level for
 // convenience.
@@ -134,3 +141,11 @@ pub use plugin::{
 pub use statusbar::{StatusBar, StatusItem, StatusMessage};
 pub use tool::{DockingTool, ToolEvent, ToolEventCallback, ToolService};
 pub use window_manager::{ComponentPlaceholder, DockingWindowManager, WindowContainer};
+pub use action::{Action as ActionTrait, KeyBindableAction, ToggleAction};
+pub use action_context::DockingActionContext;
+pub use component_provider::ComponentProvider as ComponentProviderTrait;
+pub use dialog_component_provider::DialogComponentProvider as DialogComponentProviderTrait;
+pub use dockable_component::DockableComponent;
+pub use docking_tool::DockingTool as DockingToolTrait;
+pub use drop_target_handler::{DropRegionVisual, DropTargetHandler};
+pub use window_position::{DockEdge, WindowPositionInfo};
