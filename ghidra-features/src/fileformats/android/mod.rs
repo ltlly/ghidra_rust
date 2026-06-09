@@ -5,6 +5,7 @@
 //! Covers: DEX, OAT, VDEX, ART, boot image, boot loader, APEX,
 //! FBPK, LZ4, profiler, and other Android runtime formats.
 
+pub mod art;
 pub mod bootimg;
 pub mod dex_class_def;
 pub mod dex_format;

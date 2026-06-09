@@ -41,6 +41,8 @@ pub mod pdb_reader;
 pub mod default_pdb_import_options;
 pub mod pdb_plugin;
 pub mod msf_file;
+pub mod symbol;
+pub mod type_record;
 
 use std::fmt;
 
