@@ -9,8 +9,21 @@
 //!
 //! Sub-modules:
 //! - [`xref_table`] -- tabular display model for xrefs and reference change tracking
+//! - [`cross_references_plugin`] -- top-level plugin coordinating cross-reference providers
+//! - [`cross_references_provider`] -- component providers for viewing/editing xrefs
 
 pub mod xref_table;
+
+/// Cross References Plugin -- top-level plugin coordinating cross-reference providers.
+///
+/// Ported from `ghidra.app.plugin.core.references.ReferencesPlugin`.
+pub mod cross_references_plugin;
+
+/// Cross References Provider -- component providers for viewing/editing xrefs.
+///
+/// Ported from `ghidra.app.plugin.core.references.EditReferencesProvider`
+/// and `ghidra.app.plugin.core.references.ExternalReferencesProvider`.
+pub mod cross_references_provider;
 
 use ghidra_core::addr::Address;
 use ghidra_core::symbol::{RefType, Reference, ReferenceManager, SourceType};

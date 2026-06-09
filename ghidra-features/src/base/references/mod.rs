@@ -39,6 +39,8 @@ pub mod instruction_listener;
 pub mod offset_table;
 pub mod plugin;
 pub mod ref_type_factory;
+pub mod references_plugin;
+pub mod references_provider;
 
 pub use commands::{
     AddMemRefCmd, AddOffsetMemRefCmd, AddRegisterRefCmd, AddStackRefCmd, EditRefTypeCmd,
@@ -57,6 +59,12 @@ pub use instruction_info::InstructionOperandInfo;
 pub use offset_table::OffsetTablePlugin;
 pub use plugin::{ReferencesPlugin, ReferencesPluginState};
 pub use ref_type_factory::RefTypeFactory;
+pub use references_plugin::{
+    PluginLifecycle, ReferenceEvent, ReferencesOrchestratorState, ReferencesPluginOrchestrator,
+};
+pub use references_provider::{
+    RefsActionEnablement, ReferencesProvider, ReferencesProviderConfig, ReferencesProviderState,
+};
 pub use action_ext::{
     AddReferenceAction, DeleteAllReferencesAction, OffsetTableAction, ReferenceDirection,
     ShowReferencesAction,

@@ -24,6 +24,8 @@
 pub mod cmd;
 pub mod plugin;
 pub mod rename_cmd;
+pub mod rename_dialog;
+pub mod rename_plugin;
 
 pub use cmd::{
     is_default_function_name, is_default_label_name, validate_symbol_name, RenameAndMoveCmd,
@@ -31,6 +33,12 @@ pub use cmd::{
     MAX_SYMBOL_NAME_LENGTH,
 };
 pub use plugin::{RenameAction, RenameActionContext, RenamePlugin};
+pub use rename_dialog::{
+    RenameDialog, RenameDialogManager, RenameDialogMode, RenameDialogResult,
+};
+pub use rename_plugin::{
+    RenameHistory, RenameHistoryEntry, RenamePluginOptions, RenameServicePlugin,
+};
 
 #[cfg(test)]
 mod tests {

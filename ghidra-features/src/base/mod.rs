@@ -45,6 +45,8 @@ pub mod memory;
 pub mod merge;
 pub mod navigation;
 pub mod operand;
+pub mod operandfield;
+pub mod properties;
 pub mod property;
 pub mod references;
 pub mod register;
