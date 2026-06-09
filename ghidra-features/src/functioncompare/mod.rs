@@ -12,6 +12,14 @@
 //! - [`ComparisonContext`] -- Context carrying source and target function info
 //! - [`ApplyResult`] -- Result of an apply operation
 //! - [`FunctionComparisonPlugin`] -- Plugin providing comparison actions
+//!
+//! # Submodules
+//!
+//! - [`function_compare_plugin`] -- Plugin managing comparison providers
+//! - [`function_compare_provider`] -- Dockable provider for displaying comparisons
+
+pub mod function_compare_plugin;
+pub mod function_compare_provider;
 
 /// Help topic for function comparison.
 pub const HELP_TOPIC: &str = "FunctionComparison";

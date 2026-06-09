@@ -54,6 +54,8 @@ pub mod pcode_features;
 pub mod pcode_branch;
 pub mod pcode_code_member_visitor;
 pub mod work_item;
+pub mod lisa_analyzer;
+pub mod lisa_plugin;
 
 pub use analyses::PcodeDataflowConstantPropagation;
 pub use analyses::PcodeInterval;
@@ -72,3 +74,11 @@ pub use pcode_frontend::{PcodeFrontend, PcodeOp};
 pub use pcode_features::PcodeFeatures;
 pub use pcode_branch::{PcodeBranch, BranchKind};
 pub use work_item::WorkItem;
+pub use lisa_analyzer::{
+    AnalysisConfig, AnalysisResult, HeapDomainOption, InterproceduralOption,
+    LisaAnalyzer, MarkType, StatementState, TaintMarker, TypeDomainOption, ValueDomainOption,
+};
+pub use lisa_plugin::{
+    AddCfgsAction, ClearCfgsAction, FunctionInfo, LisaPlugin, LisaPluginOptions, PluginEvent,
+    SetTaintAction,
+};

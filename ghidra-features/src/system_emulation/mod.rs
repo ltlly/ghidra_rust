@@ -17,7 +17,11 @@
 pub mod pcode_emu;
 pub mod syscall;
 pub mod structured_sleigh;
+pub mod emu_system_analyzer;
+pub mod emu_system_plugin;
 
 pub use pcode_emu::*;
 pub use syscall::*;
 pub use structured_sleigh::*;
+pub use emu_system_analyzer::*;
+pub use emu_system_plugin::*;
