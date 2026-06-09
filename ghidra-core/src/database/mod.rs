@@ -79,11 +79,11 @@ pub use db::{
     LruCache, NoopDbListener, UndoEntry, DBListener,
 };
 // Re-export from new modules
-pub use db_handle::{DBHandle, PooledConnection};
+pub use db_handle::{DBHandle, DBHandleListener, NoopDBHandleListener, PooledConnection};
 pub use db_record::DBRecord;
 pub use long_key_index::LongKeyIndex;
 pub use schema::{Field, Schema};
-pub use table::Table;
+pub use table::{SecondaryIndex, Table};
 pub use transaction::{
     NoopTransactionListener, SavepointGuard, Transaction, TransactionListener, TransactionOpenMode,
 };

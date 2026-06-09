@@ -110,9 +110,10 @@ pub mod window_position;
 // convenience.
 pub use action::{
     ActionCallback, ActionContext, ActionContextInfo, ActionDisplayLevel, ActionGroup,
-    ActionProperty, ActionPropertyChangeEvent, ActionType, ContextActionCallback, DockingAction,
-    GuiActionManager, Key, KeyBinding, KeyBindingType, MenuBarData, Modifiers, PopupMenuData,
-    PropertyChangeCallback, ToolBarData, UndoEntry,
+    ActionProperty, ActionPropertyChangeEvent, ActionType, ComponentBasedDockingAction,
+    ContextActionCallback, ContextSpecificAction, DockingAction, GuiActionManager, Key,
+    KeyBinding, KeyBindingData, KeyBindingDataPrecedence, KeyBindingType, MenuBarData, Modifiers,
+    MultiAction, PopupMenuData, PropertyChangeCallback, ToolBarData, UndoEntry,
 };
 pub use actions::{
     ClosurePopupProvider, DockingActionProxy, DockingToolActions, MenuBarManager,
@@ -147,12 +148,15 @@ pub use action::{Action as ActionTrait, KeyBindableAction, ToggleAction};
 pub use action_context::DockingActionContext;
 pub use component_provider::{
     ComponentProvider as ComponentProviderTrait, ComponentProviderState,
+    ShowProviderActionState, get_mapped_name, get_mapped_owner,
+    register_provider_name_owner_change,
 };
 pub use dialog_component_provider::DialogComponentProvider as DialogComponentProviderTrait;
 pub use dockable_component::DockableComponent;
 pub use docking_tool::{
     DockingContextListener as ToolContextListener, DockingTool as DockingToolTrait,
-    DockingToolEvent, DockingToolEventCallback, DockingToolService, PopupActionProvider,
+    DockingToolConfig, DockingToolEvent, DockingToolEventCallback, DockingToolInfo,
+    DockingToolService, PopupActionProvider,
 };
 pub use drop_target_handler::{DropRegionVisual, DropTargetHandler};
 pub use window_position::{DockEdge, WindowPositionInfo};

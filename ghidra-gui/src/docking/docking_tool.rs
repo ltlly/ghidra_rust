@@ -554,6 +554,160 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
 }
 
 // ---------------------------------------------------------------------------
+// DockingToolConfig — tool configuration state
+// ---------------------------------------------------------------------------
+
+/// Configuration and option state for a docking tool.
+///
+/// Port of Ghidra's `ToolOptions` and related configuration concepts.
+/// This struct provides a simple key-value store for tool options organized
+/// by category.
+#[derive(Debug, Clone, Default)]
+pub struct DockingToolConfig {
+    /// Tool-wide options organized as (category, key) -> value.
+    options: std::collections::BTreeMap<(String, String), String>,
+    /// Tool-wide properties.
+    properties: std::collections::BTreeMap<String, String>,
+    /// Whether the configuration has been modified since last save.
+    config_changed: bool,
+    /// The tool's icon identifier.
+    icon: Option<String>,
+}
+
+impl DockingToolConfig {
+    /// Create a new empty configuration.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set an option value for the given category and key.
+    pub fn set_option(&mut self, category: &str, key: &str, value: &str) {
+        self.options
+            .insert((category.to_owned(), key.to_owned()), value.to_owned());
+        self.config_changed = true;
+    }
+
+    /// Get an option value for the given category and key.
+    pub fn get_option(&self, category: &str, key: &str) -> Option<&str> {
+        self.options
+            .get(&(category.to_owned(), key.to_owned()))
+            .map(|s| s.as_str())
+    }
+
+    /// Remove an option value for the given category and key.
+    pub fn remove_option(&mut self, category: &str, key: &str) -> Option<String> {
+        let removed = self
+            .options
+            .remove(&(category.to_owned(), key.to_owned()));
+        if removed.is_some() {
+            self.config_changed = true;
+        }
+        removed
+    }
+
+    /// Get all option keys for a given category.
+    pub fn option_keys_in_category(&self, category: &str) -> Vec<&str> {
+        self.options
+            .keys()
+            .filter(|(cat, _)| cat == category)
+            .map(|(_, key)| key.as_str())
+            .collect()
+    }
+
+    /// Get all categories that have options.
+    pub fn categories(&self) -> Vec<&str> {
+        let mut cats: Vec<&str> = self
+            .options
+            .keys()
+            .map(|(cat, _)| cat.as_str())
+            .collect();
+        cats.sort();
+        cats.dedup();
+        cats
+    }
+
+    /// Set a tool-wide property.
+    pub fn set_property(&mut self, key: &str, value: &str) {
+        self.properties.insert(key.to_owned(), value.to_owned());
+    }
+
+    /// Get a tool-wide property.
+    pub fn get_property(&self, key: &str) -> Option<&str> {
+        self.properties.get(key).map(|s| s.as_str())
+    }
+
+    /// Remove a tool-wide property.
+    pub fn remove_property(&mut self, key: &str) -> Option<String> {
+        self.properties.remove(key)
+    }
+
+    /// Get the tool's icon identifier.
+    pub fn icon(&self) -> Option<&str> {
+        self.icon.as_deref()
+    }
+
+    /// Set the tool's icon.
+    pub fn set_icon(&mut self, icon: impl Into<String>) {
+        self.icon = Some(icon.into());
+    }
+
+    /// Whether the configuration has unsaved changes.
+    pub fn has_config_changed(&self) -> bool {
+        self.config_changed
+    }
+
+    /// Set the config changed flag.
+    pub fn set_config_changed(&mut self, changed: bool) {
+        self.config_changed = changed;
+    }
+
+    /// Mark the configuration as saved.
+    pub fn mark_saved(&mut self) {
+        self.config_changed = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DockingToolInfo — tool metadata
+// ---------------------------------------------------------------------------
+
+/// Metadata about a docking tool, returned by queries.
+///
+/// Port of Ghidra's tool metadata concepts.  This is useful for tool
+/// management and serialization.
+#[derive(Debug, Clone)]
+pub struct DockingToolInfo {
+    /// The tool name.
+    pub name: String,
+    /// The active project, if any.
+    pub project: Option<String>,
+    /// The active program, if any.
+    pub program: Option<String>,
+    /// The icon identifier, if any.
+    pub icon: Option<String>,
+    /// Number of registered global actions.
+    pub global_action_count: usize,
+    /// Number of registered component providers.
+    pub provider_count: usize,
+    /// Whether the tool has unsaved configuration changes.
+    pub config_changed: bool,
+}
+
+impl fmt::Display for DockingToolInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Tool[name={}, project={}, program={}, actions={}, providers={}]",
+            self.name,
+            self.project.as_deref().unwrap_or("(none)"),
+            self.program.as_deref().unwrap_or("(none)"),
+            self.global_action_count,
+            self.provider_count,
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -743,5 +897,222 @@ mod tests {
         let cb = DockingToolEventCallback::new(|_| {});
         let dbg = format!("{:?}", cb);
         assert!(dbg.contains("DockingToolEventCallback"));
+    }
+
+    // -- DockingToolConfig tests --
+
+    #[test]
+    fn test_tool_config_new() {
+        let config = DockingToolConfig::new();
+        assert!(!config.has_config_changed());
+        assert!(config.icon().is_none());
+        assert!(config.categories().is_empty());
+    }
+
+    #[test]
+    fn test_tool_config_options() {
+        let mut config = DockingToolConfig::new();
+        config.set_option("Browser", "font-size", "14");
+        config.set_option("Browser", "theme", "dark");
+        config.set_option("Editor", "tab-size", "4");
+
+        assert_eq!(config.get_option("Browser", "font-size"), Some("14"));
+        assert_eq!(config.get_option("Browser", "theme"), Some("dark"));
+        assert_eq!(config.get_option("Editor", "tab-size"), Some("4"));
+        assert_eq!(config.get_option("Browser", "missing"), None);
+        assert!(config.has_config_changed());
+    }
+
+    #[test]
+    fn test_tool_config_remove_option() {
+        let mut config = DockingToolConfig::new();
+        config.set_option("Cat", "key", "value");
+        assert_eq!(config.remove_option("Cat", "key"), Some("value".to_owned()));
+        assert_eq!(config.get_option("Cat", "key"), None);
+        assert_eq!(config.remove_option("Cat", "key"), None);
+    }
+
+    #[test]
+    fn test_tool_config_categories() {
+        let mut config = DockingToolConfig::new();
+        config.set_option("Browser", "font-size", "14");
+        config.set_option("Editor", "tab-size", "4");
+        config.set_option("Browser", "theme", "dark");
+
+        let cats = config.categories();
+        assert_eq!(cats.len(), 2);
+        assert!(cats.contains(&"Browser"));
+        assert!(cats.contains(&"Editor"));
+    }
+
+    #[test]
+    fn test_tool_config_option_keys_in_category() {
+        let mut config = DockingToolConfig::new();
+        config.set_option("Browser", "font-size", "14");
+        config.set_option("Browser", "theme", "dark");
+
+        let keys = config.option_keys_in_category("Browser");
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"font-size"));
+        assert!(keys.contains(&"theme"));
+
+        assert!(config.option_keys_in_category("Missing").is_empty());
+    }
+
+    #[test]
+    fn test_tool_config_properties() {
+        let mut config = DockingToolConfig::new();
+        config.set_property("workspace", "default");
+        assert_eq!(config.get_property("workspace"), Some("default"));
+        assert_eq!(config.get_property("missing"), None);
+
+        let removed = config.remove_property("workspace");
+        assert_eq!(removed, Some("default".to_owned()));
+        assert!(config.get_property("workspace").is_none());
+    }
+
+    #[test]
+    fn test_tool_config_icon() {
+        let mut config = DockingToolConfig::new();
+        assert!(config.icon().is_none());
+
+        config.set_icon("ghidra-icon");
+        assert_eq!(config.icon(), Some("ghidra-icon"));
+    }
+
+    #[test]
+    fn test_tool_config_changed() {
+        let mut config = DockingToolConfig::new();
+        assert!(!config.has_config_changed());
+
+        config.set_config_changed(true);
+        assert!(config.has_config_changed());
+
+        config.mark_saved();
+        assert!(!config.has_config_changed());
+    }
+
+    // -- DockingToolInfo tests --
+
+    #[test]
+    fn test_tool_info_display() {
+        let info = DockingToolInfo {
+            name: "CodeBrowser".into(),
+            project: Some("my-project".into()),
+            program: Some("test.exe".into()),
+            icon: Some("ghidra".into()),
+            global_action_count: 42,
+            provider_count: 5,
+            config_changed: false,
+        };
+        let display = info.to_string();
+        assert!(display.contains("CodeBrowser"));
+        assert!(display.contains("my-project"));
+        assert!(display.contains("test.exe"));
+        assert!(display.contains("42"));
+        assert!(display.contains("5"));
+    }
+
+    #[test]
+    fn test_tool_info_none_fields() {
+        let info = DockingToolInfo {
+            name: "EmptyTool".into(),
+            project: None,
+            program: None,
+            icon: None,
+            global_action_count: 0,
+            provider_count: 0,
+            config_changed: true,
+        };
+        let display = info.to_string();
+        assert!(display.contains("(none)"));
+        assert!(display.contains("EmptyTool"));
+    }
+
+    // -- MockTool extended tests for new default methods --
+
+    #[test]
+    fn test_tool_trait_options() {
+        let tool = MockTool::new();
+        // Default implementations return None/empty.
+        assert_eq!(tool.get_option("cat", "key"), None);
+        assert!(tool.service_names().is_empty());
+        assert!(!tool.has_service("svc"));
+        assert_eq!(tool.get_status_info(), "");
+        assert!(tool.icon().is_none());
+    }
+
+    #[test]
+    fn test_tool_trait_visibility() {
+        let mut tool = MockTool::new();
+        assert!(tool.is_tool_visible());
+        tool.set_tool_visible(false); // no-op by default
+        assert!(tool.is_tool_visible());
+    }
+
+    #[test]
+    fn test_tool_trait_active_provider() {
+        let tool = MockTool::new();
+        // Default get_active_component_provider delegates to get_focused.
+        assert!(tool.get_active_component_provider().is_none());
+        assert!(!tool.is_active(&ProviderType::Console, "console"));
+    }
+
+    #[test]
+    fn test_tool_trait_window_manager_actions() {
+        let tool = MockTool::new();
+        assert!(tool.window_manager_id().is_none());
+        assert!(tool.tool_actions_id().is_none());
+    }
+
+    #[test]
+    fn test_tool_trait_config() {
+        let tool = MockTool::new();
+        assert!(!tool.has_config_changed());
+    }
+
+    // -- PopupActionProvider test --
+
+    #[derive(Debug)]
+    struct MockPopupProvider;
+
+    impl PopupActionProvider for MockPopupProvider {
+        fn contribute_popup_actions(&self, _ctx: &DockingActionContext) -> Vec<DockingAction> {
+            vec![DockingAction::new("popup-action", "Popup Action")]
+        }
+    }
+
+    #[test]
+    fn test_popup_action_provider() {
+        let provider = MockPopupProvider;
+        let ctx = DockingActionContext::new();
+        let actions = provider.contribute_popup_actions(&ctx);
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].name, "popup-action");
+    }
+
+    // -- DockingContextListener test --
+
+    #[derive(Debug)]
+    struct MockContextListener {
+        called: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl DockingContextListener for MockContextListener {
+        fn context_changed(&self, _ctx: &DockingActionContext) {
+            self.called.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn test_docking_context_listener() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let flag = Arc::new(AtomicBool::new(false));
+        let listener = MockContextListener { called: flag.clone() };
+        let ctx = DockingActionContext::new();
+        listener.context_changed(&ctx);
+        assert!(flag.load(Ordering::SeqCst));
     }
 }

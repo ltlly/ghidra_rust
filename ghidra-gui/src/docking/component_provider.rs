@@ -10,8 +10,10 @@
 //! well-known provider *types*; this trait describes the behaviour of a
 //! provider *instance*.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use super::action::{DockingAction, KeyBinding, KeyBindingType, ToolBarData};
 use super::action_context::DockingActionContext;
@@ -519,6 +521,180 @@ impl ComponentProviderState {
     pub fn instance_key(&self) -> (super::component::ComponentProvider, String) {
         (self.provider_type, self.name.clone())
     }
+
+    // -- Font management (Port of Ghidra's ComponentProvider.adjustFontSize) --
+
+    /// Adjust the font size for this provider's registered font.
+    ///
+    /// Port of Ghidra's `ComponentProvider.adjustFontSize(boolean)`.
+    /// Returns the new font size, or `None` if no font is registered.
+    pub fn adjust_font_size(&self, current_size: f32, bigger: bool) -> Option<f32> {
+        if self.registered_font_id.is_none() {
+            return None;
+        }
+        let new_size = if bigger {
+            current_size + 1.0
+        } else {
+            (current_size - 1.0).max(3.0)
+        };
+        Some(new_size)
+    }
+
+    /// Whether this provider has a registered adjustable font.
+    pub fn has_registered_font(&self) -> bool {
+        self.registered_font_id.is_some()
+    }
+
+    // -- Show provider action with frustration detection --
+
+    /// Create the "show provider" action with frustration detection support.
+    ///
+    /// Port of Ghidra's `ComponentProvider.ShowProviderAction` inner class.
+    /// The action toggles visibility on click, and when the user is rapidly
+    /// clicking (frustrated), it emphasizes the window instead.
+    pub fn create_show_provider_action_with_frustration(&self) -> (DockingAction, ShowProviderActionState) {
+        let supports_key_bindings = !self.is_transient;
+        let key_binding_type = if supports_key_bindings {
+            KeyBindingType::Shared
+        } else {
+            KeyBindingType::Unsupported
+        };
+
+        let mut action = DockingAction::with_key_binding_type(
+            &self.name,
+            &self.owner,
+            format!("Display {}", self.name),
+            key_binding_type,
+        )
+        .with_description(format!("Display {}", self.name));
+
+        if self.add_toolbar_action {
+            if let Some(ref icon) = self.icon {
+                action = action.with_tool_bar_data(ToolBarData::new(icon));
+            }
+        }
+
+        if supports_key_bindings {
+            if let Some(ref kb) = self.default_key_binding {
+                action = action.with_key_binding(kb.clone());
+            }
+        }
+
+        let state = ShowProviderActionState::new();
+        (action, state)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ShowProviderActionState — frustration tracking for show provider actions
+// ---------------------------------------------------------------------------
+
+/// State for tracking user frustration (rapid clicking) on a show-provider action.
+///
+/// Port of Ghidra's `ComponentProvider.ShowProviderAction` click tracking.
+/// When the user rapidly clicks the same show-provider action, the provider
+/// should be emphasized (animated) rather than toggled.
+#[derive(Debug)]
+pub struct ShowProviderActionState {
+    /// Recent click timestamps (in milliseconds since epoch).
+    click_times: Mutex<Vec<i64>>,
+    /// Time window in milliseconds for tracking rapid clicks.
+    time_window: i64,
+    /// Click threshold to consider the user "frustrated".
+    frustration_threshold: usize,
+}
+
+impl ShowProviderActionState {
+    /// Create a new state with default settings.
+    pub fn new() -> Self {
+        Self {
+            click_times: Mutex::new(Vec::new()),
+            time_window: 2000,
+            frustration_threshold: 2,
+        }
+    }
+
+    /// Record a click at the given timestamp (milliseconds).
+    ///
+    /// Returns `true` if the user is considered frustrated (rapid clicking).
+    pub fn record_click(&self, now_ms: i64) -> bool {
+        let mut times = self.click_times.lock().unwrap();
+        times.push(now_ms);
+        let cutoff = now_ms - self.time_window;
+        times.retain(|&t| t > cutoff);
+        times.len() > self.frustration_threshold
+    }
+
+    /// Whether the user is currently frustrated (without recording a new click).
+    pub fn is_frustrated(&self, now_ms: i64) -> bool {
+        let times = self.click_times.lock().unwrap();
+        let cutoff = now_ms - self.time_window;
+        let recent_count = times.iter().filter(|&&t| t > cutoff).count();
+        recent_count > self.frustration_threshold
+    }
+
+    /// Reset the click history.
+    pub fn reset(&self) {
+        let mut times = self.click_times.lock().unwrap();
+        times.clear();
+    }
+}
+
+impl Default for ShowProviderActionState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Provider name/owner change mapping (static registry)
+// ---------------------------------------------------------------------------
+
+/// Static registry for provider name/owner changes, used during layout
+/// restoration to map old provider names to new ones.
+///
+/// Port of Ghidra's `ComponentProvider.registerProviderNameOwnerChange`.
+
+fn provider_name_map() -> &'static Mutex<HashMap<String, (String, String)>> {
+    static MAP: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+    MAP.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn make_key(old_owner: &str, old_name: &str) -> String {
+    format!("owner={}name={}", old_owner, old_name)
+}
+
+/// Register a name and/or owner change for a provider.  This allows old
+/// saved layouts to correctly restore provider windows after a rename.
+///
+/// Port of Ghidra's `ComponentProvider.registerProviderNameOwnerChange`.
+pub fn register_provider_name_owner_change(
+    old_name: &str,
+    old_owner: &str,
+    new_name: &str,
+    new_owner: &str,
+) {
+    let key = make_key(old_owner, old_name);
+    let mut map = provider_name_map().lock().unwrap();
+    map.insert(key, (new_name.to_owned(), new_owner.to_owned()));
+}
+
+/// Get the mapped owner for a given old owner/name pair.
+///
+/// Port of Ghidra's `ComponentProvider.getMappedOwner`.
+pub fn get_mapped_owner(old_owner: &str, old_name: &str) -> Option<String> {
+    let key = make_key(old_owner, old_name);
+    let map = provider_name_map().lock().unwrap();
+    map.get(&key).map(|(_, owner)| owner.clone())
+}
+
+/// Get the mapped name for a given old owner/name pair.
+///
+/// Port of Ghidra's `ComponentProvider.getMappedName`.
+pub fn get_mapped_name(old_owner: &str, old_name: &str) -> Option<String> {
+    let key = make_key(old_owner, old_name);
+    let map = provider_name_map().lock().unwrap();
+    map.get(&key).map(|(name, _)| name.clone())
 }
 
 /// The trait that every dockable component provider implements.
@@ -690,6 +866,21 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
         false
     }
 
+    /// Get the action context for this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.getActionContext(MouseEvent)`.
+    /// Returns `None` when there is no context available.
+    fn get_action_context(&self) -> Option<DockingActionContext> {
+        None
+    }
+
+    /// The context class name this provider supports.
+    ///
+    /// Port of Ghidra's `ComponentProvider.getContextType()`.
+    fn context_type(&self) -> Option<&str> {
+        None
+    }
+
     /// Whether this provider should be shown by default in new tools.
     fn is_default_provider(&self) -> bool {
         false
@@ -845,13 +1036,6 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
     /// Port of Ghidra's `ComponentProvider.setWindowMenuGroup(String)`.
     fn set_window_menu_group(&mut self, _group: &str) {}
 
-    /// The context type class name this provider supports.
-    ///
-    /// Port of Ghidra's `ComponentProvider.getContextType()`.
-    fn context_type(&self) -> Option<&str> {
-        None
-    }
-
     // -- Focus --
 
     /// Whether this provider is the currently focused provider.
@@ -884,6 +1068,41 @@ pub trait ComponentProvider: fmt::Debug + Send + Sync {
     ///
     /// Port of Ghidra's `ComponentProvider.componentMadeDisplayable()`.
     fn component_made_displayable(&self) {}
+
+    // -- Font management --
+
+    /// Get the registered font ID for this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.registerAdjustableFontId`.
+    fn registered_font_id(&self) -> Option<&str> {
+        None
+    }
+
+    /// Register a font ID for automatic font size adjustments.
+    ///
+    /// Port of Ghidra's `ComponentProvider.registerAdjustableFontId`.
+    fn register_adjustable_font_id(&mut self, _font_id: &str) {}
+
+    /// Adjust the font size for this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.adjustFontSize(boolean)`.
+    /// Returns the new font size if a font is registered, `None` otherwise.
+    fn adjust_font_size(&self, current_size: f32, bigger: bool) -> Option<f32> {
+        if self.registered_font_id().is_none() {
+            return None;
+        }
+        let new_size = if bigger {
+            current_size + 1.0
+        } else {
+            (current_size - 1.0).max(3.0)
+        };
+        Some(new_size)
+    }
+
+    /// Whether this provider has a registered adjustable font.
+    fn has_registered_font(&self) -> bool {
+        self.registered_font_id().is_some()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1253,5 +1472,133 @@ mod tests {
 
         state.set_intra_group_position(WindowPosition::Bottom);
         assert_eq!(state.intra_group_position(), &WindowPosition::Bottom);
+    }
+
+    // -- Provider name/owner mapping tests --
+
+    #[test]
+    fn test_provider_name_owner_change_mapping() {
+        // Clean up any prior registrations for this key.
+        let key_old = "OldOwner";
+        let key_old_name = "OldName";
+
+        register_provider_name_owner_change(
+            key_old_name,
+            key_old,
+            "NewName",
+            "NewOwner",
+        );
+
+        assert_eq!(
+            get_mapped_owner(key_old, key_old_name),
+            Some("NewOwner".to_owned())
+        );
+        assert_eq!(
+            get_mapped_name(key_old, key_old_name),
+            Some("NewName".to_owned())
+        );
+
+        // Non-existent key returns None.
+        assert!(get_mapped_owner("nope", "nope").is_none());
+        assert!(get_mapped_name("nope", "nope").is_none());
+    }
+
+    // -- ShowProviderActionState tests --
+
+    #[test]
+    fn test_show_provider_action_state() {
+        let state = ShowProviderActionState::new();
+        assert!(!state.is_frustrated(0));
+
+        // First click - not frustrated (1 click).
+        assert!(!state.record_click(1000));
+        // Second click - not frustrated (2 clicks).
+        assert!(!state.record_click(1100));
+        // Third click - now frustrated (3 clicks > threshold of 2).
+        assert!(state.record_click(1200));
+    }
+
+    #[test]
+    fn test_show_provider_action_state_reset() {
+        let state = ShowProviderActionState::new();
+        state.record_click(1000);
+        state.record_click(1100);
+        state.reset();
+        assert!(!state.is_frustrated(1200));
+    }
+
+    #[test]
+    fn test_show_provider_action_state_time_window() {
+        let state = ShowProviderActionState::new();
+        // Clicks outside the time window should not count.
+        assert!(!state.record_click(1000));
+        assert!(!state.record_click(1100));
+        // Old clicks should expire.
+        assert!(!state.is_frustrated(5000));
+    }
+
+    // -- Font management on ComponentProviderState tests --
+
+    #[test]
+    fn test_provider_state_adjust_font_size() {
+        let state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+        // No registered font -> returns None.
+        assert!(state.adjust_font_size(12.0, true).is_none());
+    }
+
+    #[test]
+    fn test_provider_state_adjust_font_size_registered() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+        state.register_adjustable_font_id("font.listing");
+        assert!(state.has_registered_font());
+
+        let new_size = state.adjust_font_size(12.0, true);
+        assert_eq!(new_size, Some(13.0));
+
+        let new_size = state.adjust_font_size(12.0, false);
+        assert_eq!(new_size, Some(11.0));
+
+        // Minimum font size is 3.
+        let new_size = state.adjust_font_size(3.0, false);
+        assert_eq!(new_size, Some(3.0));
+    }
+
+    // -- Show provider action with frustration tests --
+
+    #[test]
+    fn test_provider_state_show_action_with_frustration() {
+        let mut state = ComponentProviderState::new("MyView", "MyPlugin", ProviderType::Console);
+        state.set_icon("icon/myview.png");
+        state.set_add_toolbar_action(true);
+
+        let (action, frustration_state) = state.create_show_provider_action_with_frustration();
+        assert_eq!(action.name, "MyView");
+        assert!(action.tool_bar_data.is_some());
+        assert!(!frustration_state.is_frustrated(0));
+    }
+
+    // -- ComponentProvider trait new method tests --
+
+    #[test]
+    fn test_provider_trait_font_methods() {
+        #[derive(Debug)]
+        struct MockProvider;
+        impl ComponentProvider for MockProvider {
+            fn name(&self) -> &str { "mock" }
+            fn window_title(&self) -> &str { "Mock" }
+            fn is_visible(&self) -> bool { false }
+            fn show(&mut self) {}
+            fn hide(&mut self) {}
+            fn instance_key(&self) -> (ProviderType, String) {
+                (ProviderType::Console, "mock".to_owned())
+            }
+            fn provider_type(&self) -> ProviderType { ProviderType::Console }
+        }
+
+        let p = MockProvider;
+        assert!(!p.has_registered_font());
+        assert!(p.adjust_font_size(12.0, true).is_none());
+        assert!(p.registered_font_id().is_none());
+        assert!(p.get_action_context().is_none());
     }
 }

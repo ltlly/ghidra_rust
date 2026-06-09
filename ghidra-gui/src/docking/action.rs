@@ -397,6 +397,119 @@ pub enum ActionType {
 }
 
 // ---------------------------------------------------------------------------
+// KeyBindingDataPrecedence — determines the priority of key binding dispatch
+// ---------------------------------------------------------------------------
+
+/// The precedence level for key binding data, controlling dispatch priority.
+///
+/// Port of Ghidra's `docking.KeyBindingPrecedence` as used by
+/// `KeyBindingData`.  Actions with higher precedence are checked first
+/// when dispatching key strokes.  This is distinct from the
+/// [`super::keybinding::KeyBindingPrecedence`] which controls action-level
+/// dispatch ordering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+pub enum KeyBindingDataPrecedence {
+    /// Default precedence for user-defined key bindings.
+    #[default]
+    DefaultLevel,
+    /// Active window precedence — key bindings in the active window are
+    /// checked before default ones.
+    ActiveWindowLevel,
+    /// System actions level — reserved keybindings that cannot be changed
+    /// by the user and have the highest precedence.
+    SystemActionsLevel,
+}
+
+impl KeyBindingDataPrecedence {
+    /// Returns `true` if this precedence supports user-assigned key bindings.
+    ///
+    /// `SystemActionsLevel` key bindings cannot be set by the user.
+    pub fn supports_user_key_bindings(&self) -> bool {
+        !matches!(self, KeyBindingDataPrecedence::SystemActionsLevel)
+    }
+}
+
+impl fmt::Display for KeyBindingDataPrecedence {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            KeyBindingDataPrecedence::DefaultLevel => write!(f, "DefaultLevel"),
+            KeyBindingDataPrecedence::ActiveWindowLevel => write!(f, "ActiveWindowLevel"),
+            KeyBindingDataPrecedence::SystemActionsLevel => write!(f, "SystemActionsLevel"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// KeyBindingData — stores key stroke and/or mouse binding for an action
+// ---------------------------------------------------------------------------
+
+/// Data for an action's key stroke and/or mouse binding.
+///
+/// Port of Ghidra's `docking.action.KeyBindingData`.  Stores a key binding
+/// along with its precedence level and an optional mouse binding.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct KeyBindingData {
+    /// The key binding (modifiers + key).
+    pub key_binding: KeyBinding,
+    /// The precedence level for this key binding.
+    pub precedence: KeyBindingDataPrecedence,
+    /// Optional mouse binding identifier (for gesture-based actions).
+    pub mouse_binding: Option<String>,
+}
+
+impl KeyBindingData {
+    /// Create a key binding data with default precedence.
+    pub fn new(key_binding: KeyBinding) -> Self {
+        Self {
+            key_binding,
+            precedence: KeyBindingDataPrecedence::DefaultLevel,
+            mouse_binding: None,
+        }
+    }
+
+    /// Create a key binding data with a specific precedence.
+    pub fn with_precedence(key_binding: KeyBinding, precedence: KeyBindingDataPrecedence) -> Self {
+        Self {
+            key_binding,
+            precedence,
+            mouse_binding: None,
+        }
+    }
+
+    /// Create a system-level key binding that cannot be changed by the user.
+    ///
+    /// Port of Ghidra's `KeyBindingData.createSystemKeyBindingData`.
+    pub fn system(key_binding: KeyBinding) -> Self {
+        Self {
+            key_binding,
+            precedence: KeyBindingDataPrecedence::SystemActionsLevel,
+            mouse_binding: None,
+        }
+    }
+
+    /// Set a mouse binding identifier.
+    pub fn with_mouse_binding(mut self, binding: impl Into<String>) -> Self {
+        self.mouse_binding = Some(binding.into());
+        self
+    }
+
+    /// Whether this key binding can be changed by the user.
+    pub fn supports_user_changes(&self) -> bool {
+        self.precedence.supports_user_key_bindings()
+    }
+}
+
+impl fmt::Display for KeyBindingData {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "KeyBindingData[key={}, precedence={}]",
+            self.key_binding, self.precedence
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
 // KeyBindingType — controls key binding support per action
 // ---------------------------------------------------------------------------
 
@@ -512,6 +625,11 @@ impl PopupMenuData {
             .as_deref()
             .or_else(|| self.menu_path.last().map(|s| s.as_str()))
             .unwrap_or("")
+    }
+
+    /// The full menu path as a joined string.
+    pub fn path_string(&self) -> String {
+        self.menu_path.join(" > ")
     }
 }
 
@@ -700,6 +818,27 @@ pub struct DockingAction {
     ///
     /// Port of Ghidra's `DockingActionIf.getOwnerDescription()`.
     pub owner_description: Option<String>,
+    /// Whether this action should be added to all windows (not just the main one).
+    ///
+    /// Port of Ghidra's `DockingAction.shouldAddToAllWindows`.
+    pub add_to_all_windows: bool,
+    /// When set, the action is only added to windows that contain providers
+    /// producing an `ActionContext` matching this class name.
+    ///
+    /// Port of Ghidra's `DockingAction.addToWindowWhenContextClass`.
+    pub add_to_window_when_context_class: Option<String>,
+    /// The default key binding data (set once, not changed by the user).
+    ///
+    /// Port of Ghidra's `DockingAction.defaultKeyBindingData`.
+    pub default_key_binding_data: Option<KeyBindingData>,
+    /// The current key binding data (may be changed by the user).
+    ///
+    /// Port of Ghidra's `DockingAction.keyBindingData`.
+    pub key_binding_data: Option<KeyBindingData>,
+    /// Inception information — where this action was created (for debugging).
+    ///
+    /// Port of Ghidra's `DockingAction.inceptionInformation`.
+    pub inception_information: Option<String>,
 }
 
 impl fmt::Debug for DockingAction {
@@ -727,6 +866,10 @@ impl fmt::Debug for DockingAction {
             .field("context_class", &self.context_class)
             .field("supports_default_context", &self.supports_default_context)
             .field("owner_description", &self.owner_description)
+            .field("add_to_all_windows", &self.add_to_all_windows)
+            .field("add_to_window_when_context_class", &self.add_to_window_when_context_class)
+            .field("key_binding_data", &self.key_binding_data)
+            .field("inception_information", &self.inception_information)
             .finish()
     }
 }
@@ -752,6 +895,9 @@ impl PartialEq for DockingAction {
             && self.context_class == other.context_class
             && self.supports_default_context == other.supports_default_context
             && self.owner_description == other.owner_description
+            && self.add_to_all_windows == other.add_to_all_windows
+            && self.add_to_window_when_context_class == other.add_to_window_when_context_class
+            && self.key_binding_data == other.key_binding_data
     }
 }
 
@@ -786,6 +932,11 @@ impl DockingAction {
             context_class: None,
             supports_default_context: false,
             owner_description: None,
+            add_to_all_windows: false,
+            add_to_window_when_context_class: None,
+            default_key_binding_data: None,
+            key_binding_data: None,
+            inception_information: None,
         }
     }
 
@@ -1181,6 +1332,168 @@ impl DockingAction {
         } else {
             true
         }
+    }
+
+    // ---------------------------------------------------------------
+    // addToWindowWhen / setAddToAllWindows
+    // ---------------------------------------------------------------
+
+    /// Set the context class that determines which windows this action
+    /// should be added to.
+    ///
+    /// When set, the action is only added to windows that contain providers
+    /// capable of producing an `ActionContext` matching the given class name.
+    ///
+    /// Port of Ghidra's `DockingAction.addToWindowWhen(Class)`.
+    pub fn add_to_window_when(mut self, context_class_name: impl Into<String>) -> Self {
+        self.add_to_window_when_context_class = Some(context_class_name.into());
+        self
+    }
+
+    /// Signal that this action should appear on all windows, not just
+    /// the main window.
+    ///
+    /// Port of Ghidra's `DockingAction.setAddToAllWindows(boolean)`.
+    pub fn set_add_to_all_windows(&mut self, add: bool) {
+        self.add_to_all_windows = add;
+    }
+
+    // ---------------------------------------------------------------
+    // Key binding data
+    // ---------------------------------------------------------------
+
+    /// Set the key binding data (with validation).
+    ///
+    /// Port of Ghidra's `DockingAction.setKeyBindingData`.
+    pub fn set_key_binding_data(&mut self, data: Option<KeyBindingData>) {
+        if let Some(ref d) = data {
+            if !d.precedence.supports_user_key_bindings() {
+                return; // cannot set system-level via this method
+            }
+        }
+        let old = self.key_binding_data.clone();
+        self.key_binding_data = data.clone();
+        if self.default_key_binding_data.is_none() {
+            self.default_key_binding_data = data;
+        }
+        self.fire_property_changed(
+            ActionProperty::KeyBindingData,
+            old.map(|d| d.to_string()),
+            self.key_binding_data.as_ref().map(|d| d.to_string()),
+        );
+    }
+
+    /// Set the key binding data without validation (for framework use).
+    ///
+    /// Port of Ghidra's `DockingAction.setUnvalidatedKeyBindingData`.
+    pub fn set_unvalidated_key_binding_data(&mut self, data: Option<KeyBindingData>) {
+        let old = self.key_binding_data.clone();
+        self.key_binding_data = data;
+        self.fire_property_changed(
+            ActionProperty::KeyBindingData,
+            old.map(|d| d.to_string()),
+            self.key_binding_data.as_ref().map(|d| d.to_string()),
+        );
+    }
+
+    /// Get the current key binding data.
+    ///
+    /// Port of Ghidra's `DockingActionIf.getKeyBindingData()`.
+    pub fn get_key_binding_data(&self) -> Option<&KeyBindingData> {
+        self.key_binding_data.as_ref()
+    }
+
+    /// Get the default key binding data.
+    ///
+    /// Port of Ghidra's `DockingActionIf.getDefaultKeyBindingData()`.
+    pub fn get_default_key_binding_data(&self) -> Option<&KeyBindingData> {
+        self.default_key_binding_data.as_ref()
+    }
+
+    // ---------------------------------------------------------------
+    // Inception tracking
+    // ---------------------------------------------------------------
+
+    /// Set inception information (source location where this action was created).
+    ///
+    /// Port of Ghidra's `DockingAction.recordInception()`.
+    pub fn set_inception_information(&mut self, info: impl Into<String>) {
+        self.inception_information = Some(info.into());
+    }
+
+    /// Get inception information.
+    ///
+    /// Port of Ghidra's `DockingActionIf.getInceptionInformation()`.
+    pub fn get_inception_information(&self) -> Option<&str> {
+        self.inception_information.as_deref()
+    }
+
+    /// Generate a help info string summarizing this action's configuration.
+    ///
+    /// Port of Ghidra's `DockingAction.getHelpInfo()`.
+    pub fn get_help_info(&self) -> String {
+        let mut buf = String::new();
+        buf.push_str(&format!("   ACTION:    {} - {}\n", self.owner, self.name));
+
+        if let Some(ref menu_data) = self.menu_bar_data {
+            buf.push_str(&format!(
+                "        MENU PATH:           {}\n",
+                menu_data.path_string()
+            ));
+            buf.push_str(&format!(
+                "        MENU GROUP:        {}\n",
+                menu_data.group
+            ));
+            if !menu_data.sub_group.is_empty() {
+                buf.push_str(&format!(
+                    "        MENU SUB-GROUP:        {}\n",
+                    menu_data.sub_group
+                ));
+            }
+            if let Some(ref mnemonic) = menu_data.mnemonic {
+                buf.push_str(&format!("        MENU MNEMONIC:     {}\n", mnemonic));
+            }
+        }
+
+        if let Some(ref popup_data) = self.popup_menu_data {
+            buf.push_str(&format!(
+                "        POPUP PATH:         {}\n",
+                popup_data.path_string()
+            ));
+            buf.push_str(&format!(
+                "        POPUP GROUP:      {}\n",
+                popup_data.group
+            ));
+            if !popup_data.sub_group.is_empty() {
+                buf.push_str(&format!(
+                    "        POPUP SUB-GROUP:         {}\n",
+                    popup_data.sub_group
+                ));
+            }
+        }
+
+        if let Some(ref tb_data) = self.tool_bar_data {
+            buf.push_str(&format!(
+                "        TOOLBAR GROUP:  {}\n",
+                tb_data.group
+            ));
+            buf.push_str(&format!(
+                "        TOOLBAR ICON:     {}\n",
+                tb_data.icon
+            ));
+        }
+
+        if let Some(ref kb) = self.key_binding {
+            buf.push_str(&format!("        KEYBINDING:          {}\n", kb));
+        }
+
+        if let Some(ref inception) = self.inception_information {
+            buf.push_str("\n    \n");
+            buf.push_str(&format!("   CREATED AT: {}\n", inception));
+            buf.push_str("    ");
+        }
+
+        buf
     }
 
     // ---------------------------------------------------------------
@@ -1944,6 +2257,146 @@ pub trait ToggleAction: Action {
 }
 
 // ---------------------------------------------------------------------------
+// ComponentBasedDockingAction — action local to a specific component
+// ---------------------------------------------------------------------------
+
+/// An action that is local to a specific UI component, rather than
+/// being global or provider-level.
+///
+/// Port of Ghidra's `docking.action.ComponentBasedDockingAction` interface.
+/// Standard docking actions are either global tool-based actions or local
+/// `ComponentProvider` actions.  This trait allows actions that are
+/// effectively local to a specific component.
+pub trait ComponentBasedDockingAction: Action {
+    /// Returns `true` if the given context contains this action's component.
+    fn is_valid_component_context(&self, context: &super::action_context::DockingActionContext) -> bool;
+}
+
+// ---------------------------------------------------------------------------
+// ContextSpecificAction — generic action for a specific context type
+// ---------------------------------------------------------------------------
+
+/// A convenience wrapper that automatically checks the `ActionContext` type
+/// and delegates to type-specific methods.
+///
+/// Port of Ghidra's `docking.action.ContextSpecificAction<T>`.  This
+/// simplifies action logic for actions that work with a specific context
+/// type.  It automatically checks the context and disables/invalidates/
+/// prevents popup if the context is not the expected type.
+///
+/// In Rust, since there is no generics-based runtime type checking, this
+/// is implemented as a `DockingAction` wrapper with a context class name
+/// filter.
+pub struct ContextSpecificAction {
+    /// The wrapped action.
+    pub action: DockingAction,
+    /// The required context class name.
+    pub required_context_class: String,
+}
+
+impl ContextSpecificAction {
+    /// Create a new context-specific action wrapping the given action.
+    pub fn new(action: DockingAction, context_class: impl Into<String>) -> Self {
+        let context_class = context_class.into();
+        let mut action = action;
+        action.set_context_class(&context_class, false);
+        Self {
+            action,
+            required_context_class: context_class,
+        }
+    }
+
+    /// Whether the given context matches this action's required type.
+    pub fn matches_context(&self, context_class_name: &str) -> bool {
+        self.required_context_class == context_class_name
+    }
+
+    /// Whether this action is enabled for a context with the given class name
+    /// and context info.
+    pub fn is_enabled_for_typed_context(
+        &self,
+        context_class_name: &str,
+        ctx: &ActionContextInfo,
+    ) -> bool {
+        if !self.matches_context(context_class_name) {
+            return false;
+        }
+        self.action.is_enabled_for_context(ctx)
+    }
+
+    /// Whether this action is valid for a context with the given class name.
+    pub fn is_valid_typed_context(&self, context_class_name: &str) -> bool {
+        self.matches_context(context_class_name)
+    }
+
+    /// Whether this action should be added to a popup for a typed context.
+    pub fn is_add_to_typed_popup(
+        &self,
+        context_class_name: &str,
+        ctx: &ActionContextInfo,
+    ) -> bool {
+        if !self.matches_context(context_class_name) {
+            return false;
+        }
+        self.action.is_add_to_popup(ctx)
+    }
+}
+
+impl fmt::Debug for ContextSpecificAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ContextSpecificAction")
+            .field("action", &self.action)
+            .field("required_context_class", &self.required_context_class)
+            .finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MultiAction — an action that contains multiple sub-actions
+// ---------------------------------------------------------------------------
+
+/// An action that contains multiple sub-actions, all of which are
+/// presented together (e.g. in a popup menu or toolbar drop-down).
+///
+/// Port of Ghidra's `docking.action.MultiActionDockingActionIf` interface.
+/// When triggered, all sub-actions are presented to the user.
+#[derive(Debug, Clone)]
+pub struct MultiAction {
+    /// The display name for this multi-action group.
+    pub display_name: String,
+    /// The owner (plugin) that created this multi-action.
+    pub owner: String,
+    /// The sub-actions.
+    pub actions: Vec<DockingAction>,
+}
+
+impl MultiAction {
+    /// Create a new multi-action.
+    pub fn new(display_name: impl Into<String>, owner: impl Into<String>) -> Self {
+        Self {
+            display_name: display_name.into(),
+            owner: owner.into(),
+            actions: Vec::new(),
+        }
+    }
+
+    /// Add a sub-action.
+    pub fn add_action(&mut self, action: DockingAction) {
+        self.actions.push(action);
+    }
+
+    /// Whether this multi-action has any sub-actions.
+    pub fn is_empty(&self) -> bool {
+        self.actions.is_empty()
+    }
+
+    /// The number of sub-actions.
+    pub fn len(&self) -> usize {
+        self.actions.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -2654,5 +3107,207 @@ mod tests {
         assert!(action.should_add_to_window_with_context_types(true, &["AnyContext"]));
         // Non-main window: no context class -> added.
         assert!(action.should_add_to_window_with_context_types(false, &["AnyContext"]));
+    }
+
+    // -- KeyBindingDataPrecedence tests --
+
+    #[test]
+    fn test_key_binding_precedence_ordering() {
+        assert!(KeyBindingDataPrecedence::DefaultLevel < KeyBindingDataPrecedence::ActiveWindowLevel);
+        assert!(KeyBindingDataPrecedence::ActiveWindowLevel < KeyBindingDataPrecedence::SystemActionsLevel);
+    }
+
+    #[test]
+    fn test_key_binding_precedence_default() {
+        assert_eq!(KeyBindingDataPrecedence::default(), KeyBindingDataPrecedence::DefaultLevel);
+    }
+
+    #[test]
+    fn test_key_binding_precedence_user_support() {
+        assert!(KeyBindingDataPrecedence::DefaultLevel.supports_user_key_bindings());
+        assert!(KeyBindingDataPrecedence::ActiveWindowLevel.supports_user_key_bindings());
+        assert!(!KeyBindingDataPrecedence::SystemActionsLevel.supports_user_key_bindings());
+    }
+
+    #[test]
+    fn test_key_binding_precedence_display() {
+        assert_eq!(KeyBindingDataPrecedence::DefaultLevel.to_string(), "DefaultLevel");
+        assert_eq!(
+            KeyBindingDataPrecedence::SystemActionsLevel.to_string(),
+            "SystemActionsLevel"
+        );
+    }
+
+    // -- KeyBindingData tests --
+
+    #[test]
+    fn test_key_binding_data_new() {
+        let kbd = KeyBindingData::new(KeyBinding::ctrl(Key::S));
+        assert_eq!(kbd.precedence, KeyBindingDataPrecedence::DefaultLevel);
+        assert!(kbd.mouse_binding.is_none());
+        assert!(kbd.supports_user_changes());
+    }
+
+    #[test]
+    fn test_key_binding_data_system() {
+        let kbd = KeyBindingData::system(KeyBinding::plain(Key::F1));
+        assert_eq!(kbd.precedence, KeyBindingDataPrecedence::SystemActionsLevel);
+        assert!(!kbd.supports_user_changes());
+    }
+
+    #[test]
+    fn test_key_binding_data_with_mouse() {
+        let kbd = KeyBindingData::new(KeyBinding::ctrl(Key::C))
+            .with_mouse_binding("LEFT_DOUBLE_CLICK");
+        assert_eq!(kbd.mouse_binding.as_deref(), Some("LEFT_DOUBLE_CLICK"));
+    }
+
+    #[test]
+    fn test_key_binding_data_display() {
+        let kbd = KeyBindingData::new(KeyBinding::ctrl(Key::S));
+        let s = kbd.to_string();
+        assert!(s.contains("Ctrl+S"));
+        assert!(s.contains("DefaultLevel"));
+    }
+
+    #[test]
+    fn test_key_binding_data_with_precedence() {
+        let kbd = KeyBindingData::with_precedence(
+            KeyBinding::alt(Key::F4),
+            KeyBindingDataPrecedence::ActiveWindowLevel,
+        );
+        assert_eq!(kbd.precedence, KeyBindingDataPrecedence::ActiveWindowLevel);
+    }
+
+    // -- addToWindowWhen / setAddToAllWindows tests --
+
+    #[test]
+    fn test_add_to_window_when() {
+        let action = DockingAction::new("a", "A")
+            .add_to_window_when("ListingContext");
+        assert_eq!(
+            action.add_to_window_when_context_class.as_deref(),
+            Some("ListingContext")
+        );
+    }
+
+    #[test]
+    fn test_set_add_to_all_windows() {
+        let mut action = DockingAction::new("a", "A");
+        assert!(!action.add_to_all_windows);
+        action.set_add_to_all_windows(true);
+        assert!(action.add_to_all_windows);
+    }
+
+    // -- Key binding data on DockingAction tests --
+
+    #[test]
+    fn test_set_key_binding_data() {
+        let mut action = DockingAction::new("a", "A");
+        assert!(action.get_key_binding_data().is_none());
+
+        let kbd = KeyBindingData::new(KeyBinding::ctrl(Key::S));
+        action.set_key_binding_data(Some(kbd));
+        assert!(action.get_key_binding_data().is_some());
+        assert!(action.get_default_key_binding_data().is_some());
+    }
+
+    #[test]
+    fn test_set_key_binding_data_system_rejected() {
+        let mut action = DockingAction::new("a", "A");
+        let kbd = KeyBindingData::system(KeyBinding::plain(Key::F1));
+        action.set_key_binding_data(Some(kbd));
+        // System-level key bindings should be rejected by set_key_binding_data.
+        assert!(action.get_key_binding_data().is_none());
+    }
+
+    #[test]
+    fn test_set_unvalidated_key_binding_data() {
+        let mut action = DockingAction::new("a", "A");
+        let kbd = KeyBindingData::system(KeyBinding::plain(Key::F1));
+        action.set_unvalidated_key_binding_data(Some(kbd));
+        // Unvalidated path accepts system-level.
+        assert!(action.get_key_binding_data().is_some());
+    }
+
+    // -- Inception tests --
+
+    #[test]
+    fn test_inception_information() {
+        let mut action = DockingAction::new("a", "A");
+        assert!(action.get_inception_information().is_none());
+
+        action.set_inception_information("MyPlugin.java:42");
+        assert_eq!(
+            action.get_inception_information(),
+            Some("MyPlugin.java:42")
+        );
+    }
+
+    // -- get_help_info tests --
+
+    #[test]
+    fn test_get_help_info() {
+        let action = DockingAction::with_owner("my-action", "MyPlugin", "My Action")
+            .with_menu_bar_data(MenuBarData::new(vec!["Edit".into(), "Action".into()]))
+            .with_key_binding(KeyBinding::ctrl(Key::Z));
+        let info = action.get_help_info();
+        assert!(info.contains("MyPlugin"));
+        assert!(info.contains("my-action"));
+        assert!(info.contains("Edit > Action"));
+        assert!(info.contains("Ctrl+Z"));
+    }
+
+    // -- MultiAction tests --
+
+    #[test]
+    fn test_multi_action() {
+        let mut multi = MultiAction::new("Batch Actions", "MyPlugin");
+        assert!(multi.is_empty());
+
+        multi.add_action(DockingAction::new("a", "A"));
+        multi.add_action(DockingAction::new("b", "B"));
+        assert_eq!(multi.len(), 2);
+        assert!(!multi.is_empty());
+    }
+
+    // -- ContextSpecificAction tests --
+
+    #[test]
+    fn test_context_specific_action() {
+        let action = DockingAction::new("goto", "Go To");
+        let specific = ContextSpecificAction::new(action, "ListingContext");
+
+        assert!(specific.matches_context("ListingContext"));
+        assert!(!specific.matches_context("DecompilerContext"));
+    }
+
+    #[test]
+    fn test_context_specific_action_enabled() {
+        let action = DockingAction::new("goto", "Go To");
+        let specific = ContextSpecificAction::new(action, "ListingContext");
+
+        let ctx = ActionContextInfo::with_address("0x1000");
+        assert!(specific.is_enabled_for_typed_context("ListingContext", &ctx));
+        assert!(!specific.is_enabled_for_typed_context("DecompilerContext", &ctx));
+    }
+
+    #[test]
+    fn test_context_specific_action_valid() {
+        let action = DockingAction::new("goto", "Go To");
+        let specific = ContextSpecificAction::new(action, "ListingContext");
+
+        assert!(specific.is_valid_typed_context("ListingContext"));
+        assert!(!specific.is_valid_typed_context("OtherContext"));
+    }
+
+    #[test]
+    fn test_context_specific_action_popup() {
+        let action = DockingAction::new("copy", "Copy");
+        let specific = ContextSpecificAction::new(action, "ListingContext");
+
+        let ctx = ActionContextInfo::with_address("0x1000");
+        assert!(specific.is_add_to_typed_popup("ListingContext", &ctx));
+        assert!(!specific.is_add_to_typed_popup("OtherContext", &ctx));
     }
 }
