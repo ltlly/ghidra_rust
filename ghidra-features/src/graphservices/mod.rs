@@ -653,6 +653,21 @@ pub use layout_algorithms::{
     HierarchicalLayoutAlgorithm, LayoutResult,
 };
 
+/// Graph viewer for rendering and interacting with graphs.
+pub mod graph_viewer;
+pub use graph_viewer::{
+    GraphViewer, GraphViewerOptions, PathHighlightMode, PickingMode, Point2d, Rect2d, ViewState,
+};
+
+/// Graph component -- the main visual container for a graph.
+pub mod graph_component;
+pub use graph_component::{
+    GraphComponent, GraphComponentOptions, NavigationState, SatelliteGraphViewer, SatellitePosition,
+};
+
+/// Layout infrastructure for graph services.
+pub mod layout;
+
 #[cfg(test)]
 mod tests {
     use super::*;

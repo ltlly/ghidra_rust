@@ -1,9 +1,17 @@
-//! Entropy Analysis Plugin -- ported from `EntropyCalculate.java`.
+//! Entropy Analysis Plugin -- ported from `EntropyCalculate.java`,
+//! `EntropyOverviewColorService.java`, and `EntropyFieldFactory.java`.
 //!
 //! Computes per-chunk Shannon entropy for a memory region.  Each chunk's
 //! byte-value histogram is converted to a normalised entropy score in the
 //! range `[0, 255]`, which can drive heat-map visualisations of packed vs
 //! unpacked regions.
+//!
+//! # Sub-modules
+//!
+//! - [`plugin`] -- Entropy plugin with configurable options, computation,
+//!   and address-to-entropy querying.
+//! - [`renderer`] -- Listing field renderer that produces colour-coded
+//!   entropy display strings.
 //!
 //! # Example
 //!
@@ -16,6 +24,9 @@
 //! let v = calc.value_at_offset(0);
 //! assert!(v >= 0);
 //! ```
+
+pub mod entropy_plugin;
+pub mod entropy_renderer;
 
 // ---------------------------------------------------------------------------
 // EntropyCalculator

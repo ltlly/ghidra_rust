@@ -22,6 +22,16 @@ pub mod table;
 /// `FREdge`, `FRPathsModel`, and `FunctionReachabilityResult`.
 pub mod graph;
 
+/// Function reachability plugin -- top-level plugin coordinating providers.
+///
+/// Ported from `ghidra.app.plugin.core.reachability.FunctionReachabilityPlugin`.
+pub mod reachability_plugin;
+
+/// Function reachability provider -- manages analysis UI state.
+///
+/// Ported from `ghidra.app.plugin.core.reachability.FunctionReachabilityProvider`.
+pub mod reachability_provider;
+
 use ghidra_core::Address;
 use std::collections::{HashMap, HashSet, VecDeque};
 

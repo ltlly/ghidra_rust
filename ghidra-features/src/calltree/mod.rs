@@ -47,6 +47,20 @@ pub mod provider;
 /// Ported from Ghidra's `ghidra.app.plugin.core.calltree.CallTreePlugin`.
 pub mod plugin;
 
+/// Enhanced call tree plugin with full lifecycle and action context management.
+///
+/// Ported from the complete `CallTreePlugin` Java class including action
+/// context resolution, program lifecycle event dispatch, and transient
+/// provider management.
+pub mod call_tree_plugin;
+
+/// Enhanced call tree provider with actions, staleness tracking, and tree management.
+///
+/// Ported from the complete `CallTreeProvider` Java class including
+/// domain object listener model, tree state management, and all
+/// provider-local actions.
+pub mod call_tree_provider;
+
 /// Function Call Graph direction enum (In, InAndOut, Out).
 ///
 /// Ported from `functioncalls.graph.FcgDirection`.

@@ -40,6 +40,16 @@ pub mod plugin;
 /// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorProvider`.
 pub mod provider;
 
+/// Stack editor plugin -- top-level plugin integration.
+///
+/// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorPlugin`.
+pub mod stack_editor_plugin;
+
+/// Stack editor dialog -- modal dialog for editing a function's stack frame.
+///
+/// Ported from `ghidra.app.plugin.core.stackeditor.StackEditorDialog`.
+pub mod stack_editor_dialog;
+
 pub use manager::EditorCheckResult;
 pub use panel::EditStackAction;
 pub use provider::{DomainObjectChangeRecord, DomainObjectEvent, ProgramEvent};
