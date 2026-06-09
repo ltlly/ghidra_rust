@@ -1034,6 +1034,500 @@ pub trait DebugAutoMappingService {
 }
 
 // ---------------------------------------------------------------------------
+// Debug Process Service
+// ---------------------------------------------------------------------------
+
+/// Information about a debug process.
+///
+/// Ported from Ghidra's process management in `ghidra.debug.api.process`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessInfo {
+    /// The process ID.
+    pub pid: i64,
+    /// The process name.
+    pub name: String,
+    /// The user running the process.
+    pub user: Option<String>,
+    /// The command line.
+    pub command_line: Option<String>,
+    /// When the process was created (millis since epoch).
+    pub created_at: i64,
+}
+
+impl ProcessInfo {
+    /// Create a new process info.
+    pub fn new(pid: i64, name: impl Into<String>) -> Self {
+        Self {
+            pid,
+            name: name.into(),
+            user: None,
+            command_line: None,
+            created_at: 0,
+        }
+    }
+
+    /// Set the user.
+    pub fn with_user(mut self, user: impl Into<String>) -> Self {
+        self.user = Some(user.into());
+        self
+    }
+
+    /// Set the command line.
+    pub fn with_command_line(mut self, cmd: impl Into<String>) -> Self {
+        self.command_line = Some(cmd.into());
+        self
+    }
+}
+
+/// Information about a thread within a process.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadInfo {
+    /// The thread ID.
+    pub tid: i64,
+    /// The owning process ID.
+    pub pid: i64,
+    /// The thread name.
+    pub name: String,
+    /// Whether the thread is currently running.
+    pub running: bool,
+}
+
+impl ThreadInfo {
+    /// Create a new thread info.
+    pub fn new(tid: i64, pid: i64, name: impl Into<String>) -> Self {
+        Self {
+            tid,
+            pid,
+            name: name.into(),
+            running: false,
+        }
+    }
+}
+
+/// Service for process and thread management.
+///
+/// Ported from Ghidra's `DebuggerProcessService`.
+pub trait DebugProcessService {
+    /// List all processes on the target.
+    fn list_processes(&self, trace_key: &str) -> DebugServiceResult<Vec<ProcessInfo>>;
+
+    /// List all threads in a process.
+    fn list_threads(&self, trace_key: &str, pid: i64) -> DebugServiceResult<Vec<ThreadInfo>>;
+
+    /// Get the current process info.
+    fn current_process(&self, trace_key: &str) -> DebugServiceResult<Option<ProcessInfo>>;
+
+    /// Get the current thread info.
+    fn current_thread(&self, trace_key: &str) -> DebugServiceResult<Option<ThreadInfo>>;
+
+    /// Select a thread as the active context.
+    fn select_thread(&mut self, trace_key: &str, tid: i64) -> DebugServiceResult<()>;
+
+    /// Get the execution state of a specific thread.
+    fn thread_state(&self, trace_key: &str, tid: i64) -> ExecutionState;
+}
+
+// ---------------------------------------------------------------------------
+// Debug Source Service
+// ---------------------------------------------------------------------------
+
+/// Source file location information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceLocation {
+    /// The file path.
+    pub file: String,
+    /// The line number (1-based).
+    pub line: u32,
+    /// The column number (1-based, 0 = unknown).
+    pub column: u32,
+    /// The function name, if known.
+    pub function: Option<String>,
+}
+
+impl SourceLocation {
+    /// Create a new source location.
+    pub fn new(file: impl Into<String>, line: u32) -> Self {
+        Self {
+            file: file.into(),
+            line,
+            column: 0,
+            function: None,
+        }
+    }
+
+    /// Set the column.
+    pub fn with_column(mut self, column: u32) -> Self {
+        self.column = column;
+        self
+    }
+
+    /// Set the function name.
+    pub fn with_function(mut self, function: impl Into<String>) -> Self {
+        self.function = Some(function.into());
+        self
+    }
+}
+
+/// Service for source-level debugging.
+///
+/// Ported from Ghidra's `DebuggerSourceService`.
+pub trait DebugSourceService {
+    /// Get the source location for a trace address.
+    fn source_location_for_address(
+        &self,
+        trace_key: &str,
+        address: u64,
+    ) -> DebugServiceResult<Option<SourceLocation>>;
+
+    /// Get the trace address for a source location.
+    fn address_for_source_location(
+        &self,
+        trace_key: &str,
+        file: &str,
+        line: u32,
+    ) -> DebugServiceResult<Option<u64>>;
+
+    /// Get available source files.
+    fn source_files(&self, trace_key: &str) -> DebugServiceResult<Vec<String>>;
+
+    /// Step to the next source line.
+    fn step_to_source_line(
+        &mut self,
+        trace_key: &str,
+        file: &str,
+        line: u32,
+    ) -> DebugServiceResult<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Debug Stack Service
+// ---------------------------------------------------------------------------
+
+/// A stack frame in a call stack.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StackFrameInfo {
+    /// The frame level (0 = top of stack).
+    pub level: u32,
+    /// The program counter address.
+    pub pc: u64,
+    /// The stack pointer address.
+    pub sp: u64,
+    /// The frame pointer address.
+    pub fp: u64,
+    /// The function name, if known.
+    pub function: Option<String>,
+    /// The source location, if available.
+    pub source: Option<SourceLocation>,
+    /// Whether this frame belongs to library (non-user) code.
+    pub is_library: bool,
+}
+
+impl StackFrameInfo {
+    /// Create a new stack frame info.
+    pub fn new(level: u32, pc: u64, sp: u64) -> Self {
+        Self {
+            level,
+            pc,
+            sp,
+            fp: 0,
+            function: None,
+            source: None,
+            is_library: false,
+        }
+    }
+
+    /// Set the function name.
+    pub fn with_function(mut self, function: impl Into<String>) -> Self {
+        self.function = Some(function.into());
+        self
+    }
+
+    /// Set the source location.
+    pub fn with_source(mut self, source: SourceLocation) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    /// Set the frame pointer.
+    pub fn with_fp(mut self, fp: u64) -> Self {
+        self.fp = fp;
+        self
+    }
+}
+
+/// Service for call stack management.
+///
+/// Ported from Ghidra's `DebuggerStackService`.
+pub trait DebugStackService {
+    /// Get the call stack for a thread.
+    fn get_call_stack(
+        &self,
+        trace_key: &str,
+        thread_key: i64,
+    ) -> DebugServiceResult<Vec<StackFrameInfo>>;
+
+    /// Get the current frame for a thread.
+    fn current_frame(
+        &self,
+        trace_key: &str,
+        thread_key: i64,
+    ) -> DebugServiceResult<Option<StackFrameInfo>>;
+
+    /// Select a stack frame.
+    fn select_frame(
+        &mut self,
+        trace_key: &str,
+        thread_key: i64,
+        frame_level: u32,
+    ) -> DebugServiceResult<()>;
+
+    /// Get the number of frames in the stack.
+    fn frame_count(&self, trace_key: &str, thread_key: i64) -> DebugServiceResult<u32>;
+}
+
+// ---------------------------------------------------------------------------
+// Debug Variable Service
+// ---------------------------------------------------------------------------
+
+/// Information about a local variable or parameter.
+///
+/// Ported from Ghidra's `DebuggerVariableService`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VariableInfo {
+    /// The variable name.
+    pub name: String,
+    /// The data type (e.g., "int", "char*", "struct foo").
+    pub data_type: String,
+    /// The size in bytes.
+    pub size: u32,
+    /// Whether this is a parameter or local.
+    pub is_parameter: bool,
+    /// The storage location: register name or stack offset.
+    pub storage: VariableStorage,
+    /// The current value, if available.
+    pub current_value: Option<String>,
+    /// The display format.
+    pub format: WatchFormat,
+}
+
+/// The storage location of a variable.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum VariableStorage {
+    /// Stored in a register.
+    Register(String),
+    /// Stored on the stack at the given offset from the frame pointer.
+    Stack(i64),
+    /// Stored at a memory address.
+    Memory(u64),
+    /// No storage (optimized out or not yet available).
+    None,
+}
+
+impl VariableInfo {
+    /// Create a new variable info.
+    pub fn new(
+        name: impl Into<String>,
+        data_type: impl Into<String>,
+        size: u32,
+        is_parameter: bool,
+        storage: VariableStorage,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            data_type: data_type.into(),
+            size,
+            is_parameter,
+            storage,
+            current_value: None,
+            format: WatchFormat::default(),
+        }
+    }
+}
+
+/// Service for local variable inspection.
+pub trait DebugVariableService {
+    /// Get variables for a stack frame.
+    fn get_variables(
+        &self,
+        trace_key: &str,
+        thread_key: i64,
+        frame_level: u32,
+    ) -> DebugServiceResult<Vec<VariableInfo>>;
+
+    /// Get the value of a variable.
+    fn get_variable_value(
+        &self,
+        trace_key: &str,
+        thread_key: i64,
+        frame_level: u32,
+        variable_name: &str,
+    ) -> DebugServiceResult<Option<String>>;
+
+    /// Set the value of a variable.
+    fn set_variable_value(
+        &mut self,
+        trace_key: &str,
+        thread_key: i64,
+        frame_level: u32,
+        variable_name: &str,
+        value: &str,
+    ) -> DebugServiceResult<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Debug Snap Service
+// ---------------------------------------------------------------------------
+
+/// Information about a snapshot in the trace.
+///
+/// Ported from Ghidra's snapshot management in `ghidra.trace.model.TraceSnapshot`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapInfo {
+    /// The snap value.
+    pub snap: i64,
+    /// A description of the snap.
+    pub description: String,
+    /// The creation timestamp.
+    pub timestamp: i64,
+    /// The thread key associated with this snap (if any).
+    pub thread_key: Option<i64>,
+    /// The program counter at this snap.
+    pub pc: Option<u64>,
+    /// Whether this snap was created by a user action.
+    pub user_created: bool,
+}
+
+impl SnapInfo {
+    /// Create a new snap info.
+    pub fn new(snap: i64, description: impl Into<String>) -> Self {
+        Self {
+            snap,
+            description: description.into(),
+            timestamp: 0,
+            thread_key: None,
+            pc: None,
+            user_created: false,
+        }
+    }
+
+    /// Mark this snap as user-created.
+    pub fn with_user_created(mut self) -> Self {
+        self.user_created = true;
+        self
+    }
+
+    /// Set the thread key.
+    pub fn with_thread_key(mut self, thread_key: i64) -> Self {
+        self.thread_key = Some(thread_key);
+        self
+    }
+
+    /// Set the program counter.
+    pub fn with_pc(mut self, pc: u64) -> Self {
+        self.pc = Some(pc);
+        self
+    }
+}
+
+/// Service for managing trace snapshots and time navigation.
+///
+/// Ported from Ghidra's `DebuggerSnapService`.
+pub trait DebugSnapService {
+    /// Get all snaps in a trace.
+    fn get_snaps(&self, trace_key: &str) -> DebugServiceResult<Vec<SnapInfo>>;
+
+    /// Get a specific snap.
+    fn get_snap(&self, trace_key: &str, snap: i64) -> DebugServiceResult<Option<SnapInfo>>;
+
+    /// Create a new snapshot.
+    fn create_snap(
+        &mut self,
+        trace_key: &str,
+        description: &str,
+    ) -> DebugServiceResult<i64>;
+
+    /// Get the minimum snap.
+    fn min_snap(&self, trace_key: &str) -> DebugServiceResult<i64>;
+
+    /// Get the maximum snap.
+    fn max_snap(&self, trace_key: &str) -> DebugServiceResult<i64>;
+
+    /// Get the number of snaps.
+    fn snap_count(&self, trace_key: &str) -> DebugServiceResult<usize>;
+
+    /// Delete a snapshot.
+    fn delete_snap(&mut self, trace_key: &str, snap: i64) -> DebugServiceResult<()>;
+}
+
+// ---------------------------------------------------------------------------
+// Debug Model Service
+// ---------------------------------------------------------------------------
+
+/// A schema definition for trace objects.
+///
+/// Ported from Ghidra's `TraceObjectSchema` in the object model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelSchema {
+    /// The schema name.
+    pub name: String,
+    /// The schema version.
+    pub version: u32,
+    /// The set of attribute names with their types.
+    pub attributes: BTreeMap<String, String>,
+    /// The set of link names with their target schema names.
+    pub links: BTreeMap<String, String>,
+    /// Whether this schema can be deleted.
+    pub deletable: bool,
+}
+
+impl ModelSchema {
+    /// Create a new model schema.
+    pub fn new(name: impl Into<String>, version: u32) -> Self {
+        Self {
+            name: name.into(),
+            version,
+            attributes: BTreeMap::new(),
+            links: BTreeMap::new(),
+            deletable: true,
+        }
+    }
+
+    /// Add an attribute definition.
+    pub fn add_attribute(&mut self, name: impl Into<String>, type_name: impl Into<String>) {
+        self.attributes.insert(name.into(), type_name.into());
+    }
+
+    /// Add a link definition.
+    pub fn add_link(&mut self, name: impl Into<String>, target_schema: impl Into<String>) {
+        self.links.insert(name.into(), target_schema.into());
+    }
+}
+
+/// Service for the trace object model.
+///
+/// Ported from Ghidra's `DebuggerModelService`.
+pub trait DebugModelService {
+    /// Get all registered schema names.
+    fn schema_names(&self, trace_key: &str) -> DebugServiceResult<Vec<String>>;
+
+    /// Get a specific schema.
+    fn get_schema(&self, trace_key: &str, name: &str) -> DebugServiceResult<Option<ModelSchema>>;
+
+    /// Register a new schema.
+    fn register_schema(&mut self, trace_key: &str, schema: ModelSchema) -> DebugServiceResult<()>;
+
+    /// Get the root object path.
+    fn root_path(&self, trace_key: &str) -> DebugServiceResult<String>;
+
+    /// List children of an object path.
+    fn list_children(
+        &self,
+        trace_key: &str,
+        path: &str,
+    ) -> DebugServiceResult<Vec<String>>;
+}
+
+// ---------------------------------------------------------------------------
 // Debug Service Container
 // ---------------------------------------------------------------------------
 
@@ -1336,5 +1830,181 @@ mod tests {
         let json = serde_json::to_string(&proposal).unwrap();
         let back: AutoMappingProposal = serde_json::from_str(&json).unwrap();
         assert_eq!(back.program_url, "file:///test.gzf");
+    }
+
+    #[test]
+    fn test_process_info() {
+        let proc = ProcessInfo::new(1234, "target")
+            .with_user("root")
+            .with_command_line("/usr/bin/target --arg");
+        assert_eq!(proc.pid, 1234);
+        assert_eq!(proc.name, "target");
+        assert_eq!(proc.user.as_deref(), Some("root"));
+        assert_eq!(proc.command_line.as_deref(), Some("/usr/bin/target --arg"));
+    }
+
+    #[test]
+    fn test_process_info_serde() {
+        let proc = ProcessInfo::new(42, "test");
+        let json = serde_json::to_string(&proc).unwrap();
+        let back: ProcessInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.pid, 42);
+        assert_eq!(back.name, "test");
+    }
+
+    #[test]
+    fn test_thread_info() {
+        let thread = ThreadInfo::new(100, 1234, "main");
+        assert_eq!(thread.tid, 100);
+        assert_eq!(thread.pid, 1234);
+        assert_eq!(thread.name, "main");
+        assert!(!thread.running);
+    }
+
+    #[test]
+    fn test_thread_info_serde() {
+        let thread = ThreadInfo::new(1, 2, "worker");
+        let json = serde_json::to_string(&thread).unwrap();
+        let back: ThreadInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.tid, 1);
+    }
+
+    #[test]
+    fn test_source_location() {
+        let loc = SourceLocation::new("main.c", 42)
+            .with_column(10)
+            .with_function("main");
+        assert_eq!(loc.file, "main.c");
+        assert_eq!(loc.line, 42);
+        assert_eq!(loc.column, 10);
+        assert_eq!(loc.function.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn test_source_location_serde() {
+        let loc = SourceLocation::new("test.rs", 1);
+        let json = serde_json::to_string(&loc).unwrap();
+        let back: SourceLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.file, "test.rs");
+        assert_eq!(back.line, 1);
+    }
+
+    #[test]
+    fn test_stack_frame_info() {
+        let frame = StackFrameInfo::new(0, 0x400000, 0x7fff0000)
+            .with_function("main")
+            .with_fp(0x7fff1000)
+            .with_source(SourceLocation::new("main.c", 10));
+        assert_eq!(frame.level, 0);
+        assert_eq!(frame.pc, 0x400000);
+        assert_eq!(frame.sp, 0x7fff0000);
+        assert_eq!(frame.fp, 0x7fff1000);
+        assert_eq!(frame.function.as_deref(), Some("main"));
+        assert!(frame.source.is_some());
+        assert!(!frame.is_library);
+    }
+
+    #[test]
+    fn test_stack_frame_info_serde() {
+        let frame = StackFrameInfo::new(1, 0x1000, 0x2000);
+        let json = serde_json::to_string(&frame).unwrap();
+        let back: StackFrameInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.level, 1);
+        assert_eq!(back.pc, 0x1000);
+    }
+
+    #[test]
+    fn test_variable_info() {
+        let var = VariableInfo::new(
+            "count",
+            "int",
+            4,
+            false,
+            VariableStorage::Register("eax".into()),
+        );
+        assert_eq!(var.name, "count");
+        assert_eq!(var.data_type, "int");
+        assert_eq!(var.size, 4);
+        assert!(!var.is_parameter);
+        assert!(matches!(&var.storage, VariableStorage::Register(r) if r == "eax"));
+    }
+
+    #[test]
+    fn test_variable_info_parameter() {
+        let var = VariableInfo::new(
+            "argc",
+            "int",
+            4,
+            true,
+            VariableStorage::Stack(-8),
+        );
+        assert!(var.is_parameter);
+        assert!(matches!(&var.storage, VariableStorage::Stack(-8)));
+    }
+
+    #[test]
+    fn test_variable_storage_serde() {
+        let reg = VariableStorage::Register("rax".into());
+        let json = serde_json::to_string(&reg).unwrap();
+        let back: VariableStorage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, VariableStorage::Register(r) if r == "rax"));
+
+        let stack = VariableStorage::Stack(16);
+        let json = serde_json::to_string(&stack).unwrap();
+        let back: VariableStorage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, VariableStorage::Stack(16)));
+
+        let mem = VariableStorage::Memory(0x400000);
+        let json = serde_json::to_string(&mem).unwrap();
+        let back: VariableStorage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, VariableStorage::Memory(0x400000)));
+    }
+
+    #[test]
+    fn test_variable_info_serde() {
+        let var = VariableInfo::new("x", "int", 4, false, VariableStorage::None);
+        let json = serde_json::to_string(&var).unwrap();
+        let back: VariableInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "x");
+    }
+
+    #[test]
+    fn test_snap_info() {
+        let snap = SnapInfo::new(42, "Initial state")
+            .with_user_created();
+        assert_eq!(snap.snap, 42);
+        assert_eq!(snap.description, "Initial state");
+    }
+
+    #[test]
+    fn test_snap_info_serde() {
+        let snap = SnapInfo::new(0, "start");
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: SnapInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.snap, 0);
+        assert_eq!(back.description, "start");
+    }
+
+    #[test]
+    fn test_model_schema() {
+        let mut schema = ModelSchema::new("Process", 1);
+        schema.add_attribute("pid", "int");
+        schema.add_attribute("name", "string");
+        schema.add_link("threads", "Thread");
+
+        assert_eq!(schema.name, "Process");
+        assert_eq!(schema.version, 1);
+        assert_eq!(schema.attributes.len(), 2);
+        assert_eq!(schema.links.len(), 1);
+        assert!(schema.deletable);
+    }
+
+    #[test]
+    fn test_model_schema_serde() {
+        let schema = ModelSchema::new("Test", 2);
+        let json = serde_json::to_string(&schema).unwrap();
+        let back: ModelSchema = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "Test");
+        assert_eq!(back.version, 2);
     }
 }

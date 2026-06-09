@@ -53,19 +53,24 @@ pub use control_mode::ControlMode;
 pub use core_types::{AddressSnap, Lifespan, TraceAddressSnapRange, TraceExecutionState, TraceSpan, SNAP_MAX, SNAP_MIN};
 pub use db_viewer::{DatabaseHandle, DatabaseKind, DatabaseRecord, DbTable, DbViewer, DbViewerState, TableStatistics, TableStatisticsCache};
 pub use debug_plugin::{
-    DebugPluginConfig, DebugPluginDependency, DebugPluginEvent, DebugPluginLoadResult,
-    DebugPluginLoader, DebugPluginPackage, DebugPluginPriority, DebugPluginRegistration,
-    DebugPluginRegistry, DebugPluginState, DebugPluginStatus, standard_plugins,
+    DebugPluginAction, DebugPluginActionRegistry, DebugPluginConfig, DebugPluginDependency,
+    DebugPluginEvent, DebugPluginLoadResult, DebugPluginLoader, DebugPluginMetrics,
+    DebugPluginPackage, DebugPluginPriority, DebugPluginRegistration, DebugPluginRegistry,
+    DebugPluginSession, DebugPluginSessionState, DebugPluginState, DebugPluginStatus,
+    DebugPluginToolAdapter, DebugPluginUiState, MenuEntry, ToolbarEntry, standard_plugins,
 };
 pub use debug_service::{
     AutoMapMode, AutoMappingEntry, AutoMappingProposal, BreakpointInfo, BreakpointKind,
     ConsoleEntry, ConsoleLevel, DebugAutoMappingService, DebugBreakpointService,
     DebugConsoleService, DebugControlService, DebugCoordinates, DebugEmulationService,
-    DebugListingService, DebugMappingService, DebugMemoryService, DebugPlatformService,
-    DebugRegisterService, DebugServiceContainer, DebugServiceError, DebugServiceResult,
-    DebugTargetService, DebugTraceManagerService, DebugWatchesService, EmulationResult,
-    ExecutionState, MemoryRegionInfo, PlatformOffer, PlatformOpinion, RegisterInfo,
-    StaticMappingEntry, WatchExpression, WatchFormat,
+    DebugListingService, DebugMappingService, DebugMemoryService, DebugModelService,
+    DebugPlatformService, DebugProcessService, DebugRegisterService, DebugServiceContainer,
+    DebugServiceError, DebugServiceResult, DebugSnapService, DebugSourceService,
+    DebugStackService, DebugTargetService, DebugTraceManagerService, DebugVariableService,
+    DebugWatchesService, EmulationResult, ExecutionState, MemoryRegionInfo, ModelSchema,
+    PlatformOffer, PlatformOpinion, ProcessInfo, RegisterInfo, SnapInfo, SourceLocation,
+    StackFrameInfo, StaticMappingEntry, ThreadInfo, VariableInfo, VariableStorage,
+    WatchExpression, WatchFormat,
 };
 pub use listing::{CodeUnitType, CommentType, TraceCodeManager, TraceCodeSpace, TraceCodeUnit, TraceComment};
 pub use memory::{TraceMemoryBlock, TraceMemoryFlag, TraceMemoryManager, TraceMemoryRegion, TraceMemoryState};
