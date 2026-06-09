@@ -109,10 +109,10 @@ pub mod window_position;
 // Re-export the most commonly-used types at the docking module level for
 // convenience.
 pub use action::{
-    ActionCallback, ActionContext, ActionContextInfo, ActionProperty, ActionPropertyChangeEvent,
-    ActionType, ContextActionCallback, DockingAction, GuiActionManager, Key, KeyBinding,
-    KeyBindingType, MenuBarData, Modifiers, PopupMenuData, PropertyChangeCallback, ToolBarData,
-    UndoEntry,
+    ActionCallback, ActionContext, ActionContextInfo, ActionDisplayLevel, ActionGroup,
+    ActionProperty, ActionPropertyChangeEvent, ActionType, ContextActionCallback, DockingAction,
+    GuiActionManager, Key, KeyBinding, KeyBindingType, MenuBarData, Modifiers, PopupMenuData,
+    PropertyChangeCallback, ToolBarData, UndoEntry,
 };
 pub use actions::{
     ClosurePopupProvider, DockingActionProxy, DockingToolActions, MenuBarManager,
@@ -145,12 +145,14 @@ pub use tool::{DockingTool, ToolEvent, ToolEventCallback, ToolService};
 pub use window_manager::{ComponentPlaceholder, DockingWindowManager, WindowContainer};
 pub use action::{Action as ActionTrait, KeyBindableAction, ToggleAction};
 pub use action_context::DockingActionContext;
-pub use component_provider::ComponentProvider as ComponentProviderTrait;
+pub use component_provider::{
+    ComponentProvider as ComponentProviderTrait, ComponentProviderState,
+};
 pub use dialog_component_provider::DialogComponentProvider as DialogComponentProviderTrait;
 pub use dockable_component::DockableComponent;
 pub use docking_tool::{
-    DockingTool as DockingToolTrait, DockingContextListener as ToolContextListener,
-    PopupActionProvider,
+    DockingContextListener as ToolContextListener, DockingTool as DockingToolTrait,
+    DockingToolEvent, DockingToolEventCallback, DockingToolService, PopupActionProvider,
 };
 pub use drop_target_handler::{DropRegionVisual, DropTargetHandler};
 pub use window_position::{DockEdge, WindowPositionInfo};

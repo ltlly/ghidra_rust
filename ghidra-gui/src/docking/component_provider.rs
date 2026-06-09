@@ -11,14 +11,515 @@
 //! provider *instance*.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::action::DockingAction;
+use super::action::{DockingAction, KeyBinding, KeyBindingType, ToolBarData};
 use super::action_context::DockingActionContext;
 use super::component::WindowPosition;
 
 // ---------------------------------------------------------------------------
-// ComponentProvider trait
+// ComponentProviderState — mutable state for a concrete provider
 // ---------------------------------------------------------------------------
+
+/// Mutable state that a concrete `ComponentProvider` implementation can
+/// embed.  Mirrors the Java `ComponentProvider` fields that are managed
+/// by the framework (titles, icon, key binding, transient flag, etc.).
+///
+/// # Usage
+///
+/// ```ignore
+/// use ghidra_gui::docking::component_provider::*;
+/// use ghidra_gui::docking::component::ComponentProvider as ProviderType;
+///
+/// struct MyProvider {
+///     state: ComponentProviderState,
+///     // ... your fields ...
+/// }
+///
+/// impl MyProvider {
+///     fn new() -> Self {
+///         Self {
+///             state: ComponentProviderState::new(
+///                 "MyView",
+///                 "MyPlugin",
+///                 ProviderType::Console,
+///             ),
+///         }
+///     }
+/// }
+/// ```
+#[derive(Debug)]
+pub struct ComponentProviderState {
+    /// Programmatic name of the provider.
+    name: String,
+    /// Owner (usually a plugin name).
+    owner: String,
+    /// The provider type enum value.
+    provider_type: super::component::ComponentProvider,
+    /// The current window title.
+    title: String,
+    /// The current sub-title.
+    sub_title: String,
+    /// The current tab text.
+    tab_text: Option<String>,
+    /// Custom title override (if set, setTitle has no effect).
+    custom_title: Option<String>,
+    /// Custom sub-title override.
+    custom_sub_title: Option<String>,
+    /// Custom tab text override.
+    custom_tab_text: Option<String>,
+    /// Icon identifier.
+    icon: Option<String>,
+    /// Whether the provider is visible.
+    visible: bool,
+    /// Whether the provider is in (registered with) a tool.
+    in_tool: bool,
+    /// Whether this is a transient provider.
+    is_transient: bool,
+    /// Whether the show action should appear in the toolbar.
+    add_toolbar_action: bool,
+    /// Default key binding for the show action.
+    default_key_binding: Option<KeyBinding>,
+    /// Window group for initial placement.
+    window_group: String,
+    /// Window menu sub-group name.
+    window_sub_menu_name: Option<String>,
+    /// Window menu group.
+    window_menu_group: String,
+    /// Default window position.
+    default_position: WindowPosition,
+    /// Intra-group position.
+    intra_group_position: WindowPosition,
+    /// Help location identifier.
+    help_location: Option<String>,
+    /// Unique instance ID (for layout persistence).
+    instance_id: u64,
+    /// Whether the instance ID has been explicitly initialized.
+    instance_id_initialized: bool,
+    /// Registered font ID for font size adjustments.
+    registered_font_id: Option<String>,
+    /// Local actions contributed by this provider.
+    local_actions: Vec<DockingAction>,
+}
+
+static NEXT_INSTANCE_ID: AtomicU64 = AtomicU64::new(1);
+
+impl ComponentProviderState {
+    /// Create a new provider state with the given name, owner, and type.
+    pub fn new(
+        name: impl Into<String>,
+        owner: impl Into<String>,
+        provider_type: super::component::ComponentProvider,
+    ) -> Self {
+        let name = name.into();
+        Self {
+            title: name.clone(),
+            name,
+            owner: owner.into(),
+            provider_type,
+            sub_title: String::new(),
+            tab_text: None,
+            custom_title: None,
+            custom_sub_title: None,
+            custom_tab_text: None,
+            icon: None,
+            visible: false,
+            in_tool: false,
+            is_transient: false,
+            add_toolbar_action: false,
+            default_key_binding: None,
+            window_group: "Default".to_owned(),
+            window_sub_menu_name: None,
+            window_menu_group: "Views".to_owned(),
+            default_position: WindowPosition::default(),
+            intra_group_position: WindowPosition::Center,
+            help_location: None,
+            instance_id: NEXT_INSTANCE_ID.fetch_add(1, Ordering::Relaxed),
+            instance_id_initialized: false,
+            registered_font_id: None,
+            local_actions: Vec::new(),
+        }
+    }
+
+    /// The programmatic name of the provider.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The owner (plugin name).
+    pub fn owner(&self) -> &str {
+        &self.owner
+    }
+
+    /// The provider type.
+    pub fn provider_type(&self) -> super::component::ComponentProvider {
+        self.provider_type
+    }
+
+    /// The unique instance ID.
+    pub fn instance_id(&self) -> u64 {
+        self.instance_id
+    }
+
+    /// Initialize the instance ID (can only be called once with a
+    /// different value; subsequent calls with the same value are no-ops).
+    ///
+    /// Port of Ghidra's `ComponentProvider.initializeInstanceID`.
+    pub fn initialize_instance_id(&mut self, new_id: u64) -> bool {
+        if self.instance_id_initialized {
+            if new_id != self.instance_id {
+                return false; // cannot change once initialized
+            }
+            return true;
+        }
+        self.instance_id_initialized = true;
+        self.instance_id = new_id;
+        true
+    }
+
+    // -- Title management --
+
+    /// The current window title.
+    pub fn title(&self) -> &str {
+        if let Some(ref custom) = self.custom_title {
+            custom
+        } else {
+            &self.title
+        }
+    }
+
+    /// Set the window title.  Has no effect if a custom title is set.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setTitle`.
+    pub fn set_title(&mut self, title: impl Into<String>) {
+        if self.custom_title.is_some() {
+            return;
+        }
+        self.title = title.into();
+    }
+
+    /// The current sub-title.
+    pub fn sub_title(&self) -> &str {
+        if let Some(ref custom) = self.custom_sub_title {
+            custom
+        } else {
+            &self.sub_title
+        }
+    }
+
+    /// Set the sub-title.  Has no effect if a custom sub-title is set.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setSubTitle`.
+    pub fn set_sub_title(&mut self, sub_title: impl Into<String>) {
+        if self.custom_sub_title.is_some() {
+            return;
+        }
+        self.sub_title = sub_title.into();
+    }
+
+    /// The current tab text.
+    pub fn tab_text(&self) -> &str {
+        if let Some(ref custom) = self.custom_tab_text {
+            custom
+        } else if let Some(ref tab) = self.tab_text {
+            tab
+        } else {
+            self.title()
+        }
+    }
+
+    /// Set the tab text.  Has no effect if a custom tab text is set.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setTabText`.
+    pub fn set_tab_text(&mut self, tab_text: impl Into<String>) {
+        if self.custom_tab_text.is_some() {
+            return;
+        }
+        self.tab_text = Some(tab_text.into());
+    }
+
+    /// Set a custom title that prevents future `set_title` calls from
+    /// having any effect.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setCustomTitle`.
+    pub fn set_custom_title(&mut self, title: impl Into<String>) {
+        let t = title.into();
+        self.custom_title = Some(t.clone());
+        self.title = t;
+    }
+
+    /// Set a custom sub-title that prevents future `set_sub_title` calls
+    /// from having any effect.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setCustomSubTitle`.
+    pub fn set_custom_sub_title(&mut self, sub_title: impl Into<String>) {
+        let s = sub_title.into();
+        self.custom_sub_title = Some(s.clone());
+        self.sub_title = s;
+    }
+
+    /// Set a custom tab text that prevents future `set_tab_text` calls
+    /// from having any effect.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setCustomTabText`.
+    pub fn set_custom_tab_text(&mut self, tab_text: impl Into<String>) {
+        let t = tab_text.into();
+        self.custom_tab_text = Some(t.clone());
+        self.tab_text = Some(t);
+    }
+
+    /// The full window title including sub-title.
+    pub fn full_title(&self) -> String {
+        let base = self.title().to_owned();
+        let sub = self.sub_title();
+        if sub.is_empty() {
+            base
+        } else {
+            format!("{} - {}", base, sub)
+        }
+    }
+
+    // -- Icon --
+
+    /// The icon identifier.
+    pub fn icon(&self) -> Option<&str> {
+        self.icon.as_deref()
+    }
+
+    /// Set the icon identifier.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setIcon`.
+    pub fn set_icon(&mut self, icon: impl Into<String>) {
+        self.icon = Some(icon.into());
+    }
+
+    // -- Visibility --
+
+    /// Whether the provider is visible.
+    pub fn is_visible(&self) -> bool {
+        self.visible
+    }
+
+    /// Set visibility.
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
+    }
+
+    // -- Tool integration --
+
+    /// Whether the provider is registered with a tool.
+    pub fn is_in_tool(&self) -> bool {
+        self.in_tool
+    }
+
+    /// Mark the provider as registered with a tool.
+    pub fn set_in_tool(&mut self, in_tool: bool) {
+        self.in_tool = in_tool;
+    }
+
+    // -- Transient --
+
+    /// Whether the provider is transient.
+    pub fn is_transient(&self) -> bool {
+        self.is_transient
+    }
+
+    /// Mark the provider as transient.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setTransient`.
+    pub fn set_transient(&mut self) {
+        self.is_transient = true;
+        // Transient providers cannot have toolbar actions or key bindings.
+        self.add_toolbar_action = false;
+        self.default_key_binding = None;
+    }
+
+    // -- Toolbar --
+
+    /// Whether the show action should appear in the toolbar.
+    pub fn add_toolbar_action(&self) -> bool {
+        self.add_toolbar_action
+    }
+
+    /// Signal that the show action should appear in the toolbar.
+    ///
+    /// Port of Ghidra's `ComponentProvider.addToToolbar`.
+    pub fn set_add_toolbar_action(&mut self, add: bool) {
+        if add && self.is_transient {
+            return; // transient providers cannot have toolbar actions
+        }
+        self.add_toolbar_action = add;
+    }
+
+    // -- Key binding --
+
+    /// The default key binding for the show action.
+    pub fn default_key_binding(&self) -> Option<&KeyBinding> {
+        self.default_key_binding.as_ref()
+    }
+
+    /// Set the default key binding for the show action.
+    ///
+    /// Port of Ghidra's `ComponentProvider.setKeyBinding`.
+    pub fn set_default_key_binding(&mut self, binding: Option<KeyBinding>) {
+        if self.is_transient && binding.is_some() {
+            return; // transient providers cannot have key bindings
+        }
+        self.default_key_binding = binding;
+    }
+
+    // -- Window group / position --
+
+    /// The window group.
+    pub fn window_group(&self) -> &str {
+        &self.window_group
+    }
+
+    /// Set the window group.
+    pub fn set_window_group(&mut self, group: impl Into<String>) {
+        self.window_group = group.into();
+    }
+
+    /// The window sub-menu name.
+    pub fn window_sub_menu_name(&self) -> Option<&str> {
+        self.window_sub_menu_name.as_deref()
+    }
+
+    /// Set the window sub-menu name.
+    pub fn set_window_sub_menu_name(&mut self, name: Option<String>) {
+        self.window_sub_menu_name = name;
+    }
+
+    /// The window menu group.
+    pub fn window_menu_group(&self) -> &str {
+        &self.window_menu_group
+    }
+
+    /// Set the window menu group.
+    pub fn set_window_menu_group(&mut self, group: impl Into<String>) {
+        self.window_menu_group = group.into();
+    }
+
+    /// The default window position.
+    pub fn default_position(&self) -> &WindowPosition {
+        &self.default_position
+    }
+
+    /// Set the default window position.
+    pub fn set_default_position(&mut self, position: WindowPosition) {
+        self.default_position = position;
+    }
+
+    /// The intra-group position.
+    pub fn intra_group_position(&self) -> &WindowPosition {
+        &self.intra_group_position
+    }
+
+    /// Set the intra-group position.
+    pub fn set_intra_group_position(&mut self, position: WindowPosition) {
+        self.intra_group_position = position;
+    }
+
+    // -- Help --
+
+    /// The help location identifier.
+    pub fn help_location(&self) -> Option<&str> {
+        self.help_location.as_deref()
+    }
+
+    /// Set the help location.
+    pub fn set_help_location(&mut self, location: impl Into<String>) {
+        self.help_location = Some(location.into());
+    }
+
+    // -- Font management --
+
+    /// The registered font ID for font size adjustments.
+    pub fn registered_font_id(&self) -> Option<&str> {
+        self.registered_font_id.as_deref()
+    }
+
+    /// Register a font ID for automatic font size adjustments.
+    ///
+    /// Port of Ghidra's `ComponentProvider.registerAdjustableFontId`.
+    pub fn register_adjustable_font_id(&mut self, font_id: impl Into<String>) {
+        self.registered_font_id = Some(font_id.into());
+    }
+
+    // -- Local actions --
+
+    /// All local actions registered on this provider.
+    pub fn local_actions(&self) -> &[DockingAction] {
+        &self.local_actions
+    }
+
+    /// Add a local action.
+    ///
+    /// Port of Ghidra's `ComponentProvider.addLocalAction`.
+    pub fn add_local_action(&mut self, action: DockingAction) {
+        if !self.local_actions.iter().any(|a| a.name == action.name) {
+            self.local_actions.push(action);
+        }
+    }
+
+    /// Remove a local action by name.
+    ///
+    /// Port of Ghidra's `ComponentProvider.removeLocalAction`.
+    pub fn remove_local_action(&mut self, action_name: &str) -> Option<DockingAction> {
+        let pos = self.local_actions.iter().position(|a| a.name == action_name);
+        pos.map(|idx| self.local_actions.remove(idx))
+    }
+
+    /// Remove all local actions.
+    ///
+    /// Port of Ghidra's `ComponentProvider.removeAllLocalActions`.
+    pub fn remove_all_local_actions(&mut self) -> Vec<DockingAction> {
+        std::mem::take(&mut self.local_actions)
+    }
+
+    // -- Show provider action --
+
+    /// Create the "show provider" action for this provider.
+    ///
+    /// Port of Ghidra's `ComponentProvider.ShowProviderAction`.
+    pub fn create_show_provider_action(&self) -> DockingAction {
+        let supports_key_bindings = !self.is_transient;
+        let key_binding_type = if supports_key_bindings {
+            KeyBindingType::Shared
+        } else {
+            KeyBindingType::Unsupported
+        };
+
+        let mut action = DockingAction::with_key_binding_type(
+            &self.name,
+            &self.owner,
+            format!("Display {}", self.name),
+            key_binding_type,
+        )
+        .with_description(format!("Display {}", self.name));
+
+        if self.add_toolbar_action {
+            if let Some(ref icon) = self.icon {
+                action = action.with_tool_bar_data(ToolBarData::new(icon));
+            }
+        }
+
+        if supports_key_bindings {
+            if let Some(ref kb) = self.default_key_binding {
+                action = action.with_key_binding(kb.clone());
+            }
+        }
+
+        action
+    }
+
+    // -- Instance key --
+
+    /// The instance key for layout persistence.
+    pub fn instance_key(&self) -> (super::component::ComponentProvider, String) {
+        (self.provider_type, self.name.clone())
+    }
+}
 
 /// The trait that every dockable component provider implements.
 ///
@@ -537,5 +1038,220 @@ mod tests {
         assert!(p.is_visible());
         p.set_visible(false);
         assert!(!p.is_visible());
+    }
+
+    // -- ComponentProviderState tests --
+
+    #[test]
+    fn test_provider_state_new() {
+        let state = ComponentProviderState::new("MyView", "MyPlugin", ProviderType::Console);
+        assert_eq!(state.name(), "MyView");
+        assert_eq!(state.owner(), "MyPlugin");
+        assert_eq!(state.provider_type(), ProviderType::Console);
+        assert_eq!(state.title(), "MyView");
+        assert!(state.sub_title().is_empty());
+        assert_eq!(state.window_group(), "Default");
+        assert!(!state.is_transient());
+        assert!(!state.is_in_tool());
+        assert!(!state.is_visible());
+    }
+
+    #[test]
+    fn test_provider_state_title_management() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+
+        // Normal title change.
+        state.set_title("New Title");
+        assert_eq!(state.title(), "New Title");
+
+        // Custom title overrides set_title.
+        state.set_custom_title("Custom");
+        assert_eq!(state.title(), "Custom");
+
+        // set_title is ignored after custom title.
+        state.set_title("Ignored");
+        assert_eq!(state.title(), "Custom");
+    }
+
+    #[test]
+    fn test_provider_state_sub_title_management() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+
+        state.set_sub_title("test.exe");
+        assert_eq!(state.sub_title(), "test.exe");
+
+        state.set_custom_sub_title("Custom Sub");
+        assert_eq!(state.sub_title(), "Custom Sub");
+
+        // set_sub_title is ignored after custom sub-title.
+        state.set_sub_title("Ignored");
+        assert_eq!(state.sub_title(), "Custom Sub");
+    }
+
+    #[test]
+    fn test_provider_state_tab_text_management() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+
+        // Default tab text is the title.
+        assert_eq!(state.tab_text(), "view");
+
+        state.set_tab_text("Custom Tab");
+        assert_eq!(state.tab_text(), "Custom Tab");
+
+        state.set_custom_tab_text("Locked Tab");
+        assert_eq!(state.tab_text(), "Locked Tab");
+
+        // set_tab_text is ignored after custom tab text.
+        state.set_tab_text("Ignored");
+        assert_eq!(state.tab_text(), "Locked Tab");
+    }
+
+    #[test]
+    fn test_provider_state_full_title() {
+        let mut state = ComponentProviderState::new("Console", "plugin", ProviderType::Console);
+        assert_eq!(state.full_title(), "Console");
+
+        state.set_sub_title("test.exe");
+        assert_eq!(state.full_title(), "Console - test.exe");
+    }
+
+    #[test]
+    fn test_provider_state_transient() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+        assert!(!state.is_transient());
+
+        state.set_add_toolbar_action(true);
+        assert!(state.add_toolbar_action());
+
+        state.set_transient();
+        assert!(state.is_transient());
+        // Transient clears toolbar and key binding.
+        assert!(!state.add_toolbar_action());
+    }
+
+    #[test]
+    fn test_provider_state_key_binding() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+
+        assert!(state.default_key_binding().is_none());
+
+        let kb = KeyBinding::ctrl(super::super::action::Key::G);
+        state.set_default_key_binding(Some(kb.clone()));
+        assert!(state.default_key_binding().is_some());
+
+        // Transient providers cannot have key bindings.
+        state.set_transient();
+        // The existing binding stays (set_transient already cleared it).
+        assert!(state.default_key_binding().is_none());
+    }
+
+    #[test]
+    fn test_provider_state_local_actions() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+        assert!(state.local_actions().is_empty());
+
+        let action = DockingAction::new("action1", "Action 1");
+        state.add_local_action(action);
+        assert_eq!(state.local_actions().len(), 1);
+
+        // Duplicate name is ignored.
+        state.add_local_action(DockingAction::new("action1", "Duplicate"));
+        assert_eq!(state.local_actions().len(), 1);
+
+        let removed = state.remove_local_action("action1");
+        assert!(removed.is_some());
+        assert!(state.local_actions().is_empty());
+    }
+
+    #[test]
+    fn test_provider_state_remove_all_local_actions() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+        state.add_local_action(DockingAction::new("a", "A"));
+        state.add_local_action(DockingAction::new("b", "B"));
+
+        let removed = state.remove_all_local_actions();
+        assert_eq!(removed.len(), 2);
+        assert!(state.local_actions().is_empty());
+    }
+
+    #[test]
+    fn test_provider_state_show_action() {
+        let mut state = ComponentProviderState::new("MyView", "MyPlugin", ProviderType::Console);
+        state.set_icon("icon/myview.png");
+        state.set_add_toolbar_action(true);
+
+        let action = state.create_show_provider_action();
+        assert_eq!(action.name, "MyView");
+        assert_eq!(action.owner, "MyPlugin");
+        assert_eq!(action.display_name, "Display MyView");
+        assert!(action.tool_bar_data.is_some());
+        assert_eq!(action.tool_bar_data.unwrap().icon, "icon/myview.png");
+    }
+
+    #[test]
+    fn test_provider_state_show_action_transient_no_toolbar() {
+        let mut state = ComponentProviderState::new("temp", "plugin", ProviderType::Console);
+        state.set_transient();
+
+        let action = state.create_show_provider_action();
+        assert!(action.tool_bar_data.is_none());
+        assert_eq!(action.key_binding_type, KeyBindingType::Unsupported);
+    }
+
+    #[test]
+    fn test_provider_state_instance_id() {
+        let mut state1 = ComponentProviderState::new("a", "p", ProviderType::Console);
+        let mut state2 = ComponentProviderState::new("b", "p", ProviderType::Console);
+
+        // Each state gets a unique instance ID.
+        assert_ne!(state1.instance_id(), state2.instance_id());
+
+        // Can initialize once.
+        assert!(state1.initialize_instance_id(42));
+        assert_eq!(state1.instance_id(), 42);
+
+        // Cannot change to a different value.
+        assert!(!state1.initialize_instance_id(99));
+        assert_eq!(state1.instance_id(), 42);
+
+        // Same value is fine.
+        assert!(state1.initialize_instance_id(42));
+    }
+
+    #[test]
+    fn test_provider_state_instance_key() {
+        let state = ComponentProviderState::new("MyView", "plugin", ProviderType::DecompilerView);
+        let (ptype, name) = state.instance_key();
+        assert_eq!(ptype, ProviderType::DecompilerView);
+        assert_eq!(name, "MyView");
+    }
+
+    #[test]
+    fn test_provider_state_font_id() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+        assert!(state.registered_font_id().is_none());
+
+        state.register_adjustable_font_id("font.listing");
+        assert_eq!(state.registered_font_id(), Some("font.listing"));
+    }
+
+    #[test]
+    fn test_provider_state_window_group_position() {
+        let mut state = ComponentProviderState::new("view", "plugin", ProviderType::Console);
+
+        state.set_window_group("Analysis");
+        assert_eq!(state.window_group(), "Analysis");
+
+        state.set_window_sub_menu_name(Some("Advanced".to_owned()));
+        assert_eq!(state.window_sub_menu_name(), Some("Advanced"));
+
+        state.set_window_menu_group("Tools");
+        assert_eq!(state.window_menu_group(), "Tools");
+
+        state.set_default_position(WindowPosition::Right);
+        assert_eq!(state.default_position(), &WindowPosition::Right);
+
+        state.set_intra_group_position(WindowPosition::Bottom);
+        assert_eq!(state.intra_group_position(), &WindowPosition::Bottom);
     }
 }

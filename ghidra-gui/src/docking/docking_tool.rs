@@ -15,6 +15,113 @@ use super::action_context::DockingActionContext;
 use super::component::{ComponentProvider as ProviderType, WindowPosition};
 
 // ---------------------------------------------------------------------------
+// DockingToolService — a service registered with the tool (trait-level)
+// ---------------------------------------------------------------------------
+
+/// A service registered with the tool's service registry.
+///
+/// Port of Ghidra's `ServiceProvider` concept.  Plugins can register
+/// services and other components can look them up by name.
+#[derive(Debug, Clone)]
+pub struct DockingToolService {
+    /// The service name / identifier.
+    pub name: String,
+    /// The service data (typically a JSON or serialized representation).
+    pub data: String,
+    /// The owner (plugin) that registered the service.
+    pub owner: String,
+}
+
+impl DockingToolService {
+    /// Create a new tool service.
+    pub fn new(
+        name: impl Into<String>,
+        data: impl Into<String>,
+        owner: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            data: data.into(),
+            owner: owner.into(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DockingToolEvent — events emitted by the tool (trait-level)
+// ---------------------------------------------------------------------------
+
+/// Events that a tool can emit to registered listeners.
+///
+/// Port of the various event types in Ghidra's tool system.
+#[derive(Debug, Clone)]
+pub enum DockingToolEvent {
+    /// A component provider was added.
+    ProviderAdded {
+        provider: ProviderType,
+        name: String,
+    },
+    /// A component provider was removed.
+    ProviderRemoved {
+        provider: ProviderType,
+        name: String,
+    },
+    /// A component provider's visibility changed.
+    ProviderVisibilityChanged {
+        provider: ProviderType,
+        name: String,
+        visible: bool,
+    },
+    /// The active (focused) component provider changed.
+    ActiveProviderChanged {
+        provider: Option<(ProviderType, String)>,
+    },
+    /// The tool's action context changed.
+    ContextChanged {
+        provider: Option<(ProviderType, String)>,
+    },
+    /// An action was added to the tool.
+    ActionAdded {
+        name: String,
+        owner: String,
+    },
+    /// An action was removed from the tool.
+    ActionRemoved {
+        name: String,
+        owner: String,
+    },
+    /// The tool's configuration changed.
+    ConfigChanged,
+    /// The tool was closed.
+    Closed,
+    /// The tool's status info changed.
+    StatusChanged {
+        text: String,
+    },
+}
+
+/// A callback that receives tool events.
+pub struct DockingToolEventCallback(Box<dyn Fn(&DockingToolEvent) + Send + Sync>);
+
+impl DockingToolEventCallback {
+    /// Create a new event callback.
+    pub fn new<F: Fn(&DockingToolEvent) + Send + Sync + 'static>(f: F) -> Self {
+        Self(Box::new(f))
+    }
+
+    /// Invoke the callback with the given event.
+    pub fn invoke(&self, event: &DockingToolEvent) {
+        (self.0)(event)
+    }
+}
+
+impl fmt::Debug for DockingToolEventCallback {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DockingToolEventCallback").finish()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PopupActionProvider — callback for contributing popup actions
 // ---------------------------------------------------------------------------
 
@@ -382,6 +489,56 @@ pub trait DockingTool: fmt::Debug + Send + Sync {
     /// Port of Ghidra's `Tool.setMenuGroup`.
     fn set_menu_group(&mut self, _menu_path: &[&str], _group: &str, _sub_group: &str) {}
 
+    // -- Icon --
+
+    /// Get the tool's icon identifier.
+    ///
+    /// Port of Ghidra's `Tool.getIcon`.
+    fn icon(&self) -> Option<&str> {
+        None
+    }
+
+    /// Set the tool's icon.
+    fn set_icon(&mut self, _icon: &str) {}
+
+    // -- Options --
+
+    /// Get an option value for the given category and key.
+    ///
+    /// Port of Ghidra's `Tool.getOptions`.
+    fn get_option(&self, _category: &str, _key: &str) -> Option<&str> {
+        None
+    }
+
+    /// Set an option value for the given category and key.
+    fn set_option(&mut self, _category: &str, _key: &str, _value: &str) {}
+
+    /// Remove an option value for the given category and key.
+    fn remove_option(&mut self, _category: &str, _key: &str) {}
+
+    // -- Service providers --
+
+    /// Get all registered service names.
+    fn service_names(&self) -> Vec<&str> {
+        Vec::new()
+    }
+
+    /// Check if a service is registered.
+    fn has_service(&self, name: &str) -> bool {
+        self.get_service(name).is_some()
+    }
+
+    // -- Event system --
+
+    /// Register a tool event listener.
+    ///
+    /// Port of Ghidra's event listener pattern.  Listeners are notified
+    /// when providers are added/removed, context changes, etc.
+    fn add_event_listener(&mut self, _listener: DockingToolEventCallback) {}
+
+    /// Remove a tool event listener by index.
+    fn remove_event_listener(&mut self, _index: usize) {}
+
     // -- Lifecycle --
 
     /// Close the tool.
@@ -524,5 +681,67 @@ mod tests {
     fn test_tool_trait_as_trait_object() {
         let tool: Box<dyn DockingTool> = Box::new(MockTool::new());
         assert_eq!(tool.tool_name(), "CodeBrowser");
+    }
+
+    // -- DockingToolService tests --
+
+    #[test]
+    fn test_docking_tool_service_new() {
+        let svc = DockingToolService::new("GhidraScript", "{}", "ScriptPlugin");
+        assert_eq!(svc.name, "GhidraScript");
+        assert_eq!(svc.data, "{}");
+        assert_eq!(svc.owner, "ScriptPlugin");
+    }
+
+    #[test]
+    fn test_docking_tool_service_clone() {
+        let svc = DockingToolService::new("svc", "data", "owner");
+        let svc2 = svc.clone();
+        assert_eq!(svc.name, svc2.name);
+    }
+
+    // -- DockingToolEvent tests --
+
+    #[test]
+    fn test_docking_tool_event_variants() {
+        let evt = DockingToolEvent::ProviderAdded {
+            provider: ProviderType::Console,
+            name: "console".to_owned(),
+        };
+        assert!(format!("{:?}", evt).contains("Console"));
+
+        let evt = DockingToolEvent::ActiveProviderChanged {
+            provider: Some((ProviderType::ListingView, "listing".to_owned())),
+        };
+        assert!(format!("{:?}", evt).contains("ListingView"));
+
+        let evt = DockingToolEvent::ContextChanged { provider: None };
+        assert!(format!("{:?}", evt).contains("ContextChanged"));
+
+        let evt = DockingToolEvent::Closed;
+        assert!(format!("{:?}", evt).contains("Closed"));
+    }
+
+    #[test]
+    fn test_docking_tool_event_callback() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let called = Arc::new(AtomicBool::new(false));
+        let called2 = called.clone();
+
+        let cb = DockingToolEventCallback::new(move |_evt| {
+            called2.store(true, Ordering::SeqCst);
+        });
+
+        cb.invoke(&DockingToolEvent::Closed);
+        assert!(called.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn test_docking_tool_event_callback_debug() {
+        let cb = DockingToolEventCallback::new(|_| {});
+        let dbg = format!("{:?}", cb);
+        assert!(dbg.contains("DockingToolEventCallback"));
     }
 }

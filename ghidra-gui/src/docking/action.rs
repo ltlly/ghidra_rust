@@ -1097,6 +1097,56 @@ impl DockingAction {
         is_main_window
     }
 
+    /// Whether this action should be added to a window, considering
+    /// the context types of providers currently in that window.
+    ///
+    /// Port of Ghidra's `DockingActionIf.shouldAddToWindow(boolean, Set<Class<?>>)`.
+    /// If this action has a context class set and the window does not contain
+    /// any providers that support that context type, the action is not added.
+    pub fn should_add_to_window_with_context_types(
+        &self,
+        is_main_window: bool,
+        context_types: &[&str],
+    ) -> bool {
+        if self.menu_bar_data.is_none() && self.tool_bar_data.is_none() {
+            return false;
+        }
+
+        // If this action has a specific context class, check that the window
+        // contains at least one provider supporting that context type.
+        if let Some(ref ctx_class) = self.context_class {
+            if !context_types.is_empty()
+                && !context_types.iter().any(|ct| ct == ctx_class)
+            {
+                return false;
+            }
+        }
+
+        is_main_window || self.context_class.is_none()
+    }
+
+    /// Categorize this action into an [`ActionGroup`] based on its
+    /// properties (local vs global, menu vs toolbar vs popup).
+    ///
+    /// This is a helper for the action chooser dialog.
+    pub fn categorize(&self, is_local: bool) -> ActionGroup {
+        if is_local {
+            if self.tool_bar_data.is_some() {
+                ActionGroup::LocalToolbar
+            } else if self.menu_bar_data.is_some() {
+                ActionGroup::LocalMenu
+            } else {
+                ActionGroup::Popup
+            }
+        } else if self.tool_bar_data.is_some() {
+            ActionGroup::GlobalToolbar
+        } else if self.menu_bar_data.is_some() {
+            ActionGroup::GlobalMenu
+        } else {
+            ActionGroup::KeybindingOnly
+        }
+    }
+
     /// Whether the action is enabled for the given context.
     ///
     /// If a dynamic `enabled_predicate` has been set, it is evaluated;
@@ -1610,6 +1660,148 @@ impl GuiActionManager {
     pub fn clear_history(&mut self) {
         self.undo_stack.clear();
         self.redo_stack.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ActionDisplayLevel — controls which actions are shown in ActionChooserDialog
+// ---------------------------------------------------------------------------
+
+/// An enum for specifying which actions should be displayed in the action
+/// chooser dialog. Each successive level is less restrictive and includes
+/// more actions to display.
+///
+/// Port of Ghidra's `docking.actions.dialog.ActionDisplayLevel`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum ActionDisplayLevel {
+    /// All local menu and toolbar actions, all local and global popup
+    /// actions with valid context and addToPopup=true, all local and
+    /// global keybinding actions that are valid and enabled.
+    #[default]
+    Local,
+    /// Adds local and global actions with a valid context, even if disabled.
+    Global,
+    /// Adds local and global actions even if invalid context and disabled.
+    All,
+}
+
+impl ActionDisplayLevel {
+    /// Returns the next display level in the cycle: Local -> Global -> All -> Local.
+    pub fn next_level(&self) -> Self {
+        match self {
+            ActionDisplayLevel::Local => ActionDisplayLevel::Global,
+            ActionDisplayLevel::Global => ActionDisplayLevel::All,
+            ActionDisplayLevel::All => ActionDisplayLevel::Local,
+        }
+    }
+
+    /// Whether this level includes disabled actions.
+    pub fn includes_disabled(&self) -> bool {
+        matches!(self, ActionDisplayLevel::Global | ActionDisplayLevel::All)
+    }
+
+    /// Whether this level includes actions with invalid context.
+    pub fn includes_invalid_context(&self) -> bool {
+        matches!(self, ActionDisplayLevel::All)
+    }
+}
+
+impl fmt::Display for ActionDisplayLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ActionDisplayLevel::Local => write!(f, "Local"),
+            ActionDisplayLevel::Global => write!(f, "Global"),
+            ActionDisplayLevel::All => write!(f, "All"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ActionGroup — category groups for the ActionChooserDialog
+// ---------------------------------------------------------------------------
+
+/// Defines action category groups. Actions displayed in the action chooser
+/// dialog are organized into these groups.
+///
+/// Port of Ghidra's `docking.actions.dialog.ActionGroup`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActionGroup {
+    /// Actions local to a provider that appear on the toolbar.
+    LocalToolbar,
+    /// Actions local to a provider that appear in menus.
+    LocalMenu,
+    /// Actions that appear in popup (context) menus.
+    Popup,
+    /// Actions that only have key bindings (no menu/toolbar presence).
+    KeybindingOnly,
+    /// Global actions that appear on the toolbar.
+    GlobalToolbar,
+    /// Global actions that appear in menus.
+    GlobalMenu,
+}
+
+impl ActionGroup {
+    /// Returns the human-readable display name for the group.
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            ActionGroup::LocalToolbar => "Local Toolbar",
+            ActionGroup::LocalMenu => "Local Menu",
+            ActionGroup::Popup => "Popup Menu",
+            ActionGroup::KeybindingOnly => "Keybinding Only",
+            ActionGroup::GlobalToolbar => "Global Toolbar",
+            ActionGroup::GlobalMenu => "Global Menu",
+        }
+    }
+
+    /// Find the group that has the given display name.
+    pub fn from_display_name(name: &str) -> Option<Self> {
+        match name {
+            "Local Toolbar" => Some(ActionGroup::LocalToolbar),
+            "Local Menu" => Some(ActionGroup::LocalMenu),
+            "Popup Menu" => Some(ActionGroup::Popup),
+            "Keybinding Only" => Some(ActionGroup::KeybindingOnly),
+            "Global Toolbar" => Some(ActionGroup::GlobalToolbar),
+            "Global Menu" => Some(ActionGroup::GlobalMenu),
+            _ => None,
+        }
+    }
+
+    /// Whether this group is for local (provider-specific) actions.
+    pub fn is_local(&self) -> bool {
+        matches!(
+            self,
+            ActionGroup::LocalToolbar | ActionGroup::LocalMenu
+        )
+    }
+
+    /// Whether this group is for global actions.
+    pub fn is_global(&self) -> bool {
+        matches!(
+            self,
+            ActionGroup::GlobalToolbar | ActionGroup::GlobalMenu
+        )
+    }
+
+    /// Whether this group is for toolbar actions.
+    pub fn is_toolbar(&self) -> bool {
+        matches!(
+            self,
+            ActionGroup::LocalToolbar | ActionGroup::GlobalToolbar
+        )
+    }
+
+    /// Whether this group is for menu actions.
+    pub fn is_menu(&self) -> bool {
+        matches!(
+            self,
+            ActionGroup::LocalMenu | ActionGroup::GlobalMenu
+        )
+    }
+}
+
+impl fmt::Display for ActionGroup {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display_name())
     }
 }
 
@@ -2289,5 +2481,178 @@ mod tests {
         let c = DockingAction::new("a", "A")
             .with_tool_bar_data(ToolBarData::new("icon.png"));
         assert_ne!(a, c);
+    }
+
+    // -- ActionDisplayLevel tests --
+
+    #[test]
+    fn test_action_display_level_default() {
+        assert_eq!(ActionDisplayLevel::default(), ActionDisplayLevel::Local);
+    }
+
+    #[test]
+    fn test_action_display_level_next() {
+        assert_eq!(
+            ActionDisplayLevel::Local.next_level(),
+            ActionDisplayLevel::Global
+        );
+        assert_eq!(
+            ActionDisplayLevel::Global.next_level(),
+            ActionDisplayLevel::All
+        );
+        assert_eq!(
+            ActionDisplayLevel::All.next_level(),
+            ActionDisplayLevel::Local
+        );
+    }
+
+    #[test]
+    fn test_action_display_level_includes_disabled() {
+        assert!(!ActionDisplayLevel::Local.includes_disabled());
+        assert!(ActionDisplayLevel::Global.includes_disabled());
+        assert!(ActionDisplayLevel::All.includes_disabled());
+    }
+
+    #[test]
+    fn test_action_display_level_includes_invalid_context() {
+        assert!(!ActionDisplayLevel::Local.includes_invalid_context());
+        assert!(!ActionDisplayLevel::Global.includes_invalid_context());
+        assert!(ActionDisplayLevel::All.includes_invalid_context());
+    }
+
+    #[test]
+    fn test_action_display_level_display() {
+        assert_eq!(ActionDisplayLevel::Local.to_string(), "Local");
+        assert_eq!(ActionDisplayLevel::Global.to_string(), "Global");
+        assert_eq!(ActionDisplayLevel::All.to_string(), "All");
+    }
+
+    // -- ActionGroup tests --
+
+    #[test]
+    fn test_action_group_display_name() {
+        assert_eq!(ActionGroup::LocalToolbar.display_name(), "Local Toolbar");
+        assert_eq!(ActionGroup::GlobalMenu.display_name(), "Global Menu");
+        assert_eq!(ActionGroup::Popup.display_name(), "Popup Menu");
+    }
+
+    #[test]
+    fn test_action_group_from_display_name() {
+        assert_eq!(
+            ActionGroup::from_display_name("Local Toolbar"),
+            Some(ActionGroup::LocalToolbar)
+        );
+        assert_eq!(
+            ActionGroup::from_display_name("Global Menu"),
+            Some(ActionGroup::GlobalMenu)
+        );
+        assert_eq!(ActionGroup::from_display_name("Nonexistent"), None);
+    }
+
+    #[test]
+    fn test_action_group_classification() {
+        assert!(ActionGroup::LocalToolbar.is_local());
+        assert!(!ActionGroup::LocalToolbar.is_global());
+        assert!(ActionGroup::LocalToolbar.is_toolbar());
+        assert!(!ActionGroup::LocalToolbar.is_menu());
+
+        assert!(!ActionGroup::GlobalMenu.is_local());
+        assert!(ActionGroup::GlobalMenu.is_global());
+        assert!(!ActionGroup::GlobalMenu.is_toolbar());
+        assert!(ActionGroup::GlobalMenu.is_menu());
+
+        assert!(!ActionGroup::Popup.is_local());
+        assert!(!ActionGroup::Popup.is_global());
+        assert!(!ActionGroup::Popup.is_toolbar());
+        assert!(!ActionGroup::Popup.is_menu());
+    }
+
+    #[test]
+    fn test_action_group_display() {
+        assert_eq!(ActionGroup::KeybindingOnly.to_string(), "Keybinding Only");
+    }
+
+    // -- categorize tests --
+
+    #[test]
+    fn test_categorize_local_with_toolbar() {
+        let action = DockingAction::new("a", "A")
+            .with_tool_bar_data(ToolBarData::new("icon.png"));
+        assert_eq!(action.categorize(true), ActionGroup::LocalToolbar);
+    }
+
+    #[test]
+    fn test_categorize_local_with_menu() {
+        let action = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        assert_eq!(action.categorize(true), ActionGroup::LocalMenu);
+    }
+
+    #[test]
+    fn test_categorize_local_popup_only() {
+        let action = DockingAction::new("a", "A");
+        assert_eq!(action.categorize(true), ActionGroup::Popup);
+    }
+
+    #[test]
+    fn test_categorize_global_with_toolbar() {
+        let action = DockingAction::new("a", "A")
+            .with_tool_bar_data(ToolBarData::new("icon.png"));
+        assert_eq!(action.categorize(false), ActionGroup::GlobalToolbar);
+    }
+
+    #[test]
+    fn test_categorize_global_menu() {
+        let action = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        assert_eq!(action.categorize(false), ActionGroup::GlobalMenu);
+    }
+
+    #[test]
+    fn test_categorize_global_keybinding_only() {
+        let action = DockingAction::new("a", "A");
+        assert_eq!(action.categorize(false), ActionGroup::KeybindingOnly);
+    }
+
+    // -- should_add_to_window_with_context_types tests --
+
+    #[test]
+    fn test_should_add_to_window_with_context_types_no_menu_toolbar() {
+        let action = DockingAction::new("a", "A");
+        assert!(!action.should_add_to_window_with_context_types(true, &[]));
+    }
+
+    #[test]
+    fn test_should_add_to_window_with_context_types_matching() {
+        let action = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        let mut action = action;
+        action.set_context_class("ListingContext", false);
+        assert!(action.should_add_to_window_with_context_types(
+            true,
+            &["ListingContext", "DecompilerContext"]
+        ));
+    }
+
+    #[test]
+    fn test_should_add_to_window_with_context_types_no_match() {
+        let action = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        let mut action = action;
+        action.set_context_class("ListingContext", false);
+        assert!(!action.should_add_to_window_with_context_types(
+            true,
+            &["DecompilerContext"]
+        ));
+    }
+
+    #[test]
+    fn test_should_add_to_window_with_context_types_no_class() {
+        let action = DockingAction::new("a", "A")
+            .with_menu_bar_data(MenuBarData::simple("A"));
+        // No context class set -> added to main window.
+        assert!(action.should_add_to_window_with_context_types(true, &["AnyContext"]));
+        // Non-main window: no context class -> added.
+        assert!(action.should_add_to_window_with_context_types(false, &["AnyContext"]));
     }
 }

@@ -247,11 +247,11 @@ mod tests {
     fn make_graph() -> HashDirectedGraph<i32, DefaultGEdge<i32>> {
         let mut g = HashDirectedGraph::new();
         for v in [1, 2, 3, 4] {
-            g.add_vertex(v);
+            GDirectedGraph::add_vertex(&mut g, v);
         }
-        g.add_edge(DefaultGEdge::new(1, 2));
-        g.add_edge(DefaultGEdge::new(2, 3));
-        g.add_edge(DefaultGEdge::new(3, 4));
+        GDirectedGraph::add_edge(&mut g, DefaultGEdge::new(1, 2));
+        GDirectedGraph::add_edge(&mut g, DefaultGEdge::new(2, 3));
+        GDirectedGraph::add_edge(&mut g, DefaultGEdge::new(3, 4));
         g
     }
 
