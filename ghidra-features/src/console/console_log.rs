@@ -437,22 +437,26 @@ mod tests {
 
     #[test]
     fn test_console_log_truncation() {
-        let mut log = ConsoleLog::new(100);
-        // Fill beyond limit
-        for i in 0..20 {
+        // MIN_MAX_CHARS is 1000, so new() clamps to at least 1000.
+        let max = ConsoleLog::MIN_MAX_CHARS;
+        let mut log = ConsoleLog::new(max);
+        // Fill beyond limit: each line is ~12 chars, need ~90 lines for 1000+ chars
+        for i in 0..120 {
             log.add_message(&format!("line {:04}\n", i));
         }
-        // Should have been truncated
-        assert!(log.total_chars() <= 100);
+        // Should have been truncated to around max_chars
+        assert!(log.total_chars() <= max);
     }
 
     #[test]
     fn test_console_log_single_large_message() {
-        let mut log = ConsoleLog::new(100);
-        let big = "x".repeat(200);
+        // MIN_MAX_CHARS is 1000, so new(100) clamps to 1000.
+        let max = ConsoleLog::MIN_MAX_CHARS;
+        let mut log = ConsoleLog::new(max);
+        let big = "x".repeat(max * 2);
         log.add_message(&big);
         // Should be capped to max_chars
-        assert!(log.total_chars() <= 100);
+        assert!(log.total_chars() <= max);
     }
 
     #[test]
@@ -492,12 +496,21 @@ mod tests {
     #[test]
     fn test_console_log_last_n() {
         let mut log = ConsoleLog::new(10000);
+        // Alternate styles so entries don't merge
         for i in 0..10 {
-            log.add_message(&format!("line{}\n", i));
+            if i % 2 == 0 {
+                log.add_message(&format!("line{}\n", i));
+            } else {
+                log.add_error_message(&format!("line{}\n", i));
+            }
         }
         let last3 = log.last_n(3);
         assert_eq!(last3.len(), 3);
-        assert!(last3[0].text().contains("line7"));
+        // Last 3 entries should contain line7, line8, line9
+        let combined: String = last3.iter().map(|e| e.text()).collect();
+        assert!(combined.contains("line7"));
+        assert!(combined.contains("line8"));
+        assert!(combined.contains("line9"));
     }
 
     #[test]
@@ -539,8 +552,10 @@ mod tests {
         log.add_error_message("b");
         log.add_message("c");
         log.add_error_message("d");
-        assert_eq!(log.count_by_style(ConsoleStyle::Output), 1); // "a" and "c" merged
-        assert_eq!(log.count_by_style(ConsoleStyle::Error), 1); // "b" and "d" merged
+        // "a" and "c" are separated by error "b", so they cannot merge.
+        // Same for "b" and "d" separated by output "c".
+        assert_eq!(log.count_by_style(ConsoleStyle::Output), 2);
+        assert_eq!(log.count_by_style(ConsoleStyle::Error), 2);
     }
 
     #[test]
