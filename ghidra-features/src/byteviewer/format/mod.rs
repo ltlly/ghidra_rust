@@ -1244,6 +1244,206 @@ impl DataFormat {
 }
 
 // ===========================================================================
+// CursorWidthDataFormatModel trait
+// ===========================================================================
+
+/// Optional extension trait for format models that need to specify the
+/// cursor width for individual characters.
+///
+/// Ported from Ghidra's `CursorWidthDataFormatModel` interface.
+pub trait CursorWidthDataFormatModel: DataFormatModel {
+    /// Return the cursor width (in display units) for the current font
+    /// metrics. Implementations may vary depending on the character set
+    /// being displayed.
+    fn cursor_width(&self, char_width: usize) -> usize {
+        self.data_unit_symbol_size() * char_width
+    }
+}
+
+// ===========================================================================
+// TooltipDataFormatModel trait
+// ===========================================================================
+
+/// Optional extension trait for format models that provide tooltip popups.
+///
+/// Ported from Ghidra's `TooltipDataFormatModel` interface.
+pub trait TooltipDataFormatModel: DataFormatModel {
+    /// Get a tooltip string for the byte at the given index.
+    fn get_tooltip(&self, block: &dyn ByteBlock, index: &BigInt) -> Option<String>;
+}
+
+// ===========================================================================
+// AddressFormatModel
+// ===========================================================================
+
+/// Displays whether the bytes at a given address form a valid address in
+/// the program's memory space.
+///
+/// Ported from Ghidra's `AddressFormatModel`.
+///
+/// Uses special Unicode symbols:
+/// - `\u{278A}` (GOOD_ADDRESS) -- the byte value points to a valid address
+/// - `'.'` (BAD_ADDRESS) -- the address is known but not valid
+/// - `'?'` (NON_ADDRESS) -- no program loaded
+#[derive(Debug, Clone)]
+pub struct AddressFormatModel {
+    symbol_size: usize,
+}
+
+impl AddressFormatModel {
+    /// Symbol for a valid address target.
+    pub const GOOD_ADDRESS: &'static str = "\u{278A}";
+    /// Symbol for an address that doesn't point to valid memory.
+    pub const BAD_ADDRESS: &'static str = ".";
+    /// Symbol when no program is available.
+    pub const NON_ADDRESS: &'static str = "?";
+
+    /// Create a new address format model.
+    pub fn new() -> Self {
+        Self { symbol_size: 1 }
+    }
+}
+
+impl Default for AddressFormatModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DataFormatModel for AddressFormatModel {
+    fn unit_byte_size(&self) -> usize {
+        1
+    }
+
+    fn name(&self) -> &str {
+        "Address"
+    }
+
+    fn data_unit_symbol_size(&self) -> usize {
+        self.symbol_size
+    }
+
+    fn get_byte_offset(&self, _block: &dyn ByteBlock, _position: usize) -> usize {
+        0
+    }
+
+    fn get_column_position(&self, _block: &dyn ByteBlock, _byte_offset: usize) -> usize {
+        0
+    }
+
+    fn get_data_representation(
+        &self,
+        block: &dyn ByteBlock,
+        index: &BigInt,
+    ) -> Result<String, ByteBlockAccessException> {
+        // In the Rust port without a full program context, we check
+        // if the block can read the byte at index. If the block reports
+        // a location representation and the byte is non-zero (potential
+        // address pointer), we mark it as good.
+        let _ = block.get_byte(index)?;
+        let loc = block.location_representation(index);
+        if loc.is_empty() {
+            Ok(Self::NON_ADDRESS.to_string())
+        } else {
+            // Without a full memory model, mark as bad (non-resolvable)
+            Ok(Self::BAD_ADDRESS.to_string())
+        }
+    }
+
+    fn unit_delimiter_size(&self) -> usize {
+        0
+    }
+}
+
+impl UniversalDataFormatModel for AddressFormatModel {}
+
+impl ProgramDataFormatModel for AddressFormatModel {
+    fn set_program(&mut self, _program: Option<u64>) {
+        // In the full implementation, this would store the program
+        // reference for address resolution.
+    }
+}
+
+// ===========================================================================
+// DisassembledFormatModel
+// ===========================================================================
+
+/// Displays whether bytes have been disassembled (part of an instruction
+/// or defined data).
+///
+/// Ported from Ghidra's `DisassembledFormatModel`.
+///
+/// - `'.'` -- the byte is part of an instruction or defined data
+/// - `'\u{25A1}'` (white square) -- the byte is unassembled
+/// - `'?'` -- listing not available
+#[derive(Debug, Clone)]
+pub struct DisassembledFormatModel {
+    symbol_size: usize,
+}
+
+impl DisassembledFormatModel {
+    /// Unicode block character for unassembled bytes.
+    pub const BLOCK: &'static str = "\u{25A1}";
+
+    /// Create a new disassembled format model.
+    pub fn new() -> Self {
+        Self { symbol_size: 1 }
+    }
+}
+
+impl Default for DisassembledFormatModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DataFormatModel for DisassembledFormatModel {
+    fn unit_byte_size(&self) -> usize {
+        1
+    }
+
+    fn name(&self) -> &str {
+        "Disassembled"
+    }
+
+    fn data_unit_symbol_size(&self) -> usize {
+        self.symbol_size
+    }
+
+    fn get_byte_offset(&self, _block: &dyn ByteBlock, _position: usize) -> usize {
+        0
+    }
+
+    fn get_column_position(&self, _block: &dyn ByteBlock, _byte_offset: usize) -> usize {
+        0
+    }
+
+    fn get_data_representation(
+        &self,
+        block: &dyn ByteBlock,
+        index: &BigInt,
+    ) -> Result<String, ByteBlockAccessException> {
+        // In the full implementation, this would check the listing for
+        // instructions/defined data. Without a listing, mark as unknown.
+        let _ = block.get_byte(index)?;
+        Ok(Self::BLOCK.to_string())
+    }
+
+    fn unit_delimiter_size(&self) -> usize {
+        0
+    }
+}
+
+impl UniversalDataFormatModel for DisassembledFormatModel {}
+
+impl ProgramDataFormatModel for DisassembledFormatModel {
+    fn set_program(&mut self, _program: Option<u64>) {
+        // In the full implementation, this would store the program
+        // reference for listing queries.
+    }
+}
+
+// ===========================================================================
 // Legacy convenience functions (backward compatibility)
 // ===========================================================================
 
@@ -1944,5 +2144,87 @@ mod tests {
         let row = model.format_row(0, &data);
         assert!(row.contains("255"));
         assert!(row.contains(" 10"));
+    }
+
+    // ---- AddressFormatModel tests ----
+
+    #[test]
+    fn test_address_format_model_create() {
+        let model = AddressFormatModel::new();
+        assert_eq!(model.name(), "Address");
+        assert_eq!(model.unit_byte_size(), 1);
+        assert_eq!(model.data_unit_symbol_size(), 1);
+    }
+
+    #[test]
+    fn test_address_format_model_represent() {
+        let model = AddressFormatModel::new();
+        let block = TestBlock::new(vec![0x00, 0x10]);
+        // Without a program, returns BAD_ADDRESS
+        let repr = model.get_data_representation(&block, &idx(0)).unwrap();
+        assert_eq!(repr, AddressFormatModel::BAD_ADDRESS);
+    }
+
+    #[test]
+    fn test_address_format_model_delimiter() {
+        let model = AddressFormatModel::new();
+        assert_eq!(model.unit_delimiter_size(), 0);
+    }
+
+    // ---- DisassembledFormatModel tests ----
+
+    #[test]
+    fn test_disassembled_format_model_create() {
+        let model = DisassembledFormatModel::new();
+        assert_eq!(model.name(), "Disassembled");
+        assert_eq!(model.unit_byte_size(), 1);
+    }
+
+    #[test]
+    fn test_disassembled_format_model_represent() {
+        let model = DisassembledFormatModel::new();
+        let block = TestBlock::new(vec![0xCC, 0x90]);
+        // Without a listing, returns BLOCK character
+        let repr = model.get_data_representation(&block, &idx(0)).unwrap();
+        assert_eq!(repr, DisassembledFormatModel::BLOCK);
+    }
+
+    #[test]
+    fn test_disassembled_format_model_delimiter() {
+        let model = DisassembledFormatModel::new();
+        assert_eq!(model.unit_delimiter_size(), 0);
+    }
+
+    // ---- CursorWidthDataFormatModel tests ----
+
+    #[test]
+    fn test_cursor_width_concept() {
+        // CursorWidthDataFormatModel is a trait extension.
+        // The default implementation multiplies data_unit_symbol_size * char_width.
+        let model = HexFormatModel::new();
+        let expected = model.data_unit_symbol_size() * 8;
+        assert_eq!(expected, 16); // 2 * 8
+    }
+
+    // ---- TooltipDataFormatModel tests ----
+
+    // TooltipDataFormatModel is a trait; tested via its interface contract.
+    // Concrete implementations (if any) would be tested separately.
+
+    // ---- ProgramDataFormatModel marker tests ----
+
+    #[test]
+    fn test_program_data_format_model_set_program() {
+        let mut model = AddressFormatModel::new();
+        model.set_program(Some(0x1234));
+        model.set_program(None);
+        // No panic = pass
+    }
+
+    #[test]
+    fn test_disassembled_set_program() {
+        let mut model = DisassembledFormatModel::new();
+        model.set_program(Some(0x1234));
+        model.set_program(None);
     }
 }

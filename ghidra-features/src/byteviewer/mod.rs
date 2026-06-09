@@ -24,12 +24,24 @@
 //!
 //! # Sub-modules
 //!
+//! - [`byte_viewer_component`] -- the [`ByteViewerComponent`](byte_viewer_component::ByteViewerComponent)
+//!   with highlighter, background colour model, and indexed view
+//! - [`byte_viewer_plugin`] -- the [`ByteViewerPlugin`](byte_viewer_plugin::ByteViewerPlugin),
+//!   providers, clipboard, action context, and change events
+//! - [`byte_viewer_layout_model`] -- the [`ByteViewerLayoutModel`](byte_viewer_layout_model::ByteViewerLayoutModel)
+//!   for mapping data coordinates to display positions
+//! - [`byte_viewer_state`] -- viewer state, location memento, index mapping,
+//!   and block-set implementations ([`MemoryByteBlock`](byte_viewer_state::MemoryByteBlock),
+//!   [`ProgramByteBlockSet`](byte_viewer_state::ProgramByteBlockSet),
+//!   [`FileByteBlock`](byte_viewer_state::FileByteBlock),
+//!   [`FileByteBlockSet`](byte_viewer_state::FileByteBlockSet))
 //! - [`format`] -- the [`DataFormatModel`](format::DataFormatModel) trait hierarchy
 //!   and all concrete format model implementations
 
 pub mod byte_viewer_component;
 pub mod byte_viewer_layout_model;
 pub mod byte_viewer_plugin;
+pub mod byte_viewer_state;
 pub mod format;
 
 use num_bigint::BigInt;

@@ -1,6 +1,8 @@
 //! Byte Viewer Component implementation.
 //!
-//! Ported from Ghidra's `ghidra.app.plugin.core.byteviewer.ByteViewerComponent`.
+//! Ported from Ghidra's `ghidra.app.plugin.core.byteviewer.ByteViewerComponent`,
+//! `ByteViewerHighlighter`, `ByteViewerBGColorModel`, `ByteViewerComponentNamer`,
+//! and `ByteViewerIndexedView`.
 //!
 //! This component manages the core viewing logic: it holds the byte block
 //! set, tracks the current cursor position and selection, manages the
@@ -11,6 +13,8 @@
 //! - [`ByteViewerComponent`] -- the main component that drives byte display
 //! - [`CursorPosition`] -- the current cursor within the byte viewer
 //! - [`ViewerRow`] -- a single rendered row of formatted bytes
+//! - [`ByteViewerHighlighter`] -- middle-mouse text highlighting
+//! - [`ByteViewerIndexedView`] -- multi-panel indexed-scroll view
 
 use num_bigint::BigInt;
 
@@ -492,6 +496,245 @@ impl Default for ByteViewerComponent {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ByteViewerHighlighter
+// ---------------------------------------------------------------------------
+
+/// Middle-mouse highlight support for the byte viewer.
+///
+/// Ported from Ghidra's `ByteViewerHighlighter`.
+///
+/// When the user middle-clicks on a byte value in the viewer, the
+/// highlighter remembers that text and highlights matching values in all
+/// visible fields.
+#[derive(Debug, Clone, Default)]
+pub struct ByteViewerHighlighter {
+    /// The text currently being highlighted.
+    highlight_text: Option<String>,
+}
+
+impl ByteViewerHighlighter {
+    /// Create a new highlighter with no active highlight.
+    pub fn new() -> Self {
+        Self {
+            highlight_text: None,
+        }
+    }
+
+    /// Set the text to highlight.
+    pub fn set_text(&mut self, text: Option<String>) {
+        self.highlight_text = text;
+    }
+
+    /// Get the currently highlighted text.
+    pub fn text(&self) -> Option<&str> {
+        self.highlight_text.as_deref()
+    }
+
+    /// Check whether `text` matches the highlighted text.
+    ///
+    /// Returns `true` if the highlight is active and `text` matches.
+    pub fn is_highlighted(&self, text: &str) -> bool {
+        self.highlight_text
+            .as_deref()
+            .map_or(false, |h| h == text)
+    }
+
+    /// Create highlight spans for the given text.
+    ///
+    /// Returns a list of `(start, end)` character ranges that should be
+    /// highlighted. Returns an empty list if there is no active highlight
+    /// or if the text does not match.
+    pub fn create_highlights(&self, text: &str) -> Vec<(usize, usize)> {
+        if self.is_highlighted(text) {
+            vec![(0, text.len().saturating_sub(1))]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ByteViewerBGColorModel
+// ---------------------------------------------------------------------------
+
+/// Background colour model for the byte viewer that highlights the current
+/// cursor line.
+///
+/// Ported from Ghidra's `ByteViewerBGColorModel`.
+#[derive(Debug, Clone)]
+pub struct ByteViewerBgColorModel {
+    /// Whether to highlight the current line.
+    highlight_current_line: bool,
+    /// The default background colour (as an ARGB u32).
+    bg_color: u32,
+    /// The current-line highlight colour (as an ARGB u32).
+    current_line_color: u32,
+}
+
+impl ByteViewerBgColorModel {
+    /// Default background colour (white).
+    pub const DEFAULT_BG_COLOR: u32 = 0xFF_FF_FF_FF;
+    /// Default current-line highlight colour (light yellow).
+    pub const CURRENT_LINE_COLOR: u32 = 0xFF_FF_FF_CC;
+
+    /// Create a new background colour model.
+    pub fn new() -> Self {
+        Self {
+            highlight_current_line: false,
+            bg_color: Self::DEFAULT_BG_COLOR,
+            current_line_color: Self::CURRENT_LINE_COLOR,
+        }
+    }
+
+    /// Whether current-line highlighting is active.
+    pub fn is_highlight_current_line(&self) -> bool {
+        self.highlight_current_line
+    }
+
+    /// Enable or disable current-line highlighting.
+    pub fn set_highlight_current_line(&mut self, highlight: bool) {
+        self.highlight_current_line = highlight;
+    }
+
+    /// Get the background colour for the given line index.
+    ///
+    /// Returns the current-line colour if highlighting is enabled and
+    /// `line_index` matches the cursor line.
+    pub fn background_color(&self, line_index: u64, cursor_line: u64) -> u32 {
+        if self.highlight_current_line && line_index == cursor_line {
+            self.current_line_color
+        } else {
+            self.bg_color
+        }
+    }
+
+    /// Get the default background colour.
+    pub fn default_background_color(&self) -> u32 {
+        self.bg_color
+    }
+
+    /// Set the default background colour.
+    pub fn set_default_background_color(&mut self, color: u32) {
+        self.bg_color = color;
+    }
+}
+
+impl Default for ByteViewerBgColorModel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ByteViewerComponentNamer
+// ---------------------------------------------------------------------------
+
+/// Trait for components used as columns in the byte viewer that want to
+/// provide a descriptive header name.
+///
+/// Ported from Ghidra's `ByteViewerComponentNamer` interface.
+pub trait ByteViewerComponentNamer {
+    /// Return the descriptive name for this component's column header.
+    fn byte_viewer_component_name(&self) -> &str;
+}
+
+// ---------------------------------------------------------------------------
+// ByteViewerIndexedView
+// ---------------------------------------------------------------------------
+
+/// The main byte viewer container that manages multiple format panels in an
+/// indexed scroll arrangement.
+///
+/// Ported from Ghidra's `ByteViewerIndexedView`.
+///
+/// This view always contains an "index" panel (showing addresses) and zero
+/// or more data panels (one per format -- hex, octal, binary, etc.).
+/// All panels scroll in sync.
+#[derive(Debug)]
+pub struct ByteViewerIndexedView {
+    /// Names of the data views in display order.
+    view_names: Vec<String>,
+    /// The current scroll position (line index).
+    scroll_position: BigInt,
+    /// Total number of indexes (lines) available.
+    index_count: BigInt,
+    /// Whether all indexes have uniform height.
+    uniform_index: bool,
+}
+
+impl ByteViewerIndexedView {
+    /// Create a new indexed view.
+    pub fn new() -> Self {
+        Self {
+            view_names: Vec::new(),
+            scroll_position: BigInt::from(0),
+            index_count: BigInt::from(0),
+            uniform_index: true,
+        }
+    }
+
+    /// Add a data view with the given name.
+    pub fn add_view(&mut self, name: impl Into<String>) {
+        self.view_names.push(name.into());
+    }
+
+    /// Remove a view by name.
+    pub fn remove_view(&mut self, name: &str) {
+        self.view_names.retain(|n| n != name);
+    }
+
+    /// Get the view names in display order.
+    pub fn view_names(&self) -> &[String] {
+        &self.view_names
+    }
+
+    /// Get the current scroll position.
+    pub fn scroll_position(&self) -> &BigInt {
+        &self.scroll_position
+    }
+
+    /// Scroll to show the given line index at the given vertical offset.
+    pub fn show_index(&mut self, index: BigInt, _y_offset: i32) {
+        self.scroll_position = index;
+    }
+
+    /// Scroll one line down.
+    pub fn scroll_line_down(&mut self) {
+        if self.scroll_position < self.index_count {
+            self.scroll_position += 1;
+        }
+    }
+
+    /// Scroll one line up.
+    pub fn scroll_line_up(&mut self) {
+        if self.scroll_position > BigInt::from(0) {
+            self.scroll_position -= 1;
+        }
+    }
+
+    /// Get the total number of indexes.
+    pub fn index_count(&self) -> &BigInt {
+        &self.index_count
+    }
+
+    /// Set the total number of indexes.
+    pub fn set_index_count(&mut self, count: BigInt) {
+        self.index_count = count;
+    }
+
+    /// Whether indexes have uniform height.
+    pub fn is_uniform_index(&self) -> bool {
+        self.uniform_index
+    }
+}
+
+impl Default for ByteViewerIndexedView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -661,5 +904,119 @@ mod tests {
         assert_eq!(component.address_format(), AddressFormat::Hex64);
         component.set_address_format(AddressFormat::Hex32);
         assert_eq!(component.address_format(), AddressFormat::Hex32);
+    }
+
+    // ---- ByteViewerHighlighter tests ----
+
+    #[test]
+    fn test_highlighter_create() {
+        let h = ByteViewerHighlighter::new();
+        assert!(h.text().is_none());
+        assert!(!h.is_highlighted("FF"));
+    }
+
+    #[test]
+    fn test_highlighter_set_text() {
+        let mut h = ByteViewerHighlighter::new();
+        h.set_text(Some("FF".into()));
+        assert_eq!(h.text(), Some("FF"));
+        assert!(h.is_highlighted("FF"));
+        assert!(!h.is_highlighted("00"));
+    }
+
+    #[test]
+    fn test_highlighter_create_highlights() {
+        let mut h = ByteViewerHighlighter::new();
+        h.set_text(Some("FF".into()));
+        let spans = h.create_highlights("FF");
+        assert_eq!(spans, vec![(0, 1)]);
+
+        let spans = h.create_highlights("00");
+        assert!(spans.is_empty());
+    }
+
+    #[test]
+    fn test_highlighter_no_highlight() {
+        let h = ByteViewerHighlighter::new();
+        assert!(h.create_highlights("FF").is_empty());
+    }
+
+    // ---- ByteViewerBgColorModel tests ----
+
+    #[test]
+    fn test_bg_color_model_create() {
+        let model = ByteViewerBgColorModel::new();
+        assert!(!model.is_highlight_current_line());
+        assert_eq!(model.default_background_color(), ByteViewerBgColorModel::DEFAULT_BG_COLOR);
+    }
+
+    #[test]
+    fn test_bg_color_model_highlight() {
+        let mut model = ByteViewerBgColorModel::new();
+        model.set_highlight_current_line(true);
+        assert_eq!(model.background_color(5, 5), ByteViewerBgColorModel::CURRENT_LINE_COLOR);
+        assert_eq!(model.background_color(3, 5), ByteViewerBgColorModel::DEFAULT_BG_COLOR);
+    }
+
+    #[test]
+    fn test_bg_color_model_no_highlight() {
+        let model = ByteViewerBgColorModel::new();
+        assert_eq!(model.background_color(5, 5), ByteViewerBgColorModel::DEFAULT_BG_COLOR);
+    }
+
+    #[test]
+    fn test_bg_color_model_set_bg() {
+        let mut model = ByteViewerBgColorModel::new();
+        model.set_default_background_color(0xFF_0000_00);
+        assert_eq!(model.default_background_color(), 0xFF_0000_00);
+    }
+
+    // ---- ByteViewerIndexedView tests ----
+
+    #[test]
+    fn test_indexed_view_create() {
+        let view = ByteViewerIndexedView::new();
+        assert!(view.view_names().is_empty());
+        assert_eq!(*view.scroll_position(), BigInt::from(0));
+        assert!(view.is_uniform_index());
+    }
+
+    #[test]
+    fn test_indexed_view_add_remove() {
+        let mut view = ByteViewerIndexedView::new();
+        view.add_view("Hex");
+        view.add_view("Octal");
+        assert_eq!(view.view_names().len(), 2);
+
+        view.remove_view("Hex");
+        assert_eq!(view.view_names(), &["Octal".to_string()]);
+    }
+
+    #[test]
+    fn test_indexed_view_scroll() {
+        let mut view = ByteViewerIndexedView::new();
+        view.set_index_count(BigInt::from(100));
+        view.show_index(BigInt::from(50), 0);
+        assert_eq!(*view.scroll_position(), BigInt::from(50));
+
+        view.scroll_line_down();
+        assert_eq!(*view.scroll_position(), BigInt::from(51));
+
+        view.scroll_line_up();
+        assert_eq!(*view.scroll_position(), BigInt::from(50));
+    }
+
+    #[test]
+    fn test_indexed_view_scroll_bounds() {
+        let mut view = ByteViewerIndexedView::new();
+        view.set_index_count(BigInt::from(2));
+        view.show_index(BigInt::from(0), 0);
+
+        view.scroll_line_up(); // should stay at 0
+        assert_eq!(*view.scroll_position(), BigInt::from(0));
+
+        view.show_index(BigInt::from(2), 0);
+        view.scroll_line_down(); // should stay at 2 (at limit)
+        assert_eq!(*view.scroll_position(), BigInt::from(2));
     }
 }

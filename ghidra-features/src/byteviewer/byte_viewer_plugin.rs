@@ -1,6 +1,9 @@
 //! Byte Viewer Plugin implementation.
 //!
-//! Ported from Ghidra's `ghidra.app.plugin.core.byteviewer.ByteViewerPlugin`.
+//! Ported from Ghidra's `ghidra.app.plugin.core.byteviewer.ByteViewerPlugin`,
+//! `AbstractByteViewerPlugin`, `ProgramByteViewerComponentProvider`,
+//! `ByteViewerComponentProvider`, `ByteViewerActionContext`,
+//! `ByteViewerClipboardProvider`, and `ByteBlockChangePluginEvent`.
 //!
 //! This is the top-level plugin that integrates the byte viewer into the
 //! Ghidra framework. It manages provider lifecycle, coordinates navigation
@@ -12,12 +15,18 @@
 //! - [`ByteViewerPlugin`] -- the main plugin struct
 //! - [`ByteViewerProvider`] -- the provider that owns the component and
 //!   manages its visibility within the tool
+//! - [`ProgramByteViewerProvider`] -- provider specialised for program-backed
+//!   byte viewing (transaction support, undo/redo state)
+//! - [`ByteViewerActionContext`] -- action context carrying the active column
+//! - [`ByteViewerClipboardProvider`] -- clipboard copy/paste support
+//! - [`ByteBlockChangePluginEvent`] -- plugin event for byte-edit propagation
 
 use num_bigint::BigInt;
 use std::collections::BTreeMap;
 
 use super::{
     ByteBlockInfo, ByteBlockSet, ByteBlockSelection, ByteViewerConfigOptions,
+    ByteEditInfo,
 };
 use super::byte_viewer_component::ByteViewerComponent;
 
@@ -277,6 +286,370 @@ impl Default for ByteViewerPlugin {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ByteBlockChangePluginEvent
+// ---------------------------------------------------------------------------
+
+/// Plugin event for notification of byte block changes produced by the
+/// Byte Viewer.
+///
+/// Ported from Ghidra's `ByteBlockChangePluginEvent`.
+///
+/// Carries a [`ByteEditInfo`] describing the change and a weak reference to
+/// the program it applies to.
+#[derive(Debug, Clone)]
+pub struct ByteBlockChangePluginEvent {
+    /// Name of the source plugin that generated this event.
+    source: String,
+    /// The byte edit description.
+    edit: ByteEditInfo,
+    /// Opaque program handle (name).
+    program_name: Option<String>,
+}
+
+impl ByteBlockChangePluginEvent {
+    /// Event name constant.
+    pub const NAME: &'static str = "ByteBlockChange";
+
+    /// Create a new byte block change plugin event.
+    pub fn new(
+        source: impl Into<String>,
+        edit: ByteEditInfo,
+        program_name: Option<String>,
+    ) -> Self {
+        Self {
+            source: source.into(),
+            edit,
+            program_name,
+        }
+    }
+
+    /// The source plugin name.
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    /// The event name.
+    pub fn event_name(&self) -> &str {
+        Self::NAME
+    }
+
+    /// Get the program name this event relates to.
+    pub fn program_name(&self) -> Option<&str> {
+        self.program_name.as_deref()
+    }
+
+    /// Get the byte edit info.
+    pub fn byte_edit_info(&self) -> &ByteEditInfo {
+        &self.edit
+    }
+
+    /// Human-readable detail string.
+    pub fn details(&self) -> String {
+        format!(
+            "Address of Block Change==> {}, offset ==> {}",
+            self.edit.block_address(),
+            self.edit.offset()
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ByteViewerActionContext
+// ---------------------------------------------------------------------------
+
+/// Action context for the byte viewer.
+///
+/// Ported from Ghidra's `ByteViewerActionContext`.
+///
+/// Carries a reference to the currently active byte viewer column so that
+/// actions can operate on the correct format view.
+#[derive(Debug)]
+pub struct ByteViewerActionContext {
+    /// The provider this context belongs to.
+    provider_name: String,
+    /// The active column index (None means no specific column).
+    active_column: Option<usize>,
+}
+
+impl ByteViewerActionContext {
+    /// Create a new action context.
+    pub fn new(provider_name: impl Into<String>) -> Self {
+        Self {
+            provider_name: provider_name.into(),
+            active_column: None,
+        }
+    }
+
+    /// Create with a specific active column.
+    pub fn with_column(provider_name: impl Into<String>, column: usize) -> Self {
+        Self {
+            provider_name: provider_name.into(),
+            active_column: Some(column),
+        }
+    }
+
+    /// The provider name.
+    pub fn provider_name(&self) -> &str {
+        &self.provider_name
+    }
+
+    /// The active column, if any.
+    pub fn active_column(&self) -> Option<usize> {
+        self.active_column
+    }
+
+    /// Whether the byte viewer works on functions (it does not).
+    pub fn has_functions(&self) -> bool {
+        false
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ByteViewerClipboardProvider
+// ---------------------------------------------------------------------------
+
+/// Clipboard copy/paste support for the byte viewer.
+///
+/// Ported from Ghidra's `ByteViewerClipboardProvider`.
+///
+/// Manages the available clipboard copy types, tracks whether copy/paste
+/// is enabled, and provides the byte string conversion.
+#[derive(Debug, Clone)]
+pub struct ByteViewerClipboardProvider {
+    /// Whether copy is currently enabled (selection is non-empty).
+    copy_enabled: bool,
+    /// Whether paste is currently enabled.
+    paste_enabled: bool,
+    /// The currently selected address range (as a start/end address pair).
+    selection_range: Option<(u64, u64)>,
+    /// The program name for the current context.
+    program_name: Option<String>,
+}
+
+impl ByteViewerClipboardProvider {
+    /// Create a new clipboard provider.
+    pub fn new() -> Self {
+        Self {
+            copy_enabled: false,
+            paste_enabled: false,
+            selection_range: None,
+            program_name: None,
+        }
+    }
+
+    /// Whether copy is currently available.
+    pub fn can_copy(&self) -> bool {
+        self.copy_enabled
+    }
+
+    /// Whether paste is currently available.
+    pub fn can_paste(&self) -> bool {
+        self.paste_enabled && self.program_name.is_some()
+    }
+
+    /// Whether copy is enabled (always true for byte viewer).
+    pub fn enable_copy(&self) -> bool {
+        true
+    }
+
+    /// Whether paste is enabled.
+    pub fn is_paste_enabled(&self) -> bool {
+        self.paste_enabled
+    }
+
+    /// Set paste enabled.
+    pub fn set_paste_enabled(&mut self, enabled: bool) {
+        self.paste_enabled = enabled;
+    }
+
+    /// Set the current selection range.
+    pub fn set_selection_range(&mut self, range: Option<(u64, u64)>) {
+        self.selection_range = range;
+        self.copy_enabled = range.is_some();
+    }
+
+    /// Get the current selection range.
+    pub fn selection_range(&self) -> Option<(u64, u64)> {
+        self.selection_range
+    }
+
+    /// Set the current program.
+    pub fn set_program(&mut self, program_name: Option<String>) {
+        self.program_name = program_name;
+    }
+
+    /// Format the current selection as a hex byte string.
+    pub fn copy_bytes_as_hex_string(&self, bytes: &[u8], with_spaces: bool) -> String {
+        if with_spaces {
+            bytes
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            bytes
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect::<Vec<_>>()
+                .join("")
+        }
+    }
+
+    /// Format bytes as a Python byte string literal.
+    pub fn copy_as_python_bytes(&self, bytes: &[u8]) -> String {
+        let inner: String = bytes
+            .iter()
+            .map(|b| format!("\\x{:02x}", b))
+            .collect();
+        format!("b\"{}\"", inner)
+    }
+
+    /// Format bytes as a Python list of ints.
+    pub fn copy_as_python_list(&self, bytes: &[u8]) -> String {
+        let inner: String = bytes
+            .iter()
+            .map(|b| format!("{}", b))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("[{}]", inner)
+    }
+
+    /// Format bytes as a C byte array.
+    pub fn copy_as_c_array(&self, bytes: &[u8]) -> String {
+        let inner: String = bytes
+            .iter()
+            .map(|b| format!("0x{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("{{{}}}", inner)
+    }
+}
+
+impl Default for ByteViewerClipboardProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramByteViewerProvider
+// ---------------------------------------------------------------------------
+
+/// A [`ByteViewerProvider`] specialisation for program-backed viewing.
+///
+/// Ported from Ghidra's `ProgramByteViewerComponentProvider`.
+///
+/// Adds transaction management for byte edits, undo/redo state
+/// serialisation, and program-location-aware navigation.
+#[derive(Debug)]
+pub struct ProgramByteViewerProvider {
+    /// The base provider.
+    base: ByteViewerProvider,
+    /// The program handle (opaque name).
+    program_name: Option<String>,
+    /// Clipboard support.
+    clipboard: ByteViewerClipboardProvider,
+    /// Whether byte editing is allowed.
+    editable: bool,
+}
+
+impl ProgramByteViewerProvider {
+    /// Create a new program byte viewer provider.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            base: ByteViewerProvider::new(name),
+            program_name: None,
+            clipboard: ByteViewerClipboardProvider::new(),
+            editable: true,
+        }
+    }
+
+    /// The provider name.
+    pub fn name(&self) -> &str {
+        self.base.name()
+    }
+
+    /// Whether the provider is visible.
+    pub fn is_visible(&self) -> bool {
+        self.base.is_visible()
+    }
+
+    /// Set visibility.
+    pub fn set_visible(&mut self, visible: bool) {
+        self.base.set_visible(visible);
+    }
+
+    /// Whether the provider has been disposed.
+    pub fn is_disposed(&self) -> bool {
+        self.base.is_disposed()
+    }
+
+    /// Connect to a program.
+    pub fn program_opened(&mut self, program_name: impl Into<String>) {
+        let name = program_name.into();
+        self.program_name = Some(name.clone());
+        self.clipboard.set_program(Some(name.clone()));
+        self.base.program_opened(name);
+    }
+
+    /// Disconnect from the program.
+    pub fn program_closed(&mut self) {
+        self.program_name = None;
+        self.clipboard.set_program(None);
+        self.base.program_closed();
+    }
+
+    /// Get a reference to the component.
+    pub fn component(&self) -> &ByteViewerComponent {
+        self.base.component()
+    }
+
+    /// Get a mutable reference to the component.
+    pub fn component_mut(&mut self) -> &mut ByteViewerComponent {
+        self.base.component_mut()
+    }
+
+    /// Get the program name.
+    pub fn program_name(&self) -> Option<&str> {
+        self.program_name.as_deref()
+    }
+
+    /// Whether byte editing is allowed.
+    pub fn is_editable(&self) -> bool {
+        self.editable
+    }
+
+    /// Set whether byte editing is allowed.
+    pub fn set_editable(&mut self, editable: bool) {
+        self.editable = editable;
+    }
+
+    /// Get the clipboard provider.
+    pub fn clipboard(&self) -> &ByteViewerClipboardProvider {
+        &self.clipboard
+    }
+
+    /// Get a mutable reference to the clipboard provider.
+    pub fn clipboard_mut(&mut self) -> &mut ByteViewerClipboardProvider {
+        &mut self.clipboard
+    }
+
+    /// Notify the provider of a byte edit.
+    ///
+    /// Returns a [`ByteBlockChangePluginEvent`] to be broadcast.
+    pub fn notify_edit(&self, edit: ByteEditInfo) -> ByteBlockChangePluginEvent {
+        ByteBlockChangePluginEvent::new("ByteViewer", edit, self.program_name.clone())
+    }
+
+    /// Dispose of this provider.
+    pub fn dispose(&mut self) {
+        self.base.dispose();
+        self.program_name = None;
+        self.clipboard.set_program(None);
+    }
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -395,5 +768,142 @@ mod tests {
         config.set_bytes_per_line(32);
         let plugin = ByteViewerPlugin::with_config(config);
         assert_eq!(plugin.config().bytes_per_line(), 32);
+    }
+
+    // ---- ByteBlockChangePluginEvent tests ----
+
+    #[test]
+    fn test_change_event_create() {
+        let edit = ByteEditInfo::new(0x1000, BigInt::from(5), vec![0x00], vec![0xFF]);
+        let event = ByteBlockChangePluginEvent::new("TestPlugin", edit, Some("test.exe".into()));
+        assert_eq!(event.source(), "TestPlugin");
+        assert_eq!(event.event_name(), "ByteBlockChange");
+        assert_eq!(event.program_name(), Some("test.exe"));
+        assert_eq!(event.byte_edit_info().block_address(), 0x1000);
+    }
+
+    #[test]
+    fn test_change_event_details() {
+        let edit = ByteEditInfo::new(0x1000, BigInt::from(0), vec![0x00], vec![0xFF]);
+        let event = ByteBlockChangePluginEvent::new("P", edit, None);
+        let details = event.details();
+        assert!(details.contains("4096")); // 0x1000 = 4096 decimal
+        assert!(details.contains("offset"));
+    }
+
+    // ---- ByteViewerActionContext tests ----
+
+    #[test]
+    fn test_action_context_create() {
+        let ctx = ByteViewerActionContext::new("TestProvider");
+        assert_eq!(ctx.provider_name(), "TestProvider");
+        assert!(ctx.active_column().is_none());
+        assert!(!ctx.has_functions());
+    }
+
+    #[test]
+    fn test_action_context_with_column() {
+        let ctx = ByteViewerActionContext::with_column("TestProvider", 3);
+        assert_eq!(ctx.active_column(), Some(3));
+    }
+
+    // ---- ByteViewerClipboardProvider tests ----
+
+    #[test]
+    fn test_clipboard_create() {
+        let cb = ByteViewerClipboardProvider::new();
+        assert!(!cb.can_copy());
+        assert!(!cb.can_paste());
+        assert!(cb.enable_copy());
+    }
+
+    #[test]
+    fn test_clipboard_selection() {
+        let mut cb = ByteViewerClipboardProvider::new();
+        cb.set_program(Some("test.exe".into()));
+        cb.set_selection_range(Some((0x1000, 0x100F)));
+        assert!(cb.can_copy());
+        assert_eq!(cb.selection_range(), Some((0x1000, 0x100F)));
+    }
+
+    #[test]
+    fn test_clipboard_paste() {
+        let mut cb = ByteViewerClipboardProvider::new();
+        assert!(!cb.can_paste());
+        cb.set_paste_enabled(true);
+        assert!(!cb.can_paste()); // no program
+        cb.set_program(Some("test.exe".into()));
+        assert!(cb.can_paste());
+    }
+
+    #[test]
+    fn test_clipboard_hex_format() {
+        let cb = ByteViewerClipboardProvider::new();
+        let bytes = [0xDE, 0xAD, 0xBE, 0xEF];
+        assert_eq!(cb.copy_bytes_as_hex_string(&bytes, true), "DE AD BE EF");
+        assert_eq!(cb.copy_bytes_as_hex_string(&bytes, false), "DEADBEEF");
+    }
+
+    #[test]
+    fn test_clipboard_python_format() {
+        let cb = ByteViewerClipboardProvider::new();
+        let bytes = [0xCA, 0xFE];
+        assert_eq!(cb.copy_as_python_bytes(&bytes), "b\"\\xca\\xfe\"");
+        assert_eq!(cb.copy_as_python_list(&bytes), "[202, 254]");
+    }
+
+    #[test]
+    fn test_clipboard_c_format() {
+        let cb = ByteViewerClipboardProvider::new();
+        let bytes = [0x90, 0xC3];
+        assert_eq!(cb.copy_as_c_array(&bytes), "{0x90, 0xc3}");
+    }
+
+    // ---- ProgramByteViewerProvider tests ----
+
+    #[test]
+    fn test_program_provider_create() {
+        let provider = ProgramByteViewerProvider::new("test");
+        assert_eq!(provider.name(), "test");
+        assert!(!provider.is_disposed());
+        assert!(provider.program_name().is_none());
+        assert!(provider.is_editable());
+    }
+
+    #[test]
+    fn test_program_provider_lifecycle() {
+        let mut provider = ProgramByteViewerProvider::new("test");
+        provider.program_opened("prog.exe");
+        assert_eq!(provider.program_name(), Some("prog.exe"));
+
+        provider.program_closed();
+        assert!(provider.program_name().is_none());
+    }
+
+    #[test]
+    fn test_program_provider_notify_edit() {
+        let mut provider = ProgramByteViewerProvider::new("test");
+        provider.program_opened("prog.exe");
+        let edit = ByteEditInfo::new(0x1000, BigInt::from(0), vec![0x00], vec![0xFF]);
+        let event = provider.notify_edit(edit);
+        assert_eq!(event.event_name(), "ByteBlockChange");
+        assert_eq!(event.program_name(), Some("prog.exe"));
+    }
+
+    #[test]
+    fn test_program_provider_editable() {
+        let mut provider = ProgramByteViewerProvider::new("test");
+        assert!(provider.is_editable());
+        provider.set_editable(false);
+        assert!(!provider.is_editable());
+    }
+
+    #[test]
+    fn test_program_provider_dispose() {
+        let mut provider = ProgramByteViewerProvider::new("test");
+        provider.program_opened("prog.exe");
+        provider.dispose();
+        assert!(provider.is_disposed());
+        assert!(provider.program_name().is_none());
     }
 }
