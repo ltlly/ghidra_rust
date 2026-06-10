@@ -226,6 +226,21 @@ impl LfBclass {
         ""
     }
 
+    /// Set the base class record number.
+    pub fn set_base_class_record_number(&mut self, record: RecordNumber) {
+        self.base_class_record_number = record;
+    }
+
+    /// Set the byte offset of the base within the derived class.
+    pub fn set_offset(&mut self, offset: u32) {
+        self.offset = offset;
+    }
+
+    /// Set the member attributes.
+    pub fn set_attributes(&mut self, attributes: MemberAttributes) {
+        self.attributes = attributes;
+    }
+
     /// Convert this base class into a [`FieldListEntry::BaseClass`].
     ///
     /// This is useful when constructing or manipulating field lists
@@ -599,5 +614,106 @@ mod tests {
         let bc = LfBclass::parse(&data).unwrap();
         assert_eq!(bc.access(), AccessProtection::Protected);
         assert_eq!(bc.byte_offset(), 12);
+    }
+
+    #[test]
+    fn test_bclass_set_base_class_record_number() {
+        let mut bc = make_test_bclass();
+        assert_eq!(bc.base_class_record_number(), RecordNumber::type_record(0x1000));
+        bc.set_base_class_record_number(RecordNumber::type_record(0x8000));
+        assert_eq!(bc.base_class_record_number(), RecordNumber::type_record(0x8000));
+    }
+
+    #[test]
+    fn test_bclass_set_offset() {
+        let mut bc = make_test_bclass();
+        assert_eq!(bc.byte_offset(), 0);
+        bc.set_offset(64);
+        assert_eq!(bc.byte_offset(), 64);
+        assert_eq!(bc.offset_value(), 64u64);
+    }
+
+    #[test]
+    fn test_bclass_set_attributes() {
+        let mut bc = make_test_bclass();
+        assert_eq!(bc.access(), AccessProtection::Public);
+        bc.set_attributes(MemberAttributes {
+            access: AccessProtection::Private,
+            ..MemberAttributes::public_member()
+        });
+        assert_eq!(bc.access(), AccessProtection::Private);
+    }
+
+    #[test]
+    fn test_bclass_emit_after_modification() {
+        let mut bc = make_test_bclass();
+        bc.set_offset(16);
+        let emitted = bc.emit(Bind::NONE);
+        assert!(emitted.contains("<@16>"));
+        assert!(emitted.contains("public"));
+    }
+
+    #[test]
+    fn test_bclass_parse_from_reader_protected() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0002u16.to_le_bytes()); // protected
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // baseClass
+        data.extend_from_slice(&4u16.to_le_bytes());      // offset
+
+        let mut reader = PdbByteReader::new(&data);
+        let bc = LfBclass::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(bc.access(), AccessProtection::Protected);
+        assert_eq!(bc.byte_offset(), 4);
+        assert_eq!(bc.base_class_record_number(), RecordNumber::type_record(0x2000));
+    }
+
+    #[test]
+    fn test_bclass_display_format() {
+        let bc = LfBclass::from_parsed(0x0003, 0x1000, 8);
+        let display = format!("{}", bc);
+        assert!(display.starts_with("public:"));
+        assert!(display.contains("0x1000"));
+        assert!(display.contains("<@8>"));
+    }
+
+    #[test]
+    fn test_bclass_all_access_levels() {
+        let none = LfBclass::from_parsed(0x0000, 0x1000, 0);
+        assert_eq!(none.access(), AccessProtection::None);
+
+        let priv_ = LfBclass::from_parsed(0x0001, 0x1000, 0);
+        assert_eq!(priv_.access(), AccessProtection::Private);
+
+        let prot = LfBclass::from_parsed(0x0002, 0x1000, 0);
+        assert_eq!(prot.access(), AccessProtection::Protected);
+
+        let pub_ = LfBclass::from_parsed(0x0003, 0x1000, 0);
+        assert_eq!(pub_.access(), AccessProtection::Public);
+    }
+
+    #[test]
+    fn test_bclass_numeric_edge_cases() {
+        // Test offset exactly at 0x7FFF (max small numeric)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x7FFFu16.to_le_bytes()); // max small numeric
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.byte_offset(), 0x7FFF);
+    }
+
+    #[test]
+    fn test_bclass_numeric_u32_variant() {
+        // Test offset encoded with u32 variant (0x8000 + 0x02)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x8000u16.to_le_bytes()); // numeric tag
+        data.push(0x02);                                   // variant = u32
+        data.extend_from_slice(&0xDEADBEEFu32.to_le_bytes());
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.byte_offset(), 0xDEADBEEF);
     }
 }

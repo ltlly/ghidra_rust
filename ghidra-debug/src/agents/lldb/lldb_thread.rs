@@ -2887,3 +2887,866 @@ mod effective_display_tests {
         assert_eq!(t4.queue_kind_str(), "unknown");
     }
 }
+
+// =========================================================================
+// Thread Synchronization Orchestration
+// =========================================================================
+
+/// Orchestrates the synchronization of LLDB threads to the Ghidra trace.
+///
+/// Corresponds to the Python agent's `put_threads`, `put_frames`, and
+/// `put_event_thread` commands. Manages the thread collection, tracks
+/// which threads/frames have been visited, and computes the display
+/// names used in the trace.
+///
+/// Ported from `commands.py` `put_threads()`, `put_frames()`, and
+/// `hooks.py` `ProcessState.record()`.
+#[derive(Debug)]
+pub struct LldbThreadSyncOrchestrator {
+    /// The thread collection.
+    collection: LldbThreadCollection,
+    /// Event thread tracker.
+    event_thread: LldbEventThreadTracker,
+    /// Frame selection tracker.
+    frame_selection: LldbFrameSelection,
+    /// Thread focus tracker.
+    focus: LldbThreadFocus,
+    /// Per-frame register caches keyed by (thread_index, frame_level).
+    register_caches: BTreeMap<(u32, u32), LldbRegisterCache>,
+    /// Output radix for TID display (10, 16, or 8).
+    radix: u32,
+}
+
+impl LldbThreadSyncOrchestrator {
+    /// Create a new orchestrator for a process.
+    pub fn new(process_index: u32) -> Self {
+        Self {
+            collection: LldbThreadCollection::new(process_index),
+            event_thread: LldbEventThreadTracker::new(),
+            frame_selection: LldbFrameSelection::new(),
+            focus: LldbThreadFocus::new(),
+            register_caches: BTreeMap::new(),
+            radix: 16,
+        }
+    }
+
+    /// Get the thread collection.
+    pub fn collection(&self) -> &LldbThreadCollection {
+        &self.collection
+    }
+
+    /// Get a mutable reference to the thread collection.
+    pub fn collection_mut(&mut self) -> &mut LldbThreadCollection {
+        &mut self.collection
+    }
+
+    /// Get the event thread tracker.
+    pub fn event_thread(&self) -> &LldbEventThreadTracker {
+        &self.event_thread
+    }
+
+    /// Set the event thread.
+    pub fn set_event_thread(&mut self, thread_index: u32) {
+        let proc_idx = self.collection.process_index();
+        self.event_thread.set(proc_idx, thread_index);
+    }
+
+    /// Clear the event thread.
+    pub fn clear_event_thread(&mut self) {
+        self.event_thread.clear();
+    }
+
+    /// Get the frame selection.
+    pub fn frame_selection(&self) -> &LldbFrameSelection {
+        &self.frame_selection
+    }
+
+    /// Set the frame selection.
+    pub fn set_frame_selection(&mut self, thread_index: u32, frame_level: u32) {
+        let proc_idx = self.collection.process_index();
+        self.frame_selection.set(proc_idx, thread_index, frame_level);
+    }
+
+    /// Clear the frame selection.
+    pub fn clear_frame_selection(&mut self) {
+        self.frame_selection.clear();
+    }
+
+    /// Get the thread focus.
+    pub fn focus(&self) -> &LldbThreadFocus {
+        &self.focus
+    }
+
+    /// Focus on a thread.
+    pub fn focus_thread(&mut self, thread_index: u32) {
+        self.focus.focus_thread(thread_index);
+    }
+
+    /// Focus on a frame.
+    pub fn focus_frame(&mut self, thread_index: u32, frame_level: u32) {
+        self.focus.focus_frame(thread_index, frame_level);
+    }
+
+    /// Set the output radix.
+    pub fn set_radix(&mut self, radix: u32) {
+        self.radix = radix;
+    }
+
+    /// Get the output radix.
+    pub fn radix(&self) -> u32 {
+        self.radix
+    }
+
+    /// Build the put_threads trace data.
+    ///
+    /// Ported from `put_threads()` in `commands.py`. For each thread in
+    /// the process, this produces the trace path and key-value pairs
+    /// needed to create/update the thread object.
+    pub fn build_put_threads(&self) -> Vec<LldbThreadTraceEntry> {
+        let proc_index = self.collection.process_index();
+        self.collection
+            .iter()
+            .map(|t| {
+                let path = format!(
+                    "Processes[{}].Threads[{}]",
+                    proc_index, t.index
+                );
+                let key = format!("[{}]", t.index);
+                let mut values = vec![
+                    ("_state".to_string(), t.state.as_trace_str().to_string()),
+                ];
+                if let Some(ref name) = t.name {
+                    values.push(("_display".to_string(), name.clone()));
+                }
+                if let Some(tid) = t.tid {
+                    values.push(("TID".to_string(), tid.to_string()));
+                    let tid_str = match self.radix {
+                        16 => format!("0x{:x}", tid),
+                        8 => format!("0{:o}", tid),
+                        _ => format!("{}", tid),
+                    };
+                    values.push((
+                        "_short_display".to_string(),
+                        format!("[{}.{}:{}]", proc_index, t.index, tid_str),
+                    ));
+                }
+                if let Some(ref queue) = t.queue_name {
+                    values.push(("Queue".to_string(), queue.clone()));
+                }
+                let stack_path = format!("{}.Stack", path);
+                LldbThreadTraceEntry {
+                    path,
+                    key,
+                    values,
+                    stack_path,
+                }
+            })
+            .collect()
+    }
+
+    /// Build the put_frames trace data for a specific thread.
+    ///
+    /// Ported from `put_frames()` in `commands.py`. For each frame in
+    /// the thread, this produces the trace path and key-value pairs
+    /// needed to create/update the frame object.
+    pub fn build_put_frames(&self, thread_index: u32) -> Option<Vec<LldbFrameTraceEntry>> {
+        let proc_index = self.collection.process_index();
+        let thread = self.collection.get(thread_index)?;
+        let entries: Vec<LldbFrameTraceEntry> = thread
+            .frames
+            .values()
+            .map(|f| {
+                let path = format!(
+                    "Processes[{}].Threads[{}].Stack[{}]",
+                    proc_index, thread_index, f.level
+                );
+                let key = format!("[{}]", f.level);
+                let mut values = vec![
+                    (
+                        "_display".to_string(),
+                        f.build_display(),
+                    ),
+                    ("PC".to_string(), format!("0x{:x}", f.pc)),
+                ];
+                if let Some(ref fname) = f.function_name {
+                    values.push(("Function".to_string(), fname.clone()));
+                }
+                let regs_path = format!("{}.Registers", path);
+                LldbFrameTraceEntry {
+                    path,
+                    key,
+                    values,
+                    regs_path,
+                }
+            })
+            .collect();
+        Some(entries)
+    }
+
+    /// Build register trace data for a specific frame.
+    ///
+    /// Ported from `putreg` in `commands.py`. Returns register
+    /// name-value pairs that have changed since the last sync.
+    pub fn build_put_registers(
+        &mut self,
+        thread_index: u32,
+        frame_level: u32,
+    ) -> Vec<(String, Vec<u8>)> {
+        let proc_index = self.collection.process_index();
+        let thread = match self.collection.get(thread_index) {
+            Some(t) => t,
+            None => return Vec::new(),
+        };
+        let frame = match thread.frames.get(&frame_level) {
+            Some(f) => f,
+            None => return Vec::new(),
+        };
+
+        let cache_key = (thread_index, frame_level);
+        let cache = self
+            .register_caches
+            .entry(cache_key)
+            .or_insert_with(|| LldbRegisterCache::new(frame_level));
+
+        let changed = cache.update(&frame.registers);
+        let mut result = Vec::new();
+        for name in &changed {
+            if let Some(reg) = frame.get_register(name) {
+                let path = format!(
+                    "Processes[{}].Threads[{}].Stack[{}].Registers.{}",
+                    proc_index, thread_index, frame_level, name
+                );
+                result.push((path, reg.bytes.clone()));
+            }
+        }
+        result
+    }
+
+    /// Build the put_event_thread trace data.
+    ///
+    /// Ported from `put_event_thread()` in `commands.py`.
+    pub fn build_put_event_thread(&self) -> Option<String> {
+        self.event_thread.trace_path()
+    }
+
+    /// Build the retain keys for threads in a process.
+    pub fn build_thread_retain_keys(&self) -> Vec<String> {
+        self.collection
+            .indices()
+            .iter()
+            .map(|idx| format!("[{}]", idx))
+            .collect()
+    }
+
+    /// Build the retain keys for frames in a thread.
+    pub fn build_frame_retain_keys(&self, thread_index: u32) -> Option<Vec<String>> {
+        let thread = self.collection.get(thread_index)?;
+        Some(thread.build_frame_retain_keys())
+    }
+
+    /// Build the retain keys for registers in a frame.
+    pub fn build_register_retain_keys(
+        &self,
+        thread_index: u32,
+        frame_level: u32,
+    ) -> Option<Vec<String>> {
+        let thread = self.collection.get(thread_index)?;
+        let frame = thread.frames.get(&frame_level)?;
+        Some(frame.build_register_retain_keys())
+    }
+
+    /// Clear all register caches (called on new stop).
+    pub fn clear_register_caches(&mut self) {
+        self.register_caches.clear();
+    }
+
+    /// Get the selected thread (first running, then first stopped).
+    pub fn selected_thread(&self) -> Option<&LldbThread> {
+        self.collection
+            .iter()
+            .find(|t| t.state == ExecutionState::Running)
+            .or_else(|| self.collection.iter().find(|t| t.state == ExecutionState::Stopped))
+    }
+
+    /// Get a summary of all threads for debugging.
+    pub fn thread_summary(&self) -> Vec<LldbThreadSummary> {
+        self.collection
+            .iter()
+            .map(|t| LldbThreadSummary {
+                index: t.index,
+                tid: t.tid,
+                name: t.name.clone(),
+                state: t.state,
+                frame_count: t.frames.len(),
+                stop_reason: t.stop_reason,
+                display: t.effective_display(),
+            })
+            .collect()
+    }
+}
+
+/// Trace entry for a thread (produced by `build_put_threads`).
+#[derive(Debug, Clone)]
+pub struct LldbThreadTraceEntry {
+    /// Trace object path.
+    pub path: String,
+    /// Retain key.
+    pub key: String,
+    /// Key-value pairs to set.
+    pub values: Vec<(String, String)>,
+    /// Stack container path.
+    pub stack_path: String,
+}
+
+/// Trace entry for a frame (produced by `build_put_frames`).
+#[derive(Debug, Clone)]
+pub struct LldbFrameTraceEntry {
+    /// Trace object path.
+    pub path: String,
+    /// Retain key.
+    pub key: String,
+    /// Key-value pairs to set.
+    pub values: Vec<(String, String)>,
+    /// Registers container path.
+    pub regs_path: String,
+}
+
+/// Summary of a thread for debugging.
+#[derive(Debug, Clone)]
+pub struct LldbThreadSummary {
+    /// Thread index.
+    pub index: u32,
+    /// OS thread ID.
+    pub tid: Option<i64>,
+    /// Thread name.
+    pub name: Option<String>,
+    /// Execution state.
+    pub state: ExecutionState,
+    /// Number of stack frames.
+    pub frame_count: usize,
+    /// Stop reason.
+    pub stop_reason: Option<super::LldbStopReason>,
+    /// Display string.
+    pub display: String,
+}
+
+impl LldbThreadSummary {
+    /// Format as a human-readable string.
+    pub fn format(&self) -> String {
+        let tid_str = self
+            .tid
+            .map(|t| format!("TID {}", t))
+            .unwrap_or_else(|| "no TID".to_string());
+        format!(
+            "Thread {}: {} [{}] {} frames | {}",
+            self.index,
+            self.display,
+            self.state.as_trace_str(),
+            self.frame_count,
+            tid_str,
+        )
+    }
+}
+
+// =========================================================================
+// Backtrace Formatter
+// =========================================================================
+
+/// Formats a backtrace (call stack) for display.
+///
+/// Ported from the Python agent's backtrace display logic and the
+/// `util.get_description(f)` function that formats frame descriptions.
+#[derive(Debug)]
+pub struct LldbBacktraceFormatter {
+    /// Whether to include module names.
+    pub show_modules: bool,
+    /// Whether to include source locations.
+    pub show_source: bool,
+    /// Whether to show raw addresses.
+    pub show_addresses: bool,
+    /// Maximum depth to display.
+    pub max_depth: Option<usize>,
+}
+
+impl Default for LldbBacktraceFormatter {
+    fn default() -> Self {
+        Self {
+            show_modules: true,
+            show_source: true,
+            show_addresses: true,
+            max_depth: None,
+        }
+    }
+}
+
+impl LldbBacktraceFormatter {
+    /// Format a thread's backtrace.
+    pub fn format(&self, thread: &LldbThread) -> Vec<String> {
+        let mut frames: Vec<_> = thread.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+
+        if let Some(max) = self.max_depth {
+            frames.truncate(max);
+        }
+
+        frames
+            .iter()
+            .map(|f| self.format_frame(f))
+            .collect()
+    }
+
+    /// Format a single frame.
+    pub fn format_frame(&self, frame: &LldbStackFrame) -> String {
+        let mut parts = Vec::new();
+
+        parts.push(format!("#{}", frame.level));
+
+        if self.show_addresses {
+            parts.push(format!("0x{:x}", frame.pc));
+        }
+
+        if let Some(ref func) = frame.function_name {
+            parts.push(func.clone());
+        }
+
+        if self.show_modules {
+            if let Some(ref module) = frame.module_name {
+                parts.push(format!("[{}]", module));
+            }
+        }
+
+        if self.show_source {
+            if let Some(ref symbol) = frame.symbol_name {
+                if frame.function_name.as_ref() != Some(symbol) {
+                    parts.push(format!("({})", symbol));
+                }
+            }
+        }
+
+        parts.join(" ")
+    }
+
+    /// Format a thread's backtrace as a single multi-line string.
+    pub fn format_full(&self, thread: &LldbThread) -> String {
+        let lines = self.format(thread);
+        lines.join("\n")
+    }
+}
+
+// =========================================================================
+// Thread State History
+// =========================================================================
+
+/// Tracks the state history of a thread for debugging.
+///
+/// Records state transitions so that the agent can determine what
+/// happened during a debug session. Ported from the event tracking
+/// in the Python agent's event thread.
+#[derive(Debug, Clone)]
+pub struct LldbThreadStateHistory {
+    /// Thread index.
+    pub thread_index: u32,
+    /// Process index.
+    pub process_index: u32,
+    /// State transitions as (timestamp_hint, old_state, new_state).
+    pub transitions: Vec<(u64, ExecutionState, ExecutionState)>,
+    /// Sequence counter.
+    seq: u64,
+}
+
+impl LldbThreadStateHistory {
+    /// Create a new history for a thread.
+    pub fn new(thread_index: u32, process_index: u32) -> Self {
+        Self {
+            thread_index,
+            process_index,
+            transitions: Vec::new(),
+            seq: 0,
+        }
+    }
+
+    /// Record a state transition.
+    pub fn record(&mut self, old_state: ExecutionState, new_state: ExecutionState) {
+        self.seq += 1;
+        self.transitions.push((self.seq, old_state, new_state));
+    }
+
+    /// Get the last state, if any.
+    pub fn last_state(&self) -> Option<ExecutionState> {
+        self.transitions.last().map(|(_, _, new)| *new)
+    }
+
+    /// Get the number of recorded transitions.
+    pub fn len(&self) -> usize {
+        self.transitions.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.transitions.is_empty()
+    }
+
+    /// Get the trace path for this thread.
+    pub fn trace_path(&self) -> String {
+        format!(
+            "Processes[{}].Threads[{}]",
+            self.process_index, self.thread_index
+        )
+    }
+}
+
+// =========================================================================
+// Additional tests
+// =========================================================================
+
+#[cfg(test)]
+mod sync_orchestrator_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_sync_orchestrator_new() {
+        let orch = LldbThreadSyncOrchestrator::new(0);
+        assert_eq!(orch.collection().len(), 0);
+        assert_eq!(orch.radix(), 16);
+        assert!(orch.event_thread().trace_path().is_none());
+    }
+
+    #[test]
+    fn test_build_put_threads() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        orch.collection_mut().insert(
+            LldbThread::new(1, 0)
+                .with_tid(42)
+                .with_name("main")
+                .with_state(ExecutionState::Stopped),
+        );
+        orch.collection_mut().insert(
+            LldbThread::new(2, 0)
+                .with_tid(84)
+                .with_state(ExecutionState::Running),
+        );
+
+        let entries = orch.build_put_threads();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].path, "Processes[0].Threads[1]");
+        assert_eq!(entries[0].key, "[1]");
+        assert!(entries[0].values.iter().any(|(k, v)| k == "_state" && v == "STOPPED"));
+        assert!(entries[0].values.iter().any(|(k, v)| k == "TID" && v == "42"));
+        assert!(entries[0].values.iter().any(|(k, v)| k == "_display" && v == "main"));
+    }
+
+    #[test]
+    fn test_build_put_threads_short_display() {
+        let mut orch = LldbThreadSyncOrchestrator::new(1);
+        orch.collection_mut().insert(
+            LldbThread::new(2, 1).with_tid(0x1234),
+        );
+        let entries = orch.build_put_threads();
+        let short = entries[0]
+            .values
+            .iter()
+            .find(|(k, _)| k == "_short_display")
+            .map(|(_, v)| v.as_str());
+        assert_eq!(short, Some("[1.2:0x1234]"));
+    }
+
+    #[test]
+    fn test_build_put_frames() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        let mut thread = LldbThread::new(1, 0).with_tid(42);
+        thread.add_frame(
+            LldbStackFrame::new(0, 0x401000).with_function("main"),
+        );
+        thread.add_frame(
+            LldbStackFrame::new(1, 0x402000).with_function("foo"),
+        );
+        orch.collection_mut().insert(thread);
+
+        let entries = orch.build_put_frames(1).unwrap();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].path, "Processes[0].Threads[1].Stack[0]");
+        assert!(entries[0].values.iter().any(|(k, v)| k == "Function" && v == "main"));
+        assert!(entries[1].values.iter().any(|(k, v)| k == "Function" && v == "foo"));
+        assert_eq!(entries[0].regs_path, "Processes[0].Threads[1].Stack[0].Registers");
+    }
+
+    #[test]
+    fn test_build_put_frames_no_thread() {
+        let orch = LldbThreadSyncOrchestrator::new(0);
+        assert!(orch.build_put_frames(99).is_none());
+    }
+
+    #[test]
+    fn test_build_put_registers() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        let mut thread = LldbThread::new(1, 0);
+        let mut frame = LldbStackFrame::new(0, 0x401000);
+        frame.set_register(RegisterValue::from_u64("x0", 0x1234));
+        frame.set_register(RegisterValue::from_u64("x1", 0x5678));
+        thread.add_frame(frame);
+        orch.collection_mut().insert(thread);
+
+        // First call: all registers are new
+        let regs = orch.build_put_registers(1, 0);
+        assert_eq!(regs.len(), 2);
+
+        // Second call: no changes
+        let regs = orch.build_put_registers(1, 0);
+        assert_eq!(regs.len(), 0);
+    }
+
+    #[test]
+    fn test_build_put_event_thread() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        assert!(orch.build_put_event_thread().is_none());
+
+        orch.set_event_thread(2);
+        let path = orch.build_put_event_thread();
+        assert_eq!(path, Some("Processes[0].Threads[2]".to_string()));
+    }
+
+    #[test]
+    fn test_frame_selection_tracking() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        assert!(orch.frame_selection().frame_path().is_none());
+
+        orch.set_frame_selection(1, 2);
+        assert_eq!(
+            orch.frame_selection().frame_path(),
+            Some("Processes[0].Threads[1].Stack[2]".to_string())
+        );
+        assert_eq!(
+            orch.frame_selection().thread_path(),
+            Some("Processes[0].Threads[1]".to_string())
+        );
+
+        orch.clear_frame_selection();
+        assert!(orch.frame_selection().frame_path().is_none());
+    }
+
+    #[test]
+    fn test_thread_focus() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        assert!(!orch.focus().is_thread_focused(1));
+
+        orch.focus_thread(1);
+        assert!(orch.focus().is_thread_focused(1));
+        assert!(!orch.focus().is_frame_focused(1, 0));
+
+        orch.focus_frame(1, 2);
+        assert!(orch.focus().is_frame_focused(1, 2));
+        assert!(!orch.focus().is_frame_focused(1, 0));
+    }
+
+    #[test]
+    fn test_selected_thread() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        assert!(orch.selected_thread().is_none());
+
+        orch.collection_mut().insert(
+            LldbThread::new(1, 0).with_state(ExecutionState::Stopped),
+        );
+        orch.collection_mut().insert(
+            LldbThread::new(2, 0).with_state(ExecutionState::Running),
+        );
+
+        let sel = orch.selected_thread().unwrap();
+        assert_eq!(sel.index, 2); // Running preferred
+    }
+
+    #[test]
+    fn test_retain_keys() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        let mut thread = LldbThread::new(1, 0);
+        thread.add_frame(LldbStackFrame::new(0, 0x401000));
+        thread.add_frame(LldbStackFrame::new(1, 0x402000));
+        orch.collection_mut().insert(thread);
+
+        let keys = orch.build_frame_retain_keys(1).unwrap();
+        assert!(keys.contains(&"[0]".to_string()));
+        assert!(keys.contains(&"[1]".to_string()));
+
+        let reg_keys = orch.build_register_retain_keys(1, 0).unwrap();
+        assert!(reg_keys.is_empty()); // No registers set
+    }
+
+    #[test]
+    fn test_clear_register_caches() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        let mut thread = LldbThread::new(1, 0);
+        let mut frame = LldbStackFrame::new(0, 0x401000);
+        frame.set_register(RegisterValue::from_u64("x0", 1));
+        thread.add_frame(frame);
+        orch.collection_mut().insert(thread);
+
+        // Populate cache
+        orch.build_put_registers(1, 0);
+        // Clear
+        orch.clear_register_caches();
+        // After clear, all registers should be reported as new
+        let regs = orch.build_put_registers(1, 0);
+        assert_eq!(regs.len(), 1);
+    }
+
+    #[test]
+    fn test_thread_summary() {
+        let mut orch = LldbThreadSyncOrchestrator::new(0);
+        orch.collection_mut().insert(
+            LldbThread::new(1, 0)
+                .with_tid(42)
+                .with_name("main")
+                .with_state(ExecutionState::Stopped)
+                .with_stop_reason(crate::agents::lldb::LldbStopReason::Breakpoint),
+        );
+
+        let summaries = orch.thread_summary();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].index, 1);
+        assert_eq!(summaries[0].tid, Some(42));
+        assert!(summaries[0].format().contains("main"));
+        assert!(summaries[0].format().contains("STOPPED"));
+    }
+}
+
+#[cfg(test)]
+mod backtrace_formatter_tests {
+    use super::*;
+
+    #[test]
+    fn test_backtrace_formatter_default() {
+        let fmt = LldbBacktraceFormatter::default();
+        assert!(fmt.show_modules);
+        assert!(fmt.show_source);
+        assert!(fmt.show_addresses);
+        assert!(fmt.max_depth.is_none());
+    }
+
+    #[test]
+    fn test_format_backtrace() {
+        let fmt = LldbBacktraceFormatter::default();
+        let mut thread = LldbThread::new(1, 0);
+        thread.add_frame(
+            LldbStackFrame::new(0, 0x401000)
+                .with_function("main")
+                .with_module("a.out"),
+        );
+        thread.add_frame(
+            LldbStackFrame::new(1, 0x402000)
+                .with_function("foo")
+                .with_module("libtest.so"),
+        );
+
+        let bt = fmt.format(&thread);
+        assert_eq!(bt.len(), 2);
+        assert!(bt[0].contains("#0"));
+        assert!(bt[0].contains("0x401000"));
+        assert!(bt[0].contains("main"));
+        assert!(bt[0].contains("[a.out]"));
+        assert!(bt[1].contains("#1"));
+        assert!(bt[1].contains("foo"));
+    }
+
+    #[test]
+    fn test_format_frame_no_function() {
+        let fmt = LldbBacktraceFormatter::default();
+        let frame = LldbStackFrame::new(0, 0x401000);
+        let display = fmt.format_frame(&frame);
+        assert!(display.contains("#0"));
+        assert!(display.contains("0x401000"));
+    }
+
+    #[test]
+    fn test_format_full() {
+        let fmt = LldbBacktraceFormatter::default();
+        let mut thread = LldbThread::new(1, 0);
+        thread.add_frame(LldbStackFrame::new(0, 0x401000).with_function("main"));
+        thread.add_frame(LldbStackFrame::new(1, 0x402000).with_function("foo"));
+        let full = fmt.format_full(&thread);
+        assert!(full.contains('\n'));
+        assert!(full.contains("main"));
+        assert!(full.contains("foo"));
+    }
+
+    #[test]
+    fn test_format_max_depth() {
+        let fmt = LldbBacktraceFormatter {
+            max_depth: Some(1),
+            ..Default::default()
+        };
+        let mut thread = LldbThread::new(1, 0);
+        thread.add_frame(LldbStackFrame::new(0, 0x401000));
+        thread.add_frame(LldbStackFrame::new(1, 0x402000));
+        thread.add_frame(LldbStackFrame::new(2, 0x403000));
+        let bt = fmt.format(&thread);
+        assert_eq!(bt.len(), 1);
+    }
+
+    #[test]
+    fn test_format_no_modules() {
+        let fmt = LldbBacktraceFormatter {
+            show_modules: false,
+            ..Default::default()
+        };
+        let mut thread = LldbThread::new(1, 0);
+        thread.add_frame(
+            LldbStackFrame::new(0, 0x401000)
+                .with_function("main")
+                .with_module("a.out"),
+        );
+        let bt = fmt.format(&thread);
+        assert!(!bt[0].contains("[a.out]"));
+    }
+}
+
+#[cfg(test)]
+mod state_history_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_state_history() {
+        let mut history = LldbThreadStateHistory::new(1, 0);
+        assert!(history.is_empty());
+
+        history.record(ExecutionState::NotStarted, ExecutionState::Running);
+        history.record(ExecutionState::Running, ExecutionState::Stopped);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.last_state(), Some(ExecutionState::Stopped));
+    }
+
+    #[test]
+    fn test_thread_state_history_trace_path() {
+        let history = LldbThreadStateHistory::new(2, 1);
+        assert_eq!(
+            history.trace_path(),
+            "Processes[1].Threads[2]"
+        );
+    }
+}
+
+#[cfg(test)]
+mod thread_trace_entry_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_trace_entry_debug() {
+        let entry = LldbThreadTraceEntry {
+            path: "Processes[0].Threads[1]".to_string(),
+            key: "[1]".to_string(),
+            values: vec![("_state".to_string(), "STOPPED".to_string())],
+            stack_path: "Processes[0].Threads[1].Stack".to_string(),
+        };
+        let debug = format!("{:?}", entry);
+        assert!(debug.contains("Processes[0].Threads[1]"));
+    }
+
+    #[test]
+    fn test_frame_trace_entry_debug() {
+        let entry = LldbFrameTraceEntry {
+            path: "Processes[0].Threads[1].Stack[0]".to_string(),
+            key: "[0]".to_string(),
+            values: vec![("Function".to_string(), "main".to_string())],
+            regs_path: "Processes[0].Threads[1].Stack[0].Registers".to_string(),
+        };
+        assert_eq!(entry.key, "[0]");
+    }
+}

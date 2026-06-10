@@ -204,7 +204,7 @@ impl AbstractMsSymbol for SWith32 {
         match self.variant {
             WithVariant::With32 => super::super::symbol_kind::S_WITH32,
             WithVariant::With32V2 => super::super::symbol_kind::S_WITH32_V2,
-            WithVariant::With32St => 0x1115, // S_WITH32_ST (if defined)
+            WithVariant::With32St => super::super::symbol_kind::S_WITH32, // ST variant shares PDB ID with With32
         }
     }
 

@@ -13,7 +13,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::drgn_thread::DrgnThread;
+use super::drgn_thread::{DrgnStackFrame, DrgnThread};
 use super::{DrgnModuleInfo, DrgnSectionInfo, DrgnSymbolInfo};
 use crate::agents::{
     ExecutionState, MemoryRegion, ProcessInfo,
@@ -237,6 +237,15 @@ impl DrgnInferiorProcess {
     /// Get a mutable reference to a thread by number.
     pub fn get_thread_mut(&mut self, thread_num: u32) -> Option<&mut DrgnThread> {
         self.threads.get_mut(&thread_num)
+    }
+
+    /// Add a stack frame to a specific thread.
+    ///
+    /// If the thread does not exist, this is a no-op.
+    pub fn add_frame_to_thread(&mut self, thread_num: u32, frame: DrgnStackFrame) {
+        if let Some(thread) = self.threads.get_mut(&thread_num) {
+            thread.add_frame(frame);
+        }
     }
 
     /// Add a module to this process.
@@ -924,6 +933,282 @@ impl DrgnProcessSyncState {
             || self.regions_dirty
             || self.breaks_dirty
             || self.watches_dirty
+    }
+
+    /// Compute what needs to be synced, without modifying state.
+    ///
+    /// Returns a `DrgnRecordPlan` describing what trace writes are needed.
+    /// This mirrors the decision logic in Python `ProcessState.record()`.
+    pub fn plan_record(&self, process: &DrgnInferiorProcess) -> DrgnRecordPlan {
+        let mut plan = DrgnRecordPlan::default();
+
+        // First record: must emit processes and environment
+        if self.first {
+            plan.put_processes = true;
+            plan.put_environment = true;
+        }
+
+        // Thread changes
+        if self.first || self.threads_dirty {
+            plan.put_threads = true;
+        }
+
+        // Frame/register sync for current thread
+        if let Some(thread) = process.selected_thread() {
+            let thread_num = thread.num;
+            if self.first || !self.thread_visited(thread_num) {
+                plan.put_frames = true;
+                plan.visited_threads.push(thread_num);
+            }
+            // Frame-level dedup
+            if let Some(frame) = thread.innermost_frame() {
+                let frame_level = frame.level;
+                if self.first || !self.is_visited(thread_num, frame_level) {
+                    plan.put_registers = true;
+                    plan.put_memory_pc = true;
+                    plan.put_memory_sp = true;
+                    plan.visited_frames.push((thread_num, frame_level));
+                }
+            }
+        }
+
+        // Regions and modules
+        if self.first || self.regions_dirty || self.modules_dirty {
+            plan.put_regions = true;
+        }
+        if self.first || self.modules_dirty {
+            plan.put_modules = true;
+        }
+
+        plan
+    }
+
+    /// Execute the full record flow for a stopped process.
+    ///
+    /// This is the Rust equivalent of Python `ProcessState.record()` in `hooks.py`.
+    /// It orchestrates all the trace writes needed when a process stops.
+    ///
+    /// Returns a `DrgnRecordResult` describing what was written.
+    pub fn record(
+        &mut self,
+        process: &mut DrgnInferiorProcess,
+        description: Option<&str>,
+    ) -> DrgnRecordResult {
+        let mut result = DrgnRecordResult::default();
+
+        // Create snapshot
+        if let Some(desc) = description {
+            result.snapshot_description = Some(desc.to_string());
+        }
+
+        let first = self.first;
+        self.first = false;
+
+        // First record: put processes and environment
+        if first {
+            result.put_processes = true;
+            result.put_environment = true;
+        }
+
+        // Thread sync
+        if first || self.threads_dirty {
+            result.put_threads = true;
+            self.threads_dirty = false;
+        }
+
+        // Frame/register sync for selected thread
+        if let Some(thread) = process.selected_thread() {
+            let thread_num = thread.num;
+            if first || !self.thread_visited(thread_num) {
+                result.put_frames = true;
+                result.synced_threads.push(thread_num);
+                self.record_visit(thread_num, 0);
+            }
+            if let Some(frame) = thread.innermost_frame() {
+                let frame_level = frame.level;
+                let hashable = (thread_num, frame_level);
+                if first || !self.is_visited(thread_num, frame_level) {
+                    result.put_registers = true;
+                    result.put_memory_pc = true;
+                    result.put_memory_sp = true;
+                    result.synced_frames.push(hashable);
+                    self.record_visit(thread_num, frame_level);
+                }
+            }
+        }
+
+        // Region/module sync
+        if first || self.regions_dirty || self.modules_dirty {
+            result.put_regions = true;
+            self.regions_dirty = false;
+        }
+        if first || self.modules_dirty {
+            result.put_modules = true;
+            self.modules_dirty = false;
+        }
+
+        result
+    }
+
+    /// Execute the "continued" record flow.
+    ///
+    /// This is the Rust equivalent of Python `ProcessState.record_continued()`.
+    /// Called when execution resumes; only processes and threads are re-emitted.
+    pub fn record_continued(&mut self, _process: &mut DrgnInferiorProcess) -> DrgnRecordResult {
+        let mut result = DrgnRecordResult::default();
+        result.put_processes = true;
+        result.put_threads = true;
+        result.snapshot_description = Some("Continued".to_string());
+        result
+    }
+
+    /// Execute the "exited" record flow.
+    ///
+    /// This is the Rust equivalent of Python `ProcessState.record_exited()`.
+    /// Called when a process terminates; sets exit code and state.
+    pub fn record_exited(
+        &mut self,
+        process: &mut DrgnInferiorProcess,
+        exit_code: i32,
+    ) -> DrgnRecordResult {
+        process.set_exit(exit_code);
+        let mut result = DrgnRecordResult::default();
+        result.set_exit_code = true;
+        result.exit_code = Some(exit_code);
+        result.snapshot_description = Some(format!("Exited with code {}", exit_code));
+        result
+    }
+}
+
+/// Plan for what trace writes are needed during a record operation.
+///
+/// Computed by `DrgnProcessSyncState::plan_record()` before any writes
+/// are performed. This allows the caller to batch transactions or
+/// skip unnecessary work.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnRecordPlan {
+    /// Whether to emit the process list.
+    pub put_processes: bool,
+    /// Whether to emit the environment (arch, os, endian).
+    pub put_environment: bool,
+    /// Whether to emit the thread list.
+    pub put_threads: bool,
+    /// Whether to emit stack frames.
+    pub put_frames: bool,
+    /// Whether to emit register values.
+    pub put_registers: bool,
+    /// Whether to emit memory at the program counter.
+    pub put_memory_pc: bool,
+    /// Whether to emit memory at the stack pointer.
+    pub put_memory_sp: bool,
+    /// Whether to emit memory regions.
+    pub put_regions: bool,
+    /// Whether to emit loaded modules.
+    pub put_modules: bool,
+    /// Threads whose frames will be synced.
+    pub visited_threads: Vec<u32>,
+    /// (thread, frame) pairs whose registers will be synced.
+    pub visited_frames: Vec<(u32, u32)>,
+}
+
+impl DrgnRecordPlan {
+    /// Whether any writes are needed.
+    pub fn has_work(&self) -> bool {
+        self.put_processes
+            || self.put_environment
+            || self.put_threads
+            || self.put_frames
+            || self.put_registers
+            || self.put_memory_pc
+            || self.put_memory_sp
+            || self.put_regions
+            || self.put_modules
+    }
+
+    /// Get a summary of what will be written.
+    pub fn summary(&self) -> Vec<&'static str> {
+        let mut items = Vec::new();
+        if self.put_processes { items.push("processes"); }
+        if self.put_environment { items.push("environment"); }
+        if self.put_threads { items.push("threads"); }
+        if self.put_frames { items.push("frames"); }
+        if self.put_registers { items.push("registers"); }
+        if self.put_memory_pc { items.push("memory(pc)"); }
+        if self.put_memory_sp { items.push("memory(sp)"); }
+        if self.put_regions { items.push("regions"); }
+        if self.put_modules { items.push("modules"); }
+        items
+    }
+}
+
+/// Result of a record operation describing what was written to the trace.
+///
+/// Returned by `DrgnProcessSyncState::record()`, `record_continued()`,
+/// and `record_exited()`. This mirrors the side effects of Python
+/// `ProcessState.record()` in `hooks.py`.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnRecordResult {
+    /// Whether the process list was written.
+    pub put_processes: bool,
+    /// Whether the environment was written.
+    pub put_environment: bool,
+    /// Whether the thread list was written.
+    pub put_threads: bool,
+    /// Whether stack frames were written.
+    pub put_frames: bool,
+    /// Whether register values were written.
+    pub put_registers: bool,
+    /// Whether memory at PC was written.
+    pub put_memory_pc: bool,
+    /// Whether memory at SP was written.
+    pub put_memory_sp: bool,
+    /// Whether memory regions were written.
+    pub put_regions: bool,
+    /// Whether modules were written.
+    pub put_modules: bool,
+    /// Whether the exit code was set.
+    pub set_exit_code: bool,
+    /// The exit code, if set.
+    pub exit_code: Option<i32>,
+    /// Snapshot description, if a snapshot was created.
+    pub snapshot_description: Option<String>,
+    /// Thread numbers whose frames were synced.
+    pub synced_threads: Vec<u32>,
+    /// (thread, frame) pairs whose registers were synced.
+    pub synced_frames: Vec<(u32, u32)>,
+}
+
+impl DrgnRecordResult {
+    /// Whether any trace writes were performed.
+    pub fn has_writes(&self) -> bool {
+        self.put_processes
+            || self.put_environment
+            || self.put_threads
+            || self.put_frames
+            || self.put_registers
+            || self.put_memory_pc
+            || self.put_memory_sp
+            || self.put_regions
+            || self.put_modules
+            || self.set_exit_code
+    }
+
+    /// Get a human-readable summary of what was written.
+    pub fn summary(&self) -> String {
+        let mut items = Vec::new();
+        if self.put_processes { items.push("processes"); }
+        if self.put_environment { items.push("environment"); }
+        if self.put_threads { items.push("threads"); }
+        if self.put_frames { items.push("frames"); }
+        if self.put_registers { items.push("registers"); }
+        if self.put_memory_pc { items.push("memory(pc)"); }
+        if self.put_memory_sp { items.push("memory(sp)"); }
+        if self.put_regions { items.push("regions"); }
+        if self.put_modules { items.push("modules"); }
+        if self.set_exit_code {
+            items.push("exit_code");
+        }
+        format!("Recorded: {}", items.join(", "))
     }
 }
 
@@ -3090,5 +3375,145 @@ mod tests {
         assert!(tv.iter().any(|(k, v)| k == "_count" && v == "0"));
         let mv = p.build_modules_container_values();
         assert!(mv.iter().any(|(k, v)| k == "_count" && v == "0"));
+    }
+
+    #[test]
+    fn test_record_plan_first() {
+        let state = DrgnProcessSyncState::new();
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::cpu_thread(0, 0).with_state(ExecutionState::Stopped));
+        p.add_frame_to_thread(0, DrgnStackFrame::new(0, 0xffffffff81234567));
+
+        let plan = state.plan_record(&p);
+        assert!(plan.put_processes);
+        assert!(plan.put_environment);
+        assert!(plan.put_threads);
+        assert!(plan.put_frames);
+        assert!(plan.put_registers);
+        assert!(plan.put_regions);
+        assert!(plan.put_modules);
+        assert!(plan.has_work());
+    }
+
+    #[test]
+    fn test_record_plan_subsequent_clean() {
+        let mut state = DrgnProcessSyncState::new();
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::cpu_thread(0, 0).with_state(ExecutionState::Stopped));
+
+        // First record
+        state.first = false;
+        state.record_visit(0, 0);
+
+        let plan = state.plan_record(&p);
+        assert!(!plan.put_processes);
+        assert!(!plan.put_environment);
+        assert!(!plan.put_threads);
+        assert!(!plan.has_work());
+    }
+
+    #[test]
+    fn test_record_plan_threads_dirty() {
+        let mut state = DrgnProcessSyncState::new();
+        state.first = false;
+        state.mark_threads_dirty();
+        let p = DrgnInferiorProcess::new(0);
+
+        let plan = state.plan_record(&p);
+        assert!(plan.put_threads);
+        assert!(!plan.put_processes);
+    }
+
+    #[test]
+    fn test_record_first() {
+        let mut state = DrgnProcessSyncState::new();
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::cpu_thread(0, 0).with_state(ExecutionState::Stopped));
+        p.add_frame_to_thread(0, DrgnStackFrame::new(0, 0xffffffff81234567));
+
+        let result = state.record(&mut p, Some("Stopped"));
+        assert!(result.put_processes);
+        assert!(result.put_environment);
+        assert!(result.put_threads);
+        assert!(result.put_frames);
+        assert!(result.put_registers);
+        assert!(result.has_writes());
+        assert_eq!(result.snapshot_description, Some("Stopped".to_string()));
+        assert!(!state.first); // no longer first
+    }
+
+    #[test]
+    fn test_record_continued() {
+        let mut state = DrgnProcessSyncState::new();
+        let mut p = DrgnInferiorProcess::new(0);
+
+        let result = state.record_continued(&mut p);
+        assert!(result.put_processes);
+        assert!(result.put_threads);
+        assert!(result.snapshot_description.is_some());
+    }
+
+    #[test]
+    fn test_record_exited() {
+        let mut state = DrgnProcessSyncState::new();
+        let mut p = DrgnInferiorProcess::new(0);
+        p.state = ExecutionState::Running;
+
+        let result = state.record_exited(&mut p, 137);
+        assert!(result.set_exit_code);
+        assert_eq!(result.exit_code, Some(137));
+        assert_eq!(p.state, ExecutionState::Exited);
+        assert_eq!(p.exit_code, Some(137));
+    }
+
+    #[test]
+    fn test_record_plan_summary() {
+        let mut plan = DrgnRecordPlan::default();
+        plan.put_processes = true;
+        plan.put_threads = true;
+        let summary = plan.summary();
+        assert!(summary.contains(&"processes"));
+        assert!(summary.contains(&"threads"));
+        assert!(!summary.contains(&"registers"));
+    }
+
+    #[test]
+    fn test_record_result_summary() {
+        let mut result = DrgnRecordResult::default();
+        result.put_processes = true;
+        result.put_registers = true;
+        let summary = result.summary();
+        assert!(summary.contains("processes"));
+        assert!(summary.contains("registers"));
+    }
+
+    #[test]
+    fn test_record_dedup_second_call() {
+        let mut state = DrgnProcessSyncState::new();
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::cpu_thread(0, 0).with_state(ExecutionState::Stopped));
+        p.add_frame_to_thread(0, DrgnStackFrame::new(0, 0xffffffff81234567));
+
+        // First record
+        let r1 = state.record(&mut p, Some("Stopped"));
+        assert!(r1.put_processes);
+        assert!(r1.put_frames);
+
+        // Second record without dirty flags - should be minimal
+        let r2 = state.record(&mut p, Some("Stopped"));
+        assert!(!r2.put_processes);
+        assert!(!r2.put_threads);
+        assert!(!r2.put_frames);
+        assert!(!r2.put_registers);
+    }
+
+    #[test]
+    fn test_add_frame_to_thread() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(0));
+        p.add_frame_to_thread(0, DrgnStackFrame::new(0, 0x401000));
+        let thread = p.get_thread(0).unwrap();
+        assert_eq!(thread.frame_count(), 1);
+        assert_eq!(thread.innermost_frame().unwrap().pc, 0x401000);
     }
 }

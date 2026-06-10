@@ -1621,8 +1621,8 @@ pub enum SymbolRecord {
     Constant(ConstantSymbol),
     UserDefinedType(UdtSymbol),
     ThreadStorage(ThreadSymbol),
-    BlockStart { parent_offset: u32, end_offset: u32, segment: u16, name: String },
-    WithStart { parent_offset: u32, end_offset: u32, segment: u16, expression: String },
+    BlockStart { parent_offset: u32, end_offset: u32, length: u32, offset: u32, segment: u16, name: String },
+    WithStart { parent_offset: u32, end_offset: u32, length: u32, offset: u32, segment: u16, expression: String },
     End,
     Label(LabelSymbol),
     CompileInfo(CompileInfo),
@@ -1644,8 +1644,8 @@ pub enum SymbolRecord {
     Trampoline { trampoline_type: u16, size: u16, thunk_offset: u32, target_offset: u32, thunk_section: u16, target_section: u16 },
     // New symbol variants ported from Java
     Compile2(CompileInfo),
-    Return { flags: u32, return_value_register: u16 },
-    EntryThis { flags: u8, this_register: u16 },
+    Return { varargs_pushed_right_to_left: bool, returnee_cleans_up_stack: bool, style: u8, bytes_remaining: u32 },
+    EntryThis { this_sym: u8, bytes_remaining: u32 },
     VfTable { type_index: u32, offset: u32, segment: u16, name: String },
     Export { ordinal: u16, flags: u16, name: String },
     FrameCookie { offset: u32, register: u16, cookie_type: u8 },
@@ -1686,13 +1686,13 @@ fn parse_symbol_payload(kind: u16, payload: &[u8]) -> SymbolRecord {
         symbol_kind::S_GDATA32|symbol_kind::S_LDATA32|symbol_kind::S_GDATA32_ST|symbol_kind::S_LDATA32_ST => parse_data_symbol(kind, payload),
         symbol_kind::S_GPROC32|symbol_kind::S_LPROC32|symbol_kind::S_GPROC32_ST|symbol_kind::S_LPROC32_ST => parse_proc_symbol(kind, payload),
         symbol_kind::S_PUB32|symbol_kind::S_PUB32_ST => parse_public_symbol(payload),
-        symbol_kind::S_LABEL32|symbol_kind::S_LABEL16 => parse_label_symbol(payload),
-        symbol_kind::S_BLOCK32|symbol_kind::S_BLOCK16 => parse_block32(payload),
-        symbol_kind::S_WITH32|symbol_kind::S_WITH16 => parse_with32(payload),
+        symbol_kind::S_LABEL32|symbol_kind::S_LABEL16|symbol_kind::S_LABEL32_V2 => parse_label_symbol(payload),
+        symbol_kind::S_BLOCK32|symbol_kind::S_BLOCK16|symbol_kind::S_BLOCK32_V2 => parse_block32(payload),
+        symbol_kind::S_WITH32|symbol_kind::S_WITH16|symbol_kind::S_WITH32_V2 => parse_with32(payload),
         symbol_kind::S_END|symbol_kind::S_ENDARG|symbol_kind::S_PROC_ID_END => SymbolRecord::End,
         symbol_kind::S_REGISTER|symbol_kind::S_REGISTER_ST => parse_register_symbol(payload),
         symbol_kind::S_REGREL32|symbol_kind::S_REGREL32_ST|symbol_kind::S_REGREL16 => parse_regrel_symbol(payload),
-        symbol_kind::S_BPREL32|symbol_kind::S_BPREL32_ST|symbol_kind::S_BPREL16 => parse_bprel_symbol(payload),
+        symbol_kind::S_BPREL32|symbol_kind::S_BPREL32_ST|symbol_kind::S_BPREL16|symbol_kind::S_BPREL32_V2 => parse_bprel_symbol(payload),
         symbol_kind::S_CONSTANT|symbol_kind::S_CONSTANT_ST|symbol_kind::S_MANCONSTANT => parse_constant_symbol(payload),
         symbol_kind::S_UDT|symbol_kind::S_UDT_ST => parse_udt_symbol(payload),
         symbol_kind::S_LTHREAD32|symbol_kind::S_GTHREAD32|symbol_kind::S_LTHREAD32_ST|symbol_kind::S_GTHREAD32_ST => parse_thread_symbol(payload, kind),
@@ -1764,13 +1764,27 @@ fn parse_label_symbol(payload: &[u8]) -> SymbolRecord {
 }
 
 fn parse_block32(payload: &[u8]) -> SymbolRecord {
-    if payload.len()<10 { return SymbolRecord::Unknown{kind:symbol_kind::S_BLOCK32}; }
-    SymbolRecord::BlockStart{parent_offset:le_u32_at(payload,0),end_offset:le_u32_at(payload,4),segment:u16::from_le_bytes([payload[8],payload[9]]),name:parse_null_terminated_string(&payload[10..])}
+    if payload.len()<18 { return SymbolRecord::Unknown{kind:symbol_kind::S_BLOCK32}; }
+    SymbolRecord::BlockStart{
+        parent_offset:le_u32_at(payload,0),
+        end_offset:le_u32_at(payload,4),
+        length:le_u32_at(payload,8),
+        offset:le_u32_at(payload,12),
+        segment:u16::from_le_bytes([payload[16],payload[17]]),
+        name:parse_null_terminated_string(&payload[18..])
+    }
 }
 
 fn parse_with32(payload: &[u8]) -> SymbolRecord {
-    if payload.len()<10 { return SymbolRecord::Unknown{kind:symbol_kind::S_WITH32}; }
-    SymbolRecord::WithStart{parent_offset:le_u32_at(payload,0),end_offset:le_u32_at(payload,4),segment:u16::from_le_bytes([payload[8],payload[9]]),expression:parse_null_terminated_string(&payload[10..])}
+    if payload.len()<18 { return SymbolRecord::Unknown{kind:symbol_kind::S_WITH32}; }
+    SymbolRecord::WithStart{
+        parent_offset:le_u32_at(payload,0),
+        end_offset:le_u32_at(payload,4),
+        length:le_u32_at(payload,8),
+        offset:le_u32_at(payload,12),
+        segment:u16::from_le_bytes([payload[16],payload[17]]),
+        expression:parse_null_terminated_string(&payload[18..])
+    }
 }
 
 fn parse_register_symbol(payload: &[u8]) -> SymbolRecord {
@@ -1944,17 +1958,20 @@ fn parse_compile_v1(payload: &[u8]) -> SymbolRecord {
 }
 
 fn parse_return_symbol(payload: &[u8]) -> SymbolRecord {
-    if payload.len() < 4 { return SymbolRecord::Unknown{kind: symbol_kind::S_RETURN}; }
-    let flags = le_u32_at(payload, 0);
-    let reg = if payload.len() >= 6 { u16::from_le_bytes([payload[4], payload[5]]) } else { 0 };
-    SymbolRecord::Return{flags, return_value_register: reg}
+    if payload.len() < 3 { return SymbolRecord::Unknown{kind: symbol_kind::S_RETURN}; }
+    let flags = u16::from_le_bytes([payload[0], payload[1]]);
+    let varargs_pushed_right_to_left = (flags & 0x0001) != 0;
+    let returnee_cleans_up_stack = ((flags >> 1) & 0x0001) != 0;
+    let style = payload[2];
+    let bytes_remaining = if payload.len() > 3 { (payload.len() - 3) as u32 } else { 0 };
+    SymbolRecord::Return{varargs_pushed_right_to_left, returnee_cleans_up_stack, style, bytes_remaining}
 }
 
 fn parse_entry_this(payload: &[u8]) -> SymbolRecord {
-    if payload.len() < 3 { return SymbolRecord::Unknown{kind: symbol_kind::S_ENTRYTHIS}; }
-    let flags = payload[0];
-    let reg = u16::from_le_bytes([payload[1], payload[2]]);
-    SymbolRecord::EntryThis{flags, this_register: reg}
+    if payload.is_empty() { return SymbolRecord::Unknown{kind: symbol_kind::S_ENTRYTHIS}; }
+    let this_sym = payload[0];
+    let bytes_remaining = if payload.len() > 1 { (payload.len() - 1) as u32 } else { 0 };
+    SymbolRecord::EntryThis{this_sym, bytes_remaining}
 }
 
 fn parse_vftable_symbol(payload: &[u8]) -> SymbolRecord {

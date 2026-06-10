@@ -753,6 +753,18 @@ impl DbgEngStackFrame {
         self.registers.clear();
     }
 
+    /// Build the retain keys for register children of this frame.
+    ///
+    /// Used with `retain_values` to clean up stale register entries.
+    /// Register names are stored in lowercase for dbgeng's case-insensitive
+    /// register namespace.
+    pub fn build_register_retain_keys(&self) -> Vec<String> {
+        self.registers
+            .iter()
+            .map(|r| format!(".{}", r.name.to_lowercase()))
+            .collect()
+    }
+
     /// Build the trace object key-value pairs for this frame.
     ///
     /// Matches the Python agent's `put_frames` output with all four offsets.
@@ -1496,10 +1508,14 @@ pub struct DbgEngFrameDetails {
     pub source_file: Option<String>,
     /// Source line number, if known.
     pub source_line: Option<u32>,
+    /// Language of the function (e.g. "c", "c++", "rust").
+    pub language: Option<String>,
     /// Module name for this frame.
     pub module_name: Option<String>,
     /// Whether the frame corresponds to a signal/exception handler.
     pub is_exception_frame: bool,
+    /// Whether this is an inline frame.
+    pub is_inline: bool,
 }
 
 impl DbgEngFrameDetails {
@@ -1510,8 +1526,10 @@ impl DbgEngFrameDetails {
             is_artificial: false,
             source_file: None,
             source_line: None,
+            language: None,
             module_name: None,
             is_exception_frame: false,
+            is_inline: false,
         }
     }
 
@@ -1534,9 +1552,21 @@ impl DbgEngFrameDetails {
         self
     }
 
+    /// Set language.
+    pub fn with_language(mut self, lang: impl Into<String>) -> Self {
+        self.language = Some(lang.into());
+        self
+    }
+
     /// Mark as exception frame.
     pub fn with_exception_frame(mut self, exception: bool) -> Self {
         self.is_exception_frame = exception;
+        self
+    }
+
+    /// Mark as inline frame.
+    pub fn with_inline(mut self, inline: bool) -> Self {
+        self.is_inline = inline;
         self
     }
 
@@ -1901,6 +1931,14 @@ impl DbgEngSyncBatch {
         });
     }
 
+    /// Queue a clear-all-frames operation for a thread.
+    pub fn clear_frames(&mut self, process_num: u32, thread_num: u32) {
+        self.frame_ops.push(FrameSyncOp::ClearAll {
+            process_num,
+            thread_num,
+        });
+    }
+
     /// Queue a register set operation.
     pub fn set_register(
         &mut self,
@@ -1973,6 +2011,11 @@ pub enum FrameSyncOp {
         process_num: u32,
         thread_num: u32,
         frame_level: u32,
+    },
+    /// Clear all frames for a thread.
+    ClearAll {
+        process_num: u32,
+        thread_num: u32,
     },
 }
 
@@ -3223,6 +3266,84 @@ mod tests {
                 assert_eq!(frame_level, 0);
             }
             _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_stack_frame_build_register_retain_keys() {
+        let mut f = DbgEngStackFrame::new(0, 0x401000);
+        f.set_register(RegisterValue::from_u64("RAX", 0x1234));
+        f.set_register(RegisterValue::from_u64("RBX", 0x5678));
+        let keys = f.build_register_retain_keys();
+        assert!(keys.contains(&".rax".to_string()));
+        assert!(keys.contains(&".rbx".to_string()));
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn test_stack_frame_register_retain_keys_empty() {
+        let f = DbgEngStackFrame::new(0, 0x401000);
+        let keys = f.build_register_retain_keys();
+        assert!(keys.is_empty());
+    }
+
+    #[test]
+    fn test_frame_details_with_language() {
+        let details = DbgEngFrameDetails::new(0)
+            .with_language("c++");
+        assert_eq!(details.language.as_deref(), Some("c++"));
+    }
+
+    #[test]
+    fn test_frame_details_with_inline() {
+        let details = DbgEngFrameDetails::new(0)
+            .with_inline(true);
+        assert!(details.is_inline);
+    }
+
+    #[test]
+    fn test_frame_details_full() {
+        let details = DbgEngFrameDetails::new(0)
+            .with_artificial(false)
+            .with_source("main.c", 42)
+            .with_language("c")
+            .with_module("test.exe")
+            .with_exception_frame(false)
+            .with_inline(false);
+        assert_eq!(details.language.as_deref(), Some("c"));
+        assert!(!details.is_inline);
+        assert_eq!(details.module_name.as_deref(), Some("test.exe"));
+    }
+
+    #[test]
+    fn test_frame_sync_op_clear_all() {
+        let clear = FrameSyncOp::ClearAll {
+            process_num: 0,
+            thread_num: 1,
+        };
+        match clear {
+            FrameSyncOp::ClearAll { process_num, thread_num } => {
+                assert_eq!(process_num, 0);
+                assert_eq!(thread_num, 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_sync_batch_clear_frames() {
+        let mut batch = DbgEngSyncBatch::new();
+        batch.upsert_frame(0, 1, DbgEngStackFrame::new(0, 0x401000));
+        batch.upsert_frame(0, 1, DbgEngStackFrame::new(1, 0x402000));
+        batch.clear_frames(0, 1);
+        assert_eq!(batch.frame_ops.len(), 3);
+        // The third op should be ClearAll
+        match &batch.frame_ops[2] {
+            FrameSyncOp::ClearAll { process_num, thread_num } => {
+                assert_eq!(*process_num, 0);
+                assert_eq!(*thread_num, 1);
+            }
+            _ => panic!("expected ClearAll variant"),
         }
     }
 }

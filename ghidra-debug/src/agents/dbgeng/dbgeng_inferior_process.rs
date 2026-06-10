@@ -32,6 +32,69 @@ use crate::agents::{
 /// Still-active exit code sentinel from the Windows API.
 pub const STILL_ACTIVE: i32 = 259;
 
+/// A breakpoint location within a dbgeng breakpoint.
+///
+/// Ported from the Python `BreakpointLocation` dataclass. Dbgeng
+/// breakpoints can have data watchpoint ranges (width + access type)
+/// in addition to a resolved address. This struct captures those fields
+/// for the trace object tree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BreakpointLocationInfo {
+    /// Resolved address of this location.
+    pub address: u64,
+    /// Whether this location is enabled.
+    pub enabled: bool,
+    /// Data width in bytes (for watchpoints), if applicable.
+    pub data_width: Option<u32>,
+    /// Data access type (1=W, 2=R, 4=X), if applicable.
+    pub data_access_type: Option<u32>,
+}
+
+impl BreakpointLocationInfo {
+    /// Create a new breakpoint location.
+    pub fn new(address: u64, enabled: bool) -> Self {
+        Self {
+            address,
+            enabled,
+            data_width: None,
+            data_access_type: None,
+        }
+    }
+
+    /// Set data width and access type for a watchpoint.
+    pub fn with_data(mut self, width: u32, access_type: u32) -> Self {
+        self.data_width = Some(width);
+        self.data_access_type = Some(access_type);
+        self
+    }
+
+    /// Get the access type label.
+    pub fn access_type_label(&self) -> &'static str {
+        match self.data_access_type {
+            Some(4) => "X",
+            Some(2) => "R",
+            Some(1) => "W",
+            _ => "x",
+        }
+    }
+
+    /// Build trace object key-value pairs.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            ("Address".to_string(), format!("0x{:x}", self.address)),
+            ("Enabled".to_string(), self.enabled.to_string()),
+        ];
+        if let Some(width) = self.data_width {
+            values.push(("Width".to_string(), width.to_string()));
+        }
+        if let Some(access) = self.data_access_type {
+            values.push(("AccessType".to_string(), self.access_type_label().to_string()));
+            values.push(("AccessTypeValue".to_string(), access.to_string()));
+        }
+        values
+    }
+}
+
 /// Default page size on Windows (x86/x64).
 pub const PAGE_SIZE: u64 = 4096;
 
@@ -589,6 +652,38 @@ impl DbgEngInferiorProcess {
     /// but the process only stores the base `ModuleInfo` directly.
     pub fn add_module_with_sections(&mut self, module: ModuleWithSections) {
         self.add_module(module.info);
+    }
+
+    /// Get a module with its sections by name.
+    ///
+    /// Since the process only stores `ModuleInfo` internally, this returns
+    /// a `ModuleWithSections` wrapper with an empty sections map. The caller
+    /// can populate sections from the dbgeng API separately.
+    pub fn get_module_with_sections(&self, name: &str) -> Option<ModuleWithSections> {
+        self.modules
+            .iter()
+            .find(|m| m.name == name)
+            .map(|m| ModuleWithSections::from_info(m.clone()))
+    }
+
+    /// Remove a module by name, returning it wrapped as `ModuleWithSections`.
+    ///
+    /// Since the process only stores `ModuleInfo` internally, the returned
+    /// `ModuleWithSections` will have an empty sections map.
+    pub fn remove_module_with_sections(&mut self, name: &str) -> Option<ModuleWithSections> {
+        self.remove_module(name)
+            .map(ModuleWithSections::from_info)
+    }
+
+    /// Get all modules as `ModuleWithSections` wrappers.
+    ///
+    /// Each returned wrapper has an empty sections map; the caller can
+    /// populate sections from the dbgeng API separately.
+    pub fn modules_with_sections(&self) -> Vec<ModuleWithSections> {
+        self.modules
+            .iter()
+            .map(|m| ModuleWithSections::from_info(m.clone()))
+            .collect()
     }
 
     /// Get the trace path for a breakpoint location within this process.
@@ -3530,5 +3625,96 @@ mod tests {
         assert_eq!(mapper.map_register_name("DS"), "ds");
         assert_eq!(mapper.map_register_name("FS"), "fs");
         assert_eq!(mapper.map_register_name("GS"), "gs");
+    }
+
+    #[test]
+    fn test_breakpoint_location_info() {
+        let loc = BreakpointLocationInfo::new(0x401000, true);
+        assert_eq!(loc.address, 0x401000);
+        assert!(loc.enabled);
+        assert!(loc.data_width.is_none());
+        assert_eq!(loc.access_type_label(), "x");
+    }
+
+    #[test]
+    fn test_breakpoint_location_info_data() {
+        let loc = BreakpointLocationInfo::new(0x7ffde000, true).with_data(8, 1);
+        assert_eq!(loc.data_width, Some(8));
+        assert_eq!(loc.data_access_type, Some(1));
+        assert_eq!(loc.access_type_label(), "W");
+        let values = loc.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Address" && v == "0x7ffde000"));
+        assert!(values.iter().any(|(k, v)| k == "Width" && v == "8"));
+        assert!(values.iter().any(|(k, v)| k == "AccessType" && v == "W"));
+    }
+
+    #[test]
+    fn test_breakpoint_location_info_access_types() {
+        let loc_w = BreakpointLocationInfo::new(0x1000, true).with_data(4, 1);
+        assert_eq!(loc_w.access_type_label(), "W");
+        let loc_r = BreakpointLocationInfo::new(0x1000, true).with_data(4, 2);
+        assert_eq!(loc_r.access_type_label(), "R");
+        let loc_x = BreakpointLocationInfo::new(0x1000, true).with_data(4, 4);
+        assert_eq!(loc_x.access_type_label(), "X");
+    }
+
+    #[test]
+    fn test_process_get_module_with_sections() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "kernel32.dll".to_string(),
+            base: 0x7ff800000000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let mod_ws = p.get_module_with_sections("kernel32.dll");
+        assert!(mod_ws.is_some());
+        assert_eq!(mod_ws.unwrap().info.name, "kernel32.dll");
+        assert!(p.get_module_with_sections("ntdll.dll").is_none());
+    }
+
+    #[test]
+    fn test_process_remove_module_with_sections() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "ntdll.dll".to_string(),
+            base: 0x7ff800100000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        assert_eq!(p.module_count(), 1);
+        let removed = p.remove_module_with_sections("ntdll.dll");
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().info.name, "ntdll.dll");
+        assert_eq!(p.module_count(), 0);
+        assert!(p.remove_module_with_sections("ntdll.dll").is_none());
+    }
+
+    #[test]
+    fn test_process_modules_with_sections() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "a.dll".to_string(),
+            base: 0x100000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        p.add_module(ModuleInfo {
+            name: "b.dll".to_string(),
+            base: 0x200000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let mods = p.modules_with_sections();
+        assert_eq!(mods.len(), 2);
+        assert!(mods.iter().all(|m| m.sections.is_empty()));
     }
 }

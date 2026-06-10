@@ -319,6 +319,7 @@ impl TraceTransaction {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::agents::ExecutionState;
 
     #[test]
     fn test_build_process_objects() {

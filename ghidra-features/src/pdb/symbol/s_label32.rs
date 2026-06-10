@@ -304,7 +304,7 @@ impl AbstractMsSymbol for SLabel32 {
         match self.variant {
             LabelVariant::Label32 => super::super::symbol_kind::S_LABEL32,
             LabelVariant::Label32V2 => super::super::symbol_kind::S_LABEL32_V2,
-            LabelVariant::Label32St => 0x1116, // S_LABEL32_ST (if defined)
+            LabelVariant::Label32St => super::super::symbol_kind::S_LABEL32, // ST variant shares PDB ID with Label32
         }
     }
 

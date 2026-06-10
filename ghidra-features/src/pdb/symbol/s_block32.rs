@@ -166,7 +166,7 @@ impl AbstractMsSymbol for SBlock32 {
         match self.variant {
             BlockVariant::Block32 => super::super::symbol_kind::S_BLOCK32,
             BlockVariant::Block32V2 => super::super::symbol_kind::S_BLOCK32_V2,
-            BlockVariant::Block32St => 0x1114, // S_BLOCK32_ST (if defined)
+            BlockVariant::Block32St => super::super::symbol_kind::S_BLOCK32, // ST variant shares PDB ID with Block32
         }
     }
 

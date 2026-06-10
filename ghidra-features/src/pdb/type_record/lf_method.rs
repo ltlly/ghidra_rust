@@ -158,6 +158,23 @@ impl LfMethod {
         self.count
     }
 
+    /// Whether this has any overloads at all (count > 0).
+    pub fn has_overloads(&self) -> bool {
+        self.count > 0
+    }
+
+    /// Set the overload count.
+    ///
+    /// Useful for programmatic construction of method records.
+    pub fn set_count(&mut self, count: u16) {
+        self.count = count;
+    }
+
+    /// Set the method list record number.
+    pub fn set_method_list_record_number(&mut self, record: RecordNumber) {
+        self.method_list_record_number = record;
+    }
+
     /// Convert this overloaded method into a [`FieldListEntry::OverloadedMethod`].
     ///
     /// This is useful when constructing or manipulating field lists
@@ -535,5 +552,71 @@ mod tests {
         let m = LfMethod::parse(&data).unwrap();
         assert_eq!(m.count(), 0);
         assert!(!m.is_overloaded());
+    }
+
+    #[test]
+    fn test_method_has_overloads() {
+        let m = make_test_method(); // count=3
+        assert!(m.has_overloads());
+
+        let m2 = LfMethod::new(0, RecordNumber::NO_TYPE, "empty".to_string());
+        assert!(!m2.has_overloads());
+
+        let m3 = LfMethod::new(1, RecordNumber::type_record(0x1010), "one".to_string());
+        assert!(m3.has_overloads());
+    }
+
+    #[test]
+    fn test_method_set_count() {
+        let mut m = make_test_method();
+        assert_eq!(m.count(), 3);
+        m.set_count(5);
+        assert_eq!(m.count(), 5);
+        assert!(m.is_overloaded());
+    }
+
+    #[test]
+    fn test_method_set_method_list_record_number() {
+        let mut m = make_test_method();
+        let new_rn = RecordNumber::type_record(0x5000);
+        m.set_method_list_record_number(new_rn);
+        assert_eq!(m.method_list_record_number(), new_rn);
+    }
+
+    #[test]
+    fn test_method_display_format() {
+        let m = make_test_method();
+        let display = format!("{}", m);
+        // Should contain "overloaded[3]:foo"
+        assert!(display.contains("overloaded[3]"));
+        assert!(display.contains("foo"));
+        assert!(display.contains("0x1010"));
+    }
+
+    #[test]
+    fn test_method_parse_from_reader_single_overload() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&0x1500u32.to_le_bytes());
+        data.extend_from_slice(b"bar\0");
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfMethod::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "bar");
+        assert_eq!(m.count(), 1);
+        assert!(!m.is_overloaded());
+        assert!(m.has_overloads());
+    }
+
+    #[test]
+    fn test_method_emit_single_vs_multiple() {
+        let single = LfMethod::new(1, RecordNumber::type_record(0x1010), "f".to_string());
+        let multi = LfMethod::new(5, RecordNumber::type_record(0x1010), "f".to_string());
+
+        let emit_single = single.emit(Bind::NONE);
+        let emit_multi = multi.emit(Bind::NONE);
+
+        assert!(emit_single.contains("overloaded[1]"));
+        assert!(emit_multi.contains("overloaded[5]"));
     }
 }

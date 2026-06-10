@@ -265,9 +265,41 @@ impl LfOnemethod {
         self.attributes.property.is_virtual()
     }
 
+    /// Whether this is specifically an intro (non-pure) virtual method.
+    pub fn is_intro(&self) -> bool {
+        self.attributes.property == MemberProperty::Intro
+    }
+
+    /// Whether this is specifically an intro-pure virtual method.
+    pub fn is_intro_pure(&self) -> bool {
+        self.attributes.property == MemberProperty::IntroPure
+    }
+
+    /// Whether this is a friend declaration.
+    ///
+    /// Mirrors Java `ClassFieldMsAttributes.Property.FRIEND`.
+    pub fn is_friend(&self) -> bool {
+        self.attributes.property == MemberProperty::Friend
+    }
+
+    /// Whether this is a compiler-generated pseudo-field.
+    pub fn is_compiler_generated(&self) -> bool {
+        self.attributes.is_pseudo
+    }
+
     /// Whether the procedure type record number references a valid type.
     pub fn has_valid_procedure_type(&self) -> bool {
         !self.procedure_type_record_number.is_no_type()
+    }
+
+    /// Set the procedure type record number.
+    pub fn set_procedure_type_record_number(&mut self, record: RecordNumber) {
+        self.procedure_type_record_number = record;
+    }
+
+    /// Set the VFTable offset.
+    pub fn set_vftable_offset(&mut self, offset: i32) {
+        self.vftable_offset = offset;
     }
 
     /// Convert this single method into a [`FieldListEntry::OneMethod`].
@@ -769,5 +801,106 @@ mod tests {
         let m = LfOnemethod::parse_from_reader(&mut reader).unwrap();
         assert!(m.is_intro_virtual());
         assert_eq!(m.offset_in_vftable_if_intro_virtual(), 32);
+    }
+
+    #[test]
+    fn test_onemethod_is_intro() {
+        // 0x0013 = public + intro (bits 2-4 = 4)
+        let m = LfOnemethod::from_parsed(0x0013, 0x1011, 16, "intro".to_string());
+        assert!(m.is_intro());
+        assert!(!m.is_intro_pure());
+        assert!(m.is_intro_virtual());
+        assert!(m.is_virtual());
+    }
+
+    #[test]
+    fn test_onemethod_is_intro_pure() {
+        // 0x001B = public + intro_pure (bits 2-4 = 6)
+        let m = LfOnemethod::from_parsed(0x001B, 0x1011, 24, "pure_intro".to_string());
+        assert!(m.is_intro_pure());
+        assert!(!m.is_intro());
+        assert!(m.is_intro_virtual());
+        assert!(m.is_pure_virtual());
+        assert!(m.is_virtual());
+    }
+
+    #[test]
+    fn test_onemethod_is_friend() {
+        // 0x000F = public + friend (bits 2-4 = 3)
+        let m = LfOnemethod::from_parsed(0x000F, 0x1011, -1, "friend_fn".to_string());
+        assert!(m.is_friend());
+        assert!(!m.is_virtual());
+        assert!(!m.is_intro_virtual());
+    }
+
+    #[test]
+    fn test_onemethod_is_compiler_generated() {
+        // 0x0023 = public + pseudo (bit 5)
+        let m = LfOnemethod::from_parsed(0x0023, 0x1011, -1, "__gen".to_string());
+        assert!(m.is_compiler_generated());
+    }
+
+    #[test]
+    fn test_onemethod_set_procedure_type_record_number() {
+        let mut m = make_test_onemethod();
+        assert_eq!(m.procedure_type_record_number(), RecordNumber::type_record(0x1011));
+        m.set_procedure_type_record_number(RecordNumber::type_record(0x9999));
+        assert_eq!(m.procedure_type_record_number(), RecordNumber::type_record(0x9999));
+    }
+
+    #[test]
+    fn test_onemethod_set_vftable_offset() {
+        let mut m = make_test_onemethod();
+        assert_eq!(m.vftable_offset, -1);
+        m.set_vftable_offset(42);
+        assert_eq!(m.vftable_offset, 42);
+        assert_eq!(m.offset_in_vftable(), 42);
+    }
+
+    #[test]
+    fn test_onemethod_emit_intro_vs_nonintro() {
+        let intro = LfOnemethod::from_parsed(0x0013, 0x2000, 8, "intro".to_string());
+        let non_intro = LfOnemethod::from_parsed(0x0007, 0x2000, -1, "virtual".to_string());
+
+        let emit_intro = intro.emit(Bind::NONE);
+        let emit_non_intro = non_intro.emit(Bind::NONE);
+
+        assert!(emit_intro.contains(",8"));
+        assert!(!emit_non_intro.contains(",-1"));
+    }
+
+    #[test]
+    fn test_onemethod_display_contains_attributes() {
+        let m = LfOnemethod::from_parsed(0x0001, 0x1011, -1, "priv".to_string());
+        let display = format!("{}", m);
+        assert!(display.contains("private"));
+    }
+
+    #[test]
+    fn test_onemethod_virtual_properties_exhaustive() {
+        // Test each virtual property independently
+        let virtual_m = LfOnemethod::from_parsed(0x0007, 0x1011, -1, "v".to_string());
+        assert!(virtual_m.is_virtual());
+        assert!(!virtual_m.is_intro());
+        assert!(!virtual_m.is_intro_pure());
+        assert!(!virtual_m.is_pure_virtual());
+
+        let intro_m = LfOnemethod::from_parsed(0x0013, 0x1011, 8, "i".to_string());
+        assert!(intro_m.is_virtual());
+        assert!(intro_m.is_intro());
+        assert!(!intro_m.is_intro_pure());
+        assert!(!intro_m.is_pure_virtual());
+
+        let pure_m = LfOnemethod::from_parsed(0x0017, 0x1011, -1, "p".to_string());
+        assert!(pure_m.is_virtual());
+        assert!(!pure_m.is_intro());
+        assert!(!pure_m.is_intro_pure());
+        assert!(pure_m.is_pure_virtual());
+
+        let intropure_m = LfOnemethod::from_parsed(0x001B, 0x1011, 16, "ip".to_string());
+        assert!(intropure_m.is_virtual());
+        assert!(!intropure_m.is_intro());
+        assert!(intropure_m.is_intro_pure());
+        assert!(intropure_m.is_pure_virtual());
     }
 }

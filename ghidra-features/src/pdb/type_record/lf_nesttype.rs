@@ -133,6 +133,23 @@ impl LfNesttype {
         !self.nested_type_record_number.is_no_type()
     }
 
+    /// Set the nested type record number.
+    ///
+    /// Useful for programmatic construction or patching of nested type records.
+    pub fn set_nested_type_record_number(&mut self, record: RecordNumber) {
+        self.nested_type_record_number = record;
+    }
+
+    /// Set the name of this nested type.
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    /// Whether this nested type has a non-empty name.
+    pub fn has_name(&self) -> bool {
+        !self.name.is_empty()
+    }
+
     /// Convert this nested type into a [`FieldListEntry::NestedType`].
     ///
     /// This is useful when constructing or manipulating field lists
@@ -464,5 +481,72 @@ mod tests {
         let nt = LfNesttype::parse_from_reader(&mut reader).unwrap();
         assert_eq!(nt.get_name(), "MyNamespace::MyClass");
         assert!(reader.position() > 0);
+    }
+
+    #[test]
+    fn test_nesttype_set_nested_type_record_number() {
+        let mut nt = make_test_nesttype();
+        assert_eq!(nt.nested_type_record_number, RecordNumber::type_record(0x1001));
+        nt.set_nested_type_record_number(RecordNumber::type_record(0x9000));
+        assert_eq!(nt.nested_type_record_number, RecordNumber::type_record(0x9000));
+        assert!(nt.has_valid_nested_type());
+    }
+
+    #[test]
+    fn test_nesttype_set_name() {
+        let mut nt = make_test_nesttype();
+        assert_eq!(nt.name(), "InnerClass");
+        nt.set_name("NewName".to_string());
+        assert_eq!(nt.name(), "NewName");
+        assert!(nt.has_name());
+    }
+
+    #[test]
+    fn test_nesttype_has_name() {
+        let nt = make_test_nesttype();
+        assert!(nt.has_name());
+
+        let empty = LfNesttype::default();
+        assert!(!empty.has_name());
+    }
+
+    #[test]
+    fn test_nesttype_display_format_with_nested_namespace() {
+        let nt = LfNesttype::from_parsed(0x3000, "std::vector<int>".to_string());
+        let display = format!("{}", nt);
+        assert!(display.contains("std::vector<int>"));
+        assert!(display.contains("0x3000"));
+    }
+
+    #[test]
+    fn test_nesttype_set_to_no_type() {
+        let mut nt = make_test_nesttype();
+        assert!(nt.has_valid_nested_type());
+        nt.set_nested_type_record_number(RecordNumber::NO_TYPE);
+        assert!(!nt.has_valid_nested_type());
+    }
+
+    #[test]
+    fn test_nesttype_parse_special_characters() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes());
+        data.extend_from_slice(&0x6000u32.to_le_bytes());
+        data.extend_from_slice(b"~MyClass<T>&\0");
+
+        let nt = LfNesttype::parse(&data).unwrap();
+        assert_eq!(nt.name(), "~MyClass<T>&");
+        assert_eq!(nt.nested_type_record_number, RecordNumber::type_record(0x6000));
+    }
+
+    #[test]
+    fn test_nesttype_parse_from_reader_special_characters() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes());
+        data.extend_from_slice(&0x6000u32.to_le_bytes());
+        data.extend_from_slice(b"operator==\0");
+
+        let mut reader = PdbByteReader::new(&data);
+        let nt = LfNesttype::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(nt.name(), "operator==");
     }
 }

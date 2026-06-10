@@ -1554,6 +1554,472 @@ impl TraceSyncTracker {
     }
 }
 
+/// Result of synchronizing a thread's state to the trace.
+///
+/// Describes what trace writes were performed for a single thread
+/// during a sync cycle. Ported from the thread-level operations
+/// in Python `put_threads()` and `put_frames()` in `commands.py`.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnThreadSyncResult {
+    /// Whether the thread object was written.
+    pub thread_written: bool,
+    /// Whether the stack container was written.
+    pub stack_written: bool,
+    /// Number of frames written.
+    pub frames_written: usize,
+    /// Number of register values written.
+    pub registers_written: usize,
+    /// Whether locals were written.
+    pub locals_written: bool,
+    /// Frame levels that were written.
+    pub frame_levels: Vec<u32>,
+}
+
+impl DrgnThreadSyncResult {
+    /// Whether any writes were performed.
+    pub fn has_writes(&self) -> bool {
+        self.thread_written
+            || self.stack_written
+            || self.frames_written > 0
+            || self.registers_written > 0
+            || self.locals_written
+    }
+
+    /// Summary string for logging.
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if self.thread_written { parts.push("thread"); }
+        if self.stack_written { parts.push("stack"); }
+        if self.frames_written > 0 {
+            parts.push("frames");
+        }
+        if self.registers_written > 0 {
+            parts.push("registers");
+        }
+        if self.locals_written { parts.push("locals"); }
+        format!("Thread sync: {}", parts.join(", "))
+    }
+}
+
+/// Snapshot of a thread's state at a point in time.
+///
+/// Captures the full thread state including all frames and registers
+/// for deferred trace writing. This is useful when the trace write
+/// must happen in a single transaction.
+///
+/// Ported from the snapshot pattern in Python `hooks.py` where
+/// `ProcessState.record()` captures state then writes it.
+#[derive(Debug, Clone)]
+pub struct DrgnThreadSnapshot {
+    /// Thread metadata.
+    pub thread: DrgnThread,
+    /// Frames captured at snapshot time, sorted by level.
+    pub frames: Vec<DrgnStackFrame>,
+    /// Register batches per frame level.
+    pub register_batches: Vec<FrameRegisterBatch>,
+    /// Locals per frame level.
+    pub locals: Vec<DrgnFrameLocals>,
+    /// Timestamp of the snapshot (unix millis).
+    pub timestamp: Option<u64>,
+}
+
+impl DrgnThreadSnapshot {
+    /// Create a snapshot from a thread reference.
+    ///
+    /// Copies all frames, registers, and locals from the thread.
+    pub fn capture(thread: &DrgnThread) -> Self {
+        let frames = thread.sorted_frames().into_iter().cloned().collect();
+        let register_batches: Vec<FrameRegisterBatch> = thread
+            .frames
+            .values()
+            .map(|f| {
+                let mut batch = FrameRegisterBatch::new(f.level);
+                for reg in &f.registers {
+                    batch.push(reg.clone());
+                }
+                batch
+            })
+            .collect();
+        Self {
+            thread: thread.clone(),
+            frames,
+            register_batches,
+            locals: Vec::new(),
+            timestamp: None,
+        }
+    }
+
+    /// Set the timestamp.
+    pub fn with_timestamp(mut self, ts: u64) -> Self {
+        self.timestamp = Some(ts);
+        self
+    }
+
+    /// Add locals for a specific frame level.
+    pub fn with_locals(mut self, locals: DrgnFrameLocals) -> Self {
+        self.locals.push(locals);
+        self
+    }
+
+    /// Get the number of frames in this snapshot.
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Get the number of register values across all frames.
+    pub fn total_register_count(&self) -> usize {
+        self.register_batches.iter().map(|b| b.len()).sum()
+    }
+
+    /// Build all trace object writes needed to sync this snapshot.
+    ///
+    /// Returns (path, values) pairs for trace object creation/update.
+    pub fn build_trace_writes(&self) -> Vec<(String, Vec<(String, String)>)> {
+        let mut writes = Vec::new();
+
+        // Thread object
+        let thread_path = self.thread.trace_path();
+        writes.push((thread_path, self.thread.build_trace_values_extended()));
+
+        // Stack container
+        let stack_path = self.thread.stack_path();
+        writes.push((stack_path, self.thread.build_stack_container_values()));
+
+        // Frames
+        for frame in &self.frames {
+            let frame_path = frame.trace_path(self.thread.process_num, self.thread.num);
+            let mut values = frame.build_trace_values();
+            values.extend(frame.build_attribute_values());
+            if let Some(src_values) = frame.build_source_values() {
+                values.extend(src_values);
+            }
+            writes.push((frame_path, values));
+
+            // Registers container for this frame
+            let regs_path = frame.registers_trace_path(self.thread.process_num, self.thread.num);
+            writes.push((regs_path, vec![]));
+
+            // Locals container for this frame
+            let locals_path = frame.locals_trace_path(self.thread.process_num, self.thread.num);
+            writes.push((locals_path, vec![]));
+
+            // Source info for this frame
+            if frame.source.is_some() {
+                let src_path = frame.source_trace_path(self.thread.process_num, self.thread.num);
+                if let Some(src_vals) = frame.build_source_values() {
+                    writes.push((src_path, src_vals));
+                }
+            }
+        }
+
+        writes
+    }
+
+    /// Build register write pairs for all frames.
+    ///
+    /// Returns (path, bytes) pairs for register value writes.
+    pub fn build_register_writes(&self) -> Vec<(String, Vec<u8>)> {
+        let mut writes = Vec::new();
+        for batch in &self.register_batches {
+            writes.extend(batch.build_register_pairs(self.thread.process_num, self.thread.num));
+        }
+        writes
+    }
+
+    /// Build retain keys for frame children.
+    pub fn build_frame_retain_keys(&self) -> Vec<String> {
+        self.frames.iter().map(|f| format!("[{}]", f.level)).collect()
+    }
+}
+
+/// Orchestrates thread synchronization for a drgn process.
+///
+/// Manages the lifecycle of thread sync operations, coordinating
+/// between the process-level sync state and individual thread writes.
+/// Ported from the thread management logic in Python `hooks.py`
+/// `on_stop()`, `on_thread_selected()`, etc.
+#[derive(Debug, Default)]
+pub struct DrgnThreadSyncOrchestrator {
+    /// Pending thread events to process.
+    pub pending_events: Vec<DrgnThreadEvent>,
+    /// Snapshots taken during this sync cycle.
+    pub snapshots: Vec<DrgnThreadSnapshot>,
+    /// Retain keys collected during sync.
+    pub retain_keys: Vec<String>,
+}
+
+impl DrgnThreadSyncOrchestrator {
+    /// Create a new orchestrator.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queue a thread event for processing.
+    pub fn push_event(&mut self, event: DrgnThreadEvent) {
+        self.pending_events.push(event);
+    }
+
+    /// Take all pending events, leaving the queue empty.
+    pub fn take_events(&mut self) -> Vec<DrgnThreadEvent> {
+        std::mem::take(&mut self.pending_events)
+    }
+
+    /// Snapshot a thread and store it.
+    pub fn snapshot_thread(&mut self, thread: &DrgnThread) -> usize {
+        let snap = DrgnThreadSnapshot::capture(thread);
+        self.snapshots.push(snap);
+        self.snapshots.len() - 1
+    }
+
+    /// Get a snapshot by index.
+    pub fn get_snapshot(&self, idx: usize) -> Option<&DrgnThreadSnapshot> {
+        self.snapshots.get(idx)
+    }
+
+    /// Clear all snapshots (start of new sync cycle).
+    pub fn clear_snapshots(&mut self) {
+        self.snapshots.clear();
+        self.retain_keys.clear();
+    }
+
+    /// Record a retain key.
+    pub fn add_retain_key(&mut self, key: String) {
+        self.retain_keys.push(key);
+    }
+
+    /// Build the complete retain keys for thread container.
+    pub fn build_thread_retain_keys(&self, threads: &DrgnThreadCollection) -> Vec<String> {
+        threads.numbers().iter().map(|n| format!("[{}]", n)).collect()
+    }
+
+    /// Process all pending events and return sync results.
+    pub fn process_events(
+        &mut self,
+        threads: &mut DrgnThreadCollection,
+    ) -> Vec<DrgnThreadSyncResult> {
+        let events = self.take_events();
+        let mut results = Vec::new();
+
+        for event in &events {
+            match event {
+                DrgnThreadEvent::Created { thread_num, .. } => {
+                    if threads.get(*thread_num).is_some() {
+                        let mut result = DrgnThreadSyncResult::default();
+                        result.thread_written = true;
+                        result.stack_written = true;
+                        results.push(result);
+                    }
+                }
+                DrgnThreadEvent::Exited { thread_num, .. } => {
+                    if let Some(mut thread) = threads.remove(*thread_num) {
+                        thread.mark_exited();
+                        let mut result = DrgnThreadSyncResult::default();
+                        result.thread_written = true;
+                        results.push(result);
+                    }
+                }
+                DrgnThreadEvent::StateChanged { thread_num, new_state, .. } => {
+                    if let Some(thread) = threads.get_mut(*thread_num) {
+                        thread.state = *new_state;
+                        let mut result = DrgnThreadSyncResult::default();
+                        result.thread_written = true;
+                        results.push(result);
+                    }
+                }
+                DrgnThreadEvent::Selected { thread_num, .. } => {
+                    if let Some(thread) = threads.get(*thread_num) {
+                        let snap = DrgnThreadSnapshot::capture(thread);
+                        let mut result = DrgnThreadSyncResult::default();
+                        result.thread_written = true;
+                        result.frames_written = snap.frame_count();
+                        result.registers_written = snap.total_register_count();
+                        result.frame_levels = snap.frames.iter().map(|f| f.level).collect();
+                        self.snapshots.push(snap);
+                        results.push(result);
+                    }
+                }
+            }
+        }
+
+        results
+    }
+}
+
+/// Builder for constructing a `DrgnThread` from drgn API state.
+///
+/// Provides a fluent API for building thread objects from the
+/// various state pieces returned by the drgn Python API.
+/// Ported from the thread construction in Python `put_threads()`.
+#[derive(Debug)]
+pub struct DrgnThreadBuilder {
+    num: u32,
+    tid: Option<i64>,
+    name: Option<String>,
+    state: ExecutionState,
+    process_num: u32,
+    cpu: Option<u32>,
+    frames: Vec<DrgnStackFrame>,
+}
+
+impl DrgnThreadBuilder {
+    /// Create a new builder for a thread number.
+    pub fn new(num: u32) -> Self {
+        Self {
+            num,
+            tid: None,
+            name: None,
+            state: ExecutionState::NotStarted,
+            process_num: 0,
+            cpu: None,
+            frames: Vec::new(),
+        }
+    }
+
+    /// Set the OS thread ID.
+    pub fn tid(mut self, tid: i64) -> Self {
+        self.tid = Some(tid);
+        self
+    }
+
+    /// Set the thread name.
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Set the execution state.
+    pub fn state(mut self, state: ExecutionState) -> Self {
+        self.state = state;
+        self
+    }
+
+    /// Set the process number.
+    pub fn process_num(mut self, num: u32) -> Self {
+        self.process_num = num;
+        self
+    }
+
+    /// Set as a kernel CPU thread.
+    pub fn cpu(mut self, cpu: u32) -> Self {
+        self.cpu = Some(cpu);
+        self.name = Some(format!("CPU {}", cpu));
+        self
+    }
+
+    /// Add a stack frame.
+    pub fn frame(mut self, frame: DrgnStackFrame) -> Self {
+        self.frames.push(frame);
+        self
+    }
+
+    /// Build the `DrgnThread`.
+    pub fn build(self) -> DrgnThread {
+        let mut thread = DrgnThread {
+            num: self.num,
+            tid: self.tid,
+            name: self.name,
+            state: self.state,
+            frames: BTreeMap::new(),
+            synced: false,
+            process_num: self.process_num,
+            cpu: self.cpu,
+        };
+        for frame in self.frames {
+            thread.frames.insert(frame.level, frame);
+        }
+        thread
+    }
+}
+
+/// Summary of thread state for bulk operations.
+///
+/// Provides a lightweight view of thread state without cloning
+/// full thread objects. Useful for reporting and decision-making.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DrgnThreadSummary {
+    /// Thread number.
+    pub num: u32,
+    /// Thread name.
+    pub name: Option<String>,
+    /// Execution state.
+    pub state: ExecutionState,
+    /// Number of frames.
+    pub frame_count: usize,
+    /// Whether this is a kernel CPU thread.
+    pub is_cpu: bool,
+    /// Program counter (if frames exist).
+    pub pc: Option<u64>,
+}
+
+impl DrgnThreadSummary {
+    /// Create from a thread reference.
+    pub fn from_thread(thread: &DrgnThread) -> Self {
+        Self {
+            num: thread.num,
+            name: thread.name.clone(),
+            state: thread.state,
+            frame_count: thread.frame_count(),
+            is_cpu: thread.cpu.is_some(),
+            pc: thread.pc(),
+        }
+    }
+
+    /// Build a display string.
+    pub fn display(&self) -> String {
+        let state_str = self.state.as_trace_str();
+        match &self.name {
+            Some(name) => format!("[{}] {} {} ({})", self.num, name, state_str, self.frame_count),
+            None => format!("[{}] {} ({})", self.num, state_str, self.frame_count),
+        }
+    }
+}
+
+/// Bulk thread state query result.
+///
+/// Aggregates thread summaries for a process, used by the
+/// `refresh_threads` method handler.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnThreadBulkState {
+    /// Thread summaries sorted by number.
+    pub threads: Vec<DrgnThreadSummary>,
+    /// Total number of running threads.
+    pub running_count: usize,
+    /// Total number of stopped threads.
+    pub stopped_count: usize,
+    /// Total number of exited threads.
+    pub exited_count: usize,
+}
+
+impl DrgnThreadBulkState {
+    /// Build from a thread collection.
+    pub fn from_collection(collection: &DrgnThreadCollection) -> Self {
+        let threads: Vec<DrgnThreadSummary> = collection
+            .iter()
+            .map(DrgnThreadSummary::from_thread)
+            .collect();
+        let running_count = threads.iter().filter(|t| t.state == ExecutionState::Running).count();
+        let stopped_count = threads.iter().filter(|t| t.state == ExecutionState::Stopped).count();
+        let exited_count = threads.iter().filter(|t| t.state == ExecutionState::Exited).count();
+        Self {
+            threads,
+            running_count,
+            stopped_count,
+            exited_count,
+        }
+    }
+
+    /// Get a summary string.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} threads: {} running, {} stopped, {} exited",
+            self.threads.len(),
+            self.running_count,
+            self.stopped_count,
+            self.exited_count,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2435,5 +2901,264 @@ mod tests {
 
         sel.clear();
         assert!(sel.frame_path().is_none());
+    }
+
+    #[test]
+    fn test_thread_sync_result() {
+        let mut result = DrgnThreadSyncResult::default();
+        assert!(!result.has_writes());
+
+        result.thread_written = true;
+        assert!(result.has_writes());
+        assert!(result.summary().contains("thread"));
+
+        result.frames_written = 3;
+        result.registers_written = 10;
+        assert!(result.summary().contains("frames"));
+        assert!(result.summary().contains("registers"));
+    }
+
+    #[test]
+    fn test_thread_snapshot_capture() {
+        let mut t = DrgnThread::cpu_thread(0, 1)
+            .with_tid(42)
+            .with_state(ExecutionState::Stopped);
+        t.add_frame(
+            DrgnStackFrame::new(0, 0xffffffff81234567)
+                .with_sp(0xffff888000000000)
+                .with_function("do_sys_open"),
+        );
+        t.add_frame(
+            DrgnStackFrame::new(1, 0xffffffff81234000)
+                .with_sp(0xffff888000001000)
+                .with_function("sys_open"),
+        );
+
+        let snap = DrgnThreadSnapshot::capture(&t);
+        assert_eq!(snap.frame_count(), 2);
+        assert_eq!(snap.thread.num, 0);
+        assert_eq!(snap.thread.cpu, Some(1));
+        assert_eq!(snap.frames[0].level, 0);
+        assert_eq!(snap.frames[1].level, 1);
+    }
+
+    #[test]
+    fn test_thread_snapshot_build_trace_writes() {
+        let mut t = DrgnThread::cpu_thread(0, 0).with_state(ExecutionState::Stopped);
+        t.add_frame(DrgnStackFrame::new(0, 0x401000).with_function("main"));
+
+        let snap = DrgnThreadSnapshot::capture(&t);
+        let writes = snap.build_trace_writes();
+        // Should have: thread, stack container, frame, registers container, locals container
+        assert!(writes.len() >= 4);
+        assert!(writes.iter().any(|(p, _)| p.contains("Threads[0]")));
+        assert!(writes.iter().any(|(p, _)| p.contains("Stack[0]")));
+    }
+
+    #[test]
+    fn test_thread_snapshot_register_writes() {
+        let mut t = DrgnThread::new(0);
+        let mut f = DrgnStackFrame::new(0, 0x401000);
+        f.set_register(RegisterValue::from_u64("rax", 0x1234));
+        f.set_register(RegisterValue::from_u64("rbx", 0x5678));
+        t.add_frame(f);
+
+        let snap = DrgnThreadSnapshot::capture(&t);
+        let reg_writes = snap.build_register_writes();
+        assert_eq!(reg_writes.len(), 2);
+        assert_eq!(snap.total_register_count(), 2);
+    }
+
+    #[test]
+    fn test_thread_snapshot_retain_keys() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        t.add_frame(DrgnStackFrame::new(2, 0x3000));
+
+        let snap = DrgnThreadSnapshot::capture(&t);
+        let keys = snap.build_frame_retain_keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"[0]".to_string()));
+        assert!(keys.contains(&"[2]".to_string()));
+    }
+
+    #[test]
+    fn test_thread_builder_fluent() {
+        let t = DrgnThreadBuilder::new(0)
+            .tid(1234)
+            .name("main")
+            .state(ExecutionState::Running)
+            .process_num(0)
+            .frame(DrgnStackFrame::new(0, 0x401000))
+            .frame(DrgnStackFrame::new(1, 0x402000))
+            .build();
+
+        assert_eq!(t.num, 0);
+        assert_eq!(t.tid, Some(1234));
+        assert_eq!(t.name.as_deref(), Some("main"));
+        assert_eq!(t.state, ExecutionState::Running);
+        assert_eq!(t.process_num, 0);
+        assert_eq!(t.frame_count(), 2);
+    }
+
+    #[test]
+    fn test_thread_builder_cpu() {
+        let t = DrgnThreadBuilder::new(3)
+            .cpu(3)
+            .state(ExecutionState::Stopped)
+            .build();
+
+        assert_eq!(t.num, 3);
+        assert_eq!(t.cpu, Some(3));
+        assert_eq!(t.name.as_deref(), Some("CPU 3"));
+    }
+
+    #[test]
+    fn test_thread_sync_orchestrator() {
+        let mut orch = DrgnThreadSyncOrchestrator::new();
+        assert!(orch.pending_events.is_empty());
+        assert!(orch.snapshots.is_empty());
+
+        orch.push_event(DrgnThreadEvent::Created {
+            process_num: 0,
+            thread_num: 1,
+        });
+        assert_eq!(orch.pending_events.len(), 1);
+
+        let events = orch.take_events();
+        assert_eq!(events.len(), 1);
+        assert!(orch.pending_events.is_empty());
+    }
+
+    #[test]
+    fn test_thread_sync_orchestrator_process_events() {
+        let mut orch = DrgnThreadSyncOrchestrator::new();
+        let mut coll = DrgnThreadCollection::new(0);
+        coll.insert(DrgnThread::new(0).with_state(ExecutionState::Stopped));
+        coll.insert(DrgnThread::new(1).with_state(ExecutionState::Stopped));
+
+        orch.push_event(DrgnThreadEvent::StateChanged {
+            process_num: 0,
+            thread_num: 0,
+            new_state: ExecutionState::Running,
+        });
+        orch.push_event(DrgnThreadEvent::Selected {
+            process_num: 0,
+            thread_num: 1,
+        });
+
+        let results = orch.process_events(&mut coll);
+        assert_eq!(results.len(), 2);
+        assert!(results[0].thread_written);
+        assert_eq!(coll.get(0).unwrap().state, ExecutionState::Running);
+        // Selected event should have created a snapshot
+        assert_eq!(orch.snapshots.len(), 1);
+    }
+
+    #[test]
+    fn test_thread_sync_orchestrator_exit() {
+        let mut orch = DrgnThreadSyncOrchestrator::new();
+        let mut coll = DrgnThreadCollection::new(0);
+        coll.insert(DrgnThread::new(0).with_state(ExecutionState::Running));
+
+        orch.push_event(DrgnThreadEvent::Exited {
+            process_num: 0,
+            thread_num: 0,
+        });
+
+        let results = orch.process_events(&mut coll);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].thread_written);
+        // Thread should have been removed from collection
+        assert!(coll.get(0).is_none());
+    }
+
+    #[test]
+    fn test_thread_summary() {
+        let t = DrgnThread::cpu_thread(0, 1)
+            .with_tid(42)
+            .with_state(ExecutionState::Stopped);
+        let summary = DrgnThreadSummary::from_thread(&t);
+        assert_eq!(summary.num, 0);
+        assert!(summary.is_cpu);
+        assert_eq!(summary.state, ExecutionState::Stopped);
+        assert_eq!(summary.frame_count, 0);
+        assert!(summary.pc.is_none());
+        assert!(summary.display().contains("CPU 1"));
+    }
+
+    #[test]
+    fn test_thread_summary_with_frames() {
+        let mut t = DrgnThread::new(0).with_state(ExecutionState::Stopped);
+        t.add_frame(DrgnStackFrame::new(0, 0x401000));
+        let summary = DrgnThreadSummary::from_thread(&t);
+        assert_eq!(summary.frame_count, 1);
+        assert_eq!(summary.pc, Some(0x401000));
+    }
+
+    #[test]
+    fn test_thread_bulk_state() {
+        let mut coll = DrgnThreadCollection::new(0);
+        coll.insert(DrgnThread::new(0).with_state(ExecutionState::Running));
+        coll.insert(DrgnThread::new(1).with_state(ExecutionState::Stopped));
+        coll.insert(DrgnThread::new(2).with_state(ExecutionState::Exited));
+
+        let bulk = DrgnThreadBulkState::from_collection(&coll);
+        assert_eq!(bulk.threads.len(), 3);
+        assert_eq!(bulk.running_count, 1);
+        assert_eq!(bulk.stopped_count, 1);
+        assert_eq!(bulk.exited_count, 1);
+        assert!(bulk.summary().contains("3 threads"));
+    }
+
+    #[test]
+    fn test_thread_snapshot_with_locals() {
+        let t = DrgnThread::new(0).with_state(ExecutionState::Stopped);
+        let mut locals = DrgnFrameLocals::new(0, 0, 0);
+        locals.add_local(DrgnLocalVariableValue::new("fd", "int", "3"));
+
+        let snap = DrgnThreadSnapshot::capture(&t).with_locals(locals);
+        assert_eq!(snap.locals.len(), 1);
+        assert_eq!(snap.locals[0].local_count(), 1);
+    }
+
+    #[test]
+    fn test_thread_snapshot_timestamp() {
+        let t = DrgnThread::new(0);
+        let snap = DrgnThreadSnapshot::capture(&t).with_timestamp(1234567890);
+        assert_eq!(snap.timestamp, Some(1234567890));
+    }
+
+    #[test]
+    fn test_thread_builder_default_state() {
+        let t = DrgnThreadBuilder::new(5).build();
+        assert_eq!(t.num, 5);
+        assert_eq!(t.state, ExecutionState::NotStarted);
+        assert!(t.frames.is_empty());
+    }
+
+    #[test]
+    fn test_orchestrator_clear_snapshots() {
+        let mut orch = DrgnThreadSyncOrchestrator::new();
+        let t = DrgnThread::new(0);
+        orch.snapshot_thread(&t);
+        orch.snapshot_thread(&t);
+        assert_eq!(orch.snapshots.len(), 2);
+
+        orch.clear_snapshots();
+        assert!(orch.snapshots.is_empty());
+        assert!(orch.retain_keys.is_empty());
+    }
+
+    #[test]
+    fn test_orchestrator_retain_keys() {
+        let mut orch = DrgnThreadSyncOrchestrator::new();
+        orch.add_retain_key("[0]".to_string());
+        orch.add_retain_key("[1]".to_string());
+        assert_eq!(orch.retain_keys.len(), 2);
+
+        let coll = DrgnThreadCollection::new(0);
+        let keys = orch.build_thread_retain_keys(&coll);
+        assert!(keys.is_empty()); // empty collection
     }
 }

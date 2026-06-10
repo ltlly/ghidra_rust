@@ -2112,7 +2112,7 @@ pub fn quantize_to_pages(start: u64, end: u64) -> (u64, u64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agents::gdb::gdb_thread::GdbThread;
+    use crate::agents::gdb::gdb_thread::{GdbStackFrame, GdbThread};
 
     #[test]
     fn test_inferior_new() {

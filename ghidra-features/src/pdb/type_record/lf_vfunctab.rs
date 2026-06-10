@@ -126,6 +126,11 @@ impl LfVfunctab {
         !self.vftable_type_record_number.is_no_type()
     }
 
+    /// Set the vftable type record number.
+    pub fn set_vftable_type_record_number(&mut self, record: RecordNumber) {
+        self.vftable_type_record_number = record;
+    }
+
     /// Convert this vftable pointer into a [`FieldListEntry::VfTablePointer`].
     ///
     /// This is useful when constructing or manipulating field lists
@@ -277,6 +282,16 @@ impl LfVfuncoff {
         !self.vftable_type_record_number.is_no_type()
     }
 
+    /// Set the vftable type record number.
+    pub fn set_vftable_type_record_number(&mut self, record: RecordNumber) {
+        self.vftable_type_record_number = record;
+    }
+
+    /// Set the byte offset in the vftable.
+    pub fn set_offset_in_vftable(&mut self, offset: u32) {
+        self.offset_in_vftable = offset;
+    }
+
     /// Convert this vfuncoff into a [`FieldListEntry::VfFuncOffset`].
     pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
         super::abstract_field_list_ms_type::FieldListEntry::VfFuncOffset {
@@ -319,6 +334,12 @@ impl AbstractMsType for LfVfuncoff {
 }
 
 impl MsTypeField for LfVfuncoff {}
+
+impl Default for LfVfuncoff {
+    fn default() -> Self {
+        Self::new(RecordNumber::NO_TYPE, 0)
+    }
+}
 
 impl fmt::Display for LfVfuncoff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -742,5 +763,85 @@ mod tests {
             assert!(emitted.contains(&format!("off={}", offset)));
             assert!(emitted.contains("0x3001"));
         }
+    }
+
+    #[test]
+    fn test_vfunctab_set_vftable_type_record_number() {
+        let mut vt = make_test_vfunctab();
+        assert_eq!(vt.vftable_type_record_number, RecordNumber::type_record(0x3001));
+        vt.set_vftable_type_record_number(RecordNumber::type_record(0x9000));
+        assert_eq!(vt.vftable_type_record_number, RecordNumber::type_record(0x9000));
+        assert!(vt.has_valid_vftable_type());
+    }
+
+    #[test]
+    fn test_vfuncoff_set_vftable_type_record_number() {
+        let mut vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        vo.set_vftable_type_record_number(RecordNumber::type_record(0x9000));
+        assert_eq!(vo.vftable_type_record_number, RecordNumber::type_record(0x9000));
+    }
+
+    #[test]
+    fn test_vfuncoff_set_offset_in_vftable() {
+        let mut vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert_eq!(vo.offset(), 16);
+        vo.set_offset_in_vftable(32);
+        assert_eq!(vo.offset(), 32);
+    }
+
+    #[test]
+    fn test_vfuncoff_default_impl() {
+        let vo = LfVfuncoff::default();
+        assert!(vo.record_number().is_no_type());
+        assert!(!vo.has_valid_vftable_type());
+        assert_eq!(vo.offset(), 0);
+        assert_eq!(vo.name(), "");
+    }
+
+    #[test]
+    fn test_vfunctab_set_to_no_type() {
+        let mut vt = make_test_vfunctab();
+        assert!(vt.has_valid_vftable_type());
+        vt.set_vftable_type_record_number(RecordNumber::NO_TYPE);
+        assert!(!vt.has_valid_vftable_type());
+    }
+
+    #[test]
+    fn test_vfuncoff_display_format() {
+        let vo = LfVfuncoff::from_parsed(0x4001, 42);
+        let display = format!("{}", vo);
+        assert!(display.starts_with("VFTablePtr<off=42>: "));
+        assert!(display.contains("0x4001"));
+    }
+
+    #[test]
+    fn test_vfunctab_parse_and_modify() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x3001u32.to_le_bytes()); // vftableType
+
+        let mut vt = LfVfunctab::parse(&data).unwrap();
+        assert_eq!(vt.vftable_type_record_number, RecordNumber::type_record(0x3001));
+
+        // Modify and verify
+        vt.set_vftable_type_record_number(RecordNumber::type_record(0x5000));
+        assert_eq!(vt.vftable_type_record_number, RecordNumber::type_record(0x5000));
+        assert_eq!(vt.pointer_type_record_number(), RecordNumber::type_record(0x5000));
+    }
+
+    #[test]
+    fn test_vfuncoff_parse_and_modify() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x3001u32.to_le_bytes()); // vftableType
+        data.extend_from_slice(&16u32.to_le_bytes());     // offset
+
+        let mut vo = LfVfuncoff::parse(&data).unwrap();
+        assert_eq!(vo.offset(), 16);
+
+        vo.set_offset_in_vftable(64);
+        assert_eq!(vo.offset(), 64);
+
+        let emitted = vo.emit(Bind::NONE);
+        assert!(emitted.contains("off=64"));
     }
 }

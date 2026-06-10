@@ -3874,3 +3874,902 @@ mod parsing_tests {
         assert!(parse_lldb_module_header("  ").is_none());
     }
 }
+
+// =========================================================================
+// Process Synchronization Orchestration
+// =========================================================================
+
+/// Orchestrates the synchronization of an LLDB process's state to the
+/// Ghidra trace. This corresponds to the Python agent's `put_processes`,
+/// `put_state`, `put_regions`, `put_modules`, and `put_environment` commands.
+///
+/// Ported from `commands.py` and `hooks.py` process synchronization logic.
+#[derive(Debug)]
+pub struct LldbProcessSyncOrchestrator {
+    /// The process being synchronized.
+    process: LldbInferiorProcess,
+    /// Sync state tracking.
+    sync_state: LldbProcessSyncState,
+    /// Region index for efficient address lookups.
+    region_index: LldbRegionIndex,
+    /// Signal table.
+    signal_table: LldbSignalTable,
+    /// Whether the process has been initially recorded.
+    recorded: bool,
+}
+
+impl LldbProcessSyncOrchestrator {
+    /// Create a new orchestrator for a process.
+    pub fn new(process: LldbInferiorProcess) -> Self {
+        Self {
+            process,
+            sync_state: LldbProcessSyncState::new(),
+            region_index: LldbRegionIndex::new(),
+            signal_table: LldbSignalTable::new(),
+            recorded: false,
+        }
+    }
+
+    /// Get the process.
+    pub fn process(&self) -> &LldbInferiorProcess {
+        &self.process
+    }
+
+    /// Get a mutable reference to the process.
+    pub fn process_mut(&mut self) -> &mut LldbInferiorProcess {
+        &mut self.process
+    }
+
+    /// Get the sync state.
+    pub fn sync_state(&self) -> &LldbProcessSyncState {
+        &self.sync_state
+    }
+
+    /// Get a mutable reference to the sync state.
+    pub fn sync_state_mut(&mut self) -> &mut LldbProcessSyncState {
+        &mut self.sync_state
+    }
+
+    /// Get the region index.
+    pub fn region_index(&self) -> &LldbRegionIndex {
+        &self.region_index
+    }
+
+    /// Get the signal table.
+    pub fn signal_table(&self) -> &LldbSignalTable {
+        &self.signal_table
+    }
+
+    /// Initialize the signal table with defaults.
+    pub fn init_signals(&mut self) {
+        self.signal_table.populate_defaults();
+    }
+
+    /// Perform the initial recording of this process.
+    ///
+    /// Ported from `ProcessState.record()` when `first == True`.
+    /// This puts the process, environment, regions, modules, threads,
+    /// and frames into the trace.
+    pub fn initial_record(&mut self) -> Vec<LldbSyncAction> {
+        self.recorded = true;
+        self.sync_state.mark_recorded();
+        let mut actions = Vec::new();
+        actions.push(LldbSyncAction::PutProcesses);
+        actions.push(LldbSyncAction::PutEnvironment);
+        if self.sync_state.take_threads_dirty() || self.sync_state.first {
+            actions.push(LldbSyncAction::PutThreads);
+        }
+        actions.push(LldbSyncAction::PutFrames);
+        actions.push(LldbSyncAction::PutRegisters);
+        actions.push(LldbSyncAction::PutMemoryPc);
+        actions.push(LldbSyncAction::PutMemorySp);
+        actions
+    }
+
+    /// Record a stop event.
+    ///
+    /// Ported from `ProcessState.record()` called on stop. Detects
+    /// which aspects of the process have changed and issues the
+    /// appropriate sync actions.
+    pub fn record_stop(&mut self) -> Vec<LldbSyncAction> {
+        let mut actions = Vec::new();
+        if self.sync_state.take_threads_dirty() {
+            actions.push(LldbSyncAction::PutThreads);
+        }
+        actions.push(LldbSyncAction::PutFrames);
+        actions.push(LldbSyncAction::PutRegisters);
+        if self.sync_state.take_modules_dirty() {
+            actions.push(LldbSyncAction::PutModules);
+        }
+        if self.sync_state.take_breaks_dirty() {
+            actions.push(LldbSyncAction::PutBreakpoints);
+        }
+        actions
+    }
+
+    /// Record a continued event.
+    ///
+    /// Ported from `ProcessState.record_continued()`.
+    pub fn record_continued(&mut self) -> Vec<LldbSyncAction> {
+        vec![LldbSyncAction::PutProcesses, LldbSyncAction::PutThreads]
+    }
+
+    /// Record an exited event.
+    ///
+    /// Ported from `ProcessState.record_exited()`.
+    pub fn record_exited(&mut self, exit_code: i32) -> Vec<LldbSyncAction> {
+        self.process.set_exit(exit_code);
+        vec![LldbSyncAction::PutProcessExit(exit_code)]
+    }
+
+    /// Update the region index from the current process regions.
+    pub fn update_region_index(&mut self) {
+        self.region_index = LldbRegionIndex::from_regions(&self.process.memory_regions);
+    }
+
+    /// Check if regions have changed and update if so.
+    ///
+    /// Returns true if regions changed.
+    pub fn check_regions_changed(&mut self, new_regions: &[MemoryRegion]) -> bool {
+        let changed = self.region_index.have_changed(new_regions);
+        if changed {
+            self.region_index = LldbRegionIndex::from_regions(new_regions);
+            self.sync_state.mark_modules_dirty();
+        }
+        changed
+    }
+
+    /// Compute the base address for a given address using the region index.
+    pub fn compute_base(&self, address: u64) -> u64 {
+        self.region_index.compute_base(address)
+    }
+
+    /// Mark modules as dirty (need re-sync).
+    pub fn mark_modules_dirty(&mut self) {
+        self.sync_state.mark_modules_dirty();
+    }
+
+    /// Mark threads as dirty.
+    pub fn mark_threads_dirty(&mut self) {
+        self.sync_state.mark_threads_dirty();
+    }
+
+    /// Mark breakpoints as dirty.
+    pub fn mark_breaks_dirty(&mut self) {
+        self.sync_state.mark_breaks_dirty();
+    }
+
+    /// Clear visited state (called on new stop).
+    pub fn clear_visited(&mut self) {
+        self.sync_state.clear_visited();
+    }
+
+    /// Record a visit to a thread/frame combination.
+    pub fn record_visit(&mut self, thread_index: u32, frame_level: u32) {
+        self.sync_state.record_visit(thread_index, frame_level);
+    }
+
+    /// Check if a thread/frame has been visited.
+    pub fn is_visited(&self, thread_index: u32, frame_level: u32) -> bool {
+        self.sync_state.is_visited(thread_index, frame_level)
+    }
+
+    /// Whether this is the first recording.
+    pub fn is_first(&self) -> bool {
+        !self.recorded
+    }
+}
+
+/// Synchronization actions that can be dispatched by the orchestrator.
+///
+/// These correspond to the various `put_*` functions in the Python agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LldbSyncAction {
+    /// Synchronize process list.
+    PutProcesses,
+    /// Synchronize environment variables.
+    PutEnvironment,
+    /// Synchronize memory regions.
+    PutRegions,
+    /// Synchronize loaded modules.
+    PutModules,
+    /// Synchronize threads.
+    PutThreads,
+    /// Synchronize stack frames.
+    PutFrames,
+    /// Synchronize register values.
+    PutRegisters,
+    /// Synchronize breakpoints.
+    PutBreakpoints,
+    /// Synchronize watchpoints.
+    PutWatchpoints,
+    /// Read and synchronize memory at PC.
+    PutMemoryPc,
+    /// Read and synchronize memory at SP.
+    PutMemorySp,
+    /// Synchronize available processes.
+    PutAvailable,
+    /// Set process exit state.
+    PutProcessExit(i32),
+    /// Synchronize event thread.
+    PutEventThread,
+    /// Activate (select) the current thread/frame.
+    Activate,
+}
+
+impl LldbSyncAction {
+    /// Get a human-readable description.
+    pub fn description(&self) -> String {
+        match self {
+            Self::PutProcesses => "Put processes".to_string(),
+            Self::PutEnvironment => "Put environment".to_string(),
+            Self::PutRegions => "Put regions".to_string(),
+            Self::PutModules => "Put modules".to_string(),
+            Self::PutThreads => "Put threads".to_string(),
+            Self::PutFrames => "Put frames".to_string(),
+            Self::PutRegisters => "Put registers".to_string(),
+            Self::PutBreakpoints => "Put breakpoints".to_string(),
+            Self::PutWatchpoints => "Put watchpoints".to_string(),
+            Self::PutMemoryPc => "Put memory at PC".to_string(),
+            Self::PutMemorySp => "Put memory at SP".to_string(),
+            Self::PutAvailable => "Put available".to_string(),
+            Self::PutProcessExit(code) => format!("Put process exit ({})", code),
+            Self::PutEventThread => "Put event thread".to_string(),
+            Self::Activate => "Activate".to_string(),
+        }
+    }
+
+    /// Whether this action requires a transaction.
+    pub fn requires_transaction(&self) -> bool {
+        !matches!(self, Self::Activate)
+    }
+}
+
+// =========================================================================
+// Process Lifecycle State Machine
+// =========================================================================
+
+/// Represents the full lifecycle state of an LLDB process.
+///
+/// Ported from the Python agent's state machine in `hooks.py` which
+/// tracks `ProcessState.first`, `ProcessState.regions`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LldbProcessLifecycle {
+    /// Process not yet known.
+    Unknown,
+    /// Process just created, initial sync pending.
+    Created,
+    /// Process running (continued).
+    Running,
+    /// Process stopped (breakpoint, signal, step).
+    Stopped,
+    /// Process exited normally.
+    Exited(i32),
+    /// Process exited by signal.
+    ExitedSignal(i32),
+    /// Process detached.
+    Detached,
+}
+
+impl LldbProcessLifecycle {
+    /// Whether the process is alive.
+    pub fn is_alive(&self) -> bool {
+        matches!(self, Self::Created | Self::Running | Self::Stopped)
+    }
+
+    /// Whether the process has exited.
+    pub fn is_exited(&self) -> bool {
+        matches!(self, Self::Exited(_) | Self::ExitedSignal(_))
+    }
+
+    /// Get the trace state string.
+    pub fn as_trace_str(&self) -> &'static str {
+        match self {
+            Self::Unknown => "NOT_STARTED",
+            Self::Created | Self::Stopped => "STOPPED",
+            Self::Running => "RUNNING",
+            Self::Exited(_) | Self::ExitedSignal(_) => "TERMINATED",
+            Self::Detached => "DETACHED",
+        }
+    }
+
+    /// Transition to the next state based on an event.
+    pub fn transition(&self, event: LldbProcessEvent) -> Self {
+        match event {
+            LldbProcessEvent::Created => Self::Created,
+            LldbProcessEvent::Continued => Self::Running,
+            LldbProcessEvent::Stopped => Self::Stopped,
+            LldbProcessEvent::Exited(code) => Self::Exited(code),
+            LldbProcessEvent::ExitedSignal(sig) => Self::ExitedSignal(sig),
+            LldbProcessEvent::Detached => Self::Detached,
+        }
+    }
+}
+
+/// Events that drive the process lifecycle state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LldbProcessEvent {
+    /// Process was created.
+    Created,
+    /// Process was continued (resumed).
+    Continued,
+    /// Process stopped.
+    Stopped,
+    /// Process exited normally.
+    Exited(i32),
+    /// Process exited by signal.
+    ExitedSignal(i32),
+    /// Process was detached.
+    Detached,
+}
+
+// =========================================================================
+// Process Comparison and Diff
+// =========================================================================
+
+/// Represents differences between two process snapshots.
+///
+/// Used to determine what needs to be re-synchronized when a stop occurs.
+/// Ported from the change detection in `ProcessState.record()`.
+#[derive(Debug, Clone, Default)]
+pub struct LldbProcessDiff {
+    /// New threads that appeared since last snapshot.
+    pub new_threads: Vec<u32>,
+    /// Threads that exited since last snapshot.
+    pub exited_threads: Vec<u32>,
+    /// Threads whose state changed.
+    pub changed_threads: Vec<u32>,
+    /// New modules loaded.
+    pub new_modules: Vec<String>,
+    /// Modules unloaded.
+    pub unloaded_modules: Vec<String>,
+    /// Whether regions changed.
+    pub regions_changed: bool,
+    /// Whether breakpoints changed.
+    pub breakpoints_changed: bool,
+}
+
+impl LldbProcessDiff {
+    /// Check if any changes were detected.
+    pub fn has_changes(&self) -> bool {
+        !self.new_threads.is_empty()
+            || !self.exited_threads.is_empty()
+            || !self.changed_threads.is_empty()
+            || !self.new_modules.is_empty()
+            || !self.unloaded_modules.is_empty()
+            || self.regions_changed
+            || self.breakpoints_changed
+    }
+
+    /// Get required sync actions based on the diff.
+    pub fn required_actions(&self) -> Vec<LldbSyncAction> {
+        let mut actions = Vec::new();
+        if !self.new_threads.is_empty()
+            || !self.exited_threads.is_empty()
+            || !self.changed_threads.is_empty()
+        {
+            actions.push(LldbSyncAction::PutThreads);
+        }
+        if !self.new_modules.is_empty() || !self.unloaded_modules.is_empty() {
+            actions.push(LldbSyncAction::PutModules);
+        }
+        if self.regions_changed {
+            actions.push(LldbSyncAction::PutRegions);
+        }
+        if self.breakpoints_changed {
+            actions.push(LldbSyncAction::PutBreakpoints);
+        }
+        actions
+    }
+}
+
+/// Compute the diff between two thread states.
+pub fn diff_threads(
+    old_threads: &BTreeMap<u32, LldbThread>,
+    new_threads: &BTreeMap<u32, LldbThread>,
+) -> (Vec<u32>, Vec<u32>, Vec<u32>) {
+    let mut new = Vec::new();
+    let mut exited = Vec::new();
+    let mut changed = Vec::new();
+
+    for (&idx, new_t) in new_threads {
+        match old_threads.get(&idx) {
+            None => new.push(idx),
+            Some(old_t) => {
+                if old_t.state != new_t.state {
+                    changed.push(idx);
+                }
+            }
+        }
+    }
+    for &idx in old_threads.keys() {
+        if !new_threads.contains_key(&idx) {
+            exited.push(idx);
+        }
+    }
+    (new, exited, changed)
+}
+
+// =========================================================================
+// Module Section Iterator Helpers
+// =========================================================================
+
+/// Iterator over sections in a module, providing flattened access.
+///
+/// Ported from the section iteration in `put_modules` which iterates
+/// `lldb.target.module[IDX].GetSectionAtIndex(SECTION_IDX)`.
+pub struct LldbSectionIterator<'a> {
+    sections: Vec<&'a LldbModuleSection>,
+    index: usize,
+}
+
+impl<'a> LldbSectionIterator<'a> {
+    /// Create a new iterator from a module.
+    pub fn new(module: &'a LldbModuleWithSections) -> Self {
+        let sections: Vec<_> = module.sections.values().collect();
+        Self { sections, index: 0 }
+    }
+
+    /// Create a filtered iterator for code sections only.
+    pub fn code_sections(module: &'a LldbModuleWithSections) -> Self {
+        let sections: Vec<_> = module
+            .sections
+            .values()
+            .filter(|s| s.attrs.iter().any(|a| a == "code" || a == "instructions"))
+            .collect();
+        Self { sections, index: 0 }
+    }
+
+    /// Get the total number of sections.
+    pub fn len(&self) -> usize {
+        self.sections.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.sections.is_empty()
+    }
+}
+
+impl<'a> Iterator for LldbSectionIterator<'a> {
+    type Item = &'a LldbModuleSection;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.sections.len() {
+            let item = self.sections[self.index];
+            self.index += 1;
+            Some(item)
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.sections.len() - self.index;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a> ExactSizeIterator for LldbSectionIterator<'a> {}
+
+// =========================================================================
+// Process Summary / Debugging Helpers
+// =========================================================================
+
+/// Summary of a process's current state for debugging and logging.
+///
+/// Ported from the process info display in the Python agent's
+/// `ghidra trace info-lcsp` command.
+#[derive(Debug, Clone)]
+pub struct LldbProcessSummary {
+    /// Process ID.
+    pub pid: u64,
+    /// Process index.
+    pub index: u32,
+    /// Display name.
+    pub display: String,
+    /// Current state.
+    pub state: ExecutionState,
+    /// Number of threads.
+    pub thread_count: usize,
+    /// Number of modules.
+    pub module_count: usize,
+    /// Number of memory regions.
+    pub region_count: usize,
+    /// Target triple.
+    pub triple: Option<String>,
+    /// Whether synced to trace.
+    pub synced: bool,
+}
+
+impl LldbProcessSummary {
+    /// Build from a process.
+    pub fn from_process(p: &LldbInferiorProcess) -> Self {
+        Self {
+            pid: p.pid,
+            index: p.index,
+            display: p.display.clone(),
+            state: p.compute_state(),
+            thread_count: p.threads.len(),
+            module_count: p.modules.len(),
+            region_count: p.memory_regions.len(),
+            triple: p.triple.clone(),
+            synced: p.synced,
+        }
+    }
+
+    /// Format as a human-readable string.
+    pub fn format(&self) -> String {
+        format!(
+            "Process {} (PID {}): {} | {} threads, {} modules, {} regions | triple: {} | synced: {}",
+            self.index,
+            self.pid,
+            self.state.as_trace_str(),
+            self.thread_count,
+            self.module_count,
+            self.region_count,
+            self.triple.as_deref().unwrap_or("unknown"),
+            self.synced,
+        )
+    }
+}
+
+// =========================================================================
+// Additional tests
+// =========================================================================
+
+#[cfg(test)]
+mod sync_orchestrator_tests {
+    use super::*;
+
+    #[test]
+    fn test_orchestrator_initial_record() {
+        let proc = LldbInferiorProcess::new(1234, 0);
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        let actions = orch.initial_record();
+        assert!(actions.contains(&LldbSyncAction::PutProcesses));
+        assert!(actions.contains(&LldbSyncAction::PutEnvironment));
+        assert!(actions.contains(&LldbSyncAction::PutThreads));
+        assert!(actions.contains(&LldbSyncAction::PutFrames));
+        assert!(actions.contains(&LldbSyncAction::PutRegisters));
+        assert!(!orch.is_first());
+    }
+
+    #[test]
+    fn test_orchestrator_record_stop() {
+        let proc = LldbInferiorProcess::new(1, 0);
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        orch.sync_state.mark_modules_dirty();
+        orch.sync_state.mark_breaks_dirty();
+        let actions = orch.record_stop();
+        assert!(actions.contains(&LldbSyncAction::PutModules));
+        assert!(actions.contains(&LldbSyncAction::PutBreakpoints));
+        // Dirty flags should be consumed
+        assert!(!orch.sync_state().modules_dirty);
+        assert!(!orch.sync_state().breaks_dirty);
+    }
+
+    #[test]
+    fn test_orchestrator_record_continued() {
+        let proc = LldbInferiorProcess::new(1, 0);
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        let actions = orch.record_continued();
+        assert_eq!(actions.len(), 2);
+        assert!(actions.contains(&LldbSyncAction::PutProcesses));
+        assert!(actions.contains(&LldbSyncAction::PutThreads));
+    }
+
+    #[test]
+    fn test_orchestrator_record_exited() {
+        let proc = LldbInferiorProcess::new(1, 0);
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        let actions = orch.record_exited(42);
+        assert_eq!(actions, vec![LldbSyncAction::PutProcessExit(42)]);
+        assert_eq!(orch.process().exit_code, Some(42));
+        assert!(!orch.process().is_alive());
+    }
+
+    #[test]
+    fn test_orchestrator_region_index() {
+        let mut proc = LldbInferiorProcess::new(1, 0);
+        proc.add_memory_region(MemoryRegion {
+            base: 0x1000,
+            size: 0x2000,
+            offset: 0,
+            permissions: "r-xp".to_string(),
+            object_file: "a.out".to_string(),
+        });
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        orch.update_region_index();
+        assert_eq!(orch.compute_base(0x1500), 0x1000);
+        assert_eq!(orch.compute_base(0x5000), 0x5000);
+    }
+
+    #[test]
+    fn test_orchestrator_signals() {
+        let proc = LldbInferiorProcess::new(1, 0);
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        orch.init_signals();
+        assert!(!orch.signal_table().is_empty());
+        assert!(orch.signal_table().get(11).is_some());
+    }
+
+    #[test]
+    fn test_orchestrator_visit_tracking() {
+        let proc = LldbInferiorProcess::new(1, 0);
+        let mut orch = LldbProcessSyncOrchestrator::new(proc);
+        assert!(!orch.is_visited(1, 0));
+        orch.record_visit(1, 0);
+        assert!(orch.is_visited(1, 0));
+        orch.clear_visited();
+        assert!(!orch.is_visited(1, 0));
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn test_lifecycle_transitions() {
+        let state = LldbProcessLifecycle::Unknown;
+        let state = state.transition(LldbProcessEvent::Created);
+        assert_eq!(state, LldbProcessLifecycle::Created);
+        assert!(state.is_alive());
+
+        let state = state.transition(LldbProcessEvent::Continued);
+        assert_eq!(state, LldbProcessLifecycle::Running);
+
+        let state = state.transition(LldbProcessEvent::Stopped);
+        assert_eq!(state, LldbProcessLifecycle::Stopped);
+
+        let state = state.transition(LldbProcessEvent::Exited(0));
+        assert_eq!(state, LldbProcessLifecycle::Exited(0));
+        assert!(!state.is_alive());
+        assert!(state.is_exited());
+    }
+
+    #[test]
+    fn test_lifecycle_trace_str() {
+        assert_eq!(
+            LldbProcessLifecycle::Running.as_trace_str(),
+            "RUNNING"
+        );
+        assert_eq!(
+            LldbProcessLifecycle::Stopped.as_trace_str(),
+            "STOPPED"
+        );
+        assert_eq!(
+            LldbProcessLifecycle::Exited(0).as_trace_str(),
+            "TERMINATED"
+        );
+    }
+
+    #[test]
+    fn test_lifecycle_signal_exit() {
+        let state = LldbProcessLifecycle::Unknown
+            .transition(LldbProcessEvent::Created)
+            .transition(LldbProcessEvent::ExitedSignal(11));
+        assert!(state.is_exited());
+        assert_eq!(state.as_trace_str(), "TERMINATED");
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+    use crate::agents::lldb::lldb_thread::LldbThread;
+
+    #[test]
+    fn test_diff_threads_no_change() {
+        let mut old = BTreeMap::new();
+        old.insert(1, LldbThread::new(1, 0).with_state(ExecutionState::Stopped));
+        let mut new = BTreeMap::new();
+        new.insert(1, LldbThread::new(1, 0).with_state(ExecutionState::Stopped));
+        let (new_t, exited, changed) = diff_threads(&old, &new);
+        assert!(new_t.is_empty());
+        assert!(exited.is_empty());
+        assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn test_diff_threads_new_and_exited() {
+        let mut old = BTreeMap::new();
+        old.insert(1, LldbThread::new(1, 0));
+        old.insert(2, LldbThread::new(2, 0));
+        let mut new = BTreeMap::new();
+        new.insert(2, LldbThread::new(2, 0));
+        new.insert(3, LldbThread::new(3, 0));
+        let (new_t, exited, changed) = diff_threads(&old, &new);
+        assert_eq!(new_t, vec![3]);
+        assert_eq!(exited, vec![1]);
+        assert!(changed.is_empty());
+    }
+
+    #[test]
+    fn test_diff_threads_state_changed() {
+        let mut old = BTreeMap::new();
+        old.insert(1, LldbThread::new(1, 0).with_state(ExecutionState::Running));
+        let mut new = BTreeMap::new();
+        new.insert(1, LldbThread::new(1, 0).with_state(ExecutionState::Stopped));
+        let (new_t, exited, changed) = diff_threads(&old, &new);
+        assert!(new_t.is_empty());
+        assert!(exited.is_empty());
+        assert_eq!(changed, vec![1]);
+    }
+
+    #[test]
+    fn test_process_diff_has_changes() {
+        let diff = LldbProcessDiff {
+            new_threads: vec![3],
+            ..Default::default()
+        };
+        assert!(diff.has_changes());
+
+        let empty = LldbProcessDiff::default();
+        assert!(!empty.has_changes());
+    }
+
+    #[test]
+    fn test_process_diff_required_actions() {
+        let diff = LldbProcessDiff {
+            new_modules: vec!["libc.so".to_string()],
+            regions_changed: true,
+            breakpoints_changed: true,
+            ..Default::default()
+        };
+        let actions = diff.required_actions();
+        assert!(actions.contains(&LldbSyncAction::PutModules));
+        assert!(actions.contains(&LldbSyncAction::PutRegions));
+        assert!(actions.contains(&LldbSyncAction::PutBreakpoints));
+    }
+}
+
+#[cfg(test)]
+mod sync_action_tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_action_descriptions() {
+        assert_eq!(LldbSyncAction::PutProcesses.description(), "Put processes");
+        assert_eq!(
+            LldbSyncAction::PutProcessExit(42).description(),
+            "Put process exit (42)"
+        );
+    }
+
+    #[test]
+    fn test_sync_action_requires_transaction() {
+        assert!(LldbSyncAction::PutProcesses.requires_transaction());
+        assert!(LldbSyncAction::PutRegisters.requires_transaction());
+        assert!(!LldbSyncAction::Activate.requires_transaction());
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+    use crate::agents::lldb::lldb_thread::LldbThread;
+
+    #[test]
+    fn test_process_summary() {
+        let mut p = LldbInferiorProcess::new(42, 0)
+            .with_triple("x86_64-apple-macosx");
+        p.add_thread(LldbThread::new(1, 0));
+        p.add_thread(LldbThread::new(2, 0));
+        p.add_module(ModuleInfo {
+            name: "a.out".to_string(),
+            base: 0x1000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let summary = LldbProcessSummary::from_process(&p);
+        assert_eq!(summary.pid, 42);
+        assert_eq!(summary.thread_count, 2);
+        assert_eq!(summary.module_count, 1);
+        assert!(summary.format().contains("42"));
+        assert!(summary.format().contains("2 threads"));
+    }
+}
+
+#[cfg(test)]
+mod section_iterator_tests {
+    use super::*;
+
+    #[test]
+    fn test_section_iterator() {
+        let mut mod_ws = LldbModuleWithSections::from_info(ModuleInfo {
+            name: "test".to_string(),
+            base: 0x1000,
+            size: 0x10000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        mod_ws.add_section(LldbModuleSection::new("__TEXT.__text", 0x1000, 0x5000));
+        mod_ws.add_section(LldbModuleSection::new("__DATA.__data", 0x5000, 0x8000));
+
+        let iter = LldbSectionIterator::new(&mod_ws);
+        assert_eq!(iter.len(), 2);
+        assert!(!iter.is_empty());
+        let sections: Vec<_> = iter.collect();
+        assert_eq!(sections.len(), 2);
+    }
+
+    #[test]
+    fn test_section_iterator_code_only() {
+        let mut mod_ws = LldbModuleWithSections::from_info(ModuleInfo {
+            name: "test".to_string(),
+            base: 0x1000,
+            size: 0x10000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        mod_ws.add_section(
+            LldbModuleSection::new("__TEXT.__text", 0x1000, 0x5000)
+                .with_attrs(vec!["code".to_string()]),
+        );
+        mod_ws.add_section(LldbModuleSection::new("__DATA.__data", 0x5000, 0x8000));
+
+        let iter = LldbSectionIterator::code_sections(&mod_ws);
+        assert_eq!(iter.len(), 1);
+    }
+
+    #[test]
+    fn test_section_iterator_empty() {
+        let mod_ws = LldbModuleWithSections::from_info(ModuleInfo {
+            name: "empty".to_string(),
+            base: 0,
+            size: 0,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let iter = LldbSectionIterator::new(&mod_ws);
+        assert!(iter.is_empty());
+        assert_eq!(iter.count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod parsed_module_header_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_lldb_section_line_with_max_addr() {
+        let line = "  .text  0x1000 - 0x5000  code";
+        let sec = parse_lldb_section_line(line, 0xFFFF);
+        assert!(sec.is_some());
+        let sec = sec.unwrap();
+        assert_eq!(sec.name, ".text");
+        assert_eq!(sec.vma_start, 0x1000);
+        assert_eq!(sec.vma_end, 0x5000);
+    }
+
+    #[test]
+    fn test_parse_lldb_section_line_32bit() {
+        let line = "  __TEXT  0x100000000 - 0x100080000  code";
+        let sec = parse_lldb_section_line(line, 0xFFFFFFFF);
+        assert!(sec.is_some());
+        let sec = sec.unwrap();
+        // Addresses should be masked to 32 bits
+        assert_eq!(sec.vma_start, 0);
+        assert_eq!(sec.vma_end, 0x80000);
+    }
+
+    #[test]
+    fn test_parse_lldb_module_header_no_path() {
+        assert!(parse_lldb_module_header("[0]  ").is_none());
+        assert!(parse_lldb_module_header("Module:  ").is_none());
+    }
+
+    #[test]
+    fn test_compute_max_addr_edge_cases() {
+        assert_eq!(compute_max_addr(1), 0xFF);
+        assert_eq!(compute_max_addr(0), 0);
+        assert_eq!(compute_max_addr(16), u64::MAX);
+    }
+}

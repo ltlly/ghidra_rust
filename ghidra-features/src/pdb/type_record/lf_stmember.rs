@@ -200,6 +200,41 @@ impl LfStmember {
         true
     }
 
+    /// Whether this is a compiler-generated pseudo-field.
+    ///
+    /// Mirrors Java `ClassFieldMsAttributes.compilerGenerateFunctionDoesNotExist`.
+    pub fn is_compiler_generated(&self) -> bool {
+        self.attributes.is_pseudo
+    }
+
+    /// Whether this member cannot be inherited.
+    ///
+    /// Mirrors Java `ClassFieldMsAttributes.cannotBeInherited`.
+    pub fn is_no_inherit(&self) -> bool {
+        self.attributes.no_inherit
+    }
+
+    /// Whether this member cannot be constructed.
+    ///
+    /// Mirrors Java `ClassFieldMsAttributes.cannotBeConstructed`.
+    pub fn is_no_construct(&self) -> bool {
+        self.attributes.no_construct
+    }
+
+    /// Whether a compiler-generated function exists for this member.
+    ///
+    /// Mirrors Java `ClassFieldMsAttributes.compilerGenerateFunctionDoesExist`.
+    pub fn compiler_generated_exists(&self) -> bool {
+        self.attributes.compiler_generated_exists
+    }
+
+    /// Whether this member cannot be overridden.
+    ///
+    /// Mirrors Java `ClassFieldMsAttributes.cannotBeOverridden`.
+    pub fn cannot_be_overridden(&self) -> bool {
+        self.attributes.cannot_be_overridden
+    }
+
     /// Convert this static member into a [`FieldListEntry::StaticMember`].
     ///
     /// This is useful when constructing or manipulating field lists
@@ -602,5 +637,90 @@ mod tests {
         let m = make_test_stmember();
         let m2 = m.clone();
         assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn test_stmember_is_compiler_generated() {
+        // bit 5 = 0x0020
+        let m = LfStmember::from_parsed(0x0023, 0x0074, "pad".to_string());
+        assert!(m.is_compiler_generated());
+
+        let m2 = make_test_stmember();
+        assert!(!m2.is_compiler_generated());
+    }
+
+    #[test]
+    fn test_stmember_is_no_inherit() {
+        // bit 6 = 0x0040
+        let m = LfStmember::from_parsed(0x0043, 0x0074, "x".to_string());
+        assert!(m.is_no_inherit());
+        assert!(!m.is_compiler_generated());
+    }
+
+    #[test]
+    fn test_stmember_is_no_construct() {
+        // bit 7 = 0x0080
+        let m = LfStmember::from_parsed(0x0083, 0x0074, "x".to_string());
+        assert!(m.is_no_construct());
+    }
+
+    #[test]
+    fn test_stmember_compiler_generated_exists() {
+        // bit 8 = 0x0100
+        let m = LfStmember::from_parsed(0x0103, 0x0074, "x".to_string());
+        assert!(m.compiler_generated_exists());
+        assert!(!m.is_compiler_generated()); // different bit
+    }
+
+    #[test]
+    fn test_stmember_cannot_be_overridden() {
+        // bit 9 = 0x0200
+        let m = LfStmember::from_parsed(0x0203, 0x0074, "x".to_string());
+        assert!(m.cannot_be_overridden());
+    }
+
+    #[test]
+    fn test_stmember_all_modifier_bits() {
+        // All modifier bits set: pseudo(5) + noinherit(6) + noconstruct(7)
+        // = 0x0020 + 0x0040 + 0x0080 = 0x00E0
+        // Plus public(3) = 0x00E3
+        let m = LfStmember::from_parsed(0x00E3, 0x0074, "x".to_string());
+        assert!(m.is_compiler_generated());
+        assert!(m.is_no_inherit());
+        assert!(m.is_no_construct());
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.contains("<pseudo"));
+        assert!(emitted.contains("noinherit"));
+        assert!(emitted.contains("noconstruct"));
+    }
+
+    #[test]
+    fn test_stmember_parse_roundtrip() {
+        // Ensure parse -> emit -> parse roundtrip preserves data
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // public
+        data.extend_from_slice(&0x0074u32.to_le_bytes()); // type
+        data.extend_from_slice(b"myField\0");
+
+        let m = LfStmember::parse(&data).unwrap();
+        assert_eq!(m.name(), "myField");
+        assert_eq!(m.type_record_number, RecordNumber::type_record(0x0074));
+        assert_eq!(m.access(), AccessProtection::Public);
+        assert!(m.is_static());
+    }
+
+    #[test]
+    fn test_stmember_parse_from_reader_with_modifiers() {
+        // public + static + pseudo (0x002B)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x002Bu16.to_le_bytes());
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(b"__pad\0");
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfStmember::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "__pad");
+        assert!(m.is_compiler_generated());
+        assert_eq!(m.property(), super::super::lf_member::MemberProperty::Static);
     }
 }
