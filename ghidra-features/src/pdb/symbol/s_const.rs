@@ -54,6 +54,26 @@ pub trait SConstExt {
 
     /// Return the constant variant.
     fn constant_variant(&self) -> ConstantVariant;
+
+    /// Parse an S_CONSTANT (16-bit) symbol and return it with alignment info.
+    fn parse_constant16_aligned(data: &[u8]) -> Option<(Self, usize)>
+    where
+        Self: Sized;
+
+    /// Parse an S_CONSTANT_ST symbol and return it with alignment info.
+    fn parse_st_aligned(data: &[u8]) -> Option<(Self, usize)>
+    where
+        Self: Sized;
+
+    /// Parse an S_MANCONSTANT symbol from a byte slice.
+    fn parse_managed(data: &[u8]) -> Option<Self>
+    where
+        Self: Sized;
+
+    /// Parse an S_MANCONSTANT symbol and return it with alignment info.
+    fn parse_managed_aligned(data: &[u8]) -> Option<(Self, usize)>
+    where
+        Self: Sized;
 }
 
 impl SConstExt for SConstant {
@@ -85,6 +105,69 @@ impl SConstExt for SConstant {
 
     fn constant_variant(&self) -> ConstantVariant {
         self.variant()
+    }
+
+    fn parse_constant16_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = SConstant::parse_constant16(data)?;
+        // type_record(2) + numeric(variable) + name(ST: 2 len + bytes), aligned to 4
+        // Compute consumed: find numeric end, then ST string
+        if data.len() < 4 {
+            return Some((sym, data.len()));
+        }
+        let (_, numeric_consumed) = Numeric::parse(data, 2);
+        let name_off = 2 + numeric_consumed;
+        let consumed = if name_off + 2 <= data.len() {
+            let st_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+            name_off + 2 + st_len
+        } else {
+            data.len()
+        };
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    fn parse_st_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = SConstant::parse_st(data)?;
+        if data.len() < 6 {
+            return Some((sym, data.len()));
+        }
+        let (_, numeric_consumed) = Numeric::parse(data, 4);
+        let name_off = 4 + numeric_consumed;
+        let consumed = if name_off + 2 <= data.len() {
+            let st_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+            name_off + 2 + st_len
+        } else {
+            data.len()
+        };
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    fn parse_managed(data: &[u8]) -> Option<Self> {
+        // S_MANCONSTANT has the same layout as S_CONSTANT_V2: type(u32) + numeric + name(NT)
+        let inner = super::abstract_constant::AbstractConstant::parse(data)?;
+        Some(SConstant {
+            inner,
+            variant: ConstantVariant::ManagedConstant,
+        })
+    }
+
+    fn parse_managed_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = <Self as SConstExt>::parse_managed(data)?;
+        if data.len() < 5 {
+            return Some((sym, data.len()));
+        }
+        let (_, numeric_consumed) = Numeric::parse(data, 4);
+        let name_off = 4 + numeric_consumed;
+        let consumed = if name_off < data.len() {
+            let name_data = &data[name_off..];
+            let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+            name_off + end + 1
+        } else {
+            data.len()
+        };
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
     }
 }
 
@@ -235,5 +318,87 @@ mod tests {
             "PI".to_string(),
         );
         assert_eq!(sym.value_as_u64(), None); // float, not integral
+    }
+
+    #[test]
+    fn test_parse_constant16_aligned_literal() {
+        // type_record(u16=0x0100) + numeric(literal 42 = [0x2A, 0x00]) + name(ST "C")
+        // type(2) + numeric(2) + st_len(2) + "C"(1) = 7, aligned to 8
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0100u16.to_le_bytes());
+        data.extend_from_slice(&42u16.to_le_bytes());
+        let name = b"C";
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+
+        let (sym, consumed) = SConstant::parse_constant16_aligned(&data).unwrap();
+        assert_eq!(sym.type_record_number().number(), 0x0100);
+        assert_eq!(sym.value().as_u64(), Some(42));
+        assert_eq!(sym.name(), "C");
+        assert_eq!(sym.variant(), ConstantVariant::Constant16);
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_literal() {
+        // type(4) + numeric(2 literal) + st_len(2) + "AB"(2) = 10, aligned to 12
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0100u32.to_le_bytes());
+        data.extend_from_slice(&99u16.to_le_bytes());
+        let name = b"AB";
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+
+        let (sym, consumed) = SConstant::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.type_record_number().number(), 0x0100);
+        assert_eq!(sym.value().as_u64(), Some(99));
+        assert_eq!(sym.name(), "AB");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_managed() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&42u16.to_le_bytes()); // literal 42
+        data.extend_from_slice(b"MANAGED\0");
+
+        let sym = SConstant::parse_managed(&data).unwrap();
+        assert_eq!(sym.type_record_number().number(), 0x1000);
+        assert_eq!(sym.value().as_u64(), Some(42));
+        assert_eq!(sym.name(), "MANAGED");
+        assert_eq!(sym.variant(), ConstantVariant::ManagedConstant);
+        assert_eq!(sym.pdb_id(), 0x1020);
+    }
+
+    #[test]
+    fn test_parse_managed_aligned() {
+        // type(4) + numeric(2) + "M\0"(2) = 8, aligned to 8
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&42u16.to_le_bytes());
+        data.extend_from_slice(b"M\0");
+
+        let (sym, consumed) = SConstant::parse_managed_aligned(&data).unwrap();
+        assert_eq!(sym.variant(), ConstantVariant::ManagedConstant);
+        assert_eq!(sym.name(), "M");
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_managed_truncated() {
+        let data = [0x00, 0x01]; // too short
+        assert!(SConstant::parse_managed(&data).is_none());
+    }
+
+    #[test]
+    fn test_constant_variant_managed() {
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &[5, 0x00],
+            "M".to_string(),
+        );
+        // from_numeric_bytes creates a non-managed variant
+        assert_eq!(sym.constant_variant(), ConstantVariant::Constant);
     }
 }

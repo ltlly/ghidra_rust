@@ -631,6 +631,27 @@ impl TraceStackEntry {
 }
 
 // ---------------------------------------------------------------------------
+// StackFrameSnapshot
+// ---------------------------------------------------------------------------
+
+/// A serializable point-in-time snapshot of a stack's frames.
+///
+/// This captures the state of all frames at a given snap for a thread.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StackFrameSnapshot {
+    /// The thread key.
+    pub thread_key: i64,
+    /// The snap at which the snapshot was taken.
+    pub snap: i64,
+    /// The number of frames (stack depth).
+    pub depth: usize,
+    /// Whether this stack uses fixed frames.
+    pub fixed_frames: bool,
+    /// The frames, ordered by level (0 = innermost).
+    pub frames: Vec<TraceStackFrameEntry>,
+}
+
+// ---------------------------------------------------------------------------
 // TraceStackFrameManager
 // ---------------------------------------------------------------------------
 
@@ -876,6 +897,208 @@ impl TraceStackFrameManager {
         self.get_stack(thread_key, snap)
             .and_then(|s| s.frame(level))
             .and_then(|f| f.register(name))
+    }
+
+    // -----------------------------------------------------------------------
+    // Latest stack lookup (ported from TraceStackManager.getLatestStack)
+    // -----------------------------------------------------------------------
+
+    /// Get the most recent stack snapshot for a thread at or before `snap`.
+    ///
+    /// Ported from `TraceStackManager.getLatestStack(TraceThread, long)`.
+    /// Unlike `get_stack` which requires the snap to be within the stack's
+    /// lifespan, this finds the stack whose lifespan's minimum is closest
+    /// to but not exceeding `snap`.
+    pub fn get_latest_stack(&self, thread_key: i64, snap: i64) -> Option<&TraceStackEntry> {
+        self.stacks.get(&thread_key).and_then(|stacks| {
+            stacks
+                .iter()
+                .filter(|s| s.lifespan.lmin() <= snap)
+                .max_by_key(|s| s.lifespan.lmin())
+        })
+    }
+
+    /// Get a mutable reference to the most recent stack snapshot for a
+    /// thread at or before `snap`.
+    pub fn get_latest_stack_mut(
+        &mut self,
+        thread_key: i64,
+        snap: i64,
+    ) -> Option<&mut TraceStackEntry> {
+        self.stacks.get_mut(&thread_key).and_then(|stacks| {
+            stacks
+                .iter_mut()
+                .filter(|s| s.lifespan.lmin() <= snap)
+                .max_by_key(|s| s.lifespan.lmin())
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Frame snapshot (point-in-time view)
+    // -----------------------------------------------------------------------
+
+    /// Get a point-in-time snapshot of all frames for a thread at `snap`.
+    ///
+    /// Returns `None` if no stack exists for the thread at that snap.
+    pub fn frames_snapshot(
+        &self,
+        thread_key: i64,
+        snap: i64,
+    ) -> Option<StackFrameSnapshot> {
+        self.get_stack(thread_key, snap).map(|s| StackFrameSnapshot {
+            thread_key,
+            snap,
+            depth: s.depth(),
+            fixed_frames: s.has_fixed_frames(),
+            frames: s.frames().to_vec(),
+        })
+    }
+
+    // -----------------------------------------------------------------------
+    // Address-based frame lookup (ported from TraceStackManager.getFramesIn)
+    // -----------------------------------------------------------------------
+
+    /// Find all frames across all threads whose program counter falls
+    /// within the given address range at the given snap.
+    ///
+    /// Ported from `TraceStackManager.getFramesIn(AddressSetView)`.
+    /// Returns `(thread_key, level, frame)` tuples.
+    pub fn get_frames_in_range(
+        &self,
+        min_address: u64,
+        max_address: u64,
+        snap: i64,
+    ) -> Vec<(i64, i32, &TraceStackFrameEntry)> {
+        let mut result = Vec::new();
+        for (&thread_key, stacks) in &self.stacks {
+            for stack in stacks {
+                if !stack.is_valid_at(snap) {
+                    continue;
+                }
+                for frame in stack.frames() {
+                    if frame.pc >= min_address && frame.pc <= max_address {
+                        result.push((thread_key, frame.level, frame));
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// Find all frames whose program counter matches the given address at `snap`.
+    ///
+    /// Ported from the common pattern of filtering frames by a single address.
+    pub fn get_frames_at_address(
+        &self,
+        address: u64,
+        snap: i64,
+    ) -> Vec<(i64, i32, &TraceStackFrameEntry)> {
+        self.get_frames_in_range(address, address, snap)
+    }
+
+    // -----------------------------------------------------------------------
+    // Walk frames (visitor pattern)
+    // -----------------------------------------------------------------------
+
+    /// Walk all frames for a thread at `snap`, calling a visitor for each.
+    ///
+    /// The visitor receives the frame and its level. If the visitor returns
+    /// `false`, iteration stops.
+    pub fn walk_frames(
+        &self,
+        thread_key: i64,
+        snap: i64,
+        mut visitor: impl FnMut(&TraceStackFrameEntry) -> bool,
+    ) {
+        if let Some(stack) = self.get_stack(thread_key, snap) {
+            for frame in stack.frames() {
+                if !visitor(frame) {
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Walk all frames across all threads at `snap`, calling a visitor
+    /// for each.
+    pub fn walk_all_frames(
+        &self,
+        snap: i64,
+        mut visitor: impl FnMut(i64, &TraceStackFrameEntry) -> bool,
+    ) {
+        for (&thread_key, stacks) in &self.stacks {
+            for stack in stacks {
+                if !stack.is_valid_at(snap) {
+                    continue;
+                }
+                for frame in stack.frames() {
+                    if !visitor(thread_key, frame) {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Bulk operations
+    // -----------------------------------------------------------------------
+
+    /// Get all stacks valid at the given snap, across all threads.
+    pub fn all_stacks_at(&self, snap: i64) -> Vec<(i64, &TraceStackEntry)> {
+        let mut result = Vec::new();
+        for (&thread_key, stacks) in &self.stacks {
+            for stack in stacks {
+                if stack.is_valid_at(snap) {
+                    result.push((thread_key, stack));
+                }
+            }
+        }
+        result
+    }
+
+    /// The total number of stack snapshots across all threads.
+    pub fn total_snapshot_count(&self) -> usize {
+        self.stacks.values().map(|v| v.len()).sum()
+    }
+
+    /// Get the maximum stack depth across all threads at the given snap.
+    pub fn max_depth_at(&self, snap: i64) -> usize {
+        self.stacks
+            .values()
+            .filter_map(|stacks| {
+                stacks
+                    .iter()
+                    .filter(|s| s.is_valid_at(snap))
+                    .map(|s| s.depth())
+                    .max()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Find all threads that have a frame at the given function name at `snap`.
+    pub fn threads_in_function(
+        &self,
+        function_name: &str,
+        snap: i64,
+    ) -> Vec<i64> {
+        self.stacks
+            .iter()
+            .filter_map(|(&thread_key, stacks)| {
+                stacks.iter().any(|s| {
+                    s.is_valid_at(snap)
+                        && s.frames().iter().any(|f| {
+                            f.function_name.as_deref() == Some(function_name)
+                        })
+                }).then_some(thread_key)
+            })
+            .collect()
+    }
+
+    /// Clear all stacks for all threads.
+    pub fn clear(&mut self) {
+        self.stacks.clear();
     }
 }
 
@@ -1477,5 +1700,256 @@ mod tests {
         assert_eq!(rbp.as_u64_le(), Some(0x7FFF0010));
 
         assert!(mgr.get_frame_register(1, 0, 0, "RAX").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Latest stack tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_manager_get_latest() {
+        let mut mgr = TraceStackFrameManager::new();
+        // Stack at snap 0
+        let mut s0 = TraceStackEntry::new(1, 0, Lifespan::span(0, 9));
+        s0.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x400000, 0x7FFF0000));
+        mgr.set_stack(s0);
+        // Stack at snap 10
+        let mut s1 = TraceStackEntry::new(1, 10, Lifespan::span(10, 19));
+        s1.push_frame(TraceStackFrameEntry::new(1, 10, 0, 0x500000, 0x7FFF0000));
+        mgr.set_stack(s1);
+
+        // At snap 5, the latest is the one starting at snap 0
+        let latest = mgr.get_latest_stack(1, 5).unwrap();
+        assert_eq!(latest.snap, 0);
+
+        // At snap 15, the latest is the one starting at snap 10
+        let latest = mgr.get_latest_stack(1, 15).unwrap();
+        assert_eq!(latest.snap, 10);
+
+        // At snap 100, the latest is the one starting at snap 10
+        let latest = mgr.get_latest_stack(1, 100).unwrap();
+        assert_eq!(latest.snap, 10);
+
+        // Non-existent thread
+        assert!(mgr.get_latest_stack(99, 0).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Frame snapshot tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_manager_frames_snapshot() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020));
+        mgr.set_stack(stack);
+
+        let snap = mgr.frames_snapshot(1, 0).unwrap();
+        assert_eq!(snap.thread_key, 1);
+        assert_eq!(snap.snap, 0);
+        assert_eq!(snap.depth, 2);
+        assert!(snap.fixed_frames);
+        assert_eq!(snap.frames.len(), 2);
+        assert_eq!(snap.frames[0].pc, 0x401000);
+        assert_eq!(snap.frames[1].pc, 0x402000);
+
+        // Non-existent thread
+        assert!(mgr.frames_snapshot(99, 0).is_none());
+    }
+
+    #[test]
+    fn test_stack_manager_frames_snapshot_serde() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(stack);
+
+        let snap = mgr.frames_snapshot(1, 0).unwrap();
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: StackFrameSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.depth, 1);
+        assert_eq!(back.frames[0].pc, 0x401000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Address-based frame lookup tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_manager_get_frames_in_range() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 2, 0x503000, 0x7FFF0040));
+        mgr.set_stack(stack);
+
+        // Range covering the first two frames
+        let frames = mgr.get_frames_in_range(0x400000, 0x402FFF, 0);
+        assert_eq!(frames.len(), 2);
+
+        // Range covering all frames
+        let frames = mgr.get_frames_in_range(0x400000, 0x600000, 0);
+        assert_eq!(frames.len(), 3);
+
+        // Range covering nothing
+        let frames = mgr.get_frames_in_range(0x100000, 0x200000, 0);
+        assert_eq!(frames.len(), 0);
+    }
+
+    #[test]
+    fn test_stack_manager_get_frames_at_address() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(stack);
+
+        let frames = mgr.get_frames_at_address(0x401000, 0);
+        assert_eq!(frames.len(), 1);
+        assert_eq!(frames[0].1, 0); // level
+
+        let frames = mgr.get_frames_at_address(0x999999, 0);
+        assert_eq!(frames.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Walk frames tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_manager_walk_frames() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 2, 0x403000, 0x7FFF0040));
+        mgr.set_stack(stack);
+
+        let mut pcs = Vec::new();
+        mgr.walk_frames(1, 0, |frame| {
+            pcs.push(frame.pc);
+            true
+        });
+        assert_eq!(pcs, vec![0x401000, 0x402000, 0x403000]);
+    }
+
+    #[test]
+    fn test_stack_manager_walk_frames_early_stop() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 2, 0x403000, 0x7FFF0040));
+        mgr.set_stack(stack);
+
+        let mut count = 0;
+        mgr.walk_frames(1, 0, |_frame| {
+            count += 1;
+            count < 2 // stop after 2
+        });
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_stack_manager_walk_all_frames() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut s1 = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        s1.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(s1);
+        let mut s2 = TraceStackEntry::new(2, 0, Lifespan::at(0));
+        s2.push_frame(TraceStackFrameEntry::new(2, 0, 0, 0x501000, 0x7FFF0000));
+        mgr.set_stack(s2);
+
+        let mut count = 0;
+        mgr.walk_all_frames(0, |_thread_key, _frame| {
+            count += 1;
+            true
+        });
+        assert_eq!(count, 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Bulk operations tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_manager_all_stacks_at() {
+        let mut mgr = TraceStackFrameManager::new();
+        mgr.set_stack(TraceStackEntry::new(1, 0, Lifespan::at(0)));
+        mgr.set_stack(TraceStackEntry::new(2, 0, Lifespan::at(0)));
+
+        let all = mgr.all_stacks_at(0);
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_stack_manager_total_snapshot_count() {
+        let mut mgr = TraceStackFrameManager::new();
+        mgr.set_stack(TraceStackEntry::new(1, 0, Lifespan::at(0)));
+        mgr.set_stack(TraceStackEntry::new(1, 1, Lifespan::at(1)));
+        mgr.set_stack(TraceStackEntry::new(2, 0, Lifespan::at(0)));
+
+        assert_eq!(mgr.total_snapshot_count(), 3);
+    }
+
+    #[test]
+    fn test_stack_manager_max_depth_at() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut s1 = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        s1.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(s1);
+        let mut s2 = TraceStackEntry::new(2, 0, Lifespan::at(0));
+        s2.push_frame(TraceStackFrameEntry::new(2, 0, 0, 0x501000, 0x7FFF0000));
+        s2.push_frame(TraceStackFrameEntry::new(2, 0, 1, 0x502000, 0x7FFF0020));
+        s2.push_frame(TraceStackFrameEntry::new(2, 0, 2, 0x503000, 0x7FFF0040));
+        mgr.set_stack(s2);
+
+        assert_eq!(mgr.max_depth_at(0), 3);
+    }
+
+    #[test]
+    fn test_stack_manager_threads_in_function() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut s1 = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        s1.push_frame(
+            TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000)
+                .with_function("main"),
+        );
+        s1.push_frame(
+            TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020)
+                .with_function("foo"),
+        );
+        mgr.set_stack(s1);
+        let mut s2 = TraceStackEntry::new(2, 0, Lifespan::at(0));
+        s2.push_frame(
+            TraceStackFrameEntry::new(2, 0, 0, 0x501000, 0x7FFF0000)
+                .with_function("bar"),
+        );
+        mgr.set_stack(s2);
+
+        let main_threads = mgr.threads_in_function("main", 0);
+        assert_eq!(main_threads, vec![1]);
+
+        let foo_threads = mgr.threads_in_function("foo", 0);
+        assert_eq!(foo_threads, vec![1]);
+
+        let bar_threads = mgr.threads_in_function("bar", 0);
+        assert_eq!(bar_threads, vec![2]);
+
+        let none = mgr.threads_in_function("nonexistent", 0);
+        assert!(none.is_empty());
+    }
+
+    #[test]
+    fn test_stack_manager_clear_all() {
+        let mut mgr = TraceStackFrameManager::new();
+        mgr.set_stack(TraceStackEntry::new(1, 0, Lifespan::at(0)));
+        mgr.set_stack(TraceStackEntry::new(2, 0, Lifespan::at(0)));
+        assert_eq!(mgr.thread_count(), 2);
+        mgr.clear();
+        assert!(mgr.is_empty());
+        assert_eq!(mgr.thread_count(), 0);
     }
 }

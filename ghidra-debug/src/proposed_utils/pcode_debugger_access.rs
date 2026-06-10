@@ -5132,6 +5132,487 @@ impl PcodeDebuggerPropertyAccess {
 }
 
 // ============================================================================
+// PcodeTraceAccess -- top-level trace access shim interface
+// ============================================================================
+
+/// A trace access shim that encapsulates coordinates for reading/writing
+/// a trace during pcode emulation.
+///
+/// Ported from Ghidra's `PcodeTraceAccess` interface. This is the
+/// top-level interface that provides memory and register data-access
+/// shims for use by pcode executors and emulators. It supports
+/// deriving a new access for writing to a different snapshot.
+pub trait PcodeTraceAccess {
+    /// Derive an access for writing at a different snapshot.
+    ///
+    /// When the emulator produces output, it writes to a destination
+    /// snapshot that may differ from the source snapshot. This method
+    /// creates the write-side access shim.
+    fn derive_for_write(&self, snap: i64) -> Box<dyn PcodeTraceAccess>;
+
+    /// Get the language/compiler spec ID.
+    fn language_id(&self) -> &str;
+
+    /// Get the data-access shim for shared (memory) state.
+    fn data_for_shared_state(&self) -> &dyn PcodeDebuggerMemoryAccess;
+
+    /// Get the data-access shim for a thread's local (register) state.
+    fn data_for_local_state(&self, thread_key: i64, frame: i32)
+        -> &dyn PcodeDebuggerRegistersAccess;
+}
+
+// ============================================================================
+// PcodeTracePropertyAccess -- generic property access shim
+// ============================================================================
+
+/// A trace-property access shim for a specific named property.
+///
+/// Ported from Ghidra's `PcodeTracePropertyAccess` interface.
+/// Provides typed access to a named property stored in the trace,
+/// with fallback to static image data when the trace does not have
+/// a value.
+pub trait PcodeTracePropertyAccess {
+    /// Get the property's value at the given address offset.
+    fn get(&self, offset: u64) -> Option<Vec<u8>>;
+
+    /// Set the property's value at the given address offset.
+    fn put(&mut self, offset: u64, value: Vec<u8>);
+
+    /// Clear the property's value across a range.
+    fn clear(&mut self, start: u64, end: u64);
+
+    /// Check if the property has any value in the given range.
+    fn has_value_in_range(&self, start: u64, end: u64) -> bool;
+}
+
+/// A default implementation of `PcodeTracePropertyAccess` backed by
+/// a `BTreeMap`.
+#[derive(Debug, Clone, Default)]
+pub struct DefaultTracePropertyAccess {
+    /// The property name.
+    pub name: String,
+    /// Property values keyed by offset.
+    properties: BTreeMap<u64, Vec<u8>>,
+}
+
+impl DefaultTracePropertyAccess {
+    /// Create a new property access.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            properties: BTreeMap::new(),
+        }
+    }
+}
+
+impl PcodeTracePropertyAccess for DefaultTracePropertyAccess {
+    fn get(&self, offset: u64) -> Option<Vec<u8>> {
+        self.properties.get(&offset).cloned()
+    }
+
+    fn put(&mut self, offset: u64, value: Vec<u8>) {
+        self.properties.insert(offset, value);
+    }
+
+    fn clear(&mut self, start: u64, end: u64) {
+        let keys: Vec<u64> = self
+            .properties
+            .range(start..=end)
+            .map(|(k, _)| *k)
+            .collect();
+        for key in keys {
+            self.properties.remove(&key);
+        }
+    }
+
+    fn has_value_in_range(&self, start: u64, end: u64) -> bool {
+        self.properties.range(start..=end).next().is_some()
+    }
+}
+
+// ============================================================================
+// ThreadAccessCache -- caching per-thread data access shims
+// ============================================================================
+
+/// A cache for per-thread data access shims.
+///
+/// Ported from Ghidra's `AbstractPcodeTraceAccess` which caches
+/// `PcodeTraceRegistersAccess` instances keyed by `(thread, frame)`.
+/// This prevents redundant shim construction when the emulator
+/// repeatedly accesses the same thread's state.
+pub struct ThreadAccessCache<T> {
+    /// Cached entries: (thread_key, frame) -> access shim.
+    cache: BTreeMap<(i64, i32), T>,
+    /// The default thread key to use when none is specified.
+    default_thread: Option<i64>,
+}
+
+impl<T: std::fmt::Debug> std::fmt::Debug for ThreadAccessCache<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ThreadAccessCache")
+            .field("num_entries", &self.cache.len())
+            .field("default_thread", &self.default_thread)
+            .finish()
+    }
+}
+
+impl<T> ThreadAccessCache<T> {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self {
+            cache: BTreeMap::new(),
+            default_thread: None,
+        }
+    }
+
+    /// Set the default thread key.
+    pub fn with_default_thread(mut self, thread_key: i64) -> Self {
+        self.default_thread = Some(thread_key);
+        self
+    }
+
+    /// Get or insert an access shim for a (thread, frame) pair.
+    pub fn get_or_insert_with(
+        &mut self,
+        thread_key: i64,
+        frame: i32,
+        factory: impl FnOnce() -> T,
+    ) -> &mut T {
+        self.cache
+            .entry((thread_key, frame))
+            .or_insert_with(factory)
+    }
+
+    /// Get an existing access shim for a (thread, frame) pair.
+    pub fn get(&self, thread_key: i64, frame: i32) -> Option<&T> {
+        self.cache.get(&(thread_key, frame))
+    }
+
+    /// Get a mutable reference to an existing access shim.
+    pub fn get_mut(&mut self, thread_key: i64, frame: i32) -> Option<&mut T> {
+        self.cache.get_mut(&(thread_key, frame))
+    }
+
+    /// Remove a cached entry.
+    pub fn remove(&mut self, thread_key: i64, frame: i32) -> Option<T> {
+        self.cache.remove(&(thread_key, frame))
+    }
+
+    /// Invalidate all cached entries for a specific thread.
+    pub fn invalidate_thread(&mut self, thread_key: i64) {
+        self.cache.retain(|(t, _), _| *t != thread_key);
+    }
+
+    /// Clear the entire cache.
+    pub fn clear(&mut self) {
+        self.cache.clear();
+    }
+
+    /// The number of cached entries.
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+
+    /// Get all cached (thread, frame) pairs.
+    pub fn cached_keys(&self) -> Vec<(i64, i32)> {
+        self.cache.keys().copied().collect()
+    }
+
+    /// Get the default thread key.
+    pub fn default_thread(&self) -> Option<i64> {
+        self.default_thread
+    }
+}
+
+impl<T> Default for ThreadAccessCache<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// ViewportStateTracker -- track memory viewport state
+// ============================================================================
+
+/// The composite state of a memory region within the viewport.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ViewportMemoryState {
+    /// All bytes in the range are known.
+    Known,
+    /// Some or all bytes are unknown.
+    Unknown,
+    /// An error occurred reading the range.
+    Error,
+}
+
+/// A tracked viewport that determines memory visibility.
+///
+/// Ported from Ghidra's `TraceTimeViewport` concept. The viewport
+/// determines which snapshots are visible for memory reads. When
+/// reading from a captured snapshot, only that snapshot is visible.
+/// When reading from a scratch snapshot (e.g., emulation output),
+/// both the scratch and original source snapshots are visible.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewportStateTracker {
+    /// The primary snap.
+    pub snap: i64,
+    /// Additional snaps in the viewport (e.g., the source snap).
+    additional_snaps: Vec<i64>,
+    /// Known address ranges per snap.
+    known_ranges: BTreeMap<i64, Vec<(u64, u64)>>,
+}
+
+impl ViewportStateTracker {
+    /// Create a new viewport at a specific snap.
+    pub fn new(snap: i64) -> Self {
+        Self {
+            snap,
+            additional_snaps: Vec::new(),
+            known_ranges: BTreeMap::new(),
+        }
+    }
+
+    /// Add an additional snap to the viewport.
+    pub fn add_snap(&mut self, snap: i64) {
+        if snap != self.snap && !self.additional_snaps.contains(&snap) {
+            self.additional_snaps.push(snap);
+        }
+    }
+
+    /// Mark a range as known at a specific snap.
+    pub fn mark_known(&mut self, snap: i64, start: u64, end: u64) {
+        self.known_ranges
+            .entry(snap)
+            .or_default()
+            .push((start, end));
+    }
+
+    /// Get all snaps in the viewport (primary + additional).
+    pub fn snaps(&self) -> Vec<i64> {
+        let mut snaps = vec![self.snap];
+        snaps.extend_from_slice(&self.additional_snaps);
+        snaps
+    }
+
+    /// Check the composite state of an address range.
+    ///
+    /// Returns `Known` if all addresses are known in any viewport snap,
+    /// `Unknown` otherwise.
+    pub fn state_of(&self, start: u64, end: u64) -> ViewportMemoryState {
+        for snap in self.snaps() {
+            if let Some(ranges) = self.known_ranges.get(&snap) {
+                if Self::ranges_cover(ranges, start, end) {
+                    return ViewportMemoryState::Known;
+                }
+            }
+        }
+        ViewportMemoryState::Unknown
+    }
+
+    /// Intersect an address set with the known addresses in the viewport.
+    ///
+    /// Returns the subset of (start, end) ranges that are known.
+    pub fn intersect_known(&self, ranges: &[(u64, u64)]) -> Vec<(u64, u64)> {
+        let mut result = Vec::new();
+        for &(start, end) in ranges {
+            if self.state_of(start, end) == ViewportMemoryState::Known {
+                result.push((start, end));
+            }
+        }
+        result
+    }
+
+    fn ranges_cover(ranges: &[(u64, u64)], start: u64, end: u64) -> bool {
+        // Simple check: see if any single range fully covers [start, end]
+        for &(r_start, r_end) in ranges {
+            if r_start <= start && r_end >= end {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The number of additional snaps beyond the primary.
+    pub fn num_additional_snaps(&self) -> usize {
+        self.additional_snaps.len()
+    }
+
+    /// Remove all known ranges for a specific snap.
+    pub fn clear_snap(&mut self, snap: i64) {
+        self.known_ranges.remove(&snap);
+    }
+
+    /// Clear all state.
+    pub fn clear(&mut self) {
+        self.additional_snaps.clear();
+        self.known_ranges.clear();
+    }
+}
+
+// ============================================================================
+// PcodeTraceDataAccess -- lower-level trace data access trait
+// ============================================================================
+
+/// A trait for low-level trace data access.
+///
+/// Ported from Ghidra's `PcodeTraceDataAccess` interface. Provides
+/// the fundamental read/write operations on trace memory and register
+/// data, plus state management and property access.
+pub trait PcodeTraceDataAccess {
+    /// Get the language/compiler spec ID.
+    fn language_id(&self) -> &str;
+
+    /// Set the memory state of an address range.
+    fn set_state(&mut self, start: u64, end: u64, state: TraceMemoryState);
+
+    /// Get the composite state of an address range.
+    fn get_viewport_state(&self, start: u64, end: u64) -> TraceMemoryState;
+
+    /// Write bytes at the given offset.
+    fn put_bytes(&mut self, space: &str, offset: u64, data: &[u8]) -> usize;
+
+    /// Read bytes from the given offset.
+    fn get_bytes(&self, space: &str, offset: u64, len: u32) -> Option<Vec<u8>>;
+
+    /// Get a property access shim for a named property.
+    fn get_property_access(&self, name: &str) -> Option<Box<dyn PcodeTracePropertyAccess>>;
+}
+
+/// A default implementation of `PcodeTraceDataAccess` backed by
+/// in-memory data structures.
+#[derive(Debug, Clone)]
+pub struct DefaultTraceDataAccess {
+    /// The language/compiler spec ID.
+    pub language_id: String,
+    /// Memory data: (space, offset) -> bytes.
+    memory: BTreeMap<(String, u64), Vec<u8>>,
+    /// Memory state tracking.
+    state_map: TraceMemoryStateMap,
+    /// Named property stores.
+    properties: BTreeMap<String, DefaultTracePropertyAccess>,
+}
+
+impl DefaultTraceDataAccess {
+    /// Create a new data access instance.
+    pub fn new(language_id: impl Into<String>) -> Self {
+        Self {
+            language_id: language_id.into(),
+            memory: BTreeMap::new(),
+            state_map: TraceMemoryStateMap::new("ram"),
+            properties: BTreeMap::new(),
+        }
+    }
+}
+
+impl PcodeTraceDataAccess for DefaultTraceDataAccess {
+    fn language_id(&self) -> &str {
+        &self.language_id
+    }
+
+    fn set_state(&mut self, start: u64, end: u64, state: TraceMemoryState) {
+        self.state_map.set_state(start, end, state);
+    }
+
+    fn get_viewport_state(&self, start: u64, _end: u64) -> TraceMemoryState {
+        self.state_map.state_at(start)
+    }
+
+    fn put_bytes(&mut self, space: &str, offset: u64, data: &[u8]) -> usize {
+        let key = (space.to_string(), offset);
+        let len = data.len();
+        self.memory.insert(key, data.to_vec());
+        len
+    }
+
+    fn get_bytes(&self, space: &str, offset: u64, len: u32) -> Option<Vec<u8>> {
+        let key = (space.to_string(), offset);
+        self.memory.get(&key).map(|v| {
+            let end = (len as usize).min(v.len());
+            v[..end].to_vec()
+        })
+    }
+
+    fn get_property_access(&self, name: &str) -> Option<Box<dyn PcodeTracePropertyAccess>> {
+        self.properties
+            .get(name)
+            .map(|p| Box::new(p.clone()) as Box<dyn PcodeTracePropertyAccess>)
+    }
+}
+
+// ============================================================================
+// AbstractPcodeTraceAccess -- abstract base for trace access
+// ============================================================================
+
+/// An abstract base implementation of `PcodeTraceAccess`.
+///
+/// Ported from Ghidra's `AbstractPcodeTraceAccess`. Manages the
+/// caching of shared (memory) and thread-local (register) data
+/// access shims, and provides the `derive_for_write` mechanism.
+#[derive(Debug)]
+pub struct AbstractPcodeTraceAccessBuilder {
+    /// The platform/language ID.
+    pub language_id: String,
+    /// The primary snap.
+    pub snap: i64,
+    /// The threads snap (may differ from primary snap).
+    pub threads_snap: i64,
+    /// Cached shared state access (memory view).
+    shared_state: Option<PcodeMemoryView>,
+    /// Cached per-thread local state access (register views).
+    local_states: ThreadAccessCache<PcodeRegisterView>,
+}
+
+impl AbstractPcodeTraceAccessBuilder {
+    /// Create a new builder.
+    pub fn new(language_id: impl Into<String>, snap: i64) -> Self {
+        Self {
+            language_id: language_id.into(),
+            snap,
+            threads_snap: snap,
+            shared_state: None,
+            local_states: ThreadAccessCache::new(),
+        }
+    }
+
+    /// Set the threads snap (for finding associated threads).
+    pub fn with_threads_snap(mut self, snap: i64) -> Self {
+        self.threads_snap = snap;
+        self
+    }
+
+    /// Get the snap.
+    pub fn snap(&self) -> i64 {
+        self.snap
+    }
+
+    /// Get the threads snap.
+    pub fn threads_snap(&self) -> i64 {
+        self.threads_snap
+    }
+
+    /// Get the language ID.
+    pub fn language_id(&self) -> &str {
+        &self.language_id
+    }
+
+    /// Invalidate all cached access shims.
+    pub fn invalidate(&mut self) {
+        self.shared_state = None;
+        self.local_states.clear();
+    }
+
+    /// Invalidate cached access for a specific thread.
+    pub fn invalidate_thread(&mut self, thread_key: i64) {
+        self.local_states.invalidate_thread(thread_key);
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -6972,5 +7453,211 @@ mod tests {
 
         let keys = access.keys();
         assert_eq!(keys.len(), 3);
+    }
+
+    // -- DefaultTracePropertyAccess --
+
+    #[test]
+    fn test_default_trace_property_access() {
+        let mut prop = DefaultTracePropertyAccess::new("test_prop");
+        assert!(prop.get(0x1000).is_none());
+
+        prop.put(0x1000, vec![1, 2, 3]);
+        assert_eq!(prop.get(0x1000), Some(vec![1, 2, 3]));
+
+        prop.put(0x2000, vec![4, 5]);
+        assert!(prop.has_value_in_range(0x1000, 0x2000));
+
+        prop.clear(0x1000, 0x1000);
+        assert!(prop.get(0x1000).is_none());
+        assert_eq!(prop.get(0x2000), Some(vec![4, 5]));
+    }
+
+    // -- ThreadAccessCache --
+
+    #[test]
+    fn test_thread_access_cache() {
+        let mut cache = ThreadAccessCache::<String>::new();
+        assert!(cache.is_empty());
+
+        cache.get_or_insert_with(1, 0, || "thread1_frame0".to_string());
+        cache.get_or_insert_with(1, 1, || "thread1_frame1".to_string());
+        cache.get_or_insert_with(2, 0, || "thread2_frame0".to_string());
+
+        assert_eq!(cache.len(), 3);
+        assert_eq!(cache.get(1, 0), Some(&"thread1_frame0".to_string()));
+        assert_eq!(cache.get(1, 1), Some(&"thread1_frame1".to_string()));
+        assert_eq!(cache.get(2, 0), Some(&"thread2_frame0".to_string()));
+        assert_eq!(cache.get(3, 0), None);
+    }
+
+    #[test]
+    fn test_thread_access_cache_invalidate_thread() {
+        let mut cache = ThreadAccessCache::<String>::new();
+        cache.get_or_insert_with(1, 0, || "a".to_string());
+        cache.get_or_insert_with(1, 1, || "b".to_string());
+        cache.get_or_insert_with(2, 0, || "c".to_string());
+
+        cache.invalidate_thread(1);
+        assert_eq!(cache.len(), 1);
+        assert!(cache.get(1, 0).is_none());
+        assert_eq!(cache.get(2, 0), Some(&"c".to_string()));
+    }
+
+    #[test]
+    fn test_thread_access_cache_remove() {
+        let mut cache = ThreadAccessCache::<i32>::new();
+        cache.get_or_insert_with(1, 0, || 42);
+        assert_eq!(cache.remove(1, 0), Some(42));
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn test_thread_access_cache_cached_keys() {
+        let mut cache = ThreadAccessCache::<String>::new();
+        cache.get_or_insert_with(1, 0, || "a".to_string());
+        cache.get_or_insert_with(2, 1, || "b".to_string());
+
+        let keys = cache.cached_keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&(1, 0)));
+        assert!(keys.contains(&(2, 1)));
+    }
+
+    #[test]
+    fn test_thread_access_cache_default_thread() {
+        let cache = ThreadAccessCache::<i32>::new()
+            .with_default_thread(42);
+        assert_eq!(cache.default_thread(), Some(42));
+    }
+
+    // -- ViewportStateTracker --
+
+    #[test]
+    fn test_viewport_state_tracker_basic() {
+        let viewport = ViewportStateTracker::new(0);
+        assert_eq!(viewport.snaps(), vec![0]);
+        assert_eq!(viewport.num_additional_snaps(), 0);
+    }
+
+    #[test]
+    fn test_viewport_state_tracker_add_snap() {
+        let mut viewport = ViewportStateTracker::new(5);
+        viewport.add_snap(3);
+        viewport.add_snap(7);
+        let snaps = viewport.snaps();
+        assert_eq!(snaps.len(), 3);
+        assert!(snaps.contains(&5));
+        assert!(snaps.contains(&3));
+        assert!(snaps.contains(&7));
+    }
+
+    #[test]
+    fn test_viewport_state_tracker_known_state() {
+        let mut viewport = ViewportStateTracker::new(0);
+        viewport.mark_known(0, 0x1000, 0x1FFF);
+
+        assert_eq!(
+            viewport.state_of(0x1000, 0x1FFF),
+            ViewportMemoryState::Known
+        );
+        assert_eq!(
+            viewport.state_of(0x2000, 0x2FFF),
+            ViewportMemoryState::Unknown
+        );
+    }
+
+    #[test]
+    fn test_viewport_state_tracker_intersect_known() {
+        let mut viewport = ViewportStateTracker::new(0);
+        viewport.mark_known(0, 0x1000, 0x1FFF);
+        viewport.mark_known(0, 0x4000, 0x4FFF);
+
+        let ranges = vec![(0x1000, 0x1FFF), (0x2000, 0x2FFF), (0x4000, 0x4FFF)];
+        let known = viewport.intersect_known(&ranges);
+        assert_eq!(known.len(), 2);
+        assert!(known.contains(&(0x1000, 0x1FFF)));
+        assert!(known.contains(&(0x4000, 0x4FFF)));
+    }
+
+    #[test]
+    fn test_viewport_state_tracker_multiple_snaps() {
+        let mut viewport = ViewportStateTracker::new(5);
+        viewport.add_snap(3);
+        viewport.mark_known(3, 0x1000, 0x1FFF);
+
+        // Known in snap 3 which is in the viewport
+        assert_eq!(
+            viewport.state_of(0x1000, 0x1FFF),
+            ViewportMemoryState::Known
+        );
+    }
+
+    #[test]
+    fn test_viewport_state_tracker_clear() {
+        let mut viewport = ViewportStateTracker::new(0);
+        viewport.add_snap(1);
+        viewport.mark_known(0, 0x1000, 0x1FFF);
+
+        viewport.clear();
+        assert_eq!(viewport.snaps(), vec![0]);
+        assert_eq!(viewport.state_of(0x1000, 0x1FFF), ViewportMemoryState::Unknown);
+    }
+
+    // -- DefaultTraceDataAccess --
+
+    #[test]
+    fn test_default_trace_data_access() {
+        let mut access = DefaultTraceDataAccess::new("x86:LE:64:default");
+        assert_eq!(access.language_id(), "x86:LE:64:default");
+
+        let written = access.put_bytes("ram", 0x1000, &[0xAA, 0xBB, 0xCC]);
+        assert_eq!(written, 3);
+
+        let data = access.get_bytes("ram", 0x1000, 3);
+        assert_eq!(data, Some(vec![0xAA, 0xBB, 0xCC]));
+
+        let missing = access.get_bytes("ram", 0x2000, 1);
+        assert_eq!(missing, None);
+    }
+
+    #[test]
+    fn test_default_trace_data_access_state() {
+        let mut access = DefaultTraceDataAccess::new("test");
+        access.set_state(0x1000, 0x1FFF, TraceMemoryState::Known);
+        assert_eq!(
+            access.get_viewport_state(0x1000, 0x1FFF),
+            TraceMemoryState::Known
+        );
+        assert_eq!(
+            access.get_viewport_state(0x3000, 0x3FFF),
+            TraceMemoryState::Unknown
+        );
+    }
+
+    // -- AbstractPcodeTraceAccessBuilder --
+
+    #[test]
+    fn test_abstract_trace_access_builder() {
+        let builder = AbstractPcodeTraceAccessBuilder::new("x86:LE:64:default", 10)
+            .with_threads_snap(5);
+
+        assert_eq!(builder.snap(), 10);
+        assert_eq!(builder.threads_snap(), 5);
+        assert_eq!(builder.language_id(), "x86:LE:64:default");
+    }
+
+    #[test]
+    fn test_abstract_trace_access_builder_invalidate() {
+        let mut builder = AbstractPcodeTraceAccessBuilder::new("test", 0);
+        builder.invalidate();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_abstract_trace_access_builder_invalidate_thread() {
+        let mut builder = AbstractPcodeTraceAccessBuilder::new("test", 0);
+        builder.invalidate_thread(1);
+        // Just verify it doesn't panic
     }
 }

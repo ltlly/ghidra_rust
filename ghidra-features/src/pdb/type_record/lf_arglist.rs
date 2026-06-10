@@ -81,6 +81,13 @@ impl LfArglist {
         &self.argument_record_numbers
     }
 
+    /// Get the argument record numbers as a slice.
+    ///
+    /// Alias matching Java's `AbstractArgumentsListMsType.getArgRecordNumbers()`.
+    pub fn get_arg_record_numbers(&self) -> &[RecordNumber] {
+        &self.argument_record_numbers
+    }
+
     /// Iterate over the argument record numbers.
     pub fn iter_arguments(&self) -> impl Iterator<Item = RecordNumber> + '_ {
         self.argument_record_numbers.iter().copied()
@@ -560,6 +567,24 @@ mod tests {
     fn test_arglist_last_argument_single() {
         let al = LfArglist::new(vec![RecordNumber::type_record(0x0074)]);
         assert_eq!(al.last_argument(), Some(RecordNumber::type_record(0x0074)));
+    }
+
+    #[test]
+    fn test_arglist_get_arg_record_numbers() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+        ]);
+        let arg_rns = al.get_arg_record_numbers();
+        assert_eq!(arg_rns.len(), 2);
+        assert_eq!(arg_rns[0], RecordNumber::type_record(0x0074));
+        assert_eq!(arg_rns[1], RecordNumber::type_record(0x0040));
+    }
+
+    #[test]
+    fn test_arglist_get_arg_record_numbers_empty() {
+        let al = LfArglist::new(vec![]);
+        assert!(al.get_arg_record_numbers().is_empty());
     }
 
     // =========================================================================

@@ -31,7 +31,14 @@
 //!   `AccessEventBus` for publish/subscribe event notifications,
 //!   `MemoryCheckpointManager` for memory checkpoint/restore,
 //!   `AccessLockManager` for concurrent access read/write locking,
-//!   and `PcodeStepController` for high-level step control.
+//!   `PcodeStepController` for high-level step control,
+//!   `PcodeTraceAccess` trait for top-level trace access shims,
+//!   `PcodeTracePropertyAccess` trait for generic property access,
+//!   `ThreadAccessCache` for caching per-thread data access shims,
+//!   `ViewportStateTracker` for tracking memory viewport state,
+//!   `PcodeTraceDataAccess` trait for low-level trace data operations,
+//!   and `AbstractPcodeTraceAccessBuilder` for constructing trace
+//!   access instances with cached shim management.
 //! - **Pcode debugger registers**: Register bank abstraction, register mapping,
 //!   register groups, value transformations, calling conventions,
 //!   `RegisterSnapshot` / `RegisterBankDiff` for capturing and comparing
@@ -59,8 +66,14 @@
 //!   `RegisterChangeTracker` for incremental delta tracking with
 //!   checkpoint/rollback, `RegisterBankMerge3Result` /
 //!   `merge_register_banks_3way` for 3-way merge support,
-//!   and `RegisterSerializationUtils` for hex encoding/decoding
-//!   of register values and definitions.
+//!   `RegisterSerializationUtils` for hex encoding/decoding
+//!   of register values and definitions, `RegisterGroupDiff` for
+//!   comparing register group state between sessions,
+//!   `RegisterBankRebase` for rebasing register context across
+//!   execution contexts, `RegisterConcurrencyGuard` for thread-safe
+//!   register access with deadlock prevention,
+//!   and `RegisterWatchpointCondition` for conditional watchpoint
+//!   evaluation on register value changes.
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 

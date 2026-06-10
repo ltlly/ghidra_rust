@@ -28,6 +28,24 @@ pub enum RegisterVariant {
     Register16,
 }
 
+/// A register name with its architecture-specific index.
+///
+/// This mirrors Ghidra's Java `RegisterName` class which carries a register
+/// index and resolves it to a human-readable name via the CV register mapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RegisterName {
+    /// The architecture-specific register index (CV register ID).
+    pub index: u16,
+    /// The human-readable register name (e.g., "EAX", "RBP", "XMM0").
+    pub name: &'static str,
+}
+
+impl fmt::Display for RegisterName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} ({:#X})", self.name, self.index)
+    }
+}
+
 /// A register variable symbol (`S_REGISTER`).
 ///
 /// This symbol describes a variable whose value is held in a CPU register
@@ -222,6 +240,45 @@ impl SRegister {
     /// Whether this was parsed from the ST string format.
     pub fn is_st_format(&self) -> bool {
         self.variant == RegisterVariant::RegisterSt
+    }
+
+    /// Return a [`RegisterName`] struct carrying the register index and its
+    /// human-readable name.
+    ///
+    /// This mirrors the Java `RegisterName` class used by
+    /// `AbstractRegisterMsSymbol`.
+    pub fn register_name_info(&self) -> RegisterName {
+        RegisterName {
+            index: self.register_index,
+            name: self.register_name(),
+        }
+    }
+
+    /// Return a [`RegisterName`] for the secondary register (16-bit variant).
+    ///
+    /// Returns `None` if the secondary register index is zero.
+    pub fn register_name2_info(&self) -> Option<RegisterName> {
+        if self.register_index2 == 0 {
+            return None;
+        }
+        Some(RegisterName {
+            index: self.register_index2,
+            name: self.register_name2(),
+        })
+    }
+
+    /// Return the type record number for this register variable.
+    pub fn type_record_number(&self) -> &RecordNumber {
+        &self.type_record_number
+    }
+
+    /// Parse an S_REGISTER_V2 symbol (0x1106) from a byte slice.
+    ///
+    /// This is the v7/v2 format with a 32-bit type index and NT string.
+    /// The layout is identical to `S_REGISTER` -- this is an alias for
+    /// `parse()` that may be used to distinguish intent.
+    pub fn parse_v2(data: &[u8]) -> Option<Self> {
+        Self::parse(data)
     }
 
     /// Parse an S_REGISTER symbol and return it along with the total bytes
@@ -708,6 +765,74 @@ mod tests {
         let (sym, consumed) = SRegister::parse_register16_aligned(&data).unwrap();
         assert_eq!(sym.name, "");
         assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_register_name_info() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011, // EAX
+            "v".to_string(),
+        );
+        let info = sym.register_name_info();
+        assert_eq!(info.index, 0x0011);
+        assert_eq!(info.name, "EAX");
+    }
+
+    #[test]
+    fn test_register_name_info_display() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011,
+            "v".to_string(),
+        );
+        let info = sym.register_name_info();
+        let s = format!("{}", info);
+        assert!(s.contains("EAX"));
+        assert!(s.contains("0x11"));
+    }
+
+    #[test]
+    fn test_register_name2_info_none_for_non_dual() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011,
+            "v".to_string(),
+        );
+        assert!(sym.register_name2_info().is_none());
+    }
+
+    #[test]
+    fn test_register_name2_info_for_dual() {
+        let sym = SRegister::new_register16(
+            RecordNumber::type_record_number(0x0100),
+            0x1112,
+            "v".to_string(),
+        );
+        let info = sym.register_name2_info().unwrap();
+        assert_eq!(info.index, 0x12);
+        assert_eq!(info.name, "ECX");
+    }
+
+    #[test]
+    fn test_type_record_number_accessor() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x2000),
+            0x0011,
+            "v".to_string(),
+        );
+        assert_eq!(sym.type_record_number().number(), 0x2000);
+    }
+
+    #[test]
+    fn test_parse_v2() {
+        let data = make_register_bytes(0x1020, 20, b"eax_var");
+        let sym = SRegister::parse_v2(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x1020);
+        assert_eq!(sym.register_index, 20);
+        assert_eq!(sym.name, "eax_var");
+        // S_REGISTER_V2 uses same layout as S_REGISTER
+        assert_eq!(sym.variant, RegisterVariant::Register);
     }
 
     #[test]

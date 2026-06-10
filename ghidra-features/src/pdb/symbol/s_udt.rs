@@ -159,6 +159,44 @@ impl SUdt {
         self.variant
     }
 
+    /// Return `true` if this UDT name starts with "struct " (case-insensitive).
+    ///
+    /// This is a heuristic check; the PDB itself does not store the UDT
+    /// category in the symbol record.  The category is determined by the
+    /// referenced type record, but the name prefix convention is common
+    /// in some toolchains.
+    pub fn is_struct_name(&self) -> bool {
+        self.name.starts_with("struct ")
+    }
+
+    /// Return `true` if this UDT name starts with "class " (case-insensitive).
+    pub fn is_class_name(&self) -> bool {
+        self.name.starts_with("class ")
+    }
+
+    /// Return `true` if this UDT name starts with "union ".
+    pub fn is_union_name(&self) -> bool {
+        self.name.starts_with("union ")
+    }
+
+    /// Return `true` if this UDT name starts with "enum ".
+    pub fn is_enum_name(&self) -> bool {
+        self.name.starts_with("enum ")
+    }
+
+    /// Return the UDT name stripped of common prefixes like "struct ",
+    /// "class ", "union ", "enum ".
+    ///
+    /// If none of these prefixes are present, returns the full name.
+    pub fn bare_name(&self) -> &str {
+        for prefix in &["struct ", "class ", "union ", "enum "] {
+            if self.name.starts_with(prefix) {
+                return &self.name[prefix.len()..];
+            }
+        }
+        &self.name
+    }
+
     /// Parse an S_UDT symbol and return it along with the total bytes
     /// consumed (including 4-byte alignment padding after the name).
     ///
@@ -564,5 +602,94 @@ mod tests {
         assert_eq!(sym.variant(), UdtVariant::UdtSt);
         assert_eq!(sym.symbol_type_name(), "S_UDT_ST");
         assert_eq!(sym.pdb_id(), 0x1003);
+    }
+
+    #[test]
+    fn test_is_struct_name() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "struct Point".to_string(),
+        );
+        assert!(sym.is_struct_name());
+        assert!(!sym.is_class_name());
+        assert!(!sym.is_union_name());
+        assert!(!sym.is_enum_name());
+    }
+
+    #[test]
+    fn test_is_class_name() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "class MyClass".to_string(),
+        );
+        assert!(sym.is_class_name());
+        assert!(!sym.is_struct_name());
+    }
+
+    #[test]
+    fn test_is_union_name() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "union Variant".to_string(),
+        );
+        assert!(sym.is_union_name());
+    }
+
+    #[test]
+    fn test_is_enum_name() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "enum Color".to_string(),
+        );
+        assert!(sym.is_enum_name());
+    }
+
+    #[test]
+    fn test_bare_name_with_prefix() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "struct Point".to_string(),
+        );
+        assert_eq!(sym.bare_name(), "Point");
+    }
+
+    #[test]
+    fn test_bare_name_without_prefix() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "MyType".to_string(),
+        );
+        assert_eq!(sym.bare_name(), "MyType");
+    }
+
+    #[test]
+    fn test_bare_name_class() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "class MyClass".to_string(),
+        );
+        assert_eq!(sym.bare_name(), "MyClass");
+    }
+
+    #[test]
+    fn test_bare_name_enum() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "enum Color".to_string(),
+        );
+        assert_eq!(sym.bare_name(), "Color");
+    }
+
+    #[test]
+    fn test_no_category_prefix() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "SimpleType".to_string(),
+        );
+        assert!(!sym.is_struct_name());
+        assert!(!sym.is_class_name());
+        assert!(!sym.is_union_name());
+        assert!(!sym.is_enum_name());
+        assert_eq!(sym.bare_name(), "SimpleType");
     }
 }

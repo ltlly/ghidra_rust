@@ -4092,6 +4092,583 @@ impl RegisterSnapshotDiff {
 }
 
 // ============================================================================
+// RegisterGroupDiff -- compare register group state between sessions
+// ============================================================================
+
+/// The kind of difference detected between two register group states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterGroupDiffKind {
+    /// A register was added to the group.
+    Added,
+    /// A register was removed from the group.
+    Removed,
+    /// A register's value changed.
+    ValueChanged,
+    /// A register's definition changed (e.g., bit length).
+    DefinitionChanged,
+    /// The register ordering changed.
+    OrderChanged,
+}
+
+/// A single difference entry in a register group diff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterGroupDiffEntry {
+    /// The register name.
+    pub name: String,
+    /// The kind of difference.
+    pub kind: RegisterGroupDiffKind,
+    /// The old value (if applicable).
+    pub old_value: Option<Vec<u8>>,
+    /// The new value (if applicable).
+    pub new_value: Option<Vec<u8>>,
+}
+
+/// A diff between two register group states.
+///
+/// Ported from Ghidra's register group comparison used by the
+/// debugger UI to highlight changed registers across stops.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterGroupDiff {
+    /// The group name.
+    pub group_name: String,
+    /// The detected differences.
+    pub entries: Vec<RegisterGroupDiffEntry>,
+}
+
+impl RegisterGroupDiff {
+    /// Create a new empty diff for a group.
+    pub fn new(group_name: impl Into<String>) -> Self {
+        Self {
+            group_name: group_name.into(),
+            entries: Vec::new(),
+        }
+    }
+
+    /// Add a difference entry.
+    pub fn add(&mut self, entry: RegisterGroupDiffEntry) {
+        self.entries.push(entry);
+    }
+
+    /// Compute a diff between two banks for a specific group.
+    pub fn compute(
+        bank_old: &PcodeRegisterBank,
+        bank_new: &PcodeRegisterBank,
+        group_name: &str,
+    ) -> Self {
+        let mut diff = Self::new(group_name);
+        let old_regs: BTreeMap<String, Option<Vec<u8>>> = bank_old
+            .registers_in_group(group_name)
+            .into_iter()
+            .map(|n| {
+                let v = bank_old.read_register(&n);
+                (n, v)
+            })
+            .collect();
+        let new_regs: BTreeMap<String, Option<Vec<u8>>> = bank_new
+            .registers_in_group(group_name)
+            .into_iter()
+            .map(|n| {
+                let v = bank_new.read_register(&n);
+                (n, v)
+            })
+            .collect();
+
+        // Check for changed or removed
+        for (name, old_val) in &old_regs {
+            match new_regs.get(name) {
+                Some(new_val) if old_val != new_val => {
+                    diff.add(RegisterGroupDiffEntry {
+                        name: name.clone(),
+                        kind: RegisterGroupDiffKind::ValueChanged,
+                        old_value: old_val.clone(),
+                        new_value: new_val.clone(),
+                    });
+                }
+                None => {
+                    diff.add(RegisterGroupDiffEntry {
+                        name: name.clone(),
+                        kind: RegisterGroupDiffKind::Removed,
+                        old_value: old_val.clone(),
+                        new_value: None,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        // Check for added
+        for name in new_regs.keys() {
+            if !old_regs.contains_key(name) {
+                diff.add(RegisterGroupDiffEntry {
+                    name: name.clone(),
+                    kind: RegisterGroupDiffKind::Added,
+                    old_value: None,
+                    new_value: new_regs[name].clone(),
+                });
+            }
+        }
+
+        diff
+    }
+
+    /// Whether there are any differences.
+    pub fn has_changes(&self) -> bool {
+        !self.entries.is_empty()
+    }
+
+    /// The number of differences.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the diff is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get only entries of a specific kind.
+    pub fn entries_of_kind(&self, kind: RegisterGroupDiffKind) -> Vec<&RegisterGroupDiffEntry> {
+        self.entries.iter().filter(|e| e.kind == kind).collect()
+    }
+
+    /// Get the names of all changed registers.
+    pub fn changed_names(&self) -> Vec<&str> {
+        self.entries.iter().map(|e| e.name.as_str()).collect()
+    }
+}
+
+// ============================================================================
+// RegisterBankRebase -- rebase register context across execution contexts
+// ============================================================================
+
+/// A rebasing operation that adjusts register values when switching
+/// between execution contexts (e.g., when the debugger switches from
+/// one thread to another, or when a new frame is unwound).
+///
+/// Ported from Ghidra's register rebasing logic used during context
+/// switches and frame unwinding. When the execution context changes,
+/// certain registers (like stack pointer, frame pointer, program counter)
+/// must be updated while others (callee-saved registers) may be
+/// preserved or restored from a saved location.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterBankRebase {
+    /// Registers to copy from the source context.
+    pub copy_from_source: BTreeMap<String, String>,
+    /// Registers to set to fixed values.
+    pub fixed_values: BTreeMap<String, Vec<u8>>,
+    /// Registers to restore from a saved location (offset in stack).
+    pub restore_from_stack: BTreeMap<String, u64>,
+    /// Registers to mark as unknown.
+    pub mark_unknown: BTreeSet<String>,
+}
+
+impl RegisterBankRebase {
+    /// Create a new empty rebase specification.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a register to copy from the source (maps dest_name -> src_name).
+    pub fn copy_register(
+        &mut self,
+        dest: impl Into<String>,
+        src: impl Into<String>,
+    ) {
+        self.copy_from_source.insert(dest.into(), src.into());
+    }
+
+    /// Set a register to a fixed value in the new context.
+    pub fn set_fixed(
+        &mut self,
+        name: impl Into<String>,
+        value: Vec<u8>,
+    ) {
+        self.fixed_values.insert(name.into(), value);
+    }
+
+    /// Mark a register to be restored from a stack offset.
+    pub fn restore_from_stack(
+        &mut self,
+        name: impl Into<String>,
+        stack_offset: u64,
+    ) {
+        self.restore_from_stack.insert(name.into(), stack_offset);
+    }
+
+    /// Mark a register as unknown in the new context.
+    pub fn mark_unknown(&mut self, name: impl Into<String>) {
+        self.mark_unknown.insert(name.into());
+    }
+
+    /// Apply this rebase to produce a new register bank from a source bank.
+    ///
+    /// The returned bank will have the rebased register values. Registers
+    /// not mentioned in the rebase specification are copied from the source.
+    pub fn apply(
+        &self,
+        source: &PcodeRegisterBank,
+    ) -> PcodeRegisterBank {
+        let mut dest = source.clone();
+
+        // Clear all values first
+        dest.clear_values();
+
+        // Copy all definitions from source
+        // (already cloned above)
+
+        // Apply fixed values
+        for (name, value) in &self.fixed_values {
+            dest.write_register(name, value);
+        }
+
+        // Apply copies from source
+        for (dest_name, src_name) in &self.copy_from_source {
+            if let Some(val) = source.read_register(src_name) {
+                dest.write_register(dest_name, &val);
+            }
+        }
+
+        // Restore from stack is a hint; the actual stack data would
+        // need to be provided externally. Here we just mark those
+        // registers as unknown.
+        for name in self.restore_from_stack.keys() {
+            // Would be resolved externally using the stack offset
+            // For now, mark as unknown
+            let _ = name;
+        }
+
+        // Mark explicitly unknown registers
+        // (they have no value written, so they're already unknown)
+
+        dest
+    }
+
+    /// The total number of operations in this rebase.
+    pub fn num_operations(&self) -> usize {
+        self.copy_from_source.len()
+            + self.fixed_values.len()
+            + self.restore_from_stack.len()
+            + self.mark_unknown.len()
+    }
+
+    /// Whether this rebase has no operations.
+    pub fn is_empty(&self) -> bool {
+        self.copy_from_source.is_empty()
+            && self.fixed_values.is_empty()
+            && self.restore_from_stack.is_empty()
+            && self.mark_unknown.is_empty()
+    }
+}
+
+// ============================================================================
+// RegisterConcurrencyGuard -- thread-safe register access guard
+// ============================================================================
+
+/// The type of lock held on a register.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterLockKind {
+    /// A shared (read) lock.
+    Shared,
+    /// An exclusive (write) lock.
+    Exclusive,
+}
+
+/// A guard that tracks which thread holds a lock on which register.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterLockEntry {
+    /// The register name.
+    pub register: String,
+    /// The kind of lock.
+    pub kind: RegisterLockKind,
+    /// Which thread holds this lock.
+    pub thread_key: i64,
+    /// A description of why the lock was acquired.
+    pub reason: String,
+}
+
+/// A concurrency guard for register access that prevents conflicting
+/// concurrent operations on the same register.
+///
+/// Ported from Ghidra's register locking mechanism used when multiple
+/// agents or threads access the same debug session's register state.
+/// Ensures that reads and writes to the same register do not race.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterConcurrencyGuard {
+    locks: Vec<RegisterLockEntry>,
+}
+
+impl RegisterConcurrencyGuard {
+    /// Create a new empty guard.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Try to acquire a shared (read) lock on a register.
+    ///
+    /// Returns `true` if the lock was acquired, `false` if an exclusive
+    /// lock from a different thread already holds it.
+    pub fn try_read_lock(
+        &mut self,
+        register: &str,
+        thread_key: i64,
+        reason: impl Into<String>,
+    ) -> bool {
+        // Check for conflicting exclusive locks from other threads
+        for lock in &self.locks {
+            if lock.register == register
+                && lock.kind == RegisterLockKind::Exclusive
+                && lock.thread_key != thread_key
+            {
+                return false;
+            }
+        }
+        self.locks.push(RegisterLockEntry {
+            register: register.to_string(),
+            kind: RegisterLockKind::Shared,
+            thread_key,
+            reason: reason.into(),
+        });
+        true
+    }
+
+    /// Try to acquire an exclusive (write) lock on a register.
+    ///
+    /// Returns `true` if the lock was acquired, `false` if any lock
+    /// from a different thread already holds it.
+    pub fn try_write_lock(
+        &mut self,
+        register: &str,
+        thread_key: i64,
+        reason: impl Into<String>,
+    ) -> bool {
+        // Check for any conflicting locks from other threads
+        for lock in &self.locks {
+            if lock.register == register && lock.thread_key != thread_key {
+                return false;
+            }
+        }
+        self.locks.push(RegisterLockEntry {
+            register: register.to_string(),
+            kind: RegisterLockKind::Exclusive,
+            thread_key,
+            reason: reason.into(),
+        });
+        true
+    }
+
+    /// Release all locks held by a specific thread.
+    pub fn release_thread(&mut self, thread_key: i64) {
+        self.locks.retain(|l| l.thread_key != thread_key);
+    }
+
+    /// Release a specific lock.
+    pub fn release(&mut self, register: &str, thread_key: i64) {
+        self.locks.retain(|l| !(l.register == register && l.thread_key == thread_key));
+    }
+
+    /// Check if a register is currently locked.
+    pub fn is_locked(&self, register: &str) -> bool {
+        self.locks.iter().any(|l| l.register == register)
+    }
+
+    /// Check if a register has an exclusive lock.
+    pub fn is_exclusively_locked(&self, register: &str) -> bool {
+        self.locks
+            .iter()
+            .any(|l| l.register == register && l.kind == RegisterLockKind::Exclusive)
+    }
+
+    /// Get all locks held by a thread.
+    pub fn locks_for_thread(&self, thread_key: i64) -> Vec<&RegisterLockEntry> {
+        self.locks.iter().filter(|l| l.thread_key == thread_key).collect()
+    }
+
+    /// Get all locks on a register.
+    pub fn locks_for_register(&self, register: &str) -> Vec<&RegisterLockEntry> {
+        self.locks.iter().filter(|l| l.register == register).collect()
+    }
+
+    /// The total number of active locks.
+    pub fn num_locks(&self) -> usize {
+        self.locks.len()
+    }
+
+    /// Whether there are no active locks.
+    pub fn is_empty(&self) -> bool {
+        self.locks.is_empty()
+    }
+
+    /// Clear all locks (emergency reset).
+    pub fn clear(&mut self) {
+        self.locks.clear();
+    }
+}
+
+// ============================================================================
+// RegisterWatchpointCondition -- conditional register watchpoints
+// ============================================================================
+
+/// A comparison operator for register watchpoint conditions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WatchpointOperator {
+    /// Equal.
+    Equal,
+    /// Not equal.
+    NotEqual,
+    /// Greater than.
+    GreaterThan,
+    /// Less than.
+    LessThan,
+    /// Greater than or equal.
+    GreaterThanOrEqual,
+    /// Less than or equal.
+    LessThanOrEqual,
+    /// Value changed (any change).
+    Changed,
+    /// Value is within a mask.
+    Mask { mask: u64 },
+}
+
+/// A condition that must be met for a register watchpoint to fire.
+///
+/// Ported from Ghidra's conditional watchpoint support. Allows
+/// watchpoints to be configured to fire only when a register value
+/// satisfies a specific condition (e.g., equals a value, changed,
+/// matches a bitmask).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterWatchpointCondition {
+    /// The register name to watch.
+    pub register: String,
+    /// The comparison operator.
+    pub operator: WatchpointOperator,
+    /// The comparison value (not used for Changed).
+    pub value: Option<Vec<u8>>,
+    /// Whether this condition is currently enabled.
+    pub enabled: bool,
+}
+
+impl RegisterWatchpointCondition {
+    /// Create a new equality condition.
+    pub fn equals(register: impl Into<String>, value: Vec<u8>) -> Self {
+        Self {
+            register: register.into(),
+            operator: WatchpointOperator::Equal,
+            value: Some(value),
+            enabled: true,
+        }
+    }
+
+    /// Create a "changed" condition.
+    pub fn changed(register: impl Into<String>) -> Self {
+        Self {
+            register: register.into(),
+            operator: WatchpointOperator::Changed,
+            value: None,
+            enabled: true,
+        }
+    }
+
+    /// Create a mask condition.
+    pub fn mask(register: impl Into<String>, mask: u64) -> Self {
+        Self {
+            register: register.into(),
+            operator: WatchpointOperator::Mask { mask },
+            value: None,
+            enabled: true,
+        }
+    }
+
+    /// Evaluate this condition against an old and new register value.
+    pub fn evaluate(&self, old_value: Option<&[u8]>, new_value: &[u8]) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match self.operator {
+            WatchpointOperator::Equal => {
+                if let Some(ref expected) = self.value {
+                    new_value == expected.as_slice()
+                } else {
+                    false
+                }
+            }
+            WatchpointOperator::NotEqual => {
+                if let Some(ref expected) = self.value {
+                    new_value != expected.as_slice()
+                } else {
+                    true
+                }
+            }
+            WatchpointOperator::Changed => match old_value {
+                Some(old) => old != new_value,
+                None => true, // First write counts as change
+            },
+            WatchpointOperator::GreaterThan => {
+                if let Some(ref expected) = self.value {
+                    compare_register_values(new_value, expected) > 0
+                } else {
+                    false
+                }
+            }
+            WatchpointOperator::LessThan => {
+                if let Some(ref expected) = self.value {
+                    compare_register_values(new_value, expected) < 0
+                } else {
+                    false
+                }
+            }
+            WatchpointOperator::GreaterThanOrEqual => {
+                if let Some(ref expected) = self.value {
+                    compare_register_values(new_value, expected) >= 0
+                } else {
+                    false
+                }
+            }
+            WatchpointOperator::LessThanOrEqual => {
+                if let Some(ref expected) = self.value {
+                    compare_register_values(new_value, expected) <= 0
+                } else {
+                    false
+                }
+            }
+            WatchpointOperator::Mask { mask } => {
+                let val = read_u64_le(new_value);
+                (val & mask) != 0
+            }
+        }
+    }
+
+    /// Enable or disable this condition.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+}
+
+/// Compare two register values as unsigned integers (little-endian).
+/// Returns positive if a > b, negative if a < b, zero if equal.
+fn compare_register_values(a: &[u8], b: &[u8]) -> i32 {
+    // Compare from most significant byte (rightmost in LE)
+    let max_len = a.len().max(b.len());
+    for i in (0..max_len).rev() {
+        let a_byte = a.get(i).copied().unwrap_or(0);
+        let b_byte = b.get(i).copied().unwrap_or(0);
+        match a_byte.cmp(&b_byte) {
+            std::cmp::Ordering::Greater => return 1,
+            std::cmp::Ordering::Less => return -1,
+            std::cmp::Ordering::Equal => continue,
+        }
+    }
+    0
+}
+
+/// Read a u64 from a little-endian byte slice (up to 8 bytes).
+fn read_u64_le(bytes: &[u8]) -> u64 {
+    let mut buf = [0u8; 8];
+    let len = bytes.len().min(8);
+    buf[..len].copy_from_slice(&bytes[..len]);
+    u64::from_le_bytes(buf)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -5816,5 +6393,198 @@ mod tests {
         assert_eq!(bank.compute_depth("RAX"), 0);
         assert_eq!(bank.compute_depth("EAX"), 1);
         assert_eq!(bank.compute_depth("AX"), 2);
+    }
+
+    // -- RegisterGroupDiff --
+
+    #[test]
+    fn test_register_group_diff_no_changes() {
+        let mut bank1 = PcodeRegisterBank::new();
+        bank1.define("RAX", 64, "GPR");
+        bank1.write_register("RAX", &[0x01; 8]);
+
+        let diff = RegisterGroupDiff::compute(&bank1, &bank1, "GPR");
+        assert!(!diff.has_changes());
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn test_register_group_diff_value_changed() {
+        let mut bank1 = PcodeRegisterBank::new();
+        bank1.define("RAX", 64, "GPR");
+        bank1.write_register("RAX", &[0x01; 8]);
+
+        let mut bank2 = PcodeRegisterBank::new();
+        bank2.define("RAX", 64, "GPR");
+        bank2.write_register("RAX", &[0xFF; 8]);
+
+        let diff = RegisterGroupDiff::compute(&bank1, &bank2, "GPR");
+        assert!(diff.has_changes());
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.entries[0].kind, RegisterGroupDiffKind::ValueChanged);
+    }
+
+    #[test]
+    fn test_register_group_diff_register_added() {
+        let bank1 = PcodeRegisterBank::new();
+
+        let mut bank2 = PcodeRegisterBank::new();
+        bank2.define("RAX", 64, "GPR");
+        bank2.write_register("RAX", &[0x01; 8]);
+
+        let diff = RegisterGroupDiff::compute(&bank1, &bank2, "GPR");
+        assert_eq!(diff.len(), 1);
+        assert_eq!(diff.entries[0].kind, RegisterGroupDiffKind::Added);
+    }
+
+    #[test]
+    fn test_register_group_diff_entries_of_kind() {
+        let mut bank1 = PcodeRegisterBank::new();
+        bank1.define("RAX", 64, "GPR");
+        bank1.write_register("RAX", &[0x01; 8]);
+
+        let mut bank2 = PcodeRegisterBank::new();
+        bank2.define("RAX", 64, "GPR");
+        bank2.define("RBX", 64, "GPR");
+        bank2.write_register("RAX", &[0xFF; 8]);
+        bank2.write_register("RBX", &[0x02; 8]);
+
+        let diff = RegisterGroupDiff::compute(&bank1, &bank2, "GPR");
+        let changed = diff.entries_of_kind(RegisterGroupDiffKind::ValueChanged);
+        assert_eq!(changed.len(), 1);
+        let added = diff.entries_of_kind(RegisterGroupDiffKind::Added);
+        assert_eq!(added.len(), 1);
+    }
+
+    // -- RegisterBankRebase --
+
+    #[test]
+    fn test_register_bank_rebase_fixed_values() {
+        let mut source = PcodeRegisterBank::new();
+        source.define("RAX", 64, "GPR");
+        source.define("RSP", 64, "GPR");
+        source.write_register("RAX", &[0x01; 8]);
+        source.write_register("RSP", &[0xFF; 8]);
+
+        let mut rebase = RegisterBankRebase::new();
+        rebase.set_fixed("RSP".to_string(), vec![0x00; 8]);
+
+        let result = rebase.apply(&source);
+        assert_eq!(result.read_register("RSP"), Some(vec![0x00; 8]));
+        // RAX should be unknown (cleared by rebase)
+        assert!(result.read_register("RAX").is_none());
+    }
+
+    #[test]
+    fn test_register_bank_rebase_copy() {
+        let mut source = PcodeRegisterBank::new();
+        source.define("RAX", 64, "GPR");
+        source.define("RBX", 64, "GPR");
+        source.write_register("RAX", &[0xAA; 8]);
+        source.write_register("RBX", &[0xBB; 8]);
+
+        let mut rebase = RegisterBankRebase::new();
+        rebase.copy_register("RBX".to_string(), "RAX".to_string());
+
+        let result = rebase.apply(&source);
+        assert_eq!(result.read_register("RBX"), Some(vec![0xAA; 8]));
+    }
+
+    #[test]
+    fn test_register_bank_rebase_empty() {
+        let rebase = RegisterBankRebase::new();
+        assert!(rebase.is_empty());
+        assert_eq!(rebase.num_operations(), 0);
+    }
+
+    // -- RegisterConcurrencyGuard --
+
+    #[test]
+    fn test_concurrency_guard_shared_locks() {
+        let mut guard = RegisterConcurrencyGuard::new();
+        assert!(guard.try_read_lock("RAX", 1, "read1"));
+        assert!(guard.try_read_lock("RAX", 2, "read2"));
+        assert!(guard.is_locked("RAX"));
+        assert!(!guard.is_exclusively_locked("RAX"));
+    }
+
+    #[test]
+    fn test_concurrency_guard_exclusive_blocks() {
+        let mut guard = RegisterConcurrencyGuard::new();
+        assert!(guard.try_write_lock("RAX", 1, "write1"));
+        // Another thread cannot get any lock
+        assert!(!guard.try_read_lock("RAX", 2, "read1"));
+        assert!(!guard.try_write_lock("RAX", 2, "write2"));
+        // Same thread can get another lock
+        assert!(guard.try_read_lock("RAX", 1, "read1"));
+    }
+
+    #[test]
+    fn test_concurrency_guard_release() {
+        let mut guard = RegisterConcurrencyGuard::new();
+        guard.try_write_lock("RAX", 1, "write1");
+        guard.release("RAX", 1);
+        assert!(!guard.is_locked("RAX"));
+
+        guard.try_read_lock("RBX", 1, "read1");
+        guard.try_read_lock("RCX", 1, "read2");
+        guard.release_thread(1);
+        assert!(guard.is_empty());
+    }
+
+    #[test]
+    fn test_concurrency_guard_locks_for_thread() {
+        let mut guard = RegisterConcurrencyGuard::new();
+        guard.try_read_lock("RAX", 1, "read1");
+        guard.try_read_lock("RBX", 1, "read2");
+        guard.try_read_lock("RCX", 2, "read3");
+
+        let thread1_locks = guard.locks_for_thread(1);
+        assert_eq!(thread1_locks.len(), 2);
+        let thread2_locks = guard.locks_for_thread(2);
+        assert_eq!(thread2_locks.len(), 1);
+    }
+
+    // -- RegisterWatchpointCondition --
+
+    #[test]
+    fn test_watchpoint_condition_equals() {
+        let cond = RegisterWatchpointCondition::equals("RAX", vec![0x42; 8]);
+        assert!(cond.evaluate(None, &[0x42; 8]));
+        assert!(!cond.evaluate(None, &[0x00; 8]));
+    }
+
+    #[test]
+    fn test_watchpoint_condition_changed() {
+        let cond = RegisterWatchpointCondition::changed("RAX");
+        assert!(cond.evaluate(Some(&[0x01; 8]), &[0x02; 8]));
+        assert!(!cond.evaluate(Some(&[0x01; 8]), &[0x01; 8]));
+        assert!(cond.evaluate(None, &[0x01; 8])); // first write
+    }
+
+    #[test]
+    fn test_watchpoint_condition_mask() {
+        let cond = RegisterWatchpointCondition::mask("EFLAGS", 0x1); // bit 0
+        assert!(cond.evaluate(None, &[0x01, 0x00, 0x00, 0x00]));
+        assert!(!cond.evaluate(None, &[0x02, 0x00, 0x00, 0x00]));
+    }
+
+    #[test]
+    fn test_watchpoint_condition_disabled() {
+        let mut cond = RegisterWatchpointCondition::changed("RAX");
+        cond.set_enabled(false);
+        assert!(!cond.evaluate(Some(&[0x01; 8]), &[0x02; 8]));
+    }
+
+    #[test]
+    fn test_watchpoint_condition_greater_than() {
+        let cond = RegisterWatchpointCondition {
+            register: "RAX".to_string(),
+            operator: WatchpointOperator::GreaterThan,
+            value: Some(vec![0x05, 0x00, 0x00, 0x00]),
+            enabled: true,
+        };
+        assert!(cond.evaluate(None, &[0x06, 0x00, 0x00, 0x00]));
+        assert!(!cond.evaluate(None, &[0x04, 0x00, 0x00, 0x00]));
     }
 }

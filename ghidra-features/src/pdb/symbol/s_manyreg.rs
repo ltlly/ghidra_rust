@@ -459,6 +459,37 @@ impl SManyReg {
             .collect()
     }
 
+    /// Return the register index at the given position.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn register_at(&self, index: usize) -> Option<u16> {
+        self.registers.get(index).copied()
+    }
+
+    /// Return the human-readable register name at the given position.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn register_name_at(&self, index: usize) -> Option<&'static str> {
+        self.registers.get(index).map(|&r| {
+            use crate::pdb::registers;
+            registers::register_name(r as u32)
+        })
+    }
+
+    /// Return the type record number for this many-register variable.
+    pub fn type_record_number(&self) -> &RecordNumber {
+        &self.type_record_number
+    }
+
+    /// Parse an S_MANYREG_V2 symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_manyreg_v2_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_manyreg_v2(data)?;
+        let consumed = Self::compute_consumed_manyreg(data, sym.count);
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
+    }
+
     fn compute_consumed_manyreg2(data: &[u8], count: u16) -> usize {
         let name_off = 4 + count as usize * 2;
         if name_off >= data.len() {
@@ -971,5 +1002,62 @@ mod tests {
         );
         let names = sym.register_names();
         assert!(names.is_empty());
+    }
+
+    #[test]
+    fn test_register_at() {
+        let sym = SManyReg::new(
+            RecordNumber::type_record_number(0x1000),
+            3,
+            vec![17, 18, 20],
+            "triple".to_string(),
+        );
+        assert_eq!(sym.register_at(0), Some(17));
+        assert_eq!(sym.register_at(1), Some(18));
+        assert_eq!(sym.register_at(2), Some(20));
+        assert_eq!(sym.register_at(3), None);
+    }
+
+    #[test]
+    fn test_register_name_at() {
+        let sym = SManyReg::new(
+            RecordNumber::type_record_number(0x1000),
+            2,
+            vec![17, 20],
+            "pair".to_string(),
+        );
+        assert_eq!(sym.register_name_at(0), Some("EAX"));
+        assert_eq!(sym.register_name_at(1), Some("EBX"));
+        assert_eq!(sym.register_name_at(2), None);
+    }
+
+    #[test]
+    fn test_type_record_number_accessor() {
+        let sym = SManyReg::new(
+            RecordNumber::type_record_number(0x2000),
+            1,
+            vec![17],
+            "v".to_string(),
+        );
+        assert_eq!(sym.type_record_number().number(), 0x2000);
+    }
+
+    #[test]
+    fn test_parse_manyreg_v2_aligned() {
+        // type(4) + count(1) + reg(1) + "abc\0"(4) = 10, aligned to 12
+        let data = make_manyreg_bytes(0x1000, &[17], b"abc");
+        let (sym, consumed) = SManyReg::parse_manyreg_v2_aligned(&data).unwrap();
+        assert_eq!(sym.name, "abc");
+        assert_eq!(sym.variant, ManyRegVariant::ManyRegV2);
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_manyreg_v2_aligned_empty() {
+        // type(4) + count(1) + reg(1) + ""(0) + null(1) = 7, aligned to 8
+        let data = make_manyreg_bytes(0x1000, &[6], b"");
+        let (sym, consumed) = SManyReg::parse_manyreg_v2_aligned(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(consumed, 8);
     }
 }

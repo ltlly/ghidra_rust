@@ -148,6 +148,31 @@ impl SObjName {
         self.variant
     }
 
+    /// Return `true` if the signature is non-zero.
+    ///
+    /// A non-zero signature typically identifies a specific object file or
+    /// import library in the compilation unit.
+    pub fn has_signature(&self) -> bool {
+        self.signature != 0
+    }
+
+    /// Return the file extension from the object name, if any.
+    ///
+    /// Returns `Some("obj")` for `"test.obj"`, `None` for `"noext"`.
+    pub fn file_extension(&self) -> Option<&str> {
+        self.name.rsplit_once('.').map(|(_, ext)| ext)
+    }
+
+    /// Return `true` if the object name ends with `.obj`.
+    pub fn is_obj_file(&self) -> bool {
+        self.name.ends_with(".obj")
+    }
+
+    /// Return `true` if the object name ends with `.lib`.
+    pub fn is_lib_file(&self) -> bool {
+        self.name.ends_with(".lib")
+    }
+
     /// Parse an S_OBJNAME symbol and return it along with the total bytes
     /// consumed (including 4-byte alignment padding after the name).
     ///
@@ -504,5 +529,55 @@ mod tests {
         let sym = SObjName::new_st(0x1000, "c.obj".to_string());
         assert_eq!(sym.variant(), ObjNameVariant::ObjNameSt);
         assert_eq!(sym.symbol_type_name(), "S_OBJNAME_ST");
+    }
+
+    #[test]
+    fn test_has_signature() {
+        let sym = SObjName::new(0xDEADBEEF, "test.obj".to_string());
+        assert!(sym.has_signature());
+
+        let sym = SObjName::new(0, "empty.obj".to_string());
+        assert!(!sym.has_signature());
+    }
+
+    #[test]
+    fn test_file_extension() {
+        let sym = SObjName::new(0x1000, "test.obj".to_string());
+        assert_eq!(sym.file_extension(), Some("obj"));
+
+        let sym = SObjName::new(0x1000, "mylib.lib".to_string());
+        assert_eq!(sym.file_extension(), Some("lib"));
+
+        let sym = SObjName::new(0x1000, "noext".to_string());
+        assert_eq!(sym.file_extension(), None);
+
+        let sym = SObjName::new(0x1000, "path/to/file.o".to_string());
+        assert_eq!(sym.file_extension(), Some("o"));
+    }
+
+    #[test]
+    fn test_is_obj_file() {
+        let sym = SObjName::new(0x1000, "test.obj".to_string());
+        assert!(sym.is_obj_file());
+        assert!(!sym.is_lib_file());
+
+        let sym = SObjName::new(0x1000, "test.lib".to_string());
+        assert!(!sym.is_obj_file());
+        assert!(sym.is_lib_file());
+    }
+
+    #[test]
+    fn test_is_lib_file() {
+        let sym = SObjName::new(0x1000, "kernel32.lib".to_string());
+        assert!(sym.is_lib_file());
+        assert!(!sym.is_obj_file());
+    }
+
+    #[test]
+    fn test_no_extension() {
+        let sym = SObjName::new(0x1000, "Makefile".to_string());
+        assert!(!sym.is_obj_file());
+        assert!(!sym.is_lib_file());
+        assert_eq!(sym.file_extension(), None);
     }
 }

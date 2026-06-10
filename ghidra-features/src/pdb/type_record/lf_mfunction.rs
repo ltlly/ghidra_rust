@@ -225,11 +225,25 @@ impl LfMfunction {
         self.return_value_record_number
     }
 
+    /// Get the return type record number.
+    ///
+    /// Alias matching Java's `AbstractMemberFunctionMsType.getReturnType()`.
+    pub fn get_return_type(&self) -> RecordNumber {
+        self.return_value_record_number
+    }
+
     /// Get the containing class type record number.
     ///
     /// Alias for [`containing_class_record_number`] for consistency with
     /// Java's `AbstractMemberFunctionMsType.getContainingClassRecordNumber()`.
     pub fn get_containing_class_record_number(&self) -> RecordNumber {
+        self.class_record_number
+    }
+
+    /// Get the containing class type record number.
+    ///
+    /// Alias matching Java's `AbstractMemberFunctionMsType.getContainingClassType()`.
+    pub fn get_containing_class_type(&self) -> RecordNumber {
         self.class_record_number
     }
 
@@ -241,11 +255,25 @@ impl LfMfunction {
         self.this_record_number
     }
 
+    /// Get the this-pointer type record number.
+    ///
+    /// Alias matching Java's `AbstractMemberFunctionMsType.getThisPointerType()`.
+    pub fn get_this_pointer_type(&self) -> RecordNumber {
+        self.this_record_number
+    }
+
     /// Get the argument list type record number.
     ///
     /// Alias for [`arg_list_record_number`] for consistency with
     /// Java's `AbstractMemberFunctionMsType.getArgListRecordNumber()`.
     pub fn get_arg_list_type_record_number(&self) -> RecordNumber {
+        self.arg_list_record_number
+    }
+
+    /// Get the argument list type record number.
+    ///
+    /// Alias matching Java's `AbstractMemberFunctionMsType.getArgumentsListType()`.
+    pub fn get_arguments_list_type(&self) -> RecordNumber {
         self.arg_list_record_number
     }
 
@@ -843,6 +871,42 @@ mod tests {
         let mf = make_test_mfunction();
         assert_eq!(
             mf.get_arg_list_type_record_number(),
+            RecordNumber::type_record(0x1002)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_return_type() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_return_type(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_containing_class_type() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_containing_class_type(),
+            RecordNumber::type_record(0x1000)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_this_pointer_type() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_this_pointer_type(),
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_arguments_list_type() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_arguments_list_type(),
             RecordNumber::type_record(0x1002)
         );
     }

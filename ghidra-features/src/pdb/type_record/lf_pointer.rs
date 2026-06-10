@@ -509,6 +509,18 @@ impl LfPointer {
         self.is_restrict
     }
 
+    /// Whether the pointer has any extended pointer info.
+    ///
+    /// Returns `true` if this pointer has member pointer info, segment info,
+    /// type-based info, or an invalid base symbol. Mirrors the checks
+    /// performed in Java `AbstractPointerMsType.parseExtendedPointerInfo()`.
+    pub fn has_extended_info(&self) -> bool {
+        self.pointer_mode.is_member_pointer()
+            || self.pointer_type == PointerType::SegmentBased
+            || self.pointer_type == PointerType::TypeBased
+            || self.pointer_type == PointerType::Invalid
+    }
+
     /// Whether this is a MOCOM pointer.
     ///
     /// Mirrors Java `PointerMsType.isMocom()`.
@@ -638,6 +650,14 @@ impl LfPointer {
     ///
     /// Mirrors Java `AbstractPointerMsType.getUnderlyingRecordNumber()`.
     pub fn get_underlying_type_record_number(&self) -> RecordNumber {
+        self.underlying_record_number
+    }
+
+    /// Get the underlying (pointed-to) type record number.
+    ///
+    /// Alias for [`get_underlying_type_record_number`] matching
+    /// Java's `AbstractPointerMsType.getUnderlyingType()`.
+    pub fn get_underlying_type(&self) -> RecordNumber {
         self.underlying_record_number
     }
 
@@ -1575,6 +1595,49 @@ mod tests {
             p.get_underlying_type_record_number(),
             RecordNumber::type_record(0x0074)
         );
+    }
+
+    #[test]
+    fn test_pointer_get_underlying_type() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert_eq!(
+            p.get_underlying_type(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_pointer_has_extended_info_false() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert!(!p.has_extended_info());
+    }
+
+    #[test]
+    fn test_pointer_has_extended_info_member_pointer() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::MemberDataPointer;
+        assert!(p.has_extended_info());
+    }
+
+    #[test]
+    fn test_pointer_has_extended_info_segment_based() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::SegmentBased;
+        assert!(p.has_extended_info());
+    }
+
+    #[test]
+    fn test_pointer_has_extended_info_type_based() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::TypeBased;
+        assert!(p.has_extended_info());
+    }
+
+    #[test]
+    fn test_pointer_has_extended_info_invalid() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::Invalid;
+        assert!(p.has_extended_info());
     }
 
     #[test]

@@ -32,11 +32,12 @@ pub use trace_execution_state::{
     StateQuery, StateTransition, TraceExecutionStateManager,
 };
 pub use trace_memory_region::{
-    MemoryRegionPermissions, SnapValue, TraceMemoryFlag, TraceMemoryRegionEntry,
-    TraceMemoryRegionManager,
+    AddressRange, MemoryRegionPermissions, SnapValue, TraceMemoryFlag,
+    TraceMemoryRegionChangeEvent, TraceMemoryRegionEntry, TraceMemoryRegionManager,
+    TraceOverlappedRegionException,
 };
 pub use trace_stack_frame::{
-    FrameKind, FrameRegisterValue, SourceLocation, StackFrameError,
+    FrameKind, FrameRegisterValue, SourceLocation, StackFrameError, StackFrameSnapshot,
     TraceStackEntry, TraceStackFrameEntry, TraceStackFrameManager,
 };
 pub use trace_dynamic_table::{

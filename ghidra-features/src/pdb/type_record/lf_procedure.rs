@@ -420,11 +420,25 @@ impl LfProcedure {
         self.return_value_record_number
     }
 
+    /// Get the return type record number.
+    ///
+    /// Alias matching Java's `AbstractProcedureMsType.getReturnType()`.
+    pub fn get_return_type(&self) -> RecordNumber {
+        self.return_value_record_number
+    }
+
     /// Get the argument list type record number.
     ///
     /// Alias for [`arg_list_record_number`] for consistency with
     /// Java's `AbstractProcedureMsType.getArgListRecordNumber()`.
     pub fn get_arg_list_type_record_number(&self) -> RecordNumber {
+        self.arg_list_record_number
+    }
+
+    /// Get the argument list type record number.
+    ///
+    /// Alias matching Java's `AbstractProcedureMsType.getArgumentsListType()`.
+    pub fn get_arguments_list_type(&self) -> RecordNumber {
         self.arg_list_record_number
     }
 
@@ -932,6 +946,24 @@ mod tests {
         let p = make_test_procedure();
         assert_eq!(
             p.get_arg_list_type_record_number(),
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_procedure_get_return_type() {
+        let p = make_test_procedure();
+        assert_eq!(
+            p.get_return_type(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_procedure_get_arguments_list_type() {
+        let p = make_test_procedure();
+        assert_eq!(
+            p.get_arguments_list_type(),
             RecordNumber::type_record(0x1001)
         );
     }

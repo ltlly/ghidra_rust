@@ -144,6 +144,14 @@ impl LfModifier {
         self.modified_record_number
     }
 
+    /// Get the modified (underlying) type record number.
+    ///
+    /// Alias for [`get_modified_record_number`] matching
+    /// Java's `AbstractModifierMsType.getModifiedType()`.
+    pub fn get_modified_type(&self) -> RecordNumber {
+        self.modified_record_number
+    }
+
     /// Get the raw attributes byte (for serialization).
     pub fn attributes_byte(&self) -> u16 {
         (self.is_const as u16)
@@ -729,6 +737,12 @@ mod tests {
     fn test_modifier_get_modified_record_number() {
         let m = LfModifier::const_modifier(0x0074);
         assert_eq!(m.get_modified_record_number(), RecordNumber::type_record(0x0074));
+    }
+
+    #[test]
+    fn test_modifier_get_modified_type() {
+        let m = LfModifier::const_modifier(0x0074);
+        assert_eq!(m.get_modified_type(), RecordNumber::type_record(0x0074));
     }
 
     #[test]

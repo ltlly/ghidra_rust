@@ -154,6 +154,18 @@ impl SEnd {
         self.variant == EndVariant::ProcedureIdEnd
     }
 
+    /// Return `true` if this variant marks the end of a scope that began
+    /// with a procedure symbol (S_END or S_PROC_ID_END).
+    pub fn is_procedure_end(&self) -> bool {
+        matches!(self.variant, EndVariant::End | EndVariant::ProcIdEnd | EndVariant::ProcedureIdEnd)
+    }
+
+    /// Return `true` if this variant marks the end of an inline site
+    /// (S_INLINESITE_END or S_INLINED_FUNCTION_END).
+    pub fn is_inline_end(&self) -> bool {
+        matches!(self.variant, EndVariant::InlineSiteEnd | EndVariant::InlinedFunctionEnd)
+    }
+
     /// Parse an S_ENDARG symbol from a byte slice.
     ///
     /// The S_ENDARG symbol has no payload; any data present is ignored.
@@ -201,6 +213,19 @@ impl Default for SEnd {
 impl From<EndVariant> for SEnd {
     fn from(variant: EndVariant) -> Self {
         Self { variant }
+    }
+}
+
+impl fmt::Display for EndVariant {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            EndVariant::End => write!(f, "End"),
+            EndVariant::EndArg => write!(f, "EndArg"),
+            EndVariant::ProcIdEnd => write!(f, "ProcIdEnd"),
+            EndVariant::InlineSiteEnd => write!(f, "InlineSiteEnd"),
+            EndVariant::InlinedFunctionEnd => write!(f, "InlinedFunctionEnd"),
+            EndVariant::ProcedureIdEnd => write!(f, "ProcedureIdEnd"),
+        }
     }
 }
 
@@ -494,5 +519,35 @@ mod tests {
                 assert_ne!(variants[i], variants[j]);
             }
         }
+    }
+
+    #[test]
+    fn test_is_procedure_end() {
+        assert!(SEnd::new().is_procedure_end());
+        assert!(!SEnd::endarg().is_procedure_end());
+        assert!(SEnd::proc_id_end().is_procedure_end());
+        assert!(!SEnd::inline_site_end().is_procedure_end());
+        assert!(!SEnd::inlined_function_end().is_procedure_end());
+        assert!(SEnd::procedure_id_end().is_procedure_end());
+    }
+
+    #[test]
+    fn test_is_inline_end() {
+        assert!(!SEnd::new().is_inline_end());
+        assert!(!SEnd::endarg().is_inline_end());
+        assert!(!SEnd::proc_id_end().is_inline_end());
+        assert!(SEnd::inline_site_end().is_inline_end());
+        assert!(SEnd::inlined_function_end().is_inline_end());
+        assert!(!SEnd::procedure_id_end().is_inline_end());
+    }
+
+    #[test]
+    fn test_end_variant_display() {
+        assert_eq!(format!("{}", EndVariant::End), "End");
+        assert_eq!(format!("{}", EndVariant::EndArg), "EndArg");
+        assert_eq!(format!("{}", EndVariant::ProcIdEnd), "ProcIdEnd");
+        assert_eq!(format!("{}", EndVariant::InlineSiteEnd), "InlineSiteEnd");
+        assert_eq!(format!("{}", EndVariant::InlinedFunctionEnd), "InlinedFunctionEnd");
+        assert_eq!(format!("{}", EndVariant::ProcedureIdEnd), "ProcedureIdEnd");
     }
 }

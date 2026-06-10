@@ -65,7 +65,7 @@ pub struct SConstant {
     /// The underlying constant data.
     pub inner: AbstractConstant,
     /// Which variant was parsed.
-    variant: ConstantVariant,
+    pub(crate) variant: ConstantVariant,
 }
 
 impl SConstant {

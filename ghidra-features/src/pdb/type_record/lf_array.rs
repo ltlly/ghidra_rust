@@ -215,6 +215,20 @@ impl LfArray {
         self.array.index_type_record_number
     }
 
+    /// Get the element type record number.
+    ///
+    /// Alias matching Java's `AbstractArrayMsType.getElementTypeRecordNumber()`.
+    pub fn get_element_type(&self) -> RecordNumber {
+        self.array.element_type_record_number
+    }
+
+    /// Get the index type record number.
+    ///
+    /// Alias matching Java's `AbstractArrayMsType.getIndexType()`.
+    pub fn get_index_type(&self) -> RecordNumber {
+        self.array.index_type_record_number
+    }
+
     /// Whether this array is variadic (represents `...` arguments).
     ///
     /// A more precise check than [`is_variadic_heuristic`]. Returns `true`
@@ -659,6 +673,24 @@ mod tests {
         let a = make_test_array();
         assert_eq!(
             a.get_index_type_record_number(),
+            RecordNumber::type_record(0x0075)
+        );
+    }
+
+    #[test]
+    fn test_array_get_element_type() {
+        let a = make_test_array();
+        assert_eq!(
+            a.get_element_type(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_array_get_index_type() {
+        let a = make_test_array();
+        assert_eq!(
+            a.get_index_type(),
             RecordNumber::type_record(0x0075)
         );
     }

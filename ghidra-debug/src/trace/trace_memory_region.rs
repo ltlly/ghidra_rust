@@ -25,6 +25,120 @@ use crate::model::Lifespan;
 use crate::model::TraceMemoryState;
 
 // ---------------------------------------------------------------------------
+// TraceMemoryRegionChangeEvent
+// ---------------------------------------------------------------------------
+
+/// The kind of change event that occurred on a memory region.
+///
+/// Ported from Ghidra's `TraceEvents.REGION_ADDED`, `REGION_CHANGED`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceMemoryRegionChangeEvent {
+    /// A new region was added.
+    Added,
+    /// The region's lifespan changed (creation or destruction snap moved).
+    LifespanChanged,
+    /// The region's properties changed (name, range, flags, etc.).
+    Changed,
+    /// The region was deleted.
+    Deleted,
+}
+
+impl TraceMemoryRegionChangeEvent {
+    /// Human-readable name.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Added => "Added",
+            Self::LifespanChanged => "LifespanChanged",
+            Self::Changed => "Changed",
+            Self::Deleted => "Deleted",
+        }
+    }
+}
+
+impl fmt::Display for TraceMemoryRegionChangeEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceOverlappedRegionException
+// ---------------------------------------------------------------------------
+
+/// Error returned when adding or modifying a region would cause it to
+/// overlap an existing region in the same address space.
+///
+/// Ported from Ghidra's `TraceOverlappedRegionException`.
+#[derive(Debug, Clone)]
+pub struct TraceOverlappedRegionException {
+    /// The keys of the conflicting regions.
+    pub conflicts: Vec<i64>,
+    /// Human-readable message.
+    pub message: String,
+}
+
+impl TraceOverlappedRegionException {
+    /// Create a new overlap exception with the given conflicting region keys.
+    pub fn new(conflicts: Vec<i64>) -> Self {
+        let msg = format!(
+            "Region would overlap {} existing region(s): {:?}",
+            conflicts.len(),
+            conflicts
+        );
+        Self {
+            conflicts,
+            message: msg,
+        }
+    }
+}
+
+impl fmt::Display for TraceOverlappedRegionException {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for TraceOverlappedRegionException {}
+
+// ---------------------------------------------------------------------------
+// AddressRange (helper for range-based operations)
+// ---------------------------------------------------------------------------
+
+/// A simple address range represented as (min, max) inclusive.
+///
+/// This is a lightweight stand-in for Ghidra's `AddressRange` used by
+/// region operations that need to express a contiguous range of offsets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AddressRange {
+    /// Minimum offset (inclusive).
+    pub min: u64,
+    /// Maximum offset (inclusive).
+    pub max: u64,
+}
+
+impl AddressRange {
+    /// Create a new address range.
+    pub fn new(min: u64, max: u64) -> Self {
+        Self { min, max }
+    }
+
+    /// The length of this range in bytes.
+    pub fn length(&self) -> u64 {
+        self.max - self.min + 1
+    }
+
+    /// Whether this range contains the given offset.
+    pub fn contains(&self, offset: u64) -> bool {
+        offset >= self.min && offset <= self.max
+    }
+
+    /// Whether this range overlaps with another.
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.min <= other.max && other.min <= self.max
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TraceMemoryFlag
 // ---------------------------------------------------------------------------
 
@@ -1000,6 +1114,208 @@ impl TraceMemoryRegionManager {
     pub fn clear(&mut self) {
         self.regions.clear();
     }
+
+    // -----------------------------------------------------------------------
+    // Path-based lookup (ported from TraceMemoryManager.getLiveRegionByPath)
+    // -----------------------------------------------------------------------
+
+    /// Get a region by its path at the given snap.
+    ///
+    /// Ported from `TraceMemoryManager.getLiveRegionByPath(long, String)`.
+    /// Returns the region whose path matches and which is valid at `snap`.
+    pub fn get_region_by_path(&self, snap: i64, path: &str) -> Option<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .find(|r| r.path == path && r.is_valid_at(snap))
+    }
+
+    /// Get a mutable region by its path at the given snap.
+    pub fn get_region_by_path_mut(
+        &mut self,
+        snap: i64,
+        path: &str,
+    ) -> Option<&mut TraceMemoryRegionEntry> {
+        self.regions
+            .values_mut()
+            .find(|r| r.path == path && r.is_valid_at(snap))
+    }
+
+    // -----------------------------------------------------------------------
+    // Overlap-checked add (ported from TraceMemoryManager.addRegion)
+    // -----------------------------------------------------------------------
+
+    /// Add a region with overlap validation.
+    ///
+    /// Ported from `TraceMemoryManager.addRegion(String, Lifespan, AddressRange, Collection)`.
+    /// If the new region would overlap an existing region in the same space
+    /// and overlapping lifespan, returns `Err` with the conflicting keys.
+    pub fn add_region_checked(
+        &mut self,
+        mut region: TraceMemoryRegionEntry,
+    ) -> Result<i64, TraceOverlappedRegionException> {
+        // Check for overlaps with existing regions in the same space
+        let conflicts: Vec<i64> = self
+            .regions
+            .values()
+            .filter(|r| {
+                r.space == region.space
+                    && r.lifespan.intersects(&region.lifespan)
+                    && r.min_address <= region.max_address
+                    && region.min_address <= r.max_address
+            })
+            .map(|r| r.key)
+            .collect();
+
+        if !conflicts.is_empty() {
+            return Err(TraceOverlappedRegionException::new(conflicts));
+        }
+
+        let key = self.next_key;
+        self.next_key += 1;
+        region.key = key;
+        self.regions.insert(key, region);
+        Ok(key)
+    }
+
+    /// Create a new region (convenience for `add_region_checked`).
+    ///
+    /// Ported from `TraceMemoryManager.createRegion(String, long, AddressRange, Collection)`.
+    pub fn create_region(
+        &mut self,
+        path: impl Into<String>,
+        name: impl Into<String>,
+        space: impl Into<String>,
+        min_address: u64,
+        max_address: u64,
+        snap: i64,
+        flags: BTreeSet<TraceMemoryFlag>,
+    ) -> Result<i64, TraceOverlappedRegionException> {
+        let lifespan = Lifespan::now_on(snap);
+        let region = TraceMemoryRegionEntry::new(
+            0, // will be overwritten
+            path,
+            name,
+            space,
+            min_address,
+            max_address,
+            lifespan,
+        )
+        .with_permissions(MemoryRegionPermissions::from_flags(&flags));
+        self.add_region_checked(region)
+    }
+
+    // -----------------------------------------------------------------------
+    // Address set (ported from TraceMemoryManager.getRegionsAddressSet)
+    // -----------------------------------------------------------------------
+
+    /// Get the union of all region address ranges at the given snap.
+    ///
+    /// Ported from `TraceMemoryManager.getRegionsAddressSet(long)`.
+    /// Returns a sorted, merged list of `(min, max)` ranges.
+    pub fn get_regions_address_set(&self, snap: i64) -> Vec<(u64, u64)> {
+        let mut ranges: Vec<(u64, u64)> = self
+            .regions
+            .values()
+            .filter(|r| r.is_valid_at(snap))
+            .map(|r| r.get_range(snap))
+            .collect();
+        ranges.sort_by_key(|&(min, _)| min);
+
+        // Merge overlapping/adjacent ranges
+        let mut merged: Vec<(u64, u64)> = Vec::new();
+        for (min, max) in ranges {
+            if let Some(last) = merged.last_mut() {
+                if min <= last.1 + 1 {
+                    last.1 = last.1.max(max);
+                    continue;
+                }
+            }
+            merged.push((min, max));
+        }
+        merged
+    }
+
+    /// Get the union of all region address ranges in a given space at `snap`.
+    ///
+    /// Ported from `TraceMemoryManager.getRegionsAddressSet(long)` with
+    /// space filtering.
+    pub fn get_regions_address_set_in_space(
+        &self,
+        space: &str,
+        snap: i64,
+    ) -> Vec<(u64, u64)> {
+        let mut ranges: Vec<(u64, u64)> = self
+            .regions
+            .values()
+            .filter(|r| r.space == space && r.is_valid_at(snap))
+            .map(|r| r.get_range(snap))
+            .collect();
+        ranges.sort_by_key(|&(min, _)| min);
+
+        let mut merged: Vec<(u64, u64)> = Vec::new();
+        for (min, max) in ranges {
+            if let Some(last) = merged.last_mut() {
+                if min <= last.1 + 1 {
+                    last.1 = last.1.max(max);
+                    continue;
+                }
+            }
+            merged.push((min, max));
+        }
+        merged
+    }
+
+    /// Whether a given range is fully covered by regions in a space at `snap`.
+    ///
+    /// Useful for checking if a memory read would succeed entirely from
+    /// mapped regions.
+    pub fn is_range_covered(
+        &self,
+        space: &str,
+        min: u64,
+        max: u64,
+        snap: i64,
+    ) -> bool {
+        let set = self.get_regions_address_set_in_space(space, snap);
+        let mut covered_up_to = min;
+        for (rmin, rmax) in &set {
+            if *rmin > covered_up_to {
+                return false;
+            }
+            covered_up_to = covered_up_to.max(*rmax + 1);
+            if covered_up_to > max {
+                return true;
+            }
+        }
+        covered_up_to > max
+    }
+
+    /// Get all regions sorted by creation snap (lifespan min).
+    pub fn regions_by_creation_order(&self) -> Vec<&TraceMemoryRegionEntry> {
+        let mut regions: Vec<&TraceMemoryRegionEntry> = self.regions.values().collect();
+        regions.sort_by_key(|r| r.lifespan.lmin());
+        regions
+    }
+
+    /// Get the total number of bytes mapped across all regions in a space at `snap`.
+    pub fn total_mapped_bytes(&self, space: &str, snap: i64) -> u64 {
+        self.regions_in_space_at(space, snap)
+            .iter()
+            .map(|r| r.get_length(snap))
+            .sum()
+    }
+
+    /// Find all regions that match a predicate at the given snap.
+    pub fn find_regions_where(
+        &self,
+        snap: i64,
+        predicate: impl Fn(&TraceMemoryRegionEntry) -> bool,
+    ) -> Vec<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| r.is_valid_at(snap) && predicate(r))
+            .collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1714,5 +2030,281 @@ mod tests {
         mgr.clear();
         assert_eq!(mgr.region_count(), 0);
         assert!(mgr.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Path-based lookup tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_get_by_path() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "MemoryRegions[0]", ".text", "ram", 0x400000, 0x400FFF,
+            Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "MemoryRegions[1]", ".data", "ram", 0x500000, 0x500FFF,
+            Lifespan::now_on(0),
+        ));
+
+        let r = mgr.get_region_by_path(0, "MemoryRegions[0]").unwrap();
+        assert_eq!(r.name, ".text");
+        assert!(mgr.get_region_by_path(0, "MemoryRegions[99]").is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overlap-checked add tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_add_checked_no_overlap() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        let k0 = mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        assert!(k0.is_ok());
+
+        // Non-overlapping region should succeed
+        let k1 = mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+        ));
+        assert!(k1.is_ok());
+    }
+
+    #[test]
+    fn test_region_manager_add_checked_overlap() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ))
+        .unwrap();
+
+        // Overlapping region should fail
+        let result = mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".overlap", "ram", 0x400F00, 0x401FFF, Lifespan::now_on(0),
+        ));
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.conflicts.len(), 1);
+    }
+
+    #[test]
+    fn test_region_manager_add_checked_different_space() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ))
+        .unwrap();
+
+        // Same address range but different space -- should succeed
+        let result = mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", "reg", "register", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_region_manager_add_checked_different_lifespan() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::span(0, 10),
+        ))
+        .unwrap();
+
+        // Same range but non-overlapping lifespan -- should succeed
+        let result = mgr.add_region_checked(TraceMemoryRegionEntry::new(
+            0, "", ".text2", "ram", 0x400000, 0x400FFF, Lifespan::span(11, 20),
+        ));
+        assert!(result.is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // create_region tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_create_region() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        let flags = BTreeSet::from([TraceMemoryFlag::Read, TraceMemoryFlag::Execute]);
+        let k = mgr.create_region(
+            "MemoryRegions[0]", ".text", "ram", 0x400000, 0x400FFF, 0, flags,
+        );
+        assert!(k.is_ok());
+        let r = mgr.region(k.unwrap()).unwrap();
+        assert_eq!(r.name, ".text");
+        assert!(r.is_read_at(0));
+        assert!(r.is_execute_at(0));
+        assert!(!r.is_write_at(0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Address set tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_address_set() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+        ));
+
+        let set = mgr.get_regions_address_set(0);
+        assert_eq!(set.len(), 2);
+        assert_eq!(set[0], (0x400000, 0x400FFF));
+        assert_eq!(set[1], (0x500000, 0x500FFF));
+    }
+
+    #[test]
+    fn test_region_manager_address_set_merged() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        // Two adjacent regions
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", "a", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", "b", "ram", 0x401000, 0x401FFF, Lifespan::now_on(0),
+        ));
+
+        let set = mgr.get_regions_address_set(0);
+        assert_eq!(set.len(), 1);
+        assert_eq!(set[0], (0x400000, 0x401FFF));
+    }
+
+    #[test]
+    fn test_region_manager_address_set_in_space() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", "reg", "register", 0, 0xFF, Lifespan::now_on(0),
+        ));
+
+        let ram_set = mgr.get_regions_address_set_in_space("ram", 0);
+        assert_eq!(ram_set.len(), 1);
+        let reg_set = mgr.get_regions_address_set_in_space("register", 0);
+        assert_eq!(reg_set.len(), 1);
+    }
+
+    #[test]
+    fn test_region_manager_is_range_covered() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+
+        assert!(mgr.is_range_covered("ram", 0x400100, 0x400200, 0));
+        assert!(!mgr.is_range_covered("ram", 0x400100, 0x401000, 0));
+        assert!(mgr.is_range_covered("ram", 0x400000, 0x400FFF, 0));
+    }
+
+    // -----------------------------------------------------------------------
+    // Extended query tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_creation_order() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(5),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+
+        let ordered = mgr.regions_by_creation_order();
+        assert_eq!(ordered[0].name, ".text");
+        assert_eq!(ordered[1].name, ".data");
+    }
+
+    #[test]
+    fn test_region_manager_total_mapped_bytes() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+        ));
+
+        assert_eq!(mgr.total_mapped_bytes("ram", 0), 0x2000);
+        assert_eq!(mgr.total_mapped_bytes("register", 0), 0);
+    }
+
+    #[test]
+    fn test_region_manager_find_where() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RX),
+        );
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                1, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RW),
+        );
+
+        let exec = mgr.find_regions_where(0, |r| r.permissions.execute);
+        assert_eq!(exec.len(), 1);
+        assert_eq!(exec[0].name, ".text");
+    }
+
+    // -----------------------------------------------------------------------
+    // Change event tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_change_event_display() {
+        assert_eq!(TraceMemoryRegionChangeEvent::Added.to_string(), "Added");
+        assert_eq!(
+            TraceMemoryRegionChangeEvent::LifespanChanged.to_string(),
+            "LifespanChanged"
+        );
+        assert_eq!(TraceMemoryRegionChangeEvent::Changed.to_string(), "Changed");
+        assert_eq!(TraceMemoryRegionChangeEvent::Deleted.to_string(), "Deleted");
+    }
+
+    // -----------------------------------------------------------------------
+    // AddressRange tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_address_range_basics() {
+        let r = AddressRange::new(0x100, 0x1FF);
+        assert_eq!(r.length(), 0x100);
+        assert!(r.contains(0x100));
+        assert!(r.contains(0x180));
+        assert!(r.contains(0x1FF));
+        assert!(!r.contains(0x0FF));
+        assert!(!r.contains(0x200));
+    }
+
+    #[test]
+    fn test_address_range_overlaps() {
+        let a = AddressRange::new(0x100, 0x1FF);
+        let b = AddressRange::new(0x180, 0x280);
+        let c = AddressRange::new(0x200, 0x2FF);
+        assert!(a.overlaps(&b));
+        assert!(b.overlaps(&c));
+        assert!(!a.overlaps(&c));
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceOverlappedRegionException tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_overlap_exception_display() {
+        let err = TraceOverlappedRegionException::new(vec![1, 2]);
+        assert!(err.to_string().contains("2"));
+        assert!(err.to_string().contains("overlap"));
+        assert_eq!(err.conflicts, vec![1, 2]);
     }
 }

@@ -157,7 +157,7 @@ pub use s_coffgroup::SPeCoffGroup;
 pub mod s_register;
 pub mod s_manyreg;
 
-pub use s_register::{SRegister, RegisterVariant};
+pub use s_register::{SRegister, RegisterVariant, RegisterName};
 pub use s_manyreg::{SManyReg, ManyRegVariant};
 
 // Constant symbol alternate naming
