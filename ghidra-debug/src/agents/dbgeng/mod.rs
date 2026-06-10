@@ -10,6 +10,8 @@
 pub mod arch;
 pub mod commands;
 pub mod connection;
+pub mod dbgeng_inferior_process;
+pub mod dbgeng_thread;
 pub mod hooks;
 
 use serde::{Deserialize, Serialize};

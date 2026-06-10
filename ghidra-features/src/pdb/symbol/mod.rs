@@ -92,6 +92,12 @@ pub mod s_lprocref;
 pub mod s_dataref;
 pub mod s_annotation;
 
+// Block, scope, return, and entry symbol types ported from Ghidra Java
+pub mod s_block32;
+pub mod s_with32;
+pub mod s_return;
+pub mod s_entrythis;
+
 pub use abstract_base_pointer_relative::AbstractBasePointerRelative;
 pub use abstract_block::AbstractBlock;
 pub use abstract_compile2::AbstractCompile2;
@@ -152,3 +158,8 @@ pub mod s_manyreg;
 
 pub use s_register::SRegister;
 pub use s_manyreg::SManyReg;
+
+pub use s_block32::SBlock32;
+pub use s_with32::SWith32;
+pub use s_return::SReturn;
+pub use s_entrythis::SEntryThis;

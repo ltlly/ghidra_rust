@@ -11,6 +11,8 @@ pub mod arch;
 pub mod commands;
 pub mod connection;
 pub mod hooks;
+pub mod lldb_inferior_process;
+pub mod lldb_thread;
 
 use serde::{Deserialize, Serialize};
 
