@@ -370,12 +370,12 @@ impl Default for OverviewColorPlugin {
 }
 
 // Stub service used by OverviewColorComponent (component delegates to plugin)
-struct StubColorService {
+pub(crate) struct StubColorService {
     name: String,
 }
 
 impl StubColorService {
-    fn new(name: String) -> Self {
+    pub(crate) fn new(name: String) -> Self {
         Self { name }
     }
 }

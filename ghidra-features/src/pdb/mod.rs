@@ -44,6 +44,12 @@ pub mod msf_file;
 pub mod symbol;
 pub mod type_record;
 
+// Core PDB reader abstractions ported from Ghidra Java
+pub mod abstract_pdb;
+pub mod pdb_byte_reader;
+pub mod pdb_exception;
+pub mod msf;
+
 use std::fmt;
 
 use nom::error::{ErrorKind, ParseError};

@@ -20,6 +20,7 @@
 //! - [`reloc`] — relocation fixup handlers for binary rebasing
 //! - [`select`] — flow-based code selection actions
 //! - [`plugin`] — base GUI plugins (codebrowser, listing, symboltree, bytes, comment, decompile, terminal)
+//! - [`searchtext`] — text search plugin (search dialog, provider, actions, history)
 
 pub mod analyzer;
 pub mod assembler;
@@ -58,6 +59,7 @@ pub mod stack;
 pub mod subroutine;
 pub mod symbol;
 pub mod symboltable;
+pub mod terminal;
 
 // -- New modules ported from Ghidra's Features/Base app packages --
 /// Plugin events for program lifecycle, location, selection, and highlighting.
@@ -147,3 +149,16 @@ pub mod program;
 /// drag-and-drop, undo/redo; field list editor; editor provider types
 /// (structure, union); structure-specific panel with bit-field and alignment.
 pub mod compositeeditor;
+
+/// Search text plugin for program listing text search.
+/// Ported from `ghidra.app.plugin.core.searchtext` Java packages.
+/// Provides: search text plugin (lifecycle, actions, events),
+/// search text provider (panel UI, history, status display).
+pub mod searchtext;
+
+/// Overview plugin and provider for listing margin color bars.
+/// Ported from `ghidra.app.plugin.core.overview` Java package.
+/// Provides: plugin managing color services with toggle actions and config
+/// persistence; provider rendering the color bar with navigation, tooltips,
+/// batched refresh, and domain object change listening.
+pub mod overview;
