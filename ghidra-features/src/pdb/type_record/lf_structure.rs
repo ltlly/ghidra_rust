@@ -24,7 +24,7 @@ use std::fmt;
 use super::abstract_composite_ms_type::AbstractCompositeMsType;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::ms_property::MsProperty;
+use super::ms_property::{Hfa, Mocom, MsProperty};
 use super::RecordNumber;
 
 /// Concrete PDB structure type record (`LF_STRUCTURE`).
@@ -101,6 +101,148 @@ impl LfStructure {
             name,
             mangled_name.unwrap_or_default(),
         )
+    }
+
+    /// Parse an `LF_STRUCTURE` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `StructureMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `count` field (after the 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   count
+    /// +2  u16   property
+    /// +4  u32   fieldList type index
+    /// +8  u32   derivedFrom type index
+    /// +12 u32   vshape type index
+    /// +16 Numeric (variable-length size)
+    ///     StringNt name
+    ///     StringNt mangledName (optional)
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 16 {
+            return Err(format!(
+                "LF_STRUCTURE payload too short: need >= 16 bytes, got {}",
+                data.len()
+            ));
+        }
+        let count = u16::from_le_bytes([data[0], data[1]]);
+        let property = MsProperty::from_u16(u16::from_le_bytes([data[2], data[3]]));
+        let field_list_ti = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let derived_ti = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+        let vshape_ti = u32::from_le_bytes([data[12], data[13], data[14], data[15]]);
+
+        let (size, next) = crate::pdb::pdb_byte_reader::parse_numeric(data, 16);
+
+        // Parse name and optional mangled name from remaining bytes.
+        let (name, mangled_name) = if next < data.len() {
+            let (n, after_n) = crate::pdb::pdb_byte_reader::read_null_terminated_string(data, next);
+            let mn = if after_n < data.len() && data[after_n] != 0 {
+                crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[after_n..])
+            } else {
+                String::new()
+            };
+            (n, if mn.is_empty() { None } else { Some(mn) })
+        } else {
+            (String::new(), None)
+        };
+
+        Ok(Self::from_parsed(count, property, field_list_ti, derived_ti, vshape_ti, size, name, mangled_name))
+    }
+
+    // =========================================================================
+    // Property-based accessors
+    // =========================================================================
+
+    /// Whether this structure is scoped (e.g., a C++11 scoped enum-like usage).
+    pub fn is_scoped(&self) -> bool {
+        self.composite.property.contains(MsProperty::SCOPED)
+    }
+
+    /// Whether this structure has a unique name (fully qualified).
+    pub fn has_unique_name(&self) -> bool {
+        self.composite.property.contains(MsProperty::HAS_UNIQUE_NAME)
+    }
+
+    /// Whether this structure is sealed (cannot be inherited).
+    pub fn is_sealed(&self) -> bool {
+        self.composite.property.contains(MsProperty::SEALED)
+    }
+
+    /// Whether this structure is packed (no padding between members).
+    pub fn is_packed(&self) -> bool {
+        self.composite.property.contains(MsProperty::PACKED)
+    }
+
+    /// Whether this structure has overloaded operators.
+    pub fn has_overloaded_ops(&self) -> bool {
+        self.composite.property.contains(MsProperty::OVERLOADED_OPS)
+    }
+
+    /// Whether this structure has overloaded assignment operators.
+    pub fn has_overloaded_assign(&self) -> bool {
+        self.composite.property.contains(MsProperty::OVLD_ASSIGN)
+    }
+
+    /// Whether this structure has casting operators.
+    pub fn has_casting_ops(&self) -> bool {
+        self.composite.property.contains(MsProperty::CASTING_OPS)
+    }
+
+    /// Whether this structure has constructors/destructors.
+    pub fn has_ctor_dtor(&self) -> bool {
+        self.composite.property.contains(MsProperty::CTOR)
+    }
+
+    /// Whether this structure contains nested types.
+    pub fn contains_nested(&self) -> bool {
+        self.composite.contains_nested()
+    }
+
+    /// Get the HFA (Homogeneous Floating-point Aggregate) classification.
+    pub fn hfa(&self) -> Hfa {
+        self.composite.property.hfa()
+    }
+
+    /// Get the Mocom (Managed/COM) classification.
+    pub fn mocom(&self) -> Mocom {
+        self.composite.property.mocom()
+    }
+
+    /// Get the size of this structure in bytes.
+    pub fn get_size(&self) -> u64 {
+        self.composite.get_size()
+    }
+
+    /// Get the number of field elements.
+    pub fn get_count(&self) -> i32 {
+        self.composite.num_elements()
+    }
+
+    /// Get the field list record number.
+    pub fn get_field_list_record_number(&self) -> RecordNumber {
+        self.composite.field_list_record_number
+    }
+
+    /// Get the derived-from list record number.
+    pub fn get_derived_from_record_number(&self) -> RecordNumber {
+        self.composite.derived_from_list_record_number
+    }
+
+    /// Get the VShape table record number.
+    pub fn get_vshape_record_number(&self) -> RecordNumber {
+        self.composite.vshape_table_record_number
+    }
+
+    /// Get the property flags.
+    pub fn property(&self) -> MsProperty {
+        self.composite.property
+    }
+
+    /// Get the mangled name, if any.
+    pub fn mangled_name(&self) -> &str {
+        self.composite.mangled_name()
     }
 }
 
@@ -247,5 +389,156 @@ mod tests {
             String::new(),
         );
         assert!(s.composite.is_nested());
+    }
+
+    #[test]
+    fn test_structure_parse() {
+        // Build a minimal LF_STRUCTURE payload: count=2, property=0, fieldList=0x1001,
+        // derivedFrom=0, vshape=0, size=8, name="S"
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_le_bytes());       // count
+        data.extend_from_slice(&0u16.to_le_bytes());       // property
+        data.extend_from_slice(&0x1001u32.to_le_bytes());  // fieldList
+        data.extend_from_slice(&0u32.to_le_bytes());       // derivedFrom
+        data.extend_from_slice(&0u32.to_le_bytes());       // vshape
+        data.extend_from_slice(&8u16.to_le_bytes());       // size (small numeric)
+        data.push(b'S'); data.push(0);                     // name = "S\0"
+
+        let s = LfStructure::parse(&data).unwrap();
+        assert_eq!(s.name(), "S");
+        assert_eq!(s.get_count(), 2);
+        assert_eq!(s.get_size(), 8);
+        assert_eq!(s.get_field_list_record_number().index(), 0x1001);
+    }
+
+    #[test]
+    fn test_structure_parse_with_mangled_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x2000u32.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&16u16.to_le_bytes());
+        data.extend_from_slice(b"Foo\0");
+        data.extend_from_slice(b".?AUFoo@@\0");
+
+        let s = LfStructure::parse(&data).unwrap();
+        assert_eq!(s.name(), "Foo");
+        assert_eq!(s.mangled_name(), ".?AUFoo@@");
+    }
+
+    #[test]
+    fn test_structure_parse_too_short() {
+        let data = [0u8; 10];
+        assert!(LfStructure::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_structure_is_scoped() {
+        let mut s = make_test_structure();
+        assert!(!s.is_scoped());
+        s.composite.property |= MsProperty::SCOPED;
+        assert!(s.is_scoped());
+    }
+
+    #[test]
+    fn test_structure_has_unique_name() {
+        let mut s = make_test_structure();
+        assert!(!s.has_unique_name());
+        s.composite.property |= MsProperty::HAS_UNIQUE_NAME;
+        assert!(s.has_unique_name());
+    }
+
+    #[test]
+    fn test_structure_is_sealed() {
+        let mut s = make_test_structure();
+        assert!(!s.is_sealed());
+        s.composite.property |= MsProperty::SEALED;
+        assert!(s.is_sealed());
+    }
+
+    #[test]
+    fn test_structure_is_packed() {
+        let mut s = make_test_structure();
+        assert!(!s.is_packed());
+        s.composite.property |= MsProperty::PACKED;
+        assert!(s.is_packed());
+    }
+
+    #[test]
+    fn test_structure_has_overloaded_ops() {
+        let mut s = make_test_structure();
+        assert!(!s.has_overloaded_ops());
+        s.composite.property |= MsProperty::OVERLOADED_OPS;
+        assert!(s.has_overloaded_ops());
+    }
+
+    #[test]
+    fn test_structure_has_casting_ops() {
+        let mut s = make_test_structure();
+        assert!(!s.has_casting_ops());
+        s.composite.property |= MsProperty::CASTING_OPS;
+        assert!(s.has_casting_ops());
+    }
+
+    #[test]
+    fn test_structure_has_ctor_dtor() {
+        let mut s = make_test_structure();
+        assert!(!s.has_ctor_dtor());
+        s.composite.property |= MsProperty::CTOR;
+        assert!(s.has_ctor_dtor());
+    }
+
+    #[test]
+    fn test_structure_hfa() {
+        let s = make_test_structure();
+        assert_eq!(s.hfa(), Hfa::NONE);
+    }
+
+    #[test]
+    fn test_structure_mocom() {
+        let s = make_test_structure();
+        assert_eq!(s.mocom(), Mocom::NONE);
+    }
+
+    #[test]
+    fn test_structure_property_accessor() {
+        let s = make_test_structure();
+        assert_eq!(s.property(), MsProperty::empty());
+    }
+
+    #[test]
+    fn test_structure_get_count() {
+        let s = make_test_structure();
+        assert_eq!(s.get_count(), 3);
+    }
+
+    #[test]
+    fn test_structure_get_size() {
+        let s = make_test_structure();
+        assert_eq!(s.get_size(), 24);
+    }
+
+    #[test]
+    fn test_structure_get_record_numbers() {
+        let s = make_test_structure();
+        assert_eq!(s.get_field_list_record_number().index(), 0x1001);
+        assert_eq!(s.get_derived_from_record_number().index(), 0x1002);
+        assert_eq!(s.get_vshape_record_number().index(), 0x1003);
+    }
+
+    #[test]
+    fn test_structure_mangled_name_accessor() {
+        let s = make_test_structure();
+        assert!(s.mangled_name().is_empty());
+    }
+
+    #[test]
+    fn test_structure_contains_nested() {
+        let mut s = make_test_structure();
+        assert!(!s.contains_nested());
+        s.composite.property |= MsProperty::CONTAINS_NESTED;
+        assert!(s.contains_nested());
     }
 }

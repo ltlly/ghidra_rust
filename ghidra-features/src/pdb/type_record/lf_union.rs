@@ -25,7 +25,7 @@ use std::fmt;
 use super::abstract_composite_ms_type::AbstractCompositeMsType;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::ms_property::MsProperty;
+use super::ms_property::{Hfa, Mocom, MsProperty};
 use super::RecordNumber;
 
 /// Concrete PDB union type record (`LF_UNION`).
@@ -96,6 +96,128 @@ impl LfUnion {
             name,
             mangled_name.unwrap_or_default(),
         )
+    }
+
+    /// Parse an `LF_UNION` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `UnionMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// Unlike LF_CLASS/LF_STRUCTURE, unions do not have derivedFrom or vshape fields.
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   count
+    /// +2  u16   property
+    /// +4  u32   fieldList type index
+    /// +8  Numeric (variable-length size)
+    ///     StringNt name
+    ///     StringNt mangledName (optional)
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 8 {
+            return Err(format!(
+                "LF_UNION payload too short: need >= 8 bytes, got {}",
+                data.len()
+            ));
+        }
+        let count = u16::from_le_bytes([data[0], data[1]]);
+        let property = MsProperty::from_u16(u16::from_le_bytes([data[2], data[3]]));
+        let field_list_ti = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+
+        let (size, next) = crate::pdb::pdb_byte_reader::parse_numeric(data, 8);
+
+        let (name, mangled_name) = if next < data.len() {
+            let (n, after_n) = crate::pdb::pdb_byte_reader::read_null_terminated_string(data, next);
+            let mn = if after_n < data.len() && data[after_n] != 0 {
+                crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[after_n..])
+            } else {
+                String::new()
+            };
+            (n, if mn.is_empty() { None } else { Some(mn) })
+        } else {
+            (String::new(), None)
+        };
+
+        Ok(Self::from_parsed(count, property, field_list_ti, size, name, mangled_name))
+    }
+
+    // =========================================================================
+    // Property-based accessors
+    // =========================================================================
+
+    /// Whether this union is scoped.
+    pub fn is_scoped(&self) -> bool {
+        self.composite.property.contains(MsProperty::SCOPED)
+    }
+
+    /// Whether this union has a unique name.
+    pub fn has_unique_name(&self) -> bool {
+        self.composite.property.contains(MsProperty::HAS_UNIQUE_NAME)
+    }
+
+    /// Whether this union is packed.
+    pub fn is_packed(&self) -> bool {
+        self.composite.property.contains(MsProperty::PACKED)
+    }
+
+    /// Whether this union has overloaded operators.
+    pub fn has_overloaded_ops(&self) -> bool {
+        self.composite.property.contains(MsProperty::OVERLOADED_OPS)
+    }
+
+    /// Whether this union has overloaded assignment operators.
+    pub fn has_overloaded_assign(&self) -> bool {
+        self.composite.property.contains(MsProperty::OVLD_ASSIGN)
+    }
+
+    /// Whether this union has casting operators.
+    pub fn has_casting_ops(&self) -> bool {
+        self.composite.property.contains(MsProperty::CASTING_OPS)
+    }
+
+    /// Whether this union has constructors/destructors.
+    pub fn has_ctor_dtor(&self) -> bool {
+        self.composite.property.contains(MsProperty::CTOR)
+    }
+
+    /// Whether this union contains nested types.
+    pub fn contains_nested(&self) -> bool {
+        self.composite.contains_nested()
+    }
+
+    /// Get the HFA classification.
+    pub fn hfa(&self) -> Hfa {
+        self.composite.property.hfa()
+    }
+
+    /// Get the Mocom classification.
+    pub fn mocom(&self) -> Mocom {
+        self.composite.property.mocom()
+    }
+
+    /// Get the size of this union in bytes.
+    pub fn get_size(&self) -> u64 {
+        self.composite.get_size()
+    }
+
+    /// Get the number of field elements.
+    pub fn get_count(&self) -> i32 {
+        self.composite.num_elements()
+    }
+
+    /// Get the field list record number.
+    pub fn get_field_list_record_number(&self) -> RecordNumber {
+        self.composite.field_list_record_number
+    }
+
+    /// Get the property flags.
+    pub fn property(&self) -> MsProperty {
+        self.composite.property
+    }
+
+    /// Get the mangled name, if any.
+    pub fn mangled_name(&self) -> &str {
+        self.composite.mangled_name()
     }
 }
 
@@ -253,5 +375,141 @@ mod tests {
             String::new(),
         );
         assert!(u.name().is_empty());
+    }
+
+    #[test]
+    fn test_union_parse() {
+        // LF_UNION payload: count=2, property=0, fieldList=0x1001, size=8, name="U"
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        data.extend_from_slice(&8u16.to_le_bytes());  // small numeric size
+        data.push(b'U'); data.push(0);
+
+        let u = LfUnion::parse(&data).unwrap();
+        assert_eq!(u.name(), "U");
+        assert_eq!(u.get_count(), 2);
+        assert_eq!(u.get_size(), 8);
+        assert_eq!(u.pdb_id(), 0x1506);
+    }
+
+    #[test]
+    fn test_union_parse_with_mangled() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x2000u32.to_le_bytes());
+        data.extend_from_slice(&16u16.to_le_bytes());
+        data.extend_from_slice(b"Variant\0");
+        data.extend_from_slice(b".?ATVariant@@\0");
+
+        let u = LfUnion::parse(&data).unwrap();
+        assert_eq!(u.name(), "Variant");
+        assert_eq!(u.mangled_name(), ".?ATVariant@@");
+    }
+
+    #[test]
+    fn test_union_parse_too_short() {
+        let data = [0u8; 5];
+        assert!(LfUnion::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_union_is_scoped() {
+        let mut u = make_test_union();
+        assert!(!u.is_scoped());
+        u.composite.property |= MsProperty::SCOPED;
+        assert!(u.is_scoped());
+    }
+
+    #[test]
+    fn test_union_has_unique_name() {
+        let mut u = make_test_union();
+        assert!(!u.has_unique_name());
+        u.composite.property |= MsProperty::HAS_UNIQUE_NAME;
+        assert!(u.has_unique_name());
+    }
+
+    #[test]
+    fn test_union_is_packed() {
+        let mut u = make_test_union();
+        assert!(!u.is_packed());
+        u.composite.property |= MsProperty::PACKED;
+        assert!(u.is_packed());
+    }
+
+    #[test]
+    fn test_union_has_overloaded_ops() {
+        let mut u = make_test_union();
+        assert!(!u.has_overloaded_ops());
+        u.composite.property |= MsProperty::OVERLOADED_OPS;
+        assert!(u.has_overloaded_ops());
+    }
+
+    #[test]
+    fn test_union_has_casting_ops() {
+        let mut u = make_test_union();
+        assert!(!u.has_casting_ops());
+        u.composite.property |= MsProperty::CASTING_OPS;
+        assert!(u.has_casting_ops());
+    }
+
+    #[test]
+    fn test_union_has_ctor_dtor() {
+        let mut u = make_test_union();
+        assert!(!u.has_ctor_dtor());
+        u.composite.property |= MsProperty::CTOR;
+        assert!(u.has_ctor_dtor());
+    }
+
+    #[test]
+    fn test_union_contains_nested() {
+        let mut u = make_test_union();
+        assert!(!u.contains_nested());
+        u.composite.property |= MsProperty::CONTAINS_NESTED;
+        assert!(u.contains_nested());
+    }
+
+    #[test]
+    fn test_union_hfa() {
+        let u = make_test_union();
+        assert_eq!(u.hfa(), Hfa::NONE);
+    }
+
+    #[test]
+    fn test_union_mocom() {
+        let u = make_test_union();
+        assert_eq!(u.mocom(), Mocom::NONE);
+    }
+
+    #[test]
+    fn test_union_property_accessor() {
+        let u = make_test_union();
+        assert_eq!(u.property(), MsProperty::empty());
+    }
+
+    #[test]
+    fn test_union_get_count() {
+        let u = make_test_union();
+        assert_eq!(u.get_count(), 3);
+    }
+
+    #[test]
+    fn test_union_get_size() {
+        let u = make_test_union();
+        assert_eq!(u.get_size(), 16);
+    }
+
+    #[test]
+    fn test_union_get_field_list_record_number() {
+        let u = make_test_union();
+        assert_eq!(u.get_field_list_record_number().index(), 0x1001);
+    }
+
+    #[test]
+    fn test_union_mangled_name_accessor() {
+        let u = make_test_union();
+        assert!(u.mangled_name().is_empty());
     }
 }

@@ -86,6 +86,12 @@ pub mod s_gprocia64;
 pub mod s_lprocia64;
 pub mod s_callsite_info;
 
+// Reference and annotation symbol types ported from Ghidra Java
+pub mod s_gprocref;
+pub mod s_lprocref;
+pub mod s_dataref;
+pub mod s_annotation;
+
 pub use abstract_base_pointer_relative::AbstractBasePointerRelative;
 pub use abstract_block::AbstractBlock;
 pub use abstract_compile2::AbstractCompile2;
@@ -134,3 +140,8 @@ pub use s_defrange_framepointer_rel::SDefRangeFramePointerRelFullScope;
 pub use s_unamespace::SUNamespace;
 pub use s_gprocia64::SGProcIA64;
 pub use s_lprocia64::SLProcIA64;
+
+pub use s_gprocref::SGProcRef;
+pub use s_lprocref::SLProcRef;
+pub use s_dataref::SDataRef;
+pub use s_annotation::SAnnotation;

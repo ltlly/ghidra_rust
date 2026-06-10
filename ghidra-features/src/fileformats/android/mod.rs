@@ -26,4 +26,8 @@ pub use dex_method::{CodeItem, EncodedMethod, MethodIDItem};
 pub use dex_string::{StringDataItem, StringIDItem};
 pub use dex_type::{ProtoIDItem, TypeIDItem, TypeItem, TypeList};
 pub use oat::{is_oat, OatHeaderVersion, OatMethod};
-pub use vdex::VdexHeader;
+pub use vdex::{
+    VdexAnalyzer, VdexHeader, VdexHeaderVersion, VDEX_MAGIC, VDEX_VERSION_006, VDEX_VERSION_010,
+    VDEX_VERSION_012, VDEX_VERSION_015, VDEX_VERSION_019, VDEX_VERSION_021, VDEX_VERSION_023,
+    VDEX_VERSION_027,
+};

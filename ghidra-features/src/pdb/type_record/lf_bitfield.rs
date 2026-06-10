@@ -71,6 +71,34 @@ impl LfBitfield {
         )
     }
 
+    /// Parse an `LF_BITFIELD` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `BitfieldMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `underlyingType` field.
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u32   underlyingType   Type index of the base integral type
+    /// +4  u8    length           Number of bits in the bitfield
+    /// +5  u8    position         Bit position of the least-significant bit
+    /// ```
+    ///
+    /// Note: The Java implementation calls `reader.align4()` after parsing.
+    /// Since we parse from a flat slice, alignment is handled externally.
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 6 {
+            return Err(format!(
+                "LF_BITFIELD payload too short: need >= 6 bytes, got {}",
+                data.len()
+            ));
+        }
+        let underlying_ti = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let length = data[4];
+        let position = data[5];
+        Ok(Self::from_parsed(underlying_ti, length, position))
+    }
+
     /// Get the record number of the underlying (base) integral type.
     ///
     /// Mirrors Java `AbstractBitfieldMsType.getElementRecordNumber()`.
@@ -256,5 +284,45 @@ mod tests {
         let emitted = bf.emit(Bind::NONE);
         assert!(emitted.contains("<@5>"));
         assert!(emitted.contains(": 3"));
+    }
+
+    #[test]
+    fn test_bitfield_parse() {
+        // LF_BITFIELD payload: underlyingType=0x0074, length=4, position=0
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.push(4);  // length
+        data.push(0);  // position
+
+        let bf = LfBitfield::parse(&data).unwrap();
+        assert_eq!(bf.underlying_type_record_number, RecordNumber::type_record(0x0074));
+        assert_eq!(bf.bit_length, 4);
+        assert_eq!(bf.bit_position, 0);
+        assert_eq!(bf.pdb_id(), 0x1205);
+    }
+
+    #[test]
+    fn test_bitfield_parse_at_position() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0030u32.to_le_bytes());
+        data.push(1);  // length
+        data.push(7);  // position
+
+        let bf = LfBitfield::parse(&data).unwrap();
+        assert_eq!(bf.bit_length, 1);
+        assert_eq!(bf.bit_position, 7);
+    }
+
+    #[test]
+    fn test_bitfield_parse_too_short() {
+        let data = [0u8; 4];
+        assert!(LfBitfield::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_bitfield_name() {
+        let bf = make_test_bitfield();
+        // Bitfields don't have names; name() returns ""
+        assert_eq!(bf.name(), "");
     }
 }

@@ -78,6 +78,97 @@ impl LfEnum {
             ),
         }
     }
+
+    /// Parse an `LF_ENUM` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `EnumMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `count` field.
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   count
+    /// +2  u16   property
+    /// +4  u32   underlyingType type index
+    /// +8  u32   fieldList type index
+    /// +12 StringNt name
+    ///     StringNt mangledName (optional)
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 12 {
+            return Err(format!(
+                "LF_ENUM payload too short: need >= 12 bytes, got {}",
+                data.len()
+            ));
+        }
+        let count = u16::from_le_bytes([data[0], data[1]]);
+        let property = MsProperty::from_u16(u16::from_le_bytes([data[2], data[3]]));
+        let underlying_ti = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let field_list_ti = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+
+        let (name, mangled_name) = if 12 < data.len() {
+            let (n, after_n) = crate::pdb::pdb_byte_reader::read_null_terminated_string(data, 12);
+            let mn = if after_n < data.len() && data[after_n] != 0 {
+                crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[after_n..])
+            } else {
+                String::new()
+            };
+            (n, if mn.is_empty() { None } else { Some(mn) })
+        } else {
+            (String::new(), None)
+        };
+
+        Ok(Self::from_parsed(count, property, underlying_ti, field_list_ti, name, mangled_name))
+    }
+
+    // =========================================================================
+    // Property-based accessors
+    // =========================================================================
+
+    /// Whether this enum is a forward reference.
+    pub fn is_forward_ref(&self) -> bool {
+        self.enum_data.is_forward_ref()
+    }
+
+    /// Whether this enum is scoped (C++11 `enum class`).
+    pub fn is_scoped(&self) -> bool {
+        self.enum_data.property.contains(MsProperty::SCOPED)
+    }
+
+    /// Whether this enum has a unique name.
+    pub fn has_unique_name(&self) -> bool {
+        self.enum_data.property.contains(MsProperty::HAS_UNIQUE_NAME)
+    }
+
+    /// Whether this enum is nested inside another type.
+    pub fn is_nested(&self) -> bool {
+        self.enum_data.property.contains(MsProperty::NESTED)
+    }
+
+    /// Get the underlying type record number.
+    pub fn get_underlying_type_record_number(&self) -> RecordNumber {
+        self.enum_data.underlying_type_record_number
+    }
+
+    /// Get the field list record number.
+    pub fn get_field_list_record_number(&self) -> RecordNumber {
+        self.enum_data.field_list_record_number
+    }
+
+    /// Get the number of enumerators.
+    pub fn get_count(&self) -> i32 {
+        self.enum_data.num_elements()
+    }
+
+    /// Get the property flags.
+    pub fn property(&self) -> MsProperty {
+        self.enum_data.property
+    }
+
+    /// Get the mangled name, if any.
+    pub fn mangled_name(&self) -> &str {
+        self.enum_data.mangled_name()
+    }
 }
 
 impl AbstractMsType for LfEnum {
@@ -220,5 +311,105 @@ mod tests {
         );
         let emitted = e.emit(Bind::NONE);
         assert!(emitted.contains("isnested"));
+    }
+
+    #[test]
+    fn test_enum_parse() {
+        // LF_ENUM payload: count=4, property=0, underlyingType=0x0074,
+        // fieldList=0x1001, name="Color"
+        let mut data = Vec::new();
+        data.extend_from_slice(&4u16.to_le_bytes());       // count
+        data.extend_from_slice(&0u16.to_le_bytes());       // property
+        data.extend_from_slice(&0x0074u32.to_le_bytes());  // underlyingType
+        data.extend_from_slice(&0x1001u32.to_le_bytes());  // fieldList
+        data.extend_from_slice(b"Color\0");
+
+        let e = LfEnum::parse(&data).unwrap();
+        assert_eq!(e.name(), "Color");
+        assert_eq!(e.get_count(), 4);
+        assert_eq!(e.get_underlying_type_record_number().index(), 0x0074);
+        assert_eq!(e.get_field_list_record_number().index(), 0x1001);
+        assert_eq!(e.pdb_id(), 0x1507);
+    }
+
+    #[test]
+    fn test_enum_parse_with_mangled() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x0075u32.to_le_bytes());
+        data.extend_from_slice(&0x1002u32.to_le_bytes());
+        data.extend_from_slice(b"Status\0");
+        data.extend_from_slice(b".AW4Status@@\0");
+
+        let e = LfEnum::parse(&data).unwrap();
+        assert_eq!(e.name(), "Status");
+        assert_eq!(e.mangled_name(), ".AW4Status@@");
+    }
+
+    #[test]
+    fn test_enum_parse_too_short() {
+        let data = [0u8; 8];
+        assert!(LfEnum::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_enum_is_scoped() {
+        let mut e = make_test_enum();
+        assert!(!e.is_scoped());
+        e.enum_data.property |= MsProperty::SCOPED;
+        assert!(e.is_scoped());
+    }
+
+    #[test]
+    fn test_enum_has_unique_name() {
+        let mut e = make_test_enum();
+        assert!(!e.has_unique_name());
+        e.enum_data.property |= MsProperty::HAS_UNIQUE_NAME;
+        assert!(e.has_unique_name());
+    }
+
+    #[test]
+    fn test_enum_is_nested_accessor() {
+        let mut e = make_test_enum();
+        assert!(!e.is_nested());
+        e.enum_data.property |= MsProperty::NESTED;
+        assert!(e.is_nested());
+    }
+
+    #[test]
+    fn test_enum_get_underlying_type() {
+        let e = make_test_enum();
+        assert_eq!(
+            e.get_underlying_type_record_number(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_enum_get_field_list() {
+        let e = make_test_enum();
+        assert_eq!(
+            e.get_field_list_record_number(),
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_enum_get_count() {
+        let e = make_test_enum();
+        assert_eq!(e.get_count(), 4);
+    }
+
+    #[test]
+    fn test_enum_property_accessor() {
+        let e = make_test_enum();
+        assert_eq!(e.property(), MsProperty::empty());
+    }
+
+    #[test]
+    fn test_enum_mangled_name_accessor() {
+        let e = make_test_enum();
+        assert!(e.mangled_name().is_empty());
     }
 }
