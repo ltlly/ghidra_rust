@@ -133,6 +133,26 @@ impl SInlineSite {
     pub fn parse_annotations(&self) -> Vec<BinaryAnnotation> {
         parse_binary_annotations(&self.annotations)
     }
+
+    /// Return the total number of annotation records (including the End marker).
+    pub fn annotation_record_count(&self) -> usize {
+        self.parse_annotations().len()
+    }
+
+    /// Extract the first code offset from the annotations, if present.
+    ///
+    /// This scans the annotation records for the first `CodeOffset` opcode
+    /// and returns its operand value. Returns `None` if no code offset
+    /// annotation is found.
+    pub fn first_code_offset(&self) -> Option<u16> {
+        self.parse_annotations().iter().find_map(|ann| {
+            if ann.opcode == BinaryAnnotationOpcode::CodeOffset && !ann.operands.is_empty() {
+                Some(ann.operands[0])
+            } else {
+                None
+            }
+        })
+    }
 }
 
 /// A decoded binary annotation record from an inline site.
@@ -533,5 +553,59 @@ mod tests {
         assert_eq!(BinaryAnnotationOpcode::from_u16(1), BinaryAnnotationOpcode::CodeOffset);
         assert_eq!(BinaryAnnotationOpcode::from_u16(8), BinaryAnnotationOpcode::End);
         assert_eq!(BinaryAnnotationOpcode::from_u16(255), BinaryAnnotationOpcode::Invalid);
+    }
+
+    #[test]
+    fn test_annotation_record_count() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&make_annotation(1, &[0x10])); // CodeOffset
+        data.extend_from_slice(&make_annotation(5, &[42]));   // SetLine
+        data.extend_from_slice(&make_annotation(8, &[]));     // End
+
+        let sym = SInlineSite::new(
+            0, 0, RecordNumber::item_record_number(1), data,
+        );
+        assert_eq!(sym.annotation_record_count(), 3);
+    }
+
+    #[test]
+    fn test_annotation_record_count_empty() {
+        let sym = SInlineSite::new(
+            0, 0, RecordNumber::item_record_number(1), vec![],
+        );
+        assert_eq!(sym.annotation_record_count(), 0);
+    }
+
+    #[test]
+    fn test_first_code_offset() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&make_annotation(1, &[0x40])); // CodeOffset(0x40)
+        data.extend_from_slice(&make_annotation(5, &[10]));   // SetLine(10)
+        data.extend_from_slice(&make_annotation(8, &[]));     // End
+
+        let sym = SInlineSite::new(
+            0, 0, RecordNumber::item_record_number(1), data,
+        );
+        assert_eq!(sym.first_code_offset(), Some(0x40));
+    }
+
+    #[test]
+    fn test_first_code_offset_none() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&make_annotation(5, &[10]));   // SetLine(10)
+        data.extend_from_slice(&make_annotation(8, &[]));     // End
+
+        let sym = SInlineSite::new(
+            0, 0, RecordNumber::item_record_number(1), data,
+        );
+        assert_eq!(sym.first_code_offset(), None);
+    }
+
+    #[test]
+    fn test_first_code_offset_no_annotations() {
+        let sym = SInlineSite::new(
+            0, 0, RecordNumber::item_record_number(1), vec![],
+        );
+        assert_eq!(sym.first_code_offset(), None);
     }
 }

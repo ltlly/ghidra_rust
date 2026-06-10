@@ -50,6 +50,8 @@ pub struct LldbInferiorProcess {
     pub pointer_size: usize,
     /// Breakpoint IDs associated with this process.
     pub breakpoint_ids: Vec<u32>,
+    /// Watchpoint configurations for this process.
+    pub watchpoints: BTreeMap<u32, LldbWatchpointConfig>,
 }
 
 impl LldbInferiorProcess {
@@ -68,6 +70,7 @@ impl LldbInferiorProcess {
             triple: None,
             pointer_size: 8,
             breakpoint_ids: Vec::new(),
+            watchpoints: BTreeMap::new(),
         }
     }
 
@@ -380,6 +383,52 @@ impl LldbInferiorProcess {
     /// Remove a breakpoint ID association.
     pub fn remove_breakpoint_id(&mut self, bp_id: u32) {
         self.breakpoint_ids.retain(|id| *id != bp_id);
+    }
+
+    /// Add a watchpoint to this process.
+    pub fn add_watchpoint(&mut self, watchpoint: LldbWatchpointConfig) {
+        self.watchpoints.insert(watchpoint.id, watchpoint);
+    }
+
+    /// Remove a watchpoint by ID.
+    pub fn remove_watchpoint(&mut self, wp_id: u32) -> Option<LldbWatchpointConfig> {
+        self.watchpoints.remove(&wp_id)
+    }
+
+    /// Get a watchpoint by ID.
+    pub fn get_watchpoint(&self, wp_id: u32) -> Option<&LldbWatchpointConfig> {
+        self.watchpoints.get(&wp_id)
+    }
+
+    /// Get a mutable watchpoint by ID.
+    pub fn get_watchpoint_mut(&mut self, wp_id: u32) -> Option<&mut LldbWatchpointConfig> {
+        self.watchpoints.get_mut(&wp_id)
+    }
+
+    /// Get the number of watchpoints.
+    pub fn watchpoint_count(&self) -> usize {
+        self.watchpoints.len()
+    }
+
+    /// Check if a watchpoint covers the given address.
+    pub fn watchpoint_at_address(&self, addr: u64) -> Option<&LldbWatchpointConfig> {
+        self.watchpoints.values().find(|wp| {
+            let (start, end) = wp.address_range();
+            addr >= start && addr < end
+        })
+    }
+
+    /// Build trace object key-value pairs for the watchpoints container.
+    pub fn build_watchpoints_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.watchpoints.len().to_string())]
+    }
+
+    /// Build the retain keys for watchpoint children.
+    pub fn build_watchpoint_retain_keys(&self) -> Vec<String> {
+        self.watchpoints
+            .keys()
+            .map(|id| format!("[{}]", id))
+            .collect()
     }
 
     /// Build the retain keys for process-level object children.
@@ -1084,6 +1133,58 @@ pub struct LldbProcessBreakpoint {
     pub hardware: bool,
     /// Optional ignore count (skip first N hits).
     pub ignore_count: u32,
+    /// Breakpoint type (software, hardware, watchpoint).
+    pub bp_type: LldbBreakpointType,
+    /// LLDB-specific: auto-continue after hitting.
+    pub auto_continue: bool,
+    /// LLDB-specific: command list to execute on hit.
+    pub commands: Vec<String>,
+}
+
+/// Type of breakpoint within an LLDB target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LldbBreakpointType {
+    /// Regular software breakpoint.
+    Breakpoint,
+    /// Hardware breakpoint (instruction breakpoint).
+    HardwareBreakpoint,
+    /// Write watchpoint (data breakpoint on write).
+    WriteWatchpoint,
+    /// Read watchpoint (data breakpoint on read).
+    ReadWatchpoint,
+    /// Access watchpoint (data breakpoint on read/write).
+    AccessWatchpoint,
+    /// Exception breakpoint (e.g. C++ throw, Objective-C exception).
+    ExceptionBreakpoint,
+}
+
+impl LldbBreakpointType {
+    /// Whether this is a watchpoint type.
+    pub fn is_watchpoint(&self) -> bool {
+        matches!(
+            self,
+            Self::WriteWatchpoint | Self::ReadWatchpoint | Self::AccessWatchpoint
+        )
+    }
+
+    /// Whether this is a breakpoint type (not watchpoint).
+    pub fn is_breakpoint(&self) -> bool {
+        !self.is_watchpoint()
+    }
+
+    /// Convert to the Ghidra breakpoint kinds string.
+    ///
+    /// 'x' = software, 'X' = hardware, 'w' = write watch, 'r' = read watch,
+    /// 'a' = access watch.
+    pub fn to_kinds_str(&self) -> &'static str {
+        match self {
+            Self::Breakpoint => "x",
+            Self::HardwareBreakpoint | Self::ExceptionBreakpoint => "X",
+            Self::WriteWatchpoint => "w",
+            Self::ReadWatchpoint => "r",
+            Self::AccessWatchpoint => "a",
+        }
+    }
 }
 
 impl LldbProcessBreakpoint {
@@ -1097,6 +1198,9 @@ impl LldbProcessBreakpoint {
             condition: None,
             hardware: false,
             ignore_count: 0,
+            bp_type: LldbBreakpointType::Breakpoint,
+            auto_continue: false,
+            commands: Vec::new(),
         }
     }
 
@@ -1109,12 +1213,33 @@ impl LldbProcessBreakpoint {
     /// Set as hardware breakpoint.
     pub fn with_hardware(mut self, hw: bool) -> Self {
         self.hardware = hw;
+        if hw {
+            self.bp_type = LldbBreakpointType::HardwareBreakpoint;
+        }
+        self
+    }
+
+    /// Set the breakpoint type.
+    pub fn with_type(mut self, bp_type: LldbBreakpointType) -> Self {
+        self.bp_type = bp_type;
         self
     }
 
     /// Set a condition expression.
     pub fn with_condition(mut self, cond: impl Into<String>) -> Self {
         self.condition = Some(cond.into());
+        self
+    }
+
+    /// Set auto-continue behavior.
+    pub fn with_auto_continue(mut self, auto_continue: bool) -> Self {
+        self.auto_continue = auto_continue;
+        self
+    }
+
+    /// Add a command to execute on hit.
+    pub fn with_command(mut self, cmd: impl Into<String>) -> Self {
+        self.commands.push(cmd.into());
         self
     }
 
@@ -1128,7 +1253,315 @@ impl LldbProcessBreakpoint {
         if !self.enabled {
             return false;
         }
+        if self.auto_continue {
+            return false;
+        }
         self.hit_count == 0 || self.hit_count > self.ignore_count
+    }
+
+    /// Build the trace object key-value pairs for this breakpoint.
+    ///
+    /// Ported from `put_single_breakpoint` in the Python agent.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = Vec::new();
+        values.push(("Enabled".to_string(), self.enabled.to_string()));
+        values.push(("Hit Count".to_string(), self.hit_count.to_string()));
+        values.push(("Kinds".to_string(), self.bp_type.to_kinds_str().to_string()));
+        if self.hardware {
+            values.push(("Temporary".to_string(), "false".to_string()));
+        }
+        if let Some(ref cond) = self.condition {
+            values.push(("Condition".to_string(), cond.clone()));
+        }
+        if !self.commands.is_empty() {
+            values.push(("Commands".to_string(), self.commands.join("\n")));
+        }
+        if self.ignore_count > 0 {
+            values.push(("Ignore Count".to_string(), self.ignore_count.to_string()));
+        }
+        values
+    }
+}
+
+/// LLDB watchpoint configuration.
+///
+/// Mirrors LLDB's `SBWatchpoint` API. In LLDB, watchpoints are data
+/// breakpoints that trigger when a memory location is read, written,
+/// or accessed.
+///
+/// Ported from `put_single_watchpoint` in the Python agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LldbWatchpointConfig {
+    /// Watchpoint ID (target-level).
+    pub id: u32,
+    /// Watch address.
+    pub address: u64,
+    /// Size of the watched region in bytes.
+    pub size: u32,
+    /// Type of watchpoint.
+    pub watch_type: LldbWatchpointType,
+    /// Whether this watchpoint is enabled.
+    pub enabled: bool,
+    /// Number of times hit.
+    pub hit_count: u32,
+    /// Condition expression (if conditional).
+    pub condition: Option<String>,
+    /// LLDB-specific: command list to execute on hit.
+    pub commands: Vec<String>,
+    /// LLDB-specific: ignore count (skip first N hits).
+    pub ignore_count: u32,
+}
+
+/// Type of LLDB watchpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LldbWatchpointType {
+    /// Write only.
+    Write,
+    /// Read only.
+    Read,
+    /// Read and write (access).
+    Access,
+}
+
+impl LldbWatchpointType {
+    /// Convert to the Ghidra kinds string.
+    pub fn to_kinds_str(&self) -> &'static str {
+        match self {
+            Self::Write => "w",
+            Self::Read => "r",
+            Self::Access => "a",
+        }
+    }
+
+    /// Convert from LLDB watch type integer.
+    ///
+    /// LLDB uses: 1 = read, 2 = write, 4 = modify (but commonly
+    /// reported as read/write combinations).
+    pub fn from_lldb_watch_type(read: bool, write: bool) -> Self {
+        match (read, write) {
+            (true, true) => Self::Access,
+            (true, false) => Self::Read,
+            (false, true) => Self::Write,
+            (false, false) => Self::Access, // default
+        }
+    }
+}
+
+impl LldbWatchpointConfig {
+    /// Create a new watchpoint.
+    pub fn new(id: u32, address: u64, size: u32) -> Self {
+        Self {
+            id,
+            address,
+            size,
+            watch_type: LldbWatchpointType::Access,
+            enabled: true,
+            hit_count: 0,
+            condition: None,
+            commands: Vec::new(),
+            ignore_count: 0,
+        }
+    }
+
+    /// Set the watchpoint type.
+    pub fn with_type(mut self, watch_type: LldbWatchpointType) -> Self {
+        self.watch_type = watch_type;
+        self
+    }
+
+    /// Set enabled state.
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Set a condition expression.
+    pub fn with_condition(mut self, cond: impl Into<String>) -> Self {
+        self.condition = Some(cond.into());
+        self
+    }
+
+    /// Add a command to execute on hit.
+    pub fn with_command(mut self, cmd: impl Into<String>) -> Self {
+        self.commands.push(cmd.into());
+        self
+    }
+
+    /// Record a hit.
+    pub fn record_hit(&mut self) {
+        self.hit_count += 1;
+    }
+
+    /// Get the watched address range (start, end exclusive).
+    pub fn address_range(&self) -> (u64, u64) {
+        (self.address, self.address + self.size as u64)
+    }
+
+    /// Build the trace object key-value pairs for this watchpoint.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = Vec::new();
+        values.push(("Enabled".to_string(), self.enabled.to_string()));
+        values.push(("Hit Count".to_string(), self.hit_count.to_string()));
+        values.push(("Kinds".to_string(), self.watch_type.to_kinds_str().to_string()));
+        values.push((
+            "Range".to_string(),
+            format!("0x{:x}:0x{:x}", self.address, self.address + self.size as u64),
+        ));
+        if let Some(ref cond) = self.condition {
+            values.push(("Condition".to_string(), cond.clone()));
+        }
+        if !self.commands.is_empty() {
+            values.push(("Commands".to_string(), self.commands.join("\n")));
+        }
+        if self.ignore_count > 0 {
+            values.push(("Ignore Count".to_string(), self.ignore_count.to_string()));
+        }
+        values
+    }
+}
+
+/// A process available for attachment on the LLDB platform.
+///
+/// Ported from the `put_available` command in the Python agent.
+/// Represents processes visible on the debugging platform that can
+/// be attached to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LldbAvailableProcess {
+    /// OS process ID.
+    pub pid: u64,
+    /// Process name.
+    pub name: String,
+    /// Full executable path / command line.
+    pub executable: String,
+}
+
+impl LldbAvailableProcess {
+    /// Create a new available process entry.
+    pub fn new(pid: u64, name: impl Into<String>, executable: impl Into<String>) -> Self {
+        Self {
+            pid,
+            name: name.into(),
+            executable: executable.into(),
+        }
+    }
+
+    /// Build the display string for the Available list.
+    pub fn display(&self) -> String {
+        format!("{} {}", self.pid, self.executable)
+    }
+
+    /// Build the trace object key-value pairs.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("PID".to_string(), self.pid.to_string()),
+            ("Name".to_string(), self.name.clone()),
+            ("_display".to_string(), self.display()),
+        ]
+    }
+}
+
+/// LLDB register bank (group).
+///
+/// In LLDB, registers are organized into banks/groups (e.g.,
+/// "General Purpose Registers", "Floating Point Registers", etc.).
+/// The Python agent's `putreg` function iterates over register banks
+/// from `SBFrame.GetRegisters()`.
+///
+/// Ported from the register bank iteration in `commands.py`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LldbRegisterBank {
+    /// Bank name (e.g., "General Purpose Registers").
+    pub name: String,
+    /// Register names in this bank.
+    pub register_names: Vec<String>,
+    /// Number of registers in this bank.
+    pub count: usize,
+}
+
+impl LldbRegisterBank {
+    /// Create a new register bank.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            register_names: Vec::new(),
+            count: 0,
+        }
+    }
+
+    /// Set the register names for this bank.
+    pub fn with_registers(mut self, names: Vec<String>) -> Self {
+        self.count = names.len();
+        self.register_names = names;
+        self
+    }
+
+    /// Whether this is the primary (general purpose) register bank.
+    pub fn is_primary(&self) -> bool {
+        self.name == "General Purpose Registers"
+    }
+}
+
+/// Memory access permission flags.
+///
+/// Ported from the Python `Region` class's permissions handling
+/// and the `IsReadable`/`IsWritable`/`IsExecutable` checks.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LldbMemoryAccess {
+    /// Region is readable.
+    pub readable: bool,
+    /// Region is writable.
+    pub writable: bool,
+    /// Region is executable.
+    pub executable: bool,
+}
+
+impl LldbMemoryAccess {
+    /// Create a new memory access descriptor.
+    pub fn new(readable: bool, writable: bool, executable: bool) -> Self {
+        Self {
+            readable,
+            writable,
+            executable,
+        }
+    }
+
+    /// Parse from a permission string (e.g., "rwx", "r-xp").
+    pub fn from_perms(perms: &str) -> Self {
+        Self {
+            readable: perms.contains('r'),
+            writable: perms.contains('w'),
+            executable: perms.contains('x'),
+        }
+    }
+
+    /// Convert to a permission string.
+    pub fn to_perms(&self) -> String {
+        let mut s = String::with_capacity(4);
+        s.push(if self.readable { 'r' } else { '-' });
+        s.push(if self.writable { 'w' } else { '-' });
+        s.push(if self.executable { 'x' } else { '-' });
+        s.push('p');
+        s
+    }
+
+    /// Convert to the Ghidra trace key-value pairs.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("Permissions".to_string(), self.to_perms()),
+            ("_readable".to_string(), self.readable.to_string()),
+            ("_writable".to_string(), self.writable.to_string()),
+            ("_executable".to_string(), self.executable.to_string()),
+        ]
+    }
+}
+
+impl Default for LldbMemoryAccess {
+    fn default() -> Self {
+        Self {
+            readable: true,
+            writable: false,
+            executable: false,
+        }
     }
 }
 
@@ -1137,10 +1570,14 @@ impl LldbProcessBreakpoint {
 ///
 /// LLDB can debug multiple processes (e.g. when following forks). This
 /// manager tracks all known processes and provides convenient access.
+///
+/// Ported from the process management in `commands.py` and `hooks.py`.
 #[derive(Debug, Default)]
 pub struct LldbProcessManager {
     processes: BTreeMap<u32, LldbInferiorProcess>,
     active_index: Option<u32>,
+    /// Available processes on the platform (for attachment).
+    available: Vec<LldbAvailableProcess>,
 }
 
 impl LldbProcessManager {
@@ -1234,6 +1671,46 @@ impl LldbProcessManager {
         self.processes
             .values()
             .map(|p| p.to_process_info())
+            .collect()
+    }
+
+    /// Set the list of available processes (from platform query).
+    ///
+    /// Ported from `put_available` in the Python agent.
+    pub fn set_available(&mut self, available: Vec<LldbAvailableProcess>) {
+        self.available = available;
+    }
+
+    /// Add an available process.
+    pub fn add_available(&mut self, proc: LldbAvailableProcess) {
+        self.available.push(proc);
+    }
+
+    /// Clear the available processes list.
+    pub fn clear_available(&mut self) {
+        self.available.clear();
+    }
+
+    /// Get the available processes.
+    pub fn available(&self) -> &[LldbAvailableProcess] {
+        &self.available
+    }
+
+    /// Get the number of available processes.
+    pub fn available_count(&self) -> usize {
+        self.available.len()
+    }
+
+    /// Find an available process by PID.
+    pub fn find_available(&self, pid: u64) -> Option<&LldbAvailableProcess> {
+        self.available.iter().find(|a| a.pid == pid)
+    }
+
+    /// Build the retain keys for available process children.
+    pub fn build_available_retain_keys(&self) -> Vec<String> {
+        self.available
+            .iter()
+            .map(|a| format!("[{}]", a.pid))
             .collect()
     }
 }
@@ -1914,5 +2391,325 @@ mod manager_tests {
         let list = mgr.build_process_info_list();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, 100);
+    }
+
+    #[test]
+    fn test_process_manager_available() {
+        let mut mgr = LldbProcessManager::new();
+        assert_eq!(mgr.available_count(), 0);
+
+        mgr.add_available(LldbAvailableProcess::new(1234, "bash", "/bin/bash"));
+        mgr.add_available(LldbAvailableProcess::new(5678, "python3", "/usr/bin/python3"));
+        assert_eq!(mgr.available_count(), 2);
+
+        let found = mgr.find_available(1234);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "bash");
+
+        assert!(mgr.find_available(9999).is_none());
+
+        let keys = mgr.build_available_retain_keys();
+        assert!(keys.contains(&"[1234]".to_string()));
+        assert!(keys.contains(&"[5678]".to_string()));
+
+        mgr.clear_available();
+        assert_eq!(mgr.available_count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod breakpoint_type_tests {
+    use super::*;
+
+    #[test]
+    fn test_breakpoint_type_is_watchpoint() {
+        assert!(!LldbBreakpointType::Breakpoint.is_watchpoint());
+        assert!(!LldbBreakpointType::HardwareBreakpoint.is_watchpoint());
+        assert!(LldbBreakpointType::WriteWatchpoint.is_watchpoint());
+        assert!(LldbBreakpointType::ReadWatchpoint.is_watchpoint());
+        assert!(LldbBreakpointType::AccessWatchpoint.is_watchpoint());
+    }
+
+    #[test]
+    fn test_breakpoint_type_kinds_str() {
+        assert_eq!(LldbBreakpointType::Breakpoint.to_kinds_str(), "x");
+        assert_eq!(LldbBreakpointType::HardwareBreakpoint.to_kinds_str(), "X");
+        assert_eq!(LldbBreakpointType::WriteWatchpoint.to_kinds_str(), "w");
+        assert_eq!(LldbBreakpointType::ReadWatchpoint.to_kinds_str(), "r");
+        assert_eq!(LldbBreakpointType::AccessWatchpoint.to_kinds_str(), "a");
+    }
+
+    #[test]
+    fn test_breakpoint_auto_continue() {
+        let bp = LldbProcessBreakpoint::new(1)
+            .with_address(0x401000)
+            .with_auto_continue(true);
+        assert!(!bp.should_stop()); // auto-continue prevents stop
+
+        let bp = LldbProcessBreakpoint::new(2)
+            .with_address(0x401000)
+            .with_auto_continue(false);
+        assert!(bp.should_stop());
+    }
+
+    #[test]
+    fn test_breakpoint_with_type() {
+        let bp = LldbProcessBreakpoint::new(1)
+            .with_type(LldbBreakpointType::HardwareBreakpoint);
+        assert_eq!(bp.bp_type, LldbBreakpointType::HardwareBreakpoint);
+    }
+
+    #[test]
+    fn test_breakpoint_with_command() {
+        let bp = LldbProcessBreakpoint::new(1)
+            .with_command("print $rax")
+            .with_command("bt");
+        assert_eq!(bp.commands.len(), 2);
+        assert_eq!(bp.commands[0], "print $rax");
+    }
+
+    #[test]
+    fn test_breakpoint_build_trace_values() {
+        let bp = LldbProcessBreakpoint::new(1)
+            .with_address(0x401000)
+            .with_condition("rax == 0")
+            .with_command("bt");
+        let vals = bp.build_trace_values();
+        assert!(vals.iter().any(|(k, v)| k == "Enabled" && v == "true"));
+        assert!(vals.iter().any(|(k, v)| k == "Kinds" && v == "x"));
+        assert!(vals.iter().any(|(k, v)| k == "Condition" && v == "rax == 0"));
+        assert!(vals.iter().any(|(k, v)| k == "Commands" && v == "bt"));
+    }
+}
+
+#[cfg(test)]
+mod watchpoint_tests {
+    use super::*;
+
+    #[test]
+    fn test_watchpoint_config() {
+        let wp = LldbWatchpointConfig::new(1, 0x7fff0000, 8)
+            .with_type(LldbWatchpointType::Write)
+            .with_enabled(true);
+        assert_eq!(wp.id, 1);
+        assert_eq!(wp.address, 0x7fff0000);
+        assert_eq!(wp.size, 8);
+        assert_eq!(wp.watch_type, LldbWatchpointType::Write);
+        assert!(wp.enabled);
+    }
+
+    #[test]
+    fn test_watchpoint_address_range() {
+        let wp = LldbWatchpointConfig::new(1, 0x1000, 4);
+        let (start, end) = wp.address_range();
+        assert_eq!(start, 0x1000);
+        assert_eq!(end, 0x1004);
+    }
+
+    #[test]
+    fn test_watchpoint_hit() {
+        let mut wp = LldbWatchpointConfig::new(1, 0x1000, 8);
+        assert_eq!(wp.hit_count, 0);
+        wp.record_hit();
+        assert_eq!(wp.hit_count, 1);
+        wp.record_hit();
+        assert_eq!(wp.hit_count, 2);
+    }
+
+    #[test]
+    fn test_watchpoint_type_from_lldb() {
+        assert_eq!(
+            LldbWatchpointType::from_lldb_watch_type(true, true),
+            LldbWatchpointType::Access
+        );
+        assert_eq!(
+            LldbWatchpointType::from_lldb_watch_type(true, false),
+            LldbWatchpointType::Read
+        );
+        assert_eq!(
+            LldbWatchpointType::from_lldb_watch_type(false, true),
+            LldbWatchpointType::Write
+        );
+    }
+
+    #[test]
+    fn test_watchpoint_type_kinds_str() {
+        assert_eq!(LldbWatchpointType::Write.to_kinds_str(), "w");
+        assert_eq!(LldbWatchpointType::Read.to_kinds_str(), "r");
+        assert_eq!(LldbWatchpointType::Access.to_kinds_str(), "a");
+    }
+
+    #[test]
+    fn test_watchpoint_build_trace_values() {
+        let wp = LldbWatchpointConfig::new(1, 0x1000, 4)
+            .with_type(LldbWatchpointType::Write)
+            .with_condition("x == 5");
+        let vals = wp.build_trace_values();
+        assert!(vals.iter().any(|(k, v)| k == "Enabled" && v == "true"));
+        assert!(vals.iter().any(|(k, v)| k == "Kinds" && v == "w"));
+        assert!(vals.iter().any(|(k, _)| k == "Range"));
+        assert!(vals.iter().any(|(k, v)| k == "Condition" && v == "x == 5"));
+    }
+
+    #[test]
+    fn test_watchpoint_with_command() {
+        let wp = LldbWatchpointConfig::new(1, 0x1000, 8)
+            .with_command("bt")
+            .with_command("register read");
+        assert_eq!(wp.commands.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod available_process_tests {
+    use super::*;
+
+    #[test]
+    fn test_available_process() {
+        let ap = LldbAvailableProcess::new(1234, "bash", "/bin/bash");
+        assert_eq!(ap.pid, 1234);
+        assert_eq!(ap.name, "bash");
+        assert_eq!(ap.executable, "/bin/bash");
+        assert!(ap.display().contains("1234"));
+        assert!(ap.display().contains("/bin/bash"));
+    }
+
+    #[test]
+    fn test_available_process_trace_values() {
+        let ap = LldbAvailableProcess::new(42, "test", "/usr/bin/test");
+        let vals = ap.build_trace_values();
+        assert!(vals.iter().any(|(k, v)| k == "PID" && v == "42"));
+        assert!(vals.iter().any(|(k, v)| k == "Name" && v == "test"));
+        assert!(vals.iter().any(|(k, _)| k == "_display"));
+    }
+}
+
+#[cfg(test)]
+mod register_bank_tests {
+    use super::*;
+
+    #[test]
+    fn test_register_bank() {
+        let bank = LldbRegisterBank::new("General Purpose Registers")
+            .with_registers(vec![
+                "rax".to_string(),
+                "rbx".to_string(),
+                "rcx".to_string(),
+            ]);
+        assert_eq!(bank.name, "General Purpose Registers");
+        assert_eq!(bank.count, 3);
+        assert!(bank.is_primary());
+        assert_eq!(bank.register_names.len(), 3);
+    }
+
+    #[test]
+    fn test_register_bank_not_primary() {
+        let bank = LldbRegisterBank::new("Floating Point Registers");
+        assert!(!bank.is_primary());
+    }
+}
+
+#[cfg(test)]
+mod memory_access_tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_access_from_perms() {
+        let acc = LldbMemoryAccess::from_perms("rwx");
+        assert!(acc.readable);
+        assert!(acc.writable);
+        assert!(acc.executable);
+
+        let acc = LldbMemoryAccess::from_perms("r-xp");
+        assert!(acc.readable);
+        assert!(!acc.writable);
+        assert!(acc.executable);
+
+        let acc = LldbMemoryAccess::from_perms("---p");
+        assert!(!acc.readable);
+        assert!(!acc.writable);
+        assert!(!acc.executable);
+    }
+
+    #[test]
+    fn test_memory_access_to_perms() {
+        let acc = LldbMemoryAccess::new(true, true, true);
+        assert_eq!(acc.to_perms(), "rwxp");
+
+        let acc = LldbMemoryAccess::new(true, false, true);
+        assert_eq!(acc.to_perms(), "r-xp");
+    }
+
+    #[test]
+    fn test_memory_access_build_trace_values() {
+        let acc = LldbMemoryAccess::new(true, false, true);
+        let vals = acc.build_trace_values();
+        assert!(vals.iter().any(|(k, v)| k == "Permissions" && v == "r-xp"));
+        assert!(vals.iter().any(|(k, v)| k == "_readable" && v == "true"));
+        assert!(vals.iter().any(|(k, v)| k == "_writable" && v == "false"));
+        assert!(vals.iter().any(|(k, v)| k == "_executable" && v == "true"));
+    }
+
+    #[test]
+    fn test_memory_access_default() {
+        let acc = LldbMemoryAccess::default();
+        assert!(acc.readable);
+        assert!(!acc.writable);
+        assert!(!acc.executable);
+    }
+}
+
+#[cfg(test)]
+mod process_watchpoint_tests {
+    use super::*;
+
+    #[test]
+    fn test_process_watchpoint_management() {
+        let mut p = LldbInferiorProcess::new(1, 0);
+        assert_eq!(p.watchpoint_count(), 0);
+
+        p.add_watchpoint(LldbWatchpointConfig::new(1, 0x1000, 8));
+        p.add_watchpoint(LldbWatchpointConfig::new(2, 0x2000, 4));
+        assert_eq!(p.watchpoint_count(), 2);
+
+        let wp = p.get_watchpoint(1);
+        assert!(wp.is_some());
+        assert_eq!(wp.unwrap().address, 0x1000);
+
+        let removed = p.remove_watchpoint(1);
+        assert!(removed.is_some());
+        assert_eq!(p.watchpoint_count(), 1);
+        assert!(p.get_watchpoint(1).is_none());
+    }
+
+    #[test]
+    fn test_process_watchpoint_at_address() {
+        let mut p = LldbInferiorProcess::new(1, 0);
+        p.add_watchpoint(LldbWatchpointConfig::new(1, 0x1000, 8));
+
+        assert!(p.watchpoint_at_address(0x1000).is_some());
+        assert!(p.watchpoint_at_address(0x1007).is_some());
+        assert!(p.watchpoint_at_address(0x1008).is_none());
+        assert!(p.watchpoint_at_address(0x0fff).is_none());
+    }
+
+    #[test]
+    fn test_process_build_watchpoints_container_values() {
+        let mut p = LldbInferiorProcess::new(1, 0);
+        p.add_watchpoint(LldbWatchpointConfig::new(1, 0x1000, 8));
+        p.add_watchpoint(LldbWatchpointConfig::new(2, 0x2000, 4));
+        let vals = p.build_watchpoints_container_values();
+        assert!(vals.iter().any(|(k, v)| k == "_count" && v == "2"));
+    }
+
+    #[test]
+    fn test_process_build_watchpoint_retain_keys() {
+        let mut p = LldbInferiorProcess::new(1, 0);
+        p.add_watchpoint(LldbWatchpointConfig::new(1, 0x1000, 8));
+        p.add_watchpoint(LldbWatchpointConfig::new(3, 0x3000, 4));
+        let keys = p.build_watchpoint_retain_keys();
+        assert!(keys.contains(&"[1]".to_string()));
+        assert!(keys.contains(&"[3]".to_string()));
+        assert_eq!(keys.len(), 2);
     }
 }

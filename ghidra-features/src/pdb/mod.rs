@@ -1497,7 +1497,7 @@ pub mod symbol_kind {
     pub const S_GTHREAD32_ST: u16=0x100F; pub const S_LPROCMIPS_ST: u16=0x1010;
     pub const S_GPROCMIPS_ST: u16=0x1011; pub const S_FRAMEPROC: u16=0x1012;
     pub const S_COMPILE2: u16=0x1013; pub const S_MANYREG2: u16=0x1014;
-    pub const S_LPROCIA64: u16=0x1015; pub const S_GPROCIA64: u16=0x1016;
+    pub const S_LPROCIA64_ST: u16=0x1015; pub const S_GPROCIA64_ST: u16=0x1016;
     pub const S_LOCALSLOT: u16=0x1017; pub const S_PARAMSLOT: u16=0x1018;
     pub const S_ANNOTATION: u16=0x1019; pub const S_GMANDATA: u16=0x101A;
     pub const S_LMANDATA: u16=0x101B; pub const S_MANYLOCAL: u16=0x101C;
@@ -1540,6 +1540,9 @@ pub mod symbol_kind {
     pub const S_THUNK32_ST: u16=0x1114;
     pub const S_INLINED_FUNCTION_CALLSITE: u16=0x114D;
     pub const S_INLINED_FUNCTION_CALLSITE_EXTENDED: u16=0x115D;
+    pub const S_LPROCIA64: u16=0x1118;
+    pub const S_GPROCIA64: u16=0x1119;
+    pub const S_REGREL32_V2: u16=0x1111;
 }
 
 

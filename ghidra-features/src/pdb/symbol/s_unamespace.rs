@@ -106,7 +106,7 @@ impl AbstractMsSymbol for SUNamespace {
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "UsingNamespace: {}", self.name)
+        write!(f, "UNAMESPACE: {}", self.name)
     }
 }
 
@@ -196,7 +196,7 @@ mod tests {
     fn test_display() {
         let sym = SUNamespace::new("std::vector".to_string());
         let s = format!("{}", sym);
-        assert!(s.contains("UsingNamespace"));
+        assert!(s.contains("UNAMESPACE"));
         assert!(s.contains("std::vector"));
     }
 
@@ -204,7 +204,7 @@ mod tests {
     fn test_display_st() {
         let sym = SUNamespace::new_st("boost::asio".to_string());
         let s = format!("{}", sym);
-        assert!(s.contains("UsingNamespace"));
+        assert!(s.contains("UNAMESPACE"));
         assert!(s.contains("boost::asio"));
     }
 

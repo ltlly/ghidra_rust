@@ -91,7 +91,7 @@ pub use lf_structure::LfStructure;
 pub use lf_union::LfUnion;
 pub use lf_vfunctab::{LfVfunctab, LfVfuncoff};
 pub use lf_vtshape::{LfVtshape, VtShapeDescriptor};
-pub use lf_oem::LfOem;
+pub use lf_oem::{LfOem, LfOemString2};
 pub use lf_skip::LfSkip;
 pub use lf_index::LfIndex;
 pub use lf_func_id::LfFuncId;

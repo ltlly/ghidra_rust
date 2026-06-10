@@ -96,6 +96,17 @@ impl LfIndex {
         6
     }
 
+    /// Convert this index record into a [`FieldListEntry::Index`].
+    ///
+    /// This is the Rust equivalent of Java's `MsTypeField` interface
+    /// implementation on `AbstractIndexMsType`. It allows `LfIndex` to be
+    /// used as a continuation entry within a field list.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::Index {
+            type_record: self.referenced_record_number,
+        }
+    }
+
     /// Parse an `LF_INDEX` record (32-bit variant, PDB_ID 0x1404) from raw bytes.
     ///
     /// Mirrors the Java `IndexMsType(AbstractPdb, PdbByteReader)` constructor.
@@ -354,5 +365,29 @@ mod tests {
     #[test]
     fn test_index_pdb_id_16() {
         assert_eq!(LfIndex::PDB_ID_16, 0x0405);
+    }
+
+    #[test]
+    fn test_index_to_field_list_entry() {
+        let idx = LfIndex::new(RecordNumber::type_record(0x3000));
+        let entry = idx.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::Index { type_record } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x3000));
+            }
+            _ => panic!("Expected FieldListEntry::Index"),
+        }
+    }
+
+    #[test]
+    fn test_index_to_field_list_entry_no_type() {
+        let idx = LfIndex::new(RecordNumber::NO_TYPE);
+        let entry = idx.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::Index { type_record } => {
+                assert_eq!(type_record, RecordNumber::NO_TYPE);
+            }
+            _ => panic!("Expected FieldListEntry::Index"),
+        }
     }
 }

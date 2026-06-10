@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::dbgeng_thread::DbgEngThread;
 use crate::agents::{
-    ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo,
+    BreakpointType, ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo,
 };
 
 /// Still-active exit code sentinel from the Windows API.
@@ -675,6 +675,529 @@ impl DetailedMemoryRegion {
             values.push(("_display".to_string(), name.clone()));
         }
         values
+    }
+}
+
+/// A PE section within a loaded module.
+///
+/// Sections correspond to PE sections (e.g., `.text`, `.rdata`, `.data`)
+/// within a loaded DLL or executable. Ported from the Python agent's
+/// `SECTIONS_ADD_PATTERN` / `SECTION_KEY_PATTERN` path structure.
+///
+/// In dbgeng, sections are listed under `Processes[N].Modules[base].Sections`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModuleSection {
+    /// Section name (e.g., ".text", ".rdata", ".data", ".pdata").
+    pub name: String,
+    /// Start address (virtual address) of the section.
+    pub start: u64,
+    /// End address (exclusive) of the section.
+    pub end: u64,
+    /// Section size in bytes.
+    pub size: u32,
+    /// Section characteristics flags (PE `IMAGE_SECTION_HEADER.Characteristics`).
+    pub characteristics: u32,
+}
+
+impl ModuleSection {
+    /// Create a new module section.
+    pub fn new(name: impl Into<String>, start: u64, size: u32) -> Self {
+        Self {
+            name: name.into(),
+            start,
+            end: start + size as u64,
+            size,
+            characteristics: 0,
+        }
+    }
+
+    /// Set the characteristics flags.
+    pub fn with_characteristics(mut self, chars: u32) -> Self {
+        self.characteristics = chars;
+        self
+    }
+
+    /// Whether the section contains executable code.
+    ///
+    /// Checks `IMAGE_SCN_MEM_EXECUTE` (0x20000000).
+    pub fn is_executable(&self) -> bool {
+        self.characteristics & 0x20000000 != 0
+    }
+
+    /// Whether the section contains initialized data.
+    ///
+    /// Checks `IMAGE_SCN_CNT_INITIALIZED_DATA` (0x00000040).
+    pub fn is_initialized_data(&self) -> bool {
+        self.characteristics & 0x00000040 != 0
+    }
+
+    /// Whether the section contains uninitialized data.
+    ///
+    /// Checks `IMAGE_SCN_CNT_UNINITIALIZED_DATA` (0x00000080).
+    pub fn is_uninitialized_data(&self) -> bool {
+        self.characteristics & 0x00000080 != 0
+    }
+
+    /// Whether the section is readable.
+    ///
+    /// Checks `IMAGE_SCN_MEM_READ` (0x40000000).
+    pub fn is_readable(&self) -> bool {
+        self.characteristics & 0x40000000 != 0
+    }
+
+    /// Whether the section is writable.
+    ///
+    /// Checks `IMAGE_SCN_MEM_WRITE` (0x80000000).
+    pub fn is_writable(&self) -> bool {
+        self.characteristics & 0x80000000 != 0
+    }
+
+    /// Build the trace path for this section within a module.
+    pub fn trace_path(&self, proc_num: u32, module_base: u64) -> String {
+        format!(
+            "Processes[{}].Modules[0x{:x}].Sections[{}]",
+            proc_num, module_base, self.name
+        )
+    }
+
+    /// Build trace object key-value pairs.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            (
+                "Range".to_string(),
+                format!("0x{:x}:0x{:x}", self.start, self.end),
+            ),
+            ("Size".to_string(), format!("0x{:x}", self.size)),
+            (
+                "Characteristics".to_string(),
+                format!("0x{:x}", self.characteristics),
+            ),
+            (
+                "_display".to_string(),
+                format!("{} 0x{:x}", self.name, self.size),
+            ),
+        ]
+    }
+}
+
+/// Extended module info with PE sections support.
+///
+/// This wraps `ModuleInfo` with additional section data ported from
+/// the Python agent's `SECTIONS_ADD_PATTERN` path structure and the
+/// GDB agent's `ModuleWithSections` pattern.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleWithSections {
+    /// Base module info.
+    pub info: ModuleInfo,
+    /// Sections within this module, keyed by section name.
+    pub sections: BTreeMap<String, ModuleSection>,
+    /// Module flags from `_DEBUG_MODULE_PARAMETERS.Flags`.
+    pub flags: u32,
+    /// Symbol type from `_DEBUG_MODULE_PARAMETERS.SymbolType`.
+    pub symbol_type: u32,
+    /// Whether debug info is loaded for this module.
+    pub debug_info_loaded: bool,
+}
+
+impl ModuleWithSections {
+    /// Create from a `ModuleInfo`.
+    pub fn from_info(info: ModuleInfo) -> Self {
+        Self {
+            info,
+            sections: BTreeMap::new(),
+            flags: 0,
+            symbol_type: 0,
+            debug_info_loaded: false,
+        }
+    }
+
+    /// Set module flags.
+    pub fn with_flags(mut self, flags: u32) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Set symbol type.
+    pub fn with_symbol_type(mut self, sym_type: u32) -> Self {
+        self.symbol_type = sym_type;
+        self
+    }
+
+    /// Mark debug info as loaded.
+    pub fn with_debug_info_loaded(mut self, loaded: bool) -> Self {
+        self.debug_info_loaded = loaded;
+        self
+    }
+
+    /// Add a section. Replaces if same name exists.
+    pub fn add_section(&mut self, section: ModuleSection) {
+        self.sections.insert(section.name.clone(), section);
+    }
+
+    /// Remove a section by name.
+    pub fn remove_section(&mut self, name: &str) -> Option<ModuleSection> {
+        self.sections.remove(name)
+    }
+
+    /// Clear all sections.
+    pub fn clear_sections(&mut self) {
+        self.sections.clear();
+    }
+
+    /// Get section count.
+    pub fn section_count(&self) -> usize {
+        self.sections.len()
+    }
+
+    /// Get a section by name.
+    pub fn get_section(&self, name: &str) -> Option<&ModuleSection> {
+        self.sections.get(name)
+    }
+
+    /// Check if a section exists by name.
+    pub fn has_section(&self, name: &str) -> bool {
+        self.sections.contains_key(name)
+    }
+
+    /// Build the trace path for this module's sections container.
+    pub fn sections_path(&self, proc_num: u32) -> String {
+        format!(
+            "Processes[{}].Modules[0x{:x}].Sections",
+            proc_num, self.info.base
+        )
+    }
+
+    /// Build the trace path for this module.
+    pub fn trace_path(&self, proc_num: u32) -> String {
+        format!(
+            "Processes[{}].Modules[0x{:x}]",
+            proc_num, self.info.base
+        )
+    }
+
+    /// Build trace object key-value pairs for the module.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            (
+                "Range".to_string(),
+                format!("0x{:x}:0x{:x}", self.info.base, self.info.base + self.info.size),
+            ),
+            ("Name".to_string(), self.info.name.clone()),
+            (
+                "_display".to_string(),
+                format!("{:x} {}", self.info.base, self.info.name),
+            ),
+            ("Flags".to_string(), format!("0x{:x}", self.flags)),
+        ];
+        if let Some(ref path) = self.info.load_path {
+            values.push(("Load Path".to_string(), path.clone()));
+        }
+        if self.debug_info_loaded {
+            values.push(("Debug Info".to_string(), "loaded".to_string()));
+        }
+        values
+    }
+}
+
+/// Process-level breakpoint state for dbgeng.
+///
+/// Ported from the Python agent's `put_single_breakpoint`. Dbgeng
+/// tracks breakpoints globally but resolves them per-process. This
+/// struct captures all the fields that the Python agent writes to
+/// the trace object tree under `Processes[N].Debug.Breakpoints[id]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbgEngProcessBreakpoint {
+    /// Breakpoint ID (dbgeng-internal).
+    pub id: u32,
+    /// Breakpoint type.
+    pub bp_type: BreakpointType,
+    /// Resolved address, if not deferred.
+    pub address: Option<u64>,
+    /// Whether the breakpoint is enabled.
+    pub enabled: bool,
+    /// Hit count.
+    pub hit_count: u32,
+    /// Current pass count.
+    pub current_pass_count: u32,
+    /// Pass count (skip first N hits).
+    pub pass_count: u32,
+    /// Offset expression (for deferred or watchpoint breakpoints).
+    pub expression: Option<String>,
+    /// Match thread ID restriction (if any).
+    pub match_tid: Option<u32>,
+    /// Handler name.
+    pub handler: Option<String>,
+    /// Command to execute on hit.
+    pub command: Option<String>,
+    /// Breakpoint flags (from `GetFlags()`).
+    pub flags: u32,
+    /// Data breakpoint width (for watchpoints).
+    pub data_width: Option<u32>,
+    /// Data breakpoint access type (1=W, 2=R, 4=X).
+    pub data_access_type: Option<u32>,
+}
+
+impl DbgEngProcessBreakpoint {
+    /// Create a new breakpoint entry.
+    pub fn new(id: u32) -> Self {
+        Self {
+            id,
+            bp_type: BreakpointType::Software,
+            address: None,
+            enabled: true,
+            hit_count: 0,
+            current_pass_count: 0,
+            pass_count: 0,
+            expression: None,
+            match_tid: None,
+            handler: None,
+            command: None,
+            flags: 0,
+            data_width: None,
+            data_access_type: None,
+        }
+    }
+
+    /// Set the breakpoint type to hardware.
+    pub fn with_hardware(mut self) -> Self {
+        self.bp_type = BreakpointType::Hardware;
+        self
+    }
+
+    /// Set the breakpoint type to data (watchpoint).
+    pub fn with_data(mut self, width: u32, access_type: u32) -> Self {
+        self.bp_type = BreakpointType::Memory;
+        self.data_width = Some(width);
+        self.data_access_type = Some(access_type);
+        self
+    }
+
+    /// Set the resolved address.
+    pub fn with_address(mut self, addr: u64) -> Self {
+        self.address = Some(addr);
+        self
+    }
+
+    /// Set the offset expression (for deferred breakpoints).
+    pub fn with_expression(mut self, expr: impl Into<String>) -> Self {
+        self.expression = Some(expr.into());
+        self
+    }
+
+    /// Set the match thread ID.
+    pub fn with_match_tid(mut self, tid: u32) -> Self {
+        self.match_tid = Some(tid);
+        self
+    }
+
+    /// Set the handler name.
+    pub fn with_handler(mut self, handler: impl Into<String>) -> Self {
+        self.handler = Some(handler.into());
+        self
+    }
+
+    /// Set the command.
+    pub fn with_command(mut self, cmd: impl Into<String>) -> Self {
+        self.command = Some(cmd.into());
+        self
+    }
+
+    /// Set the flags.
+    pub fn with_flags(mut self, flags: u32) -> Self {
+        self.flags = flags;
+        self
+    }
+
+    /// Whether this breakpoint is deferred (no resolved address).
+    pub fn is_deferred(&self) -> bool {
+        self.address.is_none()
+    }
+
+    /// Whether the breakpoint is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.flags & 0x1 != 0 // DEBUG_BREAKPOINT_ENABLED
+    }
+
+    /// Whether the breakpoint is deferred.
+    pub fn is_deferred_flag(&self) -> bool {
+        self.flags & 0x2 != 0 // DEBUG_BREAKPOINT_DEFERRED
+    }
+
+    /// Record a hit.
+    pub fn record_hit(&mut self) {
+        self.hit_count += 1;
+    }
+
+    /// Build the trace path for this breakpoint within a process.
+    pub fn trace_path(&self, proc_num: u32) -> String {
+        format!(
+            "Processes[{}].Debug.Breakpoints[{}]",
+            proc_num, self.id
+        )
+    }
+
+    /// Get the access type label for data breakpoints.
+    pub fn access_type_label(&self) -> &'static str {
+        match self.data_access_type {
+            Some(4) => "X", // DEBUG_BREAKPOINT_EXECUTE
+            Some(2) => "R", // DEBUG_BREAKPOINT_READ
+            Some(1) => "W", // DEBUG_BREAKPOINT_WRITE
+            _ => "x",
+        }
+    }
+
+    /// Build trace object key-value pairs.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = Vec::new();
+        if let Some(addr) = self.address {
+            values.push(("Address".to_string(), format!("0x{:x}", addr)));
+        } else if let Some(ref expr) = self.expression {
+            values.push(("Address".to_string(), "[Deferred]".to_string()));
+            values.push(("Expression".to_string(), expr.clone()));
+        }
+        values.push(("Enabled".to_string(), self.enabled.to_string()));
+        values.push(("HitCount".to_string(), self.hit_count.to_string()));
+        values.push(("Pass Count".to_string(), self.pass_count.to_string()));
+        values.push(("Current Pass Count".to_string(), self.current_pass_count.to_string()));
+        values.push(("Flags".to_string(), format!("0x{:x}", self.flags)));
+        let kind = match self.bp_type {
+            BreakpointType::Software => "x",
+            BreakpointType::Hardware => "x",
+            BreakpointType::Memory => self.access_type_label(),
+        };
+        values.push(("Kinds".to_string(), kind.to_string()));
+        if let Some(tid) = self.match_tid {
+            values.push(("Match TID".to_string(), format!("{:04x}", tid)));
+        }
+        if let Some(ref handler) = self.handler {
+            values.push(("Handler".to_string(), handler.clone()));
+        }
+        if let Some(ref cmd) = self.command {
+            values.push(("Command".to_string(), cmd.clone()));
+        }
+        values
+    }
+}
+
+/// Dbgeng process manager -- manages multiple processes within a single
+/// dbgeng debug session.
+///
+/// Dbgeng can debug multiple processes (e.g., following child processes,
+/// or attaching to multiple targets). This manager tracks all known
+/// processes and provides convenient access, mirroring the GDB agent's
+/// `GdbInferiorManager`.
+#[derive(Debug, Default)]
+pub struct DbgEngProcessManager {
+    processes: BTreeMap<u32, DbgEngInferiorProcess>,
+    active_num: Option<u32>,
+}
+
+impl DbgEngProcessManager {
+    /// Create a new empty process manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a process.
+    pub fn add(&mut self, process: DbgEngInferiorProcess) {
+        let num = process.num;
+        if self.active_num.is_none() {
+            self.active_num = Some(num);
+        }
+        self.processes.insert(num, process);
+    }
+
+    /// Remove a process by number.
+    pub fn remove(&mut self, num: u32) -> Option<DbgEngInferiorProcess> {
+        let removed = self.processes.remove(&num);
+        if self.active_num == Some(num) {
+            self.active_num = self.processes.keys().next().copied();
+        }
+        removed
+    }
+
+    /// Get a process by number.
+    pub fn get(&self, num: u32) -> Option<&DbgEngInferiorProcess> {
+        self.processes.get(&num)
+    }
+
+    /// Get a mutable process by number.
+    pub fn get_mut(&mut self, num: u32) -> Option<&mut DbgEngInferiorProcess> {
+        self.processes.get_mut(&num)
+    }
+
+    /// Get the currently active process.
+    pub fn active(&self) -> Option<&DbgEngInferiorProcess> {
+        self.active_num.and_then(|n| self.processes.get(&n))
+    }
+
+    /// Get a mutable reference to the active process.
+    pub fn active_mut(&mut self) -> Option<&mut DbgEngInferiorProcess> {
+        self.active_num.and_then(move |n| self.processes.get_mut(&n))
+    }
+
+    /// Set the active process by number.
+    pub fn set_active(&mut self, num: u32) {
+        if self.processes.contains_key(&num) {
+            self.active_num = Some(num);
+        }
+    }
+
+    /// Get the active process number.
+    pub fn active_num(&self) -> Option<u32> {
+        self.active_num
+    }
+
+    /// Get all process numbers.
+    pub fn numbers(&self) -> Vec<u32> {
+        self.processes.keys().copied().collect()
+    }
+
+    /// Count of managed processes.
+    pub fn len(&self) -> usize {
+        self.processes.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.processes.is_empty()
+    }
+
+    /// Get all processes.
+    pub fn all(&self) -> &BTreeMap<u32, DbgEngInferiorProcess> {
+        &self.processes
+    }
+
+    /// Get all alive (non-exited) processes.
+    pub fn alive(&self) -> Vec<&DbgEngInferiorProcess> {
+        self.processes.values().filter(|p| p.is_alive()).collect()
+    }
+
+    /// Get total thread count across all processes.
+    pub fn total_thread_count(&self) -> usize {
+        self.processes.values().map(|p| p.threads.len()).sum()
+    }
+
+    /// Build process info list for the common agent interface.
+    pub fn build_process_info_list(&self) -> Vec<ProcessInfo> {
+        self.processes
+            .values()
+            .map(|p| p.to_process_info())
+            .collect()
+    }
+
+    /// Get all process numbers sorted.
+    pub fn sorted_numbers(&self) -> Vec<u32> {
+        let mut nums: Vec<u32> = self.processes.keys().copied().collect();
+        nums.sort();
+        nums
+    }
+
+    /// Refresh the state of all processes from their threads.
+    pub fn refresh_all_states(&mut self) {
+        for p in self.processes.values_mut() {
+            p.refresh_state();
+        }
     }
 }
 
@@ -1773,5 +2296,322 @@ mod tests {
         let keys = p.build_region_retain_keys();
         assert!(keys.contains(&"[00400000]".to_string()));
         assert_eq!(keys.len(), 1);
+    }
+
+    #[test]
+    fn test_module_section_new() {
+        let s = ModuleSection::new(".text", 0x1000, 0x5000);
+        assert_eq!(s.name, ".text");
+        assert_eq!(s.start, 0x1000);
+        assert_eq!(s.end, 0x6000);
+        assert_eq!(s.size, 0x5000);
+        assert_eq!(s.characteristics, 0);
+    }
+
+    #[test]
+    fn test_module_section_characteristics() {
+        let s = ModuleSection::new(".text", 0x1000, 0x5000)
+            .with_characteristics(0x60000020); // MEM_EXECUTE | MEM_READ | CNT_CODE
+        assert!(s.is_executable());
+        assert!(s.is_readable());
+        assert!(!s.is_writable());
+
+        let data = ModuleSection::new(".data", 0x6000, 0x1000)
+            .with_characteristics(0xC0000040); // MEM_READ | MEM_WRITE | CNT_INITIALIZED_DATA
+        assert!(!data.is_executable());
+        assert!(data.is_readable());
+        assert!(data.is_writable());
+        assert!(data.is_initialized_data());
+    }
+
+    #[test]
+    fn test_module_section_trace_path() {
+        let s = ModuleSection::new(".text", 0x1000, 0x5000);
+        assert_eq!(
+            s.trace_path(1, 0x7ff800000000),
+            "Processes[1].Modules[0x7ff800000000].Sections[.text]"
+        );
+    }
+
+    #[test]
+    fn test_module_section_trace_values() {
+        let s = ModuleSection::new(".rdata", 0x7000, 0x2000);
+        let values = s.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Range" && v == "0x7000:0x9000"));
+        assert!(values.iter().any(|(k, v)| k == "Size" && v == "0x2000"));
+    }
+
+    #[test]
+    fn test_module_with_sections() {
+        let info = ModuleInfo {
+            name: "kernel32.dll".to_string(),
+            base: 0x7ff800000000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: Some("C:\\Windows\\System32\\kernel32.dll".to_string()),
+        };
+        let mut mod_ws = ModuleWithSections::from_info(info)
+            .with_flags(0x1000)
+            .with_debug_info_loaded(true);
+        assert_eq!(mod_ws.section_count(), 0);
+        assert!(!mod_ws.has_section(".text"));
+
+        mod_ws.add_section(ModuleSection::new(".text", 0x1000, 0x80000));
+        mod_ws.add_section(ModuleSection::new(".rdata", 0x81000, 0x40000));
+        assert_eq!(mod_ws.section_count(), 2);
+        assert!(mod_ws.has_section(".text"));
+        assert!(mod_ws.has_section(".rdata"));
+        assert!(!mod_ws.has_section(".data"));
+
+        let text = mod_ws.get_section(".text").unwrap();
+        assert_eq!(text.start, 0x1000);
+        assert_eq!(text.size, 0x80000);
+
+        let removed = mod_ws.remove_section(".rdata");
+        assert!(removed.is_some());
+        assert_eq!(mod_ws.section_count(), 1);
+
+        mod_ws.clear_sections();
+        assert_eq!(mod_ws.section_count(), 0);
+    }
+
+    #[test]
+    fn test_module_with_sections_paths() {
+        let info = ModuleInfo {
+            name: "ntdll.dll".to_string(),
+            base: 0x7ff800100000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        };
+        let mod_ws = ModuleWithSections::from_info(info);
+        assert_eq!(
+            mod_ws.trace_path(1),
+            "Processes[1].Modules[0x7ff800100000]"
+        );
+        assert_eq!(
+            mod_ws.sections_path(1),
+            "Processes[1].Modules[0x7ff800100000].Sections"
+        );
+    }
+
+    #[test]
+    fn test_module_with_sections_trace_values() {
+        let info = ModuleInfo {
+            name: "test.exe".to_string(),
+            base: 0x400000,
+            size: 0x10000,
+            build_id: None,
+            debug_path: None,
+            load_path: Some("C:\\test.exe".to_string()),
+        };
+        let mod_ws = ModuleWithSections::from_info(info).with_debug_info_loaded(true);
+        let values = mod_ws.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "test.exe"));
+        assert!(values.iter().any(|(k, v)| k == "Debug Info" && v == "loaded"));
+        assert!(values.iter().any(|(k, _v)| k == "Load Path"));
+    }
+
+    #[test]
+    fn test_process_breakpoint_new() {
+        let bp = DbgEngProcessBreakpoint::new(1);
+        assert_eq!(bp.id, 1);
+        assert_eq!(bp.bp_type, BreakpointType::Software);
+        assert!(bp.address.is_none());
+        assert!(bp.enabled);
+        assert_eq!(bp.hit_count, 0);
+        assert!(bp.expression.is_none());
+        assert!(bp.match_tid.is_none());
+        assert!(bp.handler.is_none());
+    }
+
+    #[test]
+    fn test_process_breakpoint_builder() {
+        let bp = DbgEngProcessBreakpoint::new(5)
+            .with_address(0x401000)
+            .with_handler("my_handler")
+            .with_command("gc")
+            .with_match_tid(0x1234)
+            .with_flags(0x1); // DEBUG_BREAKPOINT_ENABLED
+        assert_eq!(bp.address, Some(0x401000));
+        assert_eq!(bp.handler.as_deref(), Some("my_handler"));
+        assert_eq!(bp.command.as_deref(), Some("gc"));
+        assert_eq!(bp.match_tid, Some(0x1234));
+        assert!(!bp.is_deferred());
+        assert!(bp.is_enabled());
+    }
+
+    #[test]
+    fn test_process_breakpoint_deferred() {
+        let bp = DbgEngProcessBreakpoint::new(1)
+            .with_expression("kernel32!CreateFileW")
+            .with_flags(0x3); // ENABLED | DEFERRED
+        assert!(bp.is_deferred());
+        assert!(bp.is_deferred_flag());
+        assert_eq!(bp.expression.as_deref(), Some("kernel32!CreateFileW"));
+    }
+
+    #[test]
+    fn test_process_breakpoint_data() {
+        let bp = DbgEngProcessBreakpoint::new(2)
+            .with_data(8, 1) // 8 bytes, write
+            .with_address(0x7ffde000);
+        assert_eq!(bp.bp_type, BreakpointType::Memory);
+        assert_eq!(bp.data_width, Some(8));
+        assert_eq!(bp.data_access_type, Some(1));
+        assert_eq!(bp.access_type_label(), "W");
+    }
+
+    #[test]
+    fn test_process_breakpoint_trace_path() {
+        let bp = DbgEngProcessBreakpoint::new(3);
+        assert_eq!(
+            bp.trace_path(1),
+            "Processes[1].Debug.Breakpoints[3]"
+        );
+    }
+
+    #[test]
+    fn test_process_breakpoint_build_trace_values() {
+        let bp = DbgEngProcessBreakpoint::new(1)
+            .with_address(0x401000)
+            .with_flags(0x1)
+            .with_command("gc");
+        let values = bp.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Address" && v == "0x401000"));
+        assert!(values.iter().any(|(k, v)| k == "Enabled" && v == "true"));
+        assert!(values.iter().any(|(k, v)| k == "Command" && v == "gc"));
+        assert!(values.iter().any(|(k, v)| k == "Kinds" && v == "x"));
+    }
+
+    #[test]
+    fn test_process_breakpoint_hit() {
+        let mut bp = DbgEngProcessBreakpoint::new(1);
+        assert_eq!(bp.hit_count, 0);
+        bp.record_hit();
+        bp.record_hit();
+        assert_eq!(bp.hit_count, 2);
+    }
+
+    #[test]
+    fn test_process_breakpoint_access_type_labels() {
+        let bp_w = DbgEngProcessBreakpoint::new(1).with_data(4, 1);
+        assert_eq!(bp_w.access_type_label(), "W");
+
+        let bp_r = DbgEngProcessBreakpoint::new(2).with_data(4, 2);
+        assert_eq!(bp_r.access_type_label(), "R");
+
+        let bp_x = DbgEngProcessBreakpoint::new(3).with_data(4, 4);
+        assert_eq!(bp_x.access_type_label(), "X");
+
+        let bp_default = DbgEngProcessBreakpoint::new(4);
+        assert_eq!(bp_default.access_type_label(), "x");
+    }
+
+    #[test]
+    fn test_process_manager() {
+        let mut mgr = DbgEngProcessManager::new();
+        assert!(mgr.is_empty());
+        assert_eq!(mgr.len(), 0);
+        assert!(mgr.active().is_none());
+
+        mgr.add(DbgEngInferiorProcess::new(0).with_pid(100));
+        mgr.add(DbgEngInferiorProcess::new(1).with_pid(200));
+        assert_eq!(mgr.len(), 2);
+        assert_eq!(mgr.active_num(), Some(0));
+
+        let p0 = mgr.get(0).unwrap();
+        assert_eq!(p0.pid, Some(100));
+
+        let p1 = mgr.get(1).unwrap();
+        assert_eq!(p1.pid, Some(200));
+
+        mgr.set_active(1);
+        assert_eq!(mgr.active_num(), Some(1));
+        assert_eq!(mgr.active().unwrap().pid, Some(200));
+    }
+
+    #[test]
+    fn test_process_manager_remove() {
+        let mut mgr = DbgEngProcessManager::new();
+        mgr.add(DbgEngInferiorProcess::new(0));
+        mgr.add(DbgEngInferiorProcess::new(1));
+        mgr.add(DbgEngInferiorProcess::new(2));
+
+        mgr.set_active(1);
+        let removed = mgr.remove(1);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().num, 1);
+
+        // Active should fall back to first available
+        assert_eq!(mgr.active_num(), Some(0));
+        assert_eq!(mgr.len(), 2);
+    }
+
+    #[test]
+    fn test_process_manager_alive() {
+        let mut mgr = DbgEngProcessManager::new();
+        let mut p0 = DbgEngInferiorProcess::new(0);
+        p0.state = ExecutionState::Stopped;
+        mgr.add(p0);
+        let mut p1 = DbgEngInferiorProcess::new(1);
+        p1.state = ExecutionState::Exited;
+        mgr.add(p1);
+        let mut p2 = DbgEngInferiorProcess::new(2);
+        p2.state = ExecutionState::Running;
+        mgr.add(p2);
+
+        let alive = mgr.alive();
+        assert_eq!(alive.len(), 2);
+        assert!(alive.iter().all(|p| p.is_alive()));
+    }
+
+    #[test]
+    fn test_process_manager_sorted_numbers() {
+        let mut mgr = DbgEngProcessManager::new();
+        mgr.add(DbgEngInferiorProcess::new(3));
+        mgr.add(DbgEngInferiorProcess::new(1));
+        mgr.add(DbgEngInferiorProcess::new(2));
+        assert_eq!(mgr.sorted_numbers(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_process_manager_process_info_list() {
+        let mut mgr = DbgEngProcessManager::new();
+        mgr.add(DbgEngInferiorProcess::new(0));
+        mgr.add(DbgEngInferiorProcess::new(1));
+        let list = mgr.build_process_info_list();
+        assert_eq!(list.len(), 2);
+    }
+
+    #[test]
+    fn test_process_manager_total_threads() {
+        let mut mgr = DbgEngProcessManager::new();
+        let mut p0 = DbgEngInferiorProcess::new(0);
+        p0.add_thread(DbgEngThread::new(0));
+        p0.add_thread(DbgEngThread::new(1));
+        mgr.add(p0);
+
+        let mut p1 = DbgEngInferiorProcess::new(1);
+        p1.add_thread(DbgEngThread::new(0));
+        mgr.add(p1);
+
+        assert_eq!(mgr.total_thread_count(), 3);
+    }
+
+    #[test]
+    fn test_process_manager_mutable() {
+        let mut mgr = DbgEngProcessManager::new();
+        mgr.add(DbgEngInferiorProcess::new(0));
+
+        let p = mgr.get_mut(0).unwrap();
+        p.mark_synced();
+        assert!(mgr.get(0).unwrap().synced);
+
+        let active = mgr.active_mut().unwrap();
+        active.set_exit(0);
+        assert_eq!(mgr.get(0).unwrap().state, ExecutionState::Exited);
     }
 }

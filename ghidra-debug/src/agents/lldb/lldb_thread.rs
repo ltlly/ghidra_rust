@@ -919,6 +919,83 @@ pub struct LldbStackFrame {
     /// Register values for this frame.
     #[serde(skip)]
     pub registers: Vec<RegisterValue>,
+    /// Register banks (groups) for this frame.
+    ///
+    /// In LLDB, registers are organized into banks such as
+    /// "General Purpose Registers", "Floating Point Registers", etc.
+    /// This is populated from `SBFrame.GetRegisters()`.
+    ///
+    /// Ported from the `putreg` function's bank iteration in `commands.py`.
+    #[serde(skip)]
+    pub register_banks: Vec<LldbRegisterGroup>,
+}
+
+/// A register group (bank) within a stack frame.
+///
+/// In LLDB, `SBFrame.GetRegisters()` returns a list of register groups
+/// (e.g., "General Purpose Registers", "Floating Point Registers").
+/// Each group contains register values that can be read/written together.
+///
+/// Ported from the `putreg` function in `commands.py` which iterates
+/// `banks.GetFirstValueByName(DEFAULT_REGISTER_BANK)`.
+#[derive(Debug, Clone)]
+pub struct LldbRegisterGroup {
+    /// Group/bank name (e.g., "General Purpose Registers").
+    pub name: String,
+    /// Register values in this group.
+    pub registers: Vec<RegisterValue>,
+    /// Whether this is the primary register group.
+    pub is_primary: bool,
+}
+
+impl LldbRegisterGroup {
+    /// Create a new register group.
+    pub fn new(name: impl Into<String>) -> Self {
+        let name_str = name.into();
+        let auto_primary = name_str == "General Purpose Registers";
+        Self {
+            name: name_str,
+            registers: Vec::new(),
+            is_primary: auto_primary,
+        }
+    }
+
+    /// Set whether this is the primary group.
+    pub fn with_primary(mut self, primary: bool) -> Self {
+        self.is_primary = primary;
+        self
+    }
+
+    /// Add a register value to this group.
+    pub fn add_register(&mut self, reg: RegisterValue) {
+        self.registers.retain(|r| r.name != reg.name);
+        self.registers.push(reg);
+    }
+
+    /// Get a register by name.
+    pub fn get_register(&self, name: &str) -> Option<&RegisterValue> {
+        self.registers.iter().find(|r| r.name == name)
+    }
+
+    /// Get all register names in this group.
+    pub fn register_names(&self) -> Vec<&str> {
+        self.registers.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    /// Number of registers in this group.
+    pub fn len(&self) -> usize {
+        self.registers.len()
+    }
+
+    /// Check if this group is empty.
+    pub fn is_empty(&self) -> bool {
+        self.registers.is_empty()
+    }
+
+    /// Clear all registers in this group.
+    pub fn clear(&mut self) {
+        self.registers.clear();
+    }
 }
 
 impl LldbStackFrame {
@@ -934,6 +1011,7 @@ impl LldbStackFrame {
             module_name: None,
             symbol_name: None,
             registers: Vec::new(),
+            register_banks: Vec::new(),
         }
     }
 
@@ -1030,6 +1108,71 @@ impl LldbStackFrame {
             .iter()
             .map(|r| r.name.clone())
             .collect()
+    }
+
+    /// Add a register bank (group) to this frame.
+    ///
+    /// Ported from the bank iteration in `putreg` in `commands.py`.
+    pub fn add_register_bank(&mut self, bank: LldbRegisterGroup) {
+        self.register_banks.retain(|b| b.name != bank.name);
+        self.register_banks.push(bank);
+    }
+
+    /// Get a register bank by name.
+    pub fn get_register_bank(&self, name: &str) -> Option<&LldbRegisterGroup> {
+        self.register_banks.iter().find(|b| b.name == name)
+    }
+
+    /// Get a mutable register bank by name.
+    pub fn get_register_bank_mut(&mut self, name: &str) -> Option<&mut LldbRegisterGroup> {
+        self.register_banks.iter_mut().find(|b| b.name == name)
+    }
+
+    /// Get the primary register bank (General Purpose Registers).
+    ///
+    /// This is the bank used by default in the Python agent's `putreg`.
+    pub fn primary_register_bank(&self) -> Option<&LldbRegisterGroup> {
+        self.register_banks.iter().find(|b| b.is_primary)
+    }
+
+    /// Get the number of register banks.
+    pub fn register_bank_count(&self) -> usize {
+        self.register_banks.len()
+    }
+
+    /// Get all register bank names.
+    pub fn register_bank_names(&self) -> Vec<&str> {
+        self.register_banks.iter().map(|b| b.name.as_str()).collect()
+    }
+
+    /// Check if this frame has register banks.
+    pub fn has_register_banks(&self) -> bool {
+        !self.register_banks.is_empty()
+    }
+
+    /// Get the total number of registers across all banks.
+    pub fn total_register_count(&self) -> usize {
+        self.register_banks.iter().map(|b| b.len()).sum()
+    }
+
+    /// Get a register value from any bank by name.
+    ///
+    /// Searches all banks for the register.
+    pub fn get_register_from_banks(&self, name: &str) -> Option<&RegisterValue> {
+        for bank in &self.register_banks {
+            if let Some(reg) = bank.get_register(name) {
+                return Some(reg);
+            }
+        }
+        None
+    }
+
+    /// Build the trace path for a specific register bank.
+    pub fn bank_trace_path(&self, process_index: u32, thread_index: u32, bank_name: &str) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Registers.{}",
+            process_index, thread_index, self.level, bank_name
+        )
     }
 }
 
@@ -1767,5 +1910,173 @@ mod frame_selection_tests {
 
         sel.clear();
         assert!(sel.frame_path().is_none());
+    }
+}
+
+#[cfg(test)]
+mod register_bank_tests {
+    use super::*;
+
+    #[test]
+    fn test_register_group_new() {
+        let group = LldbRegisterGroup::new("General Purpose Registers");
+        assert_eq!(group.name, "General Purpose Registers");
+        assert!(group.is_primary);
+        assert!(group.is_empty());
+        assert_eq!(group.len(), 0);
+    }
+
+    #[test]
+    fn test_register_group_not_primary() {
+        let group = LldbRegisterGroup::new("Floating Point Registers");
+        assert!(!group.is_primary);
+    }
+
+    #[test]
+    fn test_register_group_with_primary() {
+        let group = LldbRegisterGroup::new("Custom Registers")
+            .with_primary(true);
+        assert!(group.is_primary);
+    }
+
+    #[test]
+    fn test_register_group_add_register() {
+        let mut group = LldbRegisterGroup::new("General Purpose Registers");
+        group.add_register(RegisterValue::from_u64("rax", 0x1234));
+        group.add_register(RegisterValue::from_u64("rbx", 0x5678));
+        assert_eq!(group.len(), 2);
+        assert!(!group.is_empty());
+
+        // Replace same name
+        group.add_register(RegisterValue::from_u64("rax", 0xabcd));
+        assert_eq!(group.len(), 2);
+        assert_eq!(group.get_register("rax").unwrap().as_u64(), Some(0xabcd));
+    }
+
+    #[test]
+    fn test_register_group_get_register() {
+        let mut group = LldbRegisterGroup::new("GPR");
+        group.add_register(RegisterValue::from_u64("x0", 42));
+        assert!(group.get_register("x0").is_some());
+        assert!(group.get_register("x1").is_none());
+    }
+
+    #[test]
+    fn test_register_group_names() {
+        let mut group = LldbRegisterGroup::new("GPR");
+        group.add_register(RegisterValue::from_u64("x0", 1));
+        group.add_register(RegisterValue::from_u64("x1", 2));
+        group.add_register(RegisterValue::from_u64("pc", 3));
+        let names = group.register_names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"x0"));
+        assert!(names.contains(&"x1"));
+        assert!(names.contains(&"pc"));
+    }
+
+    #[test]
+    fn test_register_group_clear() {
+        let mut group = LldbRegisterGroup::new("GPR");
+        group.add_register(RegisterValue::from_u64("x0", 1));
+        group.clear();
+        assert!(group.is_empty());
+    }
+
+    #[test]
+    fn test_stack_frame_register_banks() {
+        let mut f = LldbStackFrame::new(0, 0x401000);
+
+        let mut gpr = LldbRegisterGroup::new("General Purpose Registers");
+        gpr.add_register(RegisterValue::from_u64("rax", 0x1234));
+        gpr.add_register(RegisterValue::from_u64("rbx", 0x5678));
+
+        let mut fpr = LldbRegisterGroup::new("Floating Point Registers");
+        fpr.add_register(RegisterValue::from_u64("xmm0", 0));
+
+        f.add_register_bank(gpr);
+        f.add_register_bank(fpr);
+
+        assert_eq!(f.register_bank_count(), 2);
+        assert!(f.has_register_banks());
+        assert_eq!(f.total_register_count(), 3);
+
+        let bank_names = f.register_bank_names();
+        assert!(bank_names.contains(&"General Purpose Registers"));
+        assert!(bank_names.contains(&"Floating Point Registers"));
+    }
+
+    #[test]
+    fn test_stack_frame_primary_bank() {
+        let mut f = LldbStackFrame::new(0, 0x401000);
+
+        let mut fpr = LldbRegisterGroup::new("Floating Point Registers");
+        fpr.add_register(RegisterValue::from_u64("xmm0", 0));
+        f.add_register_bank(fpr);
+
+        assert!(f.primary_register_bank().is_none());
+
+        let mut gpr = LldbRegisterGroup::new("General Purpose Registers");
+        gpr.add_register(RegisterValue::from_u64("rax", 0x1234));
+        f.add_register_bank(gpr);
+
+        let primary = f.primary_register_bank();
+        assert!(primary.is_some());
+        assert_eq!(primary.unwrap().name, "General Purpose Registers");
+    }
+
+    #[test]
+    fn test_stack_frame_get_register_bank() {
+        let mut f = LldbStackFrame::new(0, 0x401000);
+        let gpr = LldbRegisterGroup::new("General Purpose Registers");
+        f.add_register_bank(gpr);
+
+        assert!(f.get_register_bank("General Purpose Registers").is_some());
+        assert!(f.get_register_bank("Floating Point Registers").is_none());
+    }
+
+    #[test]
+    fn test_stack_frame_get_register_from_banks() {
+        let mut f = LldbStackFrame::new(0, 0x401000);
+
+        let mut gpr = LldbRegisterGroup::new("General Purpose Registers");
+        gpr.add_register(RegisterValue::from_u64("rax", 0x1234));
+        f.add_register_bank(gpr);
+
+        let mut fpr = LldbRegisterGroup::new("Floating Point Registers");
+        fpr.add_register(RegisterValue::from_u64("xmm0", 0xabcd));
+        f.add_register_bank(fpr);
+
+        assert!(f.get_register_from_banks("rax").is_some());
+        assert_eq!(f.get_register_from_banks("rax").unwrap().as_u64(), Some(0x1234));
+        assert!(f.get_register_from_banks("xmm0").is_some());
+        assert!(f.get_register_from_banks("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_stack_frame_bank_trace_path() {
+        let f = LldbStackFrame::new(2, 0x401000);
+        assert_eq!(
+            f.bank_trace_path(1, 3, "General Purpose Registers"),
+            "Processes[1].Threads[3].Stack[2].Registers.General Purpose Registers"
+        );
+    }
+
+    #[test]
+    fn test_stack_frame_register_bank_replace() {
+        let mut f = LldbStackFrame::new(0, 0x401000);
+
+        let mut gpr1 = LldbRegisterGroup::new("GPR");
+        gpr1.add_register(RegisterValue::from_u64("rax", 1));
+        f.add_register_bank(gpr1);
+
+        // Replace same name
+        let mut gpr2 = LldbRegisterGroup::new("GPR");
+        gpr2.add_register(RegisterValue::from_u64("rax", 2));
+        gpr2.add_register(RegisterValue::from_u64("rbx", 3));
+        f.add_register_bank(gpr2);
+
+        assert_eq!(f.register_bank_count(), 1);
+        let bank = f.get_register_bank("GPR").unwrap();
+        assert_eq!(bank.len(), 2);
     }
 }

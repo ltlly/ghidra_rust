@@ -89,6 +89,23 @@ impl LocalFlags {
         }
     }
 
+    /// Encode flags back to a raw 16-bit value.
+    pub fn to_u16(&self) -> u16 {
+        let mut val: u16 = 0;
+        if self.is_parameter { val |= 0x0001; }
+        if self.is_address_taken { val |= 0x0002; }
+        if self.is_compiler_generated { val |= 0x0004; }
+        if self.is_aggregate { val |= 0x0008; }
+        if self.is_aggregate_member { val |= 0x0010; }
+        if self.is_aliased { val |= 0x0020; }
+        if self.is_alias { val |= 0x0040; }
+        if self.is_function_return_value { val |= 0x0080; }
+        if self.is_optimized_out { val |= 0x0100; }
+        if self.is_enregistered_global { val |= 0x0200; }
+        if self.is_enregistered_static { val |= 0x0400; }
+        val
+    }
+
     /// Return a human-readable description of the active flags.
     ///
     /// This matches the Java `LocalVariableFlags.emit()` output format.
@@ -485,5 +502,24 @@ mod tests {
         );
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_flags_roundtrip() {
+        // Test that from_u16 -> to_u16 produces the same value
+        for raw in [0u16, 0x0001, 0x0003, 0x007F, 0x07FF, 0xFFFF] {
+            let flags = LocalFlags::from_u16(raw);
+            // Only bits 0-10 are defined, so mask to those
+            assert_eq!(flags.to_u16(), raw & 0x07FF);
+        }
+    }
+
+    #[test]
+    fn test_flags_to_u16_individual() {
+        let flags = LocalFlags::from_u16(0x0001);
+        assert_eq!(flags.to_u16(), 0x0001);
+
+        let flags = LocalFlags::from_u16(0x0400);
+        assert_eq!(flags.to_u16(), 0x0400);
     }
 }

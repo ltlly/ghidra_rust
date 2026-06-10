@@ -41,8 +41,8 @@ use super::record_number::{RecordCategory, RecordNumber};
 /// name          : NT string
 /// ```
 ///
-/// This corresponds to `S_REGREL32` (0x020C) and `S_REGREL32_ST` (0x100D)
-/// in the CodeView symbol set.
+/// This corresponds to `S_REGREL32` (0x020C), `S_REGREL32_ST` (0x100D),
+/// and `S_REGREL32_V2` (0x1111) in the CodeView symbol set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SRegRel32 {
     /// Signed offset from the register.
@@ -53,6 +53,9 @@ pub struct SRegRel32 {
 
     /// The register index (architecture-specific register number).
     pub register_index: u16,
+
+    /// The symbol kind used to create this record (for PDB ID reporting).
+    symbol_kind: u16,
 
     /// The variable name.
     pub name: String,
@@ -101,6 +104,23 @@ impl SRegRel32 {
             offset,
             type_record_number,
             register_index,
+            symbol_kind: super::super::symbol_kind::S_REGREL32,
+            name,
+        }
+    }
+
+    /// Create a new register-relative symbol for the V2 variant (0x1111).
+    pub fn new_v2(
+        offset: i32,
+        type_record_number: RecordNumber,
+        register_index: u16,
+        name: String,
+    ) -> Self {
+        Self {
+            offset,
+            type_record_number,
+            register_index,
+            symbol_kind: super::super::symbol_kind::S_REGREL32_V2,
             name,
         }
     }
@@ -109,6 +129,17 @@ impl SRegRel32 {
     ///
     /// Expects the layout: `offset(i32) + type_record(u32) + register(u16) + name(NT)`.
     pub fn parse(data: &[u8]) -> Option<Self> {
+        Self::parse_with_kind(data, super::super::symbol_kind::S_REGREL32)
+    }
+
+    /// Parse an S_REGREL32_V2 symbol from a byte slice.
+    ///
+    /// Same layout as [`Self::parse`] but reports the V2 PDB ID (0x1111).
+    pub fn parse_v2(data: &[u8]) -> Option<Self> {
+        Self::parse_with_kind(data, super::super::symbol_kind::S_REGREL32_V2)
+    }
+
+    fn parse_with_kind(data: &[u8], kind: u16) -> Option<Self> {
         if data.len() < 10 {
             return None;
         }
@@ -120,6 +151,7 @@ impl SRegRel32 {
             offset,
             type_record_number: trn,
             register_index,
+            symbol_kind: kind,
             name,
         })
     }
@@ -192,11 +224,14 @@ pub fn cv_register_name(index: u16) -> Option<&'static str> {
 
 impl AbstractMsSymbol for SRegRel32 {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_REGREL32
+        self.symbol_kind
     }
 
     fn symbol_type_name(&self) -> &'static str {
-        "S_REGREL32"
+        match self.symbol_kind {
+            super::super::symbol_kind::S_REGREL32_V2 => "S_REGREL32_V2",
+            _ => "S_REGREL32",
+        }
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -394,5 +429,28 @@ mod tests {
         );
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_v2_variant() {
+        let sym = SRegRel32::new_v2(
+            -8,
+            RecordNumber::type_record_number(0x1020),
+            20,
+            "v2_var".to_string(),
+        );
+        assert_eq!(sym.pdb_id(), 0x1111);
+        assert_eq!(sym.symbol_type_name(), "S_REGREL32_V2");
+        assert_eq!(sym.name(), "v2_var");
+    }
+
+    #[test]
+    fn test_parse_v2() {
+        let data = make_regrel32_bytes(-8, 0x1020, 20, b"v2_var");
+        let sym = SRegRel32::parse_v2(&data).unwrap();
+        assert_eq!(sym.pdb_id(), 0x1111);
+        assert_eq!(sym.symbol_type_name(), "S_REGREL32_V2");
+        assert_eq!(sym.offset, -8);
+        assert_eq!(sym.name, "v2_var");
     }
 }

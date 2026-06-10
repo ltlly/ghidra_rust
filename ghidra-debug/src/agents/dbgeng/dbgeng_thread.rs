@@ -29,6 +29,9 @@ use crate::agents::{
 /// Execution state of a dbgeng thread.
 ///
 /// This extends the common `ExecutionState` with dbgeng-specific states.
+/// The `Suspended` variant corresponds to the dbgeng `IsSuspended()` check
+/// in the Python agent's `convert_state` function -- a thread may be
+/// stopped but explicitly suspended (e.g., via `.suspend` command).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum DbgEngThreadState {
     /// Thread is running.
@@ -39,6 +42,11 @@ pub enum DbgEngThreadState {
     Exited,
     /// Thread is not yet started or unknown.
     Inactive,
+    /// Thread is suspended (explicitly frozen, not responsive to continue).
+    ///
+    /// Ported from the Python agent's `convert_state` which checks
+    /// `t.IsSuspended()` separately from `t.IsStopped()`.
+    Suspended,
 }
 
 impl DbgEngThreadState {
@@ -46,7 +54,7 @@ impl DbgEngThreadState {
     pub fn to_execution_state(&self) -> ExecutionState {
         match self {
             Self::Running => ExecutionState::Running,
-            Self::Stopped => ExecutionState::Stopped,
+            Self::Stopped | Self::Suspended => ExecutionState::Stopped,
             Self::Exited => ExecutionState::Exited,
             Self::Inactive => ExecutionState::NotStarted,
         }
@@ -59,6 +67,7 @@ impl DbgEngThreadState {
             Self::Stopped => "STOPPED",
             Self::Exited => "TERMINATED",
             Self::Inactive => "INACTIVE",
+            Self::Suspended => "SUSPENDED",
         }
     }
 
@@ -69,18 +78,35 @@ impl DbgEngThreadState {
             "STOPPED" => Self::Stopped,
             "TERMINATED" => Self::Exited,
             "INACTIVE" => Self::Inactive,
+            "SUSPENDED" => Self::Suspended,
             _ => Self::Inactive,
         }
     }
 
     /// Whether this state implies the thread can be resumed.
     pub fn is_resumable(&self) -> bool {
-        matches!(self, Self::Stopped)
+        matches!(self, Self::Stopped | Self::Suspended)
     }
 
     /// Whether this state implies the thread is alive.
     pub fn is_alive_state(&self) -> bool {
-        matches!(self, Self::Running | Self::Stopped)
+        matches!(self, Self::Running | Self::Stopped | Self::Suspended)
+    }
+
+    /// Parse from dbgeng thread state booleans.
+    ///
+    /// The Python agent's `convert_state` checks `IsSuspended()`,
+    /// `IsStopped()`, and `IsRunning()` in that order.
+    pub fn from_dbgeng_state(is_running: bool, is_stopped: bool, is_suspended: bool) -> Self {
+        if is_suspended {
+            Self::Suspended
+        } else if is_running {
+            Self::Running
+        } else if is_stopped {
+            Self::Stopped
+        } else {
+            Self::Inactive
+        }
     }
 
     /// Parse from dbgeng execution status.
@@ -801,6 +827,201 @@ impl DbgEngFrameSelection {
     }
 }
 
+/// A register group within a dbgeng thread.
+///
+/// Ported from the Python agent's `putreg` function, which iterates
+/// through all registers via `regs._reg.GetDescription(i)`. Dbgeng
+/// organizes registers into groups (e.g., "User", "Segment", "XMM").
+/// This struct models one such group for trace synchronization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterGroup {
+    /// Group name (e.g., "User", "Segment", "XMM", "FP").
+    pub name: String,
+    /// Register names in this group.
+    pub register_names: Vec<String>,
+    /// Whether this group has been synced to the trace.
+    pub synced: bool,
+}
+
+impl RegisterGroup {
+    /// Create a new register group.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            register_names: Vec::new(),
+            synced: false,
+        }
+    }
+
+    /// Add a register name to this group.
+    pub fn add_register(&mut self, name: impl Into<String>) {
+        self.register_names.push(name.into());
+    }
+
+    /// Get the register count.
+    pub fn register_count(&self) -> usize {
+        self.register_names.len()
+    }
+
+    /// Mark as synchronized.
+    pub fn mark_synced(&mut self) {
+        self.synced = true;
+    }
+
+    /// Build the trace path for this register group.
+    pub fn trace_path(&self, proc_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Registers.{}",
+            proc_num, thread_num, self.name
+        )
+    }
+}
+
+/// Common dbgeng register groups.
+///
+/// These correspond to the register group names returned by the
+/// dbgeng API's `GetDescription` calls. The "User" group contains
+/// the general-purpose registers that are most commonly displayed.
+pub mod register_groups {
+    /// General-purpose registers (rax, rbx, rcx, ...).
+    pub const USER: &str = "User";
+    /// Segment registers (cs, ds, es, ...).
+    pub const SEGMENT: &str = "Segment";
+    /// XMM/SSE registers (xmm0-xmm15).
+    pub const XMM: &str = "XMM";
+    /// Floating-point registers (st0-st7, fctrl, ...).
+    pub const FP: &str = "FP";
+    /// Debug registers (dr0-dr7).
+    pub const DEBUG: &str = "Debug";
+    /// Control registers (cr0, cr4, ...).
+    pub const CONTROL: &str = "Control";
+}
+
+/// Tracks register groups for a dbgeng thread.
+///
+/// Manages the set of register groups available for a thread and
+/// which have been synchronized to the trace. Ported from the
+/// Python agent's register iteration in `putreg`.
+#[derive(Debug, Clone, Default)]
+pub struct DbgEngRegisterTracker {
+    /// Known register groups, keyed by group name.
+    pub groups: BTreeMap<String, RegisterGroup>,
+}
+
+impl DbgEngRegisterTracker {
+    /// Create a new register tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a register group.
+    pub fn add_group(&mut self, group: RegisterGroup) {
+        self.groups.insert(group.name.clone(), group);
+    }
+
+    /// Get a group by name.
+    pub fn get_group(&self, name: &str) -> Option<&RegisterGroup> {
+        self.groups.get(name)
+    }
+
+    /// Get a mutable group by name.
+    pub fn get_group_mut(&mut self, name: &str) -> Option<&mut RegisterGroup> {
+        self.groups.get_mut(name)
+    }
+
+    /// Check if a group exists.
+    pub fn has_group(&self, name: &str) -> bool {
+        self.groups.contains_key(name)
+    }
+
+    /// Get the number of groups.
+    pub fn group_count(&self) -> usize {
+        self.groups.len()
+    }
+
+    /// Check if there are no register groups.
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    /// Get all group names.
+    pub fn group_names(&self) -> Vec<&str> {
+        self.groups.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get all unsynchronized groups.
+    pub fn unsynced_groups(&self) -> Vec<&RegisterGroup> {
+        self.groups.values().filter(|g| !g.synced).collect()
+    }
+
+    /// Mark all groups as needing re-sync.
+    pub fn mark_all_dirty(&mut self) {
+        for g in self.groups.values_mut() {
+            g.synced = false;
+        }
+    }
+
+    /// Get the total register count across all groups.
+    pub fn total_register_count(&self) -> usize {
+        self.groups.values().map(|g| g.register_count()).sum()
+    }
+}
+
+/// Stack walking context for dbgeng.
+///
+/// Ported from the Python agent's `put_frames` function. When
+/// walking the stack, dbgeng provides `_DEBUG_STACK_FRAME` structures
+/// with four offsets (Instruction, Stack, Frame, Return). This struct
+/// tracks the walk state to detect when frames have changed.
+#[derive(Debug, Clone, Default)]
+pub struct DbgEngStackWalker {
+    /// Last walked frame levels (to detect changes).
+    pub last_frame_levels: Vec<u32>,
+    /// Whether the stack has been walked at least once.
+    pub walked: bool,
+    /// Maximum depth to walk (0 = unlimited).
+    pub max_depth: u32,
+}
+
+impl DbgEngStackWalker {
+    /// Create a new stack walker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum walk depth.
+    pub fn with_max_depth(mut self, depth: u32) -> Self {
+        self.max_depth = depth;
+        self
+    }
+
+    /// Record a walk result.
+    pub fn record_walk(&mut self, frame_levels: Vec<u32>) {
+        self.last_frame_levels = frame_levels;
+        self.walked = true;
+    }
+
+    /// Check if the frame levels have changed since last walk.
+    pub fn frames_changed(&self, new_levels: &[u32]) -> bool {
+        if !self.walked {
+            return true;
+        }
+        if self.last_frame_levels.len() != new_levels.len() {
+            return true;
+        }
+        self.last_frame_levels
+            .iter()
+            .zip(new_levels.iter())
+            .any(|(a, b)| a != b)
+    }
+
+    /// Reset the walker state.
+    pub fn reset(&mut self) {
+        self.last_frame_levels.clear();
+        self.walked = false;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1152,17 +1373,54 @@ mod tests {
         assert_eq!(DbgEngThreadState::from_trace_str("STOPPED"), DbgEngThreadState::Stopped);
         assert_eq!(DbgEngThreadState::from_trace_str("TERMINATED"), DbgEngThreadState::Exited);
         assert_eq!(DbgEngThreadState::from_trace_str("INACTIVE"), DbgEngThreadState::Inactive);
+        assert_eq!(DbgEngThreadState::from_trace_str("SUSPENDED"), DbgEngThreadState::Suspended);
         assert_eq!(DbgEngThreadState::from_trace_str("UNKNOWN"), DbgEngThreadState::Inactive);
     }
 
     #[test]
     fn test_thread_state_properties() {
         assert!(DbgEngThreadState::Stopped.is_resumable());
+        assert!(DbgEngThreadState::Suspended.is_resumable());
         assert!(!DbgEngThreadState::Running.is_resumable());
         assert!(DbgEngThreadState::Running.is_alive_state());
         assert!(DbgEngThreadState::Stopped.is_alive_state());
+        assert!(DbgEngThreadState::Suspended.is_alive_state());
         assert!(!DbgEngThreadState::Exited.is_alive_state());
         assert!(!DbgEngThreadState::Inactive.is_alive_state());
+    }
+
+    #[test]
+    fn test_thread_state_suspended() {
+        assert_eq!(DbgEngThreadState::Suspended.as_trace_str(), "SUSPENDED");
+        assert_eq!(
+            DbgEngThreadState::Suspended.to_execution_state(),
+            ExecutionState::Stopped
+        );
+    }
+
+    #[test]
+    fn test_thread_state_from_dbgeng_state() {
+        assert_eq!(
+            DbgEngThreadState::from_dbgeng_state(true, false, false),
+            DbgEngThreadState::Running
+        );
+        assert_eq!(
+            DbgEngThreadState::from_dbgeng_state(false, true, false),
+            DbgEngThreadState::Stopped
+        );
+        assert_eq!(
+            DbgEngThreadState::from_dbgeng_state(false, false, true),
+            DbgEngThreadState::Suspended
+        );
+        assert_eq!(
+            DbgEngThreadState::from_dbgeng_state(false, false, false),
+            DbgEngThreadState::Inactive
+        );
+        // Suspended takes priority over stopped
+        assert_eq!(
+            DbgEngThreadState::from_dbgeng_state(false, true, true),
+            DbgEngThreadState::Suspended
+        );
     }
 
     #[test]
@@ -1347,5 +1605,83 @@ mod tests {
         };
         assert!(reason.is_stopped());
         assert!(reason.description().contains("kernel32.dll"));
+    }
+
+    #[test]
+    fn test_register_group() {
+        let mut g = RegisterGroup::new("User");
+        g.add_register("rax");
+        g.add_register("rbx");
+        g.add_register("rcx");
+        assert_eq!(g.register_count(), 3);
+        assert_eq!(g.trace_path(1, 2), "Processes[1].Threads[2].Registers.User");
+
+        g.mark_synced();
+        assert!(g.synced);
+    }
+
+    #[test]
+    fn test_register_group_constants() {
+        assert_eq!(register_groups::USER, "User");
+        assert_eq!(register_groups::XMM, "XMM");
+        assert_eq!(register_groups::SEGMENT, "Segment");
+    }
+
+    #[test]
+    fn test_register_tracker() {
+        let mut tracker = DbgEngRegisterTracker::new();
+        assert!(tracker.is_empty());
+
+        let mut user = RegisterGroup::new("User");
+        user.add_register("rax");
+        user.add_register("rbx");
+        tracker.add_group(user);
+
+        let mut xmm = RegisterGroup::new("XMM");
+        xmm.add_register("xmm0");
+        tracker.add_group(xmm);
+
+        assert_eq!(tracker.group_count(), 2);
+        assert!(tracker.has_group("User"));
+        assert!(!tracker.has_group("Debug"));
+        assert_eq!(tracker.total_register_count(), 3);
+
+        let names = tracker.group_names();
+        assert!(names.contains(&"User"));
+        assert!(names.contains(&"XMM"));
+
+        // All unsynced initially
+        assert_eq!(tracker.unsynced_groups().len(), 2);
+
+        // Mark one synced
+        tracker.get_group_mut("User").unwrap().mark_synced();
+        assert_eq!(tracker.unsynced_groups().len(), 1);
+
+        // Mark all dirty
+        tracker.mark_all_dirty();
+        assert_eq!(tracker.unsynced_groups().len(), 2);
+    }
+
+    #[test]
+    fn test_stack_walker() {
+        let mut walker = DbgEngStackWalker::new();
+        assert!(!walker.walked);
+        assert!(walker.frames_changed(&[0, 1, 2]));
+
+        walker.record_walk(vec![0, 1, 2]);
+        assert!(walker.walked);
+        assert!(!walker.frames_changed(&[0, 1, 2]));
+        assert!(walker.frames_changed(&[0, 1, 3]));
+        assert!(walker.frames_changed(&[0, 1]));
+
+        walker.reset();
+        assert!(!walker.walked);
+        assert!(walker.frames_changed(&[0, 1, 2]));
+    }
+
+    #[test]
+    fn test_stack_walker_max_depth() {
+        let walker = DbgEngStackWalker::new().with_max_depth(100);
+        assert_eq!(walker.max_depth, 100);
     }
 }
