@@ -3,6 +3,11 @@
 //! Ports Ghidra's:
 //! - `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.SectionMsSymbol` (S_SECTION, 0x1029)
 //! - `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.PeCoffSectionMsSymbol` (0x1136)
+//!
+//! This module provides:
+//! - [`SSection`] -- A PE section symbol (`S_SECTION`, 0x1029).
+//! - [`SPeCoffSection`] -- A PE COFF section symbol (`S_PECOFF_SECTION`, 0x1136).
+//! - [`SectionCharacteristics`] -- Decoded PE section characteristic flags.
 
 use std::fmt;
 
@@ -95,6 +100,16 @@ impl SSection {
             name,
         })
     }
+
+    /// Return the alignment as a power of 2.
+    pub fn alignment_bytes(&self) -> u32 {
+        1u32 << self.alignment
+    }
+
+    /// Decode the characteristics flags.
+    pub fn characteristics_flags(&self) -> SectionCharacteristics {
+        SectionCharacteristics::from_u32(self.characteristics)
+    }
 }
 
 impl AbstractMsSymbol for SSection {
@@ -131,6 +146,74 @@ impl fmt::Display for SSection {
 fn parse_nt_string(data: &[u8]) -> String {
     let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
     String::from_utf8_lossy(&data[..end]).to_string()
+}
+
+/// PE section characteristics flags.
+///
+/// Decoded from the `characteristics` field of [`SSection`] and
+/// [`SPeCoffSection`]. These correspond to the `IMAGE_SCN_*` constants
+/// from the PE/COFF specification.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SectionCharacteristics {
+    /// Section contains executable code.
+    pub cnt_code: bool,
+    /// Section contains initialized data.
+    pub cnt_initialized_data: bool,
+    /// Section contains uninitialized data.
+    pub cnt_uninitialized_data: bool,
+    /// Section can be discarded.
+    pub lnk_info: bool,
+    /// Section will not become part of the image.
+    pub lnk_remove: bool,
+    /// Section contains COMDAT data.
+    pub lnk_comdat: bool,
+    /// Section contains extended relocations.
+    pub lnk_nreloc_ovfl: bool,
+    /// Section is not cacheable.
+    pub mem_not_cached: bool,
+    /// Section is not pageable.
+    pub mem_not_paged: bool,
+    /// Section is shared in memory.
+    pub mem_shared: bool,
+    /// Section is executable.
+    pub mem_execute: bool,
+    /// Section is readable.
+    pub mem_read: bool,
+    /// Section is writable.
+    pub mem_write: bool,
+}
+
+impl SectionCharacteristics {
+    /// Decode characteristics from a raw 32-bit value.
+    pub fn from_u32(raw: u32) -> Self {
+        Self {
+            cnt_code:                   (raw & 0x00000020) != 0,  // IMAGE_SCN_CNT_CODE
+            cnt_initialized_data:       (raw & 0x00000040) != 0,  // IMAGE_SCN_CNT_INITIALIZED_DATA
+            cnt_uninitialized_data:     (raw & 0x00000080) != 0,  // IMAGE_SCN_CNT_UNINITIALIZED_DATA
+            lnk_info:                   (raw & 0x00000200) != 0,  // IMAGE_SCN_LNK_INFO
+            lnk_remove:                 (raw & 0x00000800) != 0,  // IMAGE_SCN_LNK_REMOVE
+            lnk_comdat:                 (raw & 0x00001000) != 0,  // IMAGE_SCN_LNK_COMDAT
+            lnk_nreloc_ovfl:            (raw & 0x01000000) != 0,  // IMAGE_SCN_LNK_NRELOC_OVFL
+            mem_not_cached:             (raw & 0x04000000) != 0,  // IMAGE_SCN_MEM_NOT_CACHED
+            mem_not_paged:              (raw & 0x08000000) != 0,  // IMAGE_SCN_MEM_NOT_PAGED
+            mem_shared:                 (raw & 0x10000000) != 0,  // IMAGE_SCN_MEM_SHARED
+            mem_execute:                (raw & 0x20000000) != 0,  // IMAGE_SCN_MEM_EXECUTE
+            mem_read:                   (raw & 0x40000000) != 0,  // IMAGE_SCN_MEM_READ
+            mem_write:                  (raw & 0x80000000) != 0,  // IMAGE_SCN_MEM_WRITE
+        }
+    }
+
+    /// Return a human-readable summary of the characteristics.
+    pub fn summary(&self) -> String {
+        let mut parts = Vec::new();
+        if self.mem_execute { parts.push("X"); }
+        if self.mem_read { parts.push("R"); }
+        if self.mem_write { parts.push("W"); }
+        if self.cnt_code { parts.push("CODE"); }
+        if self.cnt_initialized_data { parts.push("IDATA"); }
+        if self.cnt_uninitialized_data { parts.push("UDATA"); }
+        parts.join("|")
+    }
 }
 
 /// A PE COFF section symbol (0x1136).
@@ -223,6 +306,16 @@ impl SPeCoffSection {
             characteristics,
             name,
         })
+    }
+
+    /// Return the alignment as a power of 2.
+    pub fn alignment_bytes(&self) -> u32 {
+        1u32 << self.alignment
+    }
+
+    /// Decode the characteristics flags.
+    pub fn characteristics_flags(&self) -> SectionCharacteristics {
+        SectionCharacteristics::from_u32(self.characteristics)
     }
 }
 
@@ -417,5 +510,83 @@ mod tests {
         let sym = SPeCoffSection::parse(&data).unwrap();
         assert_eq!(sym.reserved, 0xFF);
         assert_eq!(sym.name, ".rdata");
+    }
+
+    // -- characteristics tests --
+
+    #[test]
+    fn test_characteristics_text() {
+        // .text: 0x60000020 = MEM_EXECUTE | MEM_READ | CNT_CODE
+        let sym = SSection::new(1, 4, 0x1000, 0x5000, 0x60000020, ".text".to_string());
+        let flags = sym.characteristics_flags();
+        assert!(flags.mem_execute);
+        assert!(flags.mem_read);
+        assert!(!flags.mem_write);
+        assert!(flags.cnt_code);
+        assert!(!flags.cnt_initialized_data);
+    }
+
+    #[test]
+    fn test_characteristics_data() {
+        // .data: 0xC0000040 = MEM_READ | MEM_WRITE | CNT_INITIALIZED_DATA
+        let sym = SSection::new(2, 4, 0x6000, 0x1000, 0xC0000040, ".data".to_string());
+        let flags = sym.characteristics_flags();
+        assert!(!flags.mem_execute);
+        assert!(flags.mem_read);
+        assert!(flags.mem_write);
+        assert!(flags.cnt_initialized_data);
+        assert!(!flags.cnt_code);
+    }
+
+    #[test]
+    fn test_characteristics_bss() {
+        // .bss: 0xC0000080 = MEM_READ | MEM_WRITE | CNT_UNINITIALIZED_DATA
+        let sym = SSection::new(3, 4, 0x8000, 0x2000, 0xC0000080, ".bss".to_string());
+        let flags = sym.characteristics_flags();
+        assert!(flags.cnt_uninitialized_data);
+        assert!(flags.mem_read);
+        assert!(flags.mem_write);
+    }
+
+    #[test]
+    fn test_characteristics_summary() {
+        let sym = SSection::new(1, 4, 0x1000, 0x5000, 0x60000020, ".text".to_string());
+        let summary = sym.characteristics_flags().summary();
+        assert!(summary.contains("X"));
+        assert!(summary.contains("R"));
+        assert!(summary.contains("CODE"));
+    }
+
+    #[test]
+    fn test_alignment_bytes() {
+        let sym = SSection::new(1, 4, 0x1000, 0x5000, 0, ".text".to_string());
+        assert_eq!(sym.alignment_bytes(), 16); // 2^4 = 16
+
+        let sym2 = SSection::new(1, 12, 0x1000, 0x5000, 0, ".text".to_string());
+        assert_eq!(sym2.alignment_bytes(), 4096); // 2^12 = 4096
+    }
+
+    #[test]
+    fn test_pecoff_alignment_bytes() {
+        let sym = SPeCoffSection::new(1, 4, 0, 0x1000, 0x5000, 0, ".text".to_string());
+        assert_eq!(sym.alignment_bytes(), 16);
+    }
+
+    #[test]
+    fn test_pecoff_characteristics() {
+        let sym = SPeCoffSection::new(1, 4, 0, 0x1000, 0x5000, 0x60000020, ".text".to_string());
+        let flags = sym.characteristics_flags();
+        assert!(flags.mem_execute);
+        assert!(flags.mem_read);
+        assert!(flags.cnt_code);
+    }
+
+    #[test]
+    fn test_default_characteristics() {
+        let flags = SectionCharacteristics::default();
+        assert!(!flags.mem_execute);
+        assert!(!flags.mem_read);
+        assert!(!flags.mem_write);
+        assert!(!flags.cnt_code);
     }
 }

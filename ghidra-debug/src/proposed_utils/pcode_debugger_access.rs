@@ -1354,6 +1354,950 @@ impl PcodeFrameSnapshot {
 }
 
 // ============================================================================
+// PrettyBytes -- pretty-printing for byte arrays
+// ============================================================================
+
+/// A wrapper on a byte array for pretty printing.
+///
+/// Ported from Ghidra's `DebuggerPcodeUtils.PrettyBytes`. Provides
+/// display in hex dump format, as unsigned/signed integers, and
+/// various rendering modes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrettyBytes {
+    /// Whether the bytes are in big-endian order.
+    pub big_endian: bool,
+    /// The raw bytes.
+    pub bytes: Vec<u8>,
+}
+
+impl PrettyBytes {
+    /// Create a new PrettyBytes value.
+    pub fn new(big_endian: bool, bytes: Vec<u8>) -> Self {
+        Self { big_endian, bytes }
+    }
+
+    /// Render as colon-separated hex.
+    pub fn to_hex_string(&self) -> String {
+        self.bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(":")
+    }
+
+    /// Render as a hex dump with lines of 16 bytes.
+    ///
+    /// If the total exceeds 256 bytes, truncates with an ellipsis.
+    pub fn to_bytes_string(&self) -> String {
+        let mut lines = Vec::new();
+        for (i, chunk) in self.bytes.chunks(16).enumerate() {
+            if i >= 16 {
+                lines.push(format!("... (count={})", self.bytes.len()));
+                break;
+            }
+            let hex: String = chunk
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<Vec<_>>()
+                .join(" ");
+            lines.push(hex);
+        }
+        lines.join("\n")
+    }
+
+    /// Interpret as an unsigned integer using the configured endianness.
+    pub fn to_u128(&self) -> u128 {
+        let mut val: u128 = 0;
+        if self.big_endian {
+            for &b in &self.bytes {
+                val = (val << 8) | b as u128;
+            }
+        } else {
+            for (i, &b) in self.bytes.iter().enumerate() {
+                val |= (b as u128) << (i * 8);
+            }
+        }
+        val
+    }
+
+    /// Interpret as a signed integer using the configured endianness.
+    pub fn to_i128(&self) -> i128 {
+        let unsigned = self.to_u128();
+        let bits = self.bytes.len() * 8;
+        if bits >= 128 {
+            return unsigned as i128;
+        }
+        let sign_bit = 1u128 << (bits - 1);
+        if unsigned & sign_bit != 0 {
+            // Sign-extend
+            (unsigned | !((1u128 << bits) - 1)) as i128
+        } else {
+            unsigned as i128
+        }
+    }
+
+    /// Collect display strings for the value.
+    ///
+    /// Returns (unsigned_decimal, hex, signed_decimal) representations.
+    pub fn collect_displays(&self) -> (String, String, String) {
+        let unsigned = self.to_u128();
+        let signed = self.to_i128();
+        let unsigned_hex = format!("0x{:x}", unsigned);
+        let signed_str = signed.to_string();
+        let unsigned_str = unsigned.to_string();
+        (unsigned_str, unsigned_hex, signed_str)
+    }
+
+    /// The number of bytes.
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Whether empty.
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+}
+
+impl std::fmt::Display for PrettyBytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "PrettyBytes[bigEndian={},bytes={},value={}]",
+            self.big_endian,
+            self.to_hex_string(),
+            self.to_u128()
+        )
+    }
+}
+
+impl PartialEq for PrettyBytes {
+    fn eq(&self, other: &Self) -> bool {
+        self.big_endian == other.big_endian && self.bytes == other.bytes
+    }
+}
+
+impl Eq for PrettyBytes {}
+
+// ============================================================================
+// ValueLocation -- track where a value was located
+// ============================================================================
+
+/// The location of a value in the debug session.
+///
+/// Ported from Ghidra's `ValueLocation` concept used in watch expressions
+/// and value tracking to identify where a computed value came from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValueLocation {
+    /// The address space name.
+    pub space: String,
+    /// The offset within the address space.
+    pub offset: u64,
+    /// The size in bytes.
+    pub size: u32,
+    /// Whether this is a register location (as opposed to memory).
+    pub is_register: bool,
+    /// The register name (if this is a register location).
+    pub register_name: Option<String>,
+}
+
+impl ValueLocation {
+    /// Create a memory location.
+    pub fn memory(space: impl Into<String>, offset: u64, size: u32) -> Self {
+        Self {
+            space: space.into(),
+            offset,
+            size,
+            is_register: false,
+            register_name: None,
+        }
+    }
+
+    /// Create a register location.
+    pub fn register(
+        space: impl Into<String>,
+        offset: u64,
+        size: u32,
+        name: impl Into<String>,
+    ) -> Self {
+        Self {
+            space: space.into(),
+            offset,
+            size,
+            is_register: true,
+            register_name: Some(name.into()),
+        }
+    }
+
+    /// The end offset (exclusive).
+    pub fn end(&self) -> u64 {
+        self.offset + self.size as u64
+    }
+
+    /// Whether this location covers the given offset.
+    pub fn covers(&self, offset: u64) -> bool {
+        offset >= self.offset && offset < self.end()
+    }
+}
+
+// ============================================================================
+// WatchValue -- value with state and location for watch expressions
+// ============================================================================
+
+/// The memory state of a value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TraceMemoryState {
+    /// The value is known.
+    Known,
+    /// The value is unknown (not in trace).
+    Unknown,
+    /// The value is an error.
+    Error,
+}
+
+/// A complete watch expression value.
+///
+/// Ported from Ghidra's `DebuggerPcodeUtils.WatchValue`. Bundles the
+/// concrete bytes, their state (known/unknown), the location, and
+/// the set of addresses that were read during computation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchValue {
+    /// The concrete bytes of the value.
+    pub bytes: PrettyBytes,
+    /// The memory state of the value.
+    pub state: TraceMemoryState,
+    /// Where the value is located.
+    pub location: Option<ValueLocation>,
+    /// The set of addresses that were read during evaluation.
+    pub reads: Vec<(String, u64, u64)>,
+}
+
+impl WatchValue {
+    /// Create a new watch value.
+    pub fn new(big_endian: bool, bytes: Vec<u8>) -> Self {
+        Self {
+            bytes: PrettyBytes::new(big_endian, bytes),
+            state: TraceMemoryState::Known,
+            location: None,
+            reads: Vec::new(),
+        }
+    }
+
+    /// Set the state.
+    pub fn with_state(mut self, state: TraceMemoryState) -> Self {
+        self.state = state;
+        self
+    }
+
+    /// Set the location.
+    pub fn with_location(mut self, location: ValueLocation) -> Self {
+        self.location = Some(location);
+        self
+    }
+
+    /// Add a read address range.
+    pub fn with_read(mut self, space: impl Into<String>, start: u64, end: u64) -> Self {
+        self.reads.push((space.into(), start, end));
+        self
+    }
+
+    /// Interpret the value as an unsigned integer.
+    pub fn to_u128(&self) -> u128 {
+        self.bytes.to_u128()
+    }
+
+    /// Interpret the value as a signed integer.
+    pub fn to_i128(&self) -> i128 {
+        self.bytes.to_i128()
+    }
+
+    /// The number of bytes.
+    pub fn len(&self) -> usize {
+        self.bytes.len()
+    }
+
+    /// Whether the value is known.
+    pub fn is_known(&self) -> bool {
+        self.state == TraceMemoryState::Known
+    }
+
+    /// The address (if location is set).
+    pub fn address(&self) -> Option<(String, u64)> {
+        self.location
+            .as_ref()
+            .map(|loc| (loc.space.clone(), loc.offset))
+    }
+}
+
+// ============================================================================
+// StaticImageProvider -- reading from static (program) images
+// ============================================================================
+
+/// Provides bytes from static (relocated) program images.
+///
+/// Ported from Ghidra's `DebuggerStaticMappingService` concept used
+/// by `PcodeDebuggerMemoryAccess.readFromStaticImages`. When a trace
+/// doesn't have a byte at a given address, the static image provider
+/// can supply it from the original binary.
+#[derive(Debug, Clone, Default)]
+pub struct StaticImageProvider {
+    /// Maps (space, offset) -> bytes from the static image.
+    images: BTreeMap<(String, u64), Vec<u8>>,
+    /// Metadata about available image regions.
+    regions: Vec<StaticImageRegion>,
+}
+
+/// A region in a static image.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticImageRegion {
+    /// The program name.
+    pub program_name: String,
+    /// The address space.
+    pub space: String,
+    /// Start offset.
+    pub start: u64,
+    /// End offset (exclusive).
+    pub end: u64,
+}
+
+impl StaticImageProvider {
+    /// Create a new empty provider.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register a region of bytes from a static image.
+    pub fn register_bytes(
+        &mut self,
+        program: impl Into<String>,
+        space: impl Into<String>,
+        start: u64,
+        bytes: Vec<u8>,
+    ) {
+        let space = space.into();
+        let len = bytes.len() as u64;
+        self.images.insert((space.clone(), start), bytes);
+        self.regions.push(StaticImageRegion {
+            program_name: program.into(),
+            space,
+            start,
+            end: start + len,
+        });
+    }
+
+    /// Read bytes from the static image. Returns `None` if no image covers the range.
+    pub fn read(&self, space: &str, offset: u64, len: u32) -> Option<Vec<u8>> {
+        for region in &self.regions {
+            if region.space == space
+                && offset >= region.start
+                && (offset + len as u64) <= region.end
+            {
+                if let Some(bytes) = self.images.get(&(space.to_string(), region.start)) {
+                    let rel = (offset - region.start) as usize;
+                    return Some(bytes[rel..rel + len as usize].to_vec());
+                }
+            }
+        }
+        None
+    }
+
+    /// Fill missing bytes from static images into a memory view.
+    ///
+    /// For each byte position in `unknown_ranges` that is not in the memory
+    /// view, attempts to read it from the static image. Returns the ranges
+    /// that still remain unknown.
+    pub fn fill_missing(
+        &self,
+        memory: &mut PcodeMemoryView,
+        unknown_ranges: &[(String, u64, u64)],
+    ) -> Vec<(String, u64, u64)> {
+        let mut still_unknown = Vec::new();
+        for (space, start, end) in unknown_ranges {
+            let mut current_unknown_start: Option<u64> = None;
+            for offset in *start..*end {
+                if memory.has_state(space, offset, 1) {
+                    if let Some(ustart) = current_unknown_start.take() {
+                        still_unknown.push((space.clone(), ustart, offset));
+                    }
+                } else {
+                    if let Some(bytes) = self.read(space, offset, 1) {
+                        memory.write(space, offset, &bytes);
+                        if let Some(ustart) = current_unknown_start.take() {
+                            still_unknown.push((space.clone(), ustart, offset));
+                        }
+                    } else {
+                        if current_unknown_start.is_none() {
+                            current_unknown_start = Some(offset);
+                        }
+                    }
+                }
+            }
+            if let Some(ustart) = current_unknown_start {
+                still_unknown.push((space.clone(), ustart, *end));
+            }
+        }
+        still_unknown
+    }
+
+    /// All registered regions.
+    pub fn regions(&self) -> &[StaticImageRegion] {
+        &self.regions
+    }
+
+    /// Whether there are any registered images.
+    pub fn is_empty(&self) -> bool {
+        self.images.is_empty()
+    }
+}
+
+// ============================================================================
+// PcodeEmulatorCallbacks -- callback infrastructure for pcode emulation
+// ============================================================================
+
+/// Callbacks invoked during pcode emulation.
+///
+/// Ported from Ghidra's pcode emulation callback infrastructure.
+/// Implementors receive notifications about memory/register access,
+/// breakpoint hits, and execution state changes.
+#[derive(Debug, Clone, Default)]
+pub struct PcodeEmulatorCallbacks {
+    /// Whether callbacks are enabled.
+    pub enabled: bool,
+    /// Recorded callback invocations for debugging.
+    log: Vec<CallbackLogEntry>,
+}
+
+/// An entry in the callback log.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallbackLogEntry {
+    /// The kind of callback.
+    pub kind: CallbackKind,
+    /// The address space involved.
+    pub space: String,
+    /// The offset involved.
+    pub offset: u64,
+    /// The size of the access.
+    pub size: u32,
+}
+
+/// The kind of emulation callback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CallbackKind {
+    /// Memory was read.
+    MemoryRead,
+    /// Memory was written.
+    MemoryWrite,
+    /// Register was read.
+    RegisterRead,
+    /// Register was written.
+    RegisterWrite,
+    /// A breakpoint was hit.
+    BreakpointHit,
+    /// Execution stopped.
+    ExecutionStopped,
+    /// A pcode op was executed.
+    PcodeOpExecuted,
+}
+
+impl PcodeEmulatorCallbacks {
+    /// Create new callbacks (enabled by default).
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            log: Vec::new(),
+        }
+    }
+
+    /// Log a callback invocation.
+    pub fn log(&mut self, kind: CallbackKind, space: &str, offset: u64, size: u32) {
+        if self.enabled {
+            self.log.push(CallbackLogEntry {
+                kind,
+                space: space.to_string(),
+                offset,
+                size,
+            });
+        }
+    }
+
+    /// Log a memory read.
+    pub fn on_memory_read(&mut self, space: &str, offset: u64, size: u32) {
+        self.log(CallbackKind::MemoryRead, space, offset, size);
+    }
+
+    /// Log a memory write.
+    pub fn on_memory_write(&mut self, space: &str, offset: u64, size: u32) {
+        self.log(CallbackKind::MemoryWrite, space, offset, size);
+    }
+
+    /// Log a register read.
+    pub fn on_register_read(&mut self, name: &str, offset: u64, size: u32) {
+        self.log(CallbackKind::RegisterRead, name, offset, size);
+    }
+
+    /// Log a register write.
+    pub fn on_register_write(&mut self, name: &str, offset: u64, size: u32) {
+        self.log(CallbackKind::RegisterWrite, name, offset, size);
+    }
+
+    /// Get the callback log.
+    pub fn log_entries(&self) -> &[CallbackLogEntry] {
+        &self.log
+    }
+
+    /// Get entries of a specific kind.
+    pub fn entries_of_kind(&self, kind: CallbackKind) -> Vec<&CallbackLogEntry> {
+        self.log.iter().filter(|e| e.kind == kind).collect()
+    }
+
+    /// The number of logged callbacks.
+    pub fn log_len(&self) -> usize {
+        self.log.len()
+    }
+
+    /// Clear the log.
+    pub fn clear_log(&mut self) {
+        self.log.clear();
+    }
+
+    /// Enable or disable callbacks.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+}
+
+// ============================================================================
+// BreakpointConditionEvaluator -- evaluate breakpoint conditions
+// ============================================================================
+
+/// Evaluates simple breakpoint condition expressions.
+///
+/// Ported from Ghidra's breakpoint condition evaluation. Supports
+/// simple comparisons: `REG == VALUE`, `REG != VALUE`, `REG > VALUE`,
+/// `REG < VALUE`. Values can be decimal or hex (0x prefix).
+///
+/// Operates on a `PcodeRegisterView` for register resolution within
+/// a pcode debug session.
+#[derive(Debug, Clone)]
+pub struct BreakpointConditionEvaluator;
+
+impl BreakpointConditionEvaluator {
+    /// Evaluate a simple condition expression against a register view.
+    ///
+    /// Supported formats:
+    /// - `REG == 0xVALUE` (equality)
+    /// - `REG != 0xVALUE` (inequality)
+    /// - `REG > VALUE` (greater than)
+    /// - `REG < VALUE` (less than)
+    /// - `REG == REG2` (register comparison)
+    ///
+    /// Returns `Ok(true)` if the condition is met, `Ok(false)` if not,
+    /// or `Err` if the expression cannot be parsed.
+    pub fn evaluate(
+        condition: &str,
+        view: &PcodeRegisterView,
+    ) -> Result<bool, String> {
+        let condition = condition.trim();
+
+        for op in &["==", "!=", ">=", "<=", ">", "<"] {
+            if let Some(pos) = condition.find(op) {
+                let left = condition[..pos].trim();
+                let right = condition[pos + op.len()..].trim();
+
+                let left_val = Self::resolve_value(left, view)?;
+                let right_val = Self::resolve_value(right, view)?;
+
+                return match *op {
+                    "==" => Ok(left_val == right_val),
+                    "!=" => Ok(left_val != right_val),
+                    ">" => Ok(left_val > right_val),
+                    "<" => Ok(left_val < right_val),
+                    ">=" => Ok(left_val >= right_val),
+                    "<=" => Ok(left_val <= right_val),
+                    _ => Err(format!("unknown operator: {}", op)),
+                };
+            }
+        }
+
+        Err(format!("cannot parse condition: '{}'", condition))
+    }
+
+    fn resolve_value(expr: &str, view: &PcodeRegisterView) -> Result<u128, String> {
+        let expr = expr.trim();
+
+        // Try hex literal
+        if let Some(hex) = expr.strip_prefix("0x").or_else(|| expr.strip_prefix("0X")) {
+            return u128::from_str_radix(hex, 16)
+                .map_err(|e| format!("invalid hex '{}': {}", expr, e));
+        }
+
+        // Try decimal literal
+        if let Ok(val) = expr.parse::<u128>() {
+            return Ok(val);
+        }
+
+        // Try as register name
+        if let Some(bytes) = view.read(expr) {
+            let mut val: u128 = 0;
+            for (i, &b) in bytes.iter().enumerate() {
+                val |= (b as u128) << (i * 8);
+            }
+            return Ok(val);
+        }
+
+        Err(format!("cannot resolve '{}'", expr))
+    }
+}
+
+// ============================================================================
+// AccessStateSnapshot -- complete access state at a point in time
+// ============================================================================
+
+/// A snapshot of the full debugger access state.
+///
+/// Ported from Ghidra's composite state snapshot used in emulation
+/// snapshots and state transfer between components.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessStateSnapshot {
+    /// The trace ID.
+    pub trace_id: String,
+    /// The snap value.
+    pub snap: i64,
+    /// The language ID.
+    pub language_id: String,
+    /// The active thread key.
+    pub active_thread: Option<i64>,
+    /// Memory state (space, offset, bytes).
+    pub memory_data: Vec<(String, u64, Vec<u8>)>,
+    /// Register state per thread (thread_key, name, value).
+    pub register_data: Vec<(i64, String, Vec<u8>)>,
+    /// Thread contexts.
+    pub thread_contexts: Vec<(i64, u64)>, // (thread_key, pc)
+    /// Breakpoint definitions.
+    pub breakpoints: Vec<(u64, String, u64)>, // (id, space, offset)
+}
+
+impl AccessStateSnapshot {
+    /// Create a new snapshot.
+    pub fn new(trace_id: impl Into<String>, snap: i64) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            snap,
+            language_id: String::new(),
+            active_thread: None,
+            memory_data: Vec::new(),
+            register_data: Vec::new(),
+            thread_contexts: Vec::new(),
+            breakpoints: Vec::new(),
+        }
+    }
+
+    /// Capture a snapshot from a `PcodeDebuggerAccess` instance.
+    pub fn capture_from(access: &PcodeDebuggerAccess) -> Self {
+        let mut snap = Self::new(&access.trace_id, access.snap);
+        snap.language_id = access.language_id.clone();
+        snap.active_thread = access.active_thread;
+
+        // Capture memory
+        for (key, &byte) in &access.memory.storage {
+            snap.memory_data.push((key.0.clone(), key.1, vec![byte]));
+        }
+
+        // Capture registers
+        for (thread_key, view) in &access.register_views {
+            for name in view.known_registers() {
+                if let Some(val) = view.read(&name) {
+                    snap.register_data.push((*thread_key, name, val));
+                }
+            }
+        }
+
+        // Capture thread contexts
+        for (key, ctx) in &access.thread_contexts {
+            snap.thread_contexts.push((*key, ctx.pc));
+        }
+
+        // Capture breakpoints
+        for (id, bp) in access.breakpoints.all() {
+            snap.breakpoints.push((*id, bp.space.clone(), bp.offset));
+        }
+
+        snap
+    }
+
+    /// Apply this snapshot to a `PcodeDebuggerAccess` instance.
+    pub fn apply_to(&self, access: &mut PcodeDebuggerAccess) {
+        access.snap = self.snap;
+        if let Some(thread) = self.active_thread {
+            access.set_active_thread(thread);
+        }
+
+        for (space, offset, bytes) in &self.memory_data {
+            access.write_memory(space, *offset, bytes);
+        }
+
+        for (thread_key, name, value) in &self.register_data {
+            let view = access.registers_for_thread_mut(*thread_key);
+            view.write(name, value);
+        }
+
+        for (key, pc) in &self.thread_contexts {
+            let ctx = access.thread_context_for_mut(*key);
+            ctx.set_pc(*pc);
+        }
+    }
+}
+
+// ============================================================================
+// TargetSimulator -- abstract target simulation
+// ============================================================================
+
+/// A trait-like abstraction for simulating target behavior.
+///
+/// Ported from Ghidra's `Target` interface used by the debugger
+/// to interact with live targets. This struct provides a concrete
+/// implementation for testing and offline simulation.
+#[derive(Debug, Clone)]
+pub struct TargetSimulator {
+    /// The target name.
+    pub name: String,
+    /// Whether the target is currently connected/alive.
+    pub connected: bool,
+    /// The last error message (if any).
+    pub last_error: Option<String>,
+    /// Pending register reads to simulate.
+    pending_register_reads: BTreeMap<String, Vec<u8>>,
+    /// Pending memory reads to simulate.
+    pending_memory_reads: BTreeMap<(String, u64), Vec<u8>>,
+    /// Recorded write operations for verification.
+    pub recorded_writes: Vec<TargetWriteRecord>,
+}
+
+/// A record of a write operation to the target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TargetWriteRecord {
+    /// Whether this was a register or memory write.
+    pub is_register: bool,
+    /// The space (or register name).
+    pub space: String,
+    /// The offset (0 for registers).
+    pub offset: u64,
+    /// The data written.
+    pub data: Vec<u8>,
+}
+
+impl TargetSimulator {
+    /// Create a new target simulator.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            connected: false,
+            last_error: None,
+            pending_register_reads: BTreeMap::new(),
+            pending_memory_reads: BTreeMap::new(),
+            recorded_writes: Vec::new(),
+        }
+    }
+
+    /// Connect the target.
+    pub fn connect(&mut self) {
+        self.connected = true;
+        self.last_error = None;
+    }
+
+    /// Disconnect the target.
+    pub fn disconnect(&mut self) {
+        self.connected = false;
+    }
+
+    /// Queue a register read response.
+    pub fn queue_register_read(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        self.pending_register_reads.insert(name.into(), value);
+    }
+
+    /// Queue a memory read response.
+    pub fn queue_memory_read(&mut self, space: impl Into<String>, offset: u64, value: Vec<u8>) {
+        self.pending_memory_reads.insert((space.into(), offset), value);
+    }
+
+    /// Simulate reading a register from the target.
+    pub fn read_register(&mut self, name: &str) -> Result<Vec<u8>, String> {
+        if !self.connected {
+            return Err("target not connected".into());
+        }
+        self.pending_register_reads
+            .remove(name)
+            .ok_or_else(|| format!("no queued value for register '{}'", name))
+    }
+
+    /// Simulate writing a register to the target.
+    pub fn write_register(&mut self, name: &str, data: &[u8]) -> Result<(), String> {
+        if !self.connected {
+            return Err("target not connected".into());
+        }
+        self.recorded_writes.push(TargetWriteRecord {
+            is_register: true,
+            space: name.to_string(),
+            offset: 0,
+            data: data.to_vec(),
+        });
+        Ok(())
+    }
+
+    /// Simulate reading memory from the target.
+    pub fn read_memory(&mut self, space: &str, offset: u64, len: u32) -> Result<Vec<u8>, String> {
+        if !self.connected {
+            return Err("target not connected".into());
+        }
+        self.pending_memory_reads
+            .remove(&(space.to_string(), offset))
+            .ok_or_else(|| {
+                format!("no queued value for memory {}:{:#x}", space, offset)
+            })
+            .map(|mut v| {
+                v.truncate(len as usize);
+                v
+            })
+    }
+
+    /// Simulate writing memory to the target.
+    pub fn write_memory(&mut self, space: &str, offset: u64, data: &[u8]) -> Result<(), String> {
+        if !self.connected {
+            return Err("target not connected".into());
+        }
+        self.recorded_writes.push(TargetWriteRecord {
+            is_register: false,
+            space: space.to_string(),
+            offset,
+            data: data.to_vec(),
+        });
+        Ok(())
+    }
+
+    /// The number of recorded writes.
+    pub fn num_recorded_writes(&self) -> usize {
+        self.recorded_writes.len()
+    }
+
+    /// Clear all recorded writes and pending reads.
+    pub fn reset(&mut self) {
+        self.pending_register_reads.clear();
+        self.pending_memory_reads.clear();
+        self.recorded_writes.clear();
+        self.last_error = None;
+    }
+}
+
+// ============================================================================
+// AddressRangeSet -- set of address ranges for tracking unknown regions
+// ============================================================================
+
+/// A set of address ranges within a single space.
+///
+/// Ported from Ghidra's `AddressSetView` concept used by
+/// `PcodeDebuggerRegistersAccess.readFromTargetRegisters` and
+/// `PcodeDebuggerMemoryAccess.readFromTargetMemory`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AddressRangeSet {
+    /// The address space name.
+    pub space: String,
+    /// Sorted non-overlapping ranges: (start, end) pairs.
+    ranges: Vec<(u64, u64)>,
+}
+
+impl AddressRangeSet {
+    /// Create a new empty address range set.
+    pub fn new(space: impl Into<String>) -> Self {
+        Self {
+            space: space.into(),
+            ranges: Vec::new(),
+        }
+    }
+
+    /// Add a range to the set, merging with existing ranges as needed.
+    pub fn add_range(&mut self, start: u64, end: u64) {
+        if start >= end {
+            return;
+        }
+        self.ranges.push((start, end));
+        self.ranges.sort_by_key(|r| r.0);
+        self.merge_overlapping();
+    }
+
+    fn merge_overlapping(&mut self) {
+        if self.ranges.len() <= 1 {
+            return;
+        }
+        let mut merged: Vec<(u64, u64)> = Vec::new();
+        let mut current = self.ranges[0];
+        for &(start, end) in &self.ranges[1..] {
+            if start <= current.1 {
+                current.1 = current.1.max(end);
+            } else {
+                merged.push(current);
+                current = (start, end);
+            }
+        }
+        merged.push(current);
+        self.ranges = merged;
+    }
+
+    /// Subtract a range from the set.
+    pub fn remove_range(&mut self, start: u64, end: u64) {
+        let mut new_ranges = Vec::new();
+        for &(rs, re) in &self.ranges {
+            if re <= start || rs >= end {
+                // No overlap
+                new_ranges.push((rs, re));
+            } else {
+                // Partial or full overlap
+                if rs < start {
+                    new_ranges.push((rs, start));
+                }
+                if re > end {
+                    new_ranges.push((end, re));
+                }
+            }
+        }
+        self.ranges = new_ranges;
+    }
+
+    /// Whether the set contains the given offset.
+    pub fn contains(&self, offset: u64) -> bool {
+        self.ranges
+            .iter()
+            .any(|&(start, end)| offset >= start && offset < end)
+    }
+
+    /// The number of disjoint ranges.
+    pub fn num_ranges(&self) -> usize {
+        self.ranges.len()
+    }
+
+    /// Whether the set is empty.
+    pub fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
+    }
+
+    /// Get the ranges as a slice.
+    pub fn ranges(&self) -> &[(u64, u64)] {
+        &self.ranges
+    }
+
+    /// Total number of addresses in the set.
+    pub fn num_addresses(&self) -> u64 {
+        self.ranges.iter().map(|(s, e)| e - s).sum()
+    }
+
+    /// Iterate over all individual offsets (only practical for small ranges).
+    pub fn iter_addresses(&self) -> impl Iterator<Item = u64> + '_ {
+        self.ranges
+            .iter()
+            .flat_map(|&(start, end)| start..end)
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1832,5 +2776,328 @@ mod tests {
         assert_eq!(snap.num_registers(), 1);
         assert_eq!(snap.get_register("RAX"), Some(&vec![1, 2, 3, 4, 5, 6, 7, 8]));
         assert_eq!(snap.read_memory("ram", 0x400000, 4), Some(vec![0xEB, 0xFE, 0x90, 0xCC]));
+    }
+
+    // -- PrettyBytes --
+
+    #[test]
+    fn test_pretty_bytes_hex() {
+        let pb = PrettyBytes::new(false, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(pb.to_hex_string(), "de:ad:be:ef");
+        assert_eq!(pb.len(), 4);
+    }
+
+    #[test]
+    fn test_pretty_bytes_u128_le() {
+        let pb = PrettyBytes::new(false, vec![0x78, 0x56, 0x34, 0x12]);
+        assert_eq!(pb.to_u128(), 0x12345678);
+    }
+
+    #[test]
+    fn test_pretty_bytes_u128_be() {
+        let pb = PrettyBytes::new(true, vec![0x12, 0x34, 0x56, 0x78]);
+        assert_eq!(pb.to_u128(), 0x12345678);
+    }
+
+    #[test]
+    fn test_pretty_bytes_signed() {
+        let pb = PrettyBytes::new(false, vec![0xFF, 0xFF]);
+        assert_eq!(pb.to_i128(), -1);
+    }
+
+    #[test]
+    fn test_pretty_bytes_display() {
+        let pb = PrettyBytes::new(false, vec![0x01, 0x02]);
+        let display = format!("{}", pb);
+        assert!(display.contains("bigEndian=false"));
+        assert!(display.contains("01:02"));
+    }
+
+    #[test]
+    fn test_pretty_bytes_collect_displays() {
+        let pb = PrettyBytes::new(false, vec![0xFF, 0x00]);
+        let (u_dec, hex, _s_dec) = pb.collect_displays();
+        assert_eq!(u_dec, "255");
+        assert_eq!(hex, "0xff");
+    }
+
+    // -- ValueLocation --
+
+    #[test]
+    fn test_value_location_memory() {
+        let loc = ValueLocation::memory("ram", 0x400000, 4);
+        assert!(!loc.is_register);
+        assert!(loc.covers(0x400000));
+        assert!(loc.covers(0x400003));
+        assert!(!loc.covers(0x400004));
+        assert_eq!(loc.end(), 0x400004);
+    }
+
+    #[test]
+    fn test_value_location_register() {
+        let loc = ValueLocation::register("register", 0, 8, "RAX");
+        assert!(loc.is_register);
+        assert_eq!(loc.register_name, Some("RAX".to_string()));
+    }
+
+    // -- WatchValue --
+
+    #[test]
+    fn test_watch_value_basic() {
+        let wv = WatchValue::new(false, vec![0x78, 0x56, 0x34, 0x12]);
+        assert!(wv.is_known());
+        assert_eq!(wv.to_u128(), 0x12345678);
+        assert_eq!(wv.len(), 4);
+    }
+
+    #[test]
+    fn test_watch_value_unknown() {
+        let wv = WatchValue::new(false, vec![0]).with_state(TraceMemoryState::Unknown);
+        assert!(!wv.is_known());
+    }
+
+    #[test]
+    fn test_watch_value_with_location() {
+        let loc = ValueLocation::memory("ram", 0x400000, 4);
+        let wv = WatchValue::new(false, vec![1, 2, 3, 4])
+            .with_location(loc)
+            .with_read("ram", 0x400000, 0x400004);
+
+        assert!(wv.address().is_some());
+        assert_eq!(wv.address().unwrap().1, 0x400000);
+        assert_eq!(wv.reads.len(), 1);
+    }
+
+    // -- StaticImageProvider --
+
+    #[test]
+    fn test_static_image_provider() {
+        let mut provider = StaticImageProvider::new();
+        provider.register_bytes("test.exe", "ram", 0x400000, vec![0xEB, 0xFE, 0x90, 0xCC]);
+
+        assert!(!provider.is_empty());
+        let bytes = provider.read("ram", 0x400001, 2).unwrap();
+        assert_eq!(bytes, vec![0xFE, 0x90]);
+
+        // Out of range
+        assert!(provider.read("ram", 0x500000, 1).is_none());
+    }
+
+    #[test]
+    fn test_static_image_fill_missing() {
+        let mut provider = StaticImageProvider::new();
+        provider.register_bytes("prog", "ram", 0x1000, vec![0xAA, 0xBB, 0xCC, 0xDD]);
+
+        let mut memory = PcodeMemoryView::new();
+        memory.write("ram", 0x1001, &[0xFF]); // partial write
+
+        let still_unknown = provider.fill_missing(&mut memory, &[("ram".to_string(), 0x1000, 0x1004)]);
+
+        // The byte at 0x1000 should have been filled from static image
+        // The byte at 0x1001 was already in memory (0xFF from the write)
+        // 0x1002 and 0x1003 should have been filled from static image
+        // So there should be no unknown ranges left
+        assert!(still_unknown.is_empty());
+    }
+
+    // -- PcodeEmulatorCallbacks --
+
+    #[test]
+    fn test_emulator_callbacks() {
+        let mut cb = PcodeEmulatorCallbacks::new();
+        assert!(cb.enabled);
+
+        cb.on_memory_read("ram", 0x1000, 4);
+        cb.on_register_write("RAX", 0, 8);
+        cb.on_memory_write("ram", 0x2000, 2);
+
+        assert_eq!(cb.log_len(), 3);
+        assert_eq!(cb.entries_of_kind(CallbackKind::MemoryRead).len(), 1);
+        assert_eq!(cb.entries_of_kind(CallbackKind::MemoryWrite).len(), 1);
+        assert_eq!(cb.entries_of_kind(CallbackKind::RegisterWrite).len(), 1);
+    }
+
+    #[test]
+    fn test_emulator_callbacks_disabled() {
+        let mut cb = PcodeEmulatorCallbacks::new();
+        cb.set_enabled(false);
+
+        cb.on_memory_read("ram", 0x1000, 4);
+        assert_eq!(cb.log_len(), 0);
+
+        cb.set_enabled(true);
+        cb.on_memory_read("ram", 0x1000, 4);
+        assert_eq!(cb.log_len(), 1);
+    }
+
+    // -- BreakpointConditionEvaluator --
+
+    #[test]
+    fn test_breakpoint_condition_equality() {
+        let mut view = PcodeRegisterView::new(0);
+        view.define_register("RAX", 64);
+        view.write("RAX", &0x42u64.to_le_bytes());
+
+        assert!(BreakpointConditionEvaluator::evaluate("RAX == 0x42", &view).unwrap());
+        assert!(!BreakpointConditionEvaluator::evaluate("RAX == 0x43", &view).unwrap());
+    }
+
+    #[test]
+    fn test_breakpoint_condition_inequality() {
+        let mut view = PcodeRegisterView::new(0);
+        view.define_register("RAX", 64);
+        view.write("RAX", &0x42u64.to_le_bytes());
+
+        assert!(BreakpointConditionEvaluator::evaluate("RAX != 0x0", &view).unwrap());
+        assert!(!BreakpointConditionEvaluator::evaluate("RAX != 0x42", &view).unwrap());
+    }
+
+    #[test]
+    fn test_breakpoint_condition_comparison() {
+        let mut view = PcodeRegisterView::new(0);
+        view.define_register("RAX", 64);
+        view.write("RAX", &100u64.to_le_bytes());
+
+        assert!(BreakpointConditionEvaluator::evaluate("RAX > 50", &view).unwrap());
+        assert!(BreakpointConditionEvaluator::evaluate("RAX < 200", &view).unwrap());
+        assert!(!BreakpointConditionEvaluator::evaluate("RAX < 50", &view).unwrap());
+    }
+
+    #[test]
+    fn test_breakpoint_condition_register_comparison() {
+        let mut view = PcodeRegisterView::new(0);
+        view.define_register("RAX", 64);
+        view.define_register("RBX", 64);
+        view.write("RAX", &100u64.to_le_bytes());
+        view.write("RBX", &100u64.to_le_bytes());
+
+        assert!(BreakpointConditionEvaluator::evaluate("RAX == RBX", &view).unwrap());
+    }
+
+    #[test]
+    fn test_breakpoint_condition_parse_error() {
+        let view = PcodeRegisterView::new(0);
+        assert!(BreakpointConditionEvaluator::evaluate("invalid", &view).is_err());
+    }
+
+    // -- AccessStateSnapshot --
+
+    #[test]
+    fn test_access_state_snapshot() {
+        let mut access = PcodeDebuggerAccess::new("t1", 0);
+        access.set_active_thread(42);
+        access.write_memory("ram", 0x400000, &[0xEB, 0xFE]);
+        access.write_register("RAX", &[1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+        access.breakpoints_mut().add_breakpoint("ram", 0x400000);
+
+        let snap = AccessStateSnapshot::capture_from(&access);
+        assert_eq!(snap.trace_id, "t1");
+        assert_eq!(snap.active_thread, Some(42));
+        assert_eq!(snap.memory_data.len(), 2);
+        assert_eq!(snap.register_data.len(), 1);
+        assert_eq!(snap.thread_contexts.len(), 1);
+        assert_eq!(snap.breakpoints.len(), 1);
+
+        // Apply to a new access
+        let mut access2 = PcodeDebuggerAccess::new("t2", 0);
+        snap.apply_to(&mut access2);
+
+        assert_eq!(access2.snap, 0);
+        assert_eq!(access2.active_thread, Some(42));
+    }
+
+    // -- TargetSimulator --
+
+    #[test]
+    fn test_target_simulator_basic() {
+        let mut target = TargetSimulator::new("gdb");
+        assert!(!target.connected);
+
+        target.connect();
+        assert!(target.connected);
+
+        target.queue_register_read("RAX", vec![0x42; 8]);
+        let val = target.read_register("RAX").unwrap();
+        assert_eq!(val, vec![0x42; 8]);
+
+        // Write and record
+        target.write_register("RBX", &[0x99; 8]).unwrap();
+        assert_eq!(target.num_recorded_writes(), 1);
+    }
+
+    #[test]
+    fn test_target_simulator_not_connected() {
+        let mut target = TargetSimulator::new("gdb");
+        assert!(target.read_register("RAX").is_err());
+        assert!(target.write_register("RAX", &[1]).is_err());
+        assert!(target.read_memory("ram", 0, 1).is_err());
+        assert!(target.write_memory("ram", 0, &[1]).is_err());
+    }
+
+    #[test]
+    fn test_target_simulator_memory() {
+        let mut target = TargetSimulator::new("gdb");
+        target.connect();
+
+        target.queue_memory_read("ram", 0x1000, vec![0xEB, 0xFE, 0x90]);
+        let val = target.read_memory("ram", 0x1000, 3).unwrap();
+        assert_eq!(val, vec![0xEB, 0xFE, 0x90]);
+
+        target.write_memory("ram", 0x2000, &[0xCC]).unwrap();
+        assert_eq!(target.num_recorded_writes(), 1);
+    }
+
+    // -- AddressRangeSet --
+
+    #[test]
+    fn test_address_range_set_basic() {
+        let mut set = AddressRangeSet::new("ram");
+        set.add_range(0x1000, 0x2000);
+        set.add_range(0x3000, 0x4000);
+
+        assert_eq!(set.num_ranges(), 2);
+        assert!(set.contains(0x1500));
+        assert!(!set.contains(0x2500));
+        assert_eq!(set.num_addresses(), 0x1000 + 0x1000);
+    }
+
+    #[test]
+    fn test_address_range_set_merge() {
+        let mut set = AddressRangeSet::new("ram");
+        set.add_range(0x1000, 0x2000);
+        set.add_range(0x1800, 0x3000); // overlaps
+
+        assert_eq!(set.num_ranges(), 1);
+        assert!(set.contains(0x1500));
+        assert!(set.contains(0x2500));
+        assert!(!set.contains(0x3000));
+    }
+
+    #[test]
+    fn test_address_range_set_remove() {
+        let mut set = AddressRangeSet::new("ram");
+        set.add_range(0x1000, 0x3000);
+        set.remove_range(0x1800, 0x2000);
+
+        assert_eq!(set.num_ranges(), 2);
+        assert!(set.contains(0x1500));
+        assert!(!set.contains(0x1900));
+        assert!(set.contains(0x2500));
+    }
+
+    #[test]
+    fn test_address_range_set_empty() {
+        let set = AddressRangeSet::new("ram");
+        assert!(set.is_empty());
+        assert!(!set.contains(0));
+        assert_eq!(set.num_addresses(), 0);
+    }
+
+    #[test]
+    fn test_address_range_set_iter() {
+        let mut set = AddressRangeSet::new("ram");
+        set.add_range(0x10, 0x13);
+        let addrs: Vec<u64> = set.iter_addresses().collect();
+        assert_eq!(addrs, vec![0x10, 0x11, 0x12]);
     }
 }

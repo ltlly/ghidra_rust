@@ -1,6 +1,11 @@
 //! S_FRAMEPROC -- Frame procedure information symbol.
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.ExtraFrameAndProcedureInformationMsSymbol`.
+//!
+//! This module provides:
+//! - [`SFrameProc`] -- The frame procedure information symbol (`S_FRAMEPROC`, 0x1012).
+//! - [`FrameProcFlags`] -- Parsed boolean flags from the flags bitfield.
+//! - [`FramePointerRegister`] -- 2-bit register index for explicitly encoded base pointers.
 
 use std::fmt;
 
@@ -21,7 +26,14 @@ use super::abstract_ms_symbol::AbstractMsSymbol;
 pub struct FramePointerRegister(pub u8);
 
 impl FramePointerRegister {
-    /// Return the register name string for x86/x64.
+    /// Return the register name string for the 2-bit encoded field.
+    ///
+    /// This matches the Java `RegisterName` class behavior for the 2-bit
+    /// fields in `S_FRAMEPROC` flags. The mapping is:
+    /// - 0 = None
+    /// - 1 = ax (al/ax/eax)
+    /// - 2 = cx (cl/cx/ecx)
+    /// - 3 = dx (dl/dx/edx)
     pub fn name(&self) -> &'static str {
         match self.0 {
             0 => "None",
@@ -30,6 +42,14 @@ impl FramePointerRegister {
             3 => "dx",
             _ => "???",
         }
+    }
+
+    /// Resolve the register name using the full x86/x64 CV register table.
+    ///
+    /// Returns the register name from [`super::s_regrel32::cv_register_name`]
+    /// if the index is valid, or falls back to [`Self::name`].
+    pub fn cv_name(&self) -> &'static str {
+        super::s_regrel32::cv_register_name(self.0 as u16).unwrap_or_else(|| self.name())
     }
 }
 

@@ -1538,6 +1538,8 @@ pub mod symbol_kind {
     pub const S_LPROCREF_V2: u16=0x1127;
     pub const S_THUNK32_V2: u16=0x1102;
     pub const S_THUNK32_ST: u16=0x1114;
+    pub const S_INLINED_FUNCTION_CALLSITE: u16=0x114D;
+    pub const S_INLINED_FUNCTION_CALLSITE_EXTENDED: u16=0x115D;
 }
 
 

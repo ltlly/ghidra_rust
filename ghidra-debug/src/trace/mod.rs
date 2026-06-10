@@ -21,7 +21,10 @@ pub use trace::{
 pub use trace_thread::{
     ExecutionStateRecord, RegisterSnapshot, StackFrameInfo, TraceThread,
 };
-pub use trace_process::{ProcessEnvironment, TraceProcess};
+pub use trace_process::{
+    LoadedModule, ProcessBuilder, ProcessEnvironment, ProcessExitInfo, ProcessIO,
+    ProcessMemoryMapping, ProcessSnapshot, TraceProcess,
+};
 pub use trace_execution_state::{
     StateQuery, StateTransition, TraceExecutionStateManager,
 };
@@ -34,5 +37,6 @@ pub use trace_stack_frame::{
     TraceStackEntry, TraceStackFrameEntry, TraceStackFrameManager,
 };
 pub use trace_dynamic_table::{
-    ColumnSchema, DynamicRow, DynamicTableEntry, DynamicValue, TraceDynamicTableManager,
+    ColumnSchema, ColumnType, DynamicRow, DynamicTableEntry, DynamicValue,
+    MutableDynamicRow, TraceDynamicTableManager,
 };

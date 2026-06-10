@@ -11,13 +11,29 @@
 //!   watchpoint management. Includes `MemoryRegionMap` for tracking
 //!   memory regions with permissions, `PcodeWatchpointManager` for
 //!   memory range watchpoints, `AccessMetrics` for performance tracking,
-//!   and `PcodeFrameSnapshot` for full execution frame capture.
+//!   `PcodeFrameSnapshot` for full execution frame capture, `PrettyBytes`
+//!   for byte-array display, `WatchValue` for watch expression evaluation,
+//!   `StaticImageProvider` for reading from relocated program images,
+//!   `TargetSimulator` for abstract target interaction, `AddressRangeSet`
+//!   for tracking unknown memory regions, `AccessStateSnapshot` for
+//!   capturing/restoring full access state, `PcodeEmulatorCallbacks`
+//!   for emulation event hooks, and `BreakpointConditionEvaluator` for
+//!   evaluating breakpoint conditions.
 //! - **Pcode debugger registers**: Register bank abstraction, register mapping,
 //!   register groups, value transformations, calling conventions,
 //!   `RegisterSnapshot` / `RegisterBankDiff` for capturing and comparing
 //!   register state, `RegisterWatchpointManager` for register change
 //!   monitoring, `CallingConventionMapper` for cross-ABI argument
-//!   translation, and `RegisterAliasChain` for multi-level alias resolution.
+//!   translation, `RegisterAliasChain` for multi-level alias resolution,
+//!   `RegisterFileLayout` for physical register file layout,
+//!   `RegisterBankOverlay` for partial register state overrides,
+//!   `RegisterTracer` for recording register access history,
+//!   `RegisterBankFork` for snapshot-and-fork register state,
+//!   `RegisterDependencyGraph` for data-flow analysis,
+//!   `RegisterWriteGate` for conditional write gating,
+//!   `RegisterReadPolicy` for handling unknown register reads,
+//!   and `RegisterValueSource` / `SourcedRegisterValue` for tracking
+//!   register value provenance.
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 

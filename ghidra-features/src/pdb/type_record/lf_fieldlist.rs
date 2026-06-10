@@ -144,6 +144,13 @@ impl LfFieldlist {
         })
     }
 
+    /// Get the friend class entries (LF_FRIENDCLS).
+    pub fn friend_classes(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.entries().iter().filter(|e| {
+            matches!(e, FieldListEntry::FriendClass { .. })
+        })
+    }
+
     /// Get the virtual base class entries (LF_VBCLASS).
     pub fn virtual_base_classes(&self) -> impl Iterator<Item = &FieldListEntry> {
         self.field_list.entries().iter().filter(|e| {
@@ -186,6 +193,11 @@ impl LfFieldlist {
     /// Count the number of friend functions.
     pub fn num_friend_functions(&self) -> usize {
         self.friend_functions().count()
+    }
+
+    /// Count the number of friend classes.
+    pub fn num_friend_classes(&self) -> usize {
+        self.friend_classes().count()
     }
 
     /// Count the number of virtual base classes (direct + indirect).
@@ -252,6 +264,11 @@ impl LfFieldlist {
     /// Whether this field list has any friend function entries.
     pub fn has_friend_functions(&self) -> bool {
         self.num_friend_functions() > 0
+    }
+
+    /// Whether this field list has any friend class entries.
+    pub fn has_friend_classes(&self) -> bool {
+        self.num_friend_classes() > 0
     }
 }
 
@@ -472,6 +489,13 @@ fn parse_single_field_entry(lid: u16, p: &[u8]) -> FieldListEntry {
                 name,
             }
         }
+        field_leaf_id::LF_FRIENDCLS => {
+            // LF_FRIENDCLS: pad(2) + typeIndex(4)
+            let ti = if p.len() >= 6 { u32::from_le_bytes([p[2], p[3], p[4], p[5]]) } else { 0 };
+            FieldListEntry::FriendClass {
+                type_record: super::RecordNumber::type_record(ti),
+            }
+        }
         field_leaf_id::LF_BITFIELD => {
             let ti = if p.len() >= 4 { u32::from_le_bytes([p[0], p[1], p[2], p[3]]) } else { 0 };
             let length = if p.len() >= 5 { p[4] } else { 0 };
@@ -533,6 +557,7 @@ fn advance_past_field_entry(lid: u16, data: &[u8], pos: usize) -> usize {
             let end = p[4..].iter().position(|&b| b == 0).unwrap_or(p.len() - 4);
             pos + 2 + 4 + end + 1
         }
+        field_leaf_id::LF_FRIENDCLS => pos + 2 + 6, // pad(2) + typeIndex(4)
         field_leaf_id::LF_BITFIELD => pos + 2 + 6,
         _ => data.len(),
     }
@@ -1020,6 +1045,37 @@ mod tests {
     }
 
     #[test]
+    fn test_fieldlist_friend_classes() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::FriendClass {
+            type_record: RecordNumber::type_record(0x1020),
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+
+        assert_eq!(fl.num_friend_classes(), 1);
+        assert_eq!(fl.friend_classes().count(), 1);
+        assert!(fl.has_friend_classes());
+    }
+
+    #[test]
+    fn test_fieldlist_parse_with_friendcls() {
+        // LF_FRIENDCLS: leafId(2) + pad(2) + typeIndex(4)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x040Bu16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());   // pad
+        data.extend_from_slice(&0x1020u32.to_le_bytes());  // type index
+
+        let fl = LfFieldlist::parse(&data).unwrap();
+        assert_eq!(fl.len(), 1);
+        assert_eq!(fl.friend_classes().count(), 1);
+    }
+
+    #[test]
     fn test_fieldlist_virtual_base_classes() {
         let mut fl = LfFieldlist::new();
         fl.add_entry(FieldListEntry::VirtualBaseClass {
@@ -1253,6 +1309,17 @@ mod tests {
     }
 
     #[test]
+    fn test_fieldlist_has_friend_classes() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_friend_classes());
+
+        fl.add_entry(FieldListEntry::FriendClass {
+            type_record: RecordNumber::type_record(0x1020),
+        });
+        assert!(fl.has_friend_classes());
+    }
+
+    #[test]
     fn test_fieldlist_eq() {
         let mut fl1 = LfFieldlist::new();
         fl1.add_entry(FieldListEntry::Member {
@@ -1319,13 +1386,16 @@ mod tests {
             type_record: RecordNumber::type_record(0x1010),
             name: "operator+".to_string(),
         });
+        fl.add_entry(FieldListEntry::FriendClass {
+            type_record: RecordNumber::type_record(0x1020),
+        });
         fl.add_entry(FieldListEntry::Bitfield {
             type_record: RecordNumber::type_record(0x0074),
             bit_length: 4,
             bit_position: 0,
         });
 
-        assert_eq!(fl.len(), 10);
+        assert_eq!(fl.len(), 11);
         assert_eq!(fl.num_base_classes(), 1);
         assert_eq!(fl.num_nonstatic_members(), 1);
         assert_eq!(fl.num_static_members(), 1);
@@ -1335,5 +1405,6 @@ mod tests {
         assert_eq!(fl.num_vftable_pointers(), 1);
         assert_eq!(fl.num_continuation_indices(), 1);
         assert_eq!(fl.num_friend_functions(), 1);
+        assert_eq!(fl.num_friend_classes(), 1);
     }
 }

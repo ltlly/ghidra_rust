@@ -1,6 +1,12 @@
 //! S_BUILDINFO -- Build information symbol.
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.BuildInformationMsSymbol`.
+//!
+//! This module provides:
+//! - [`SBuildInfo`] -- The build information symbol
+//!   (`S_BUILDINFO`, 0x103D / `S_BUILDINFO_V2`, 0x114C).
+//!
+//! Both v1 and v2 share the same binary layout; the difference is only the PDB ID.
 
 use std::fmt;
 
@@ -25,12 +31,22 @@ use super::record_number::{RecordCategory, RecordNumber};
 pub struct SBuildInfo {
     /// The IPI item record number referencing the build information.
     pub item_id: RecordNumber,
+
+    /// Whether this was parsed from a v2 record (`S_BUILDINFO_V2`, 0x114C).
+    is_v2: bool,
 }
 
 impl SBuildInfo {
-    /// Create a new build information symbol.
+    /// Create a new build information symbol (v1, PDB ID 0x103D).
     pub fn new(item_id: RecordNumber) -> Self {
-        Self { item_id }
+        Self { item_id, is_v2: false }
+    }
+
+    /// Create a new v2 build information symbol (PDB ID 0x114C).
+    ///
+    /// The binary layout is identical to v1; only the PDB ID differs.
+    pub fn new_v2(item_id: RecordNumber) -> Self {
+        Self { item_id, is_v2: true }
     }
 
     /// Parse an S_BUILDINFO symbol from a byte slice.
@@ -41,7 +57,21 @@ impl SBuildInfo {
             return None;
         }
         let (item_id, _) = RecordNumber::parse(data, 0, RecordCategory::Item, 32);
-        Some(Self { item_id })
+        Some(Self { item_id, is_v2: false })
+    }
+
+    /// Parse an S_BUILDINFO_V2 symbol from a byte slice.
+    ///
+    /// Identical to [`Self::parse`] but tags the result as v2 (PDB ID 0x114C).
+    pub fn parse_v2(data: &[u8]) -> Option<Self> {
+        let mut sym = Self::parse(data)?;
+        sym.is_v2 = true;
+        Some(sym)
+    }
+
+    /// Return `true` if this was parsed from a v2 record (PDB ID 0x114C).
+    pub fn is_v2(&self) -> bool {
+        self.is_v2
     }
 
     /// Resolve the build info item to a display string using a type record
@@ -61,7 +91,11 @@ impl SBuildInfo {
 
 impl AbstractMsSymbol for SBuildInfo {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_BUILDINFO
+        if self.is_v2 {
+            super::super::symbol_kind::S_BUILDINFO_V2
+        } else {
+            super::super::symbol_kind::S_BUILDINFO
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
@@ -158,5 +192,60 @@ mod tests {
             }
         });
         assert_eq!(resolved, "LF_BUILDINFO: cl.exe 19.29 /O2 /Zi");
+    }
+
+    // -- v2 tests --
+
+    #[test]
+    fn test_new_v2() {
+        let sym = SBuildInfo::new_v2(RecordNumber::item_record_number(0x1042));
+        assert_eq!(sym.pdb_id(), 0x114C);
+        assert!(sym.is_v2());
+        assert_eq!(sym.item_id.number(), 0x1042);
+    }
+
+    #[test]
+    fn test_parse_v2() {
+        let data = 0x1042u32.to_le_bytes();
+        let sym = SBuildInfo::parse_v2(&data).unwrap();
+        assert!(sym.is_v2());
+        assert_eq!(sym.pdb_id(), 0x114C);
+        assert_eq!(sym.item_id.number(), 0x1042);
+    }
+
+    #[test]
+    fn test_parse_v2_truncated() {
+        let data = [0x00, 0x01];
+        assert!(SBuildInfo::parse_v2(&data).is_none());
+    }
+
+    #[test]
+    fn test_v1_not_v2() {
+        let sym = SBuildInfo::new(RecordNumber::item_record_number(0x1042));
+        assert!(!sym.is_v2());
+        assert_eq!(sym.pdb_id(), 0x103D);
+    }
+
+    #[test]
+    fn test_v2_display() {
+        let sym = SBuildInfo::new_v2(RecordNumber::item_record_number(0x1042));
+        let s = format!("{}", sym);
+        assert!(s.contains("BuildInfo"));
+        assert!(s.contains("ItemId"));
+    }
+
+    #[test]
+    fn test_v2_clone_eq() {
+        let a = SBuildInfo::new_v2(RecordNumber::item_record_number(0x1042));
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert!(b.is_v2());
+    }
+
+    #[test]
+    fn test_v2_resolve() {
+        let sym = SBuildInfo::new_v2(RecordNumber::item_record_number(0x1042));
+        let result = sym.resolve(|rn| format!("LF_BUILDINFO[{:04X}]", rn.number()));
+        assert_eq!(result, "LF_BUILDINFO[1042]");
     }
 }

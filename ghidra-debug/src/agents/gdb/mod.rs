@@ -117,6 +117,98 @@ impl GdbState {
     }
 }
 
+/// GDB stop reason.
+///
+/// Represents why a thread stopped. In GDB's Python API, stop reasons
+/// are communicated via `StopEvent` and its `breakpoints` attribute, or
+/// via `InferiorThread.is_stopped()` combined with the stop reason.
+/// In GDB/MI, the stop reason appears in `*stopped` async records.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GdbStopReason {
+    /// Breakpoint hit.
+    Breakpoint,
+    /// Watchpoint hit.
+    Watchpoint,
+    /// Read watchpoint hit.
+    ReadWatchpoint,
+    /// Access watchpoint hit.
+    AccessWatchpoint,
+    /// Signal received.
+    Signal,
+    /// Step completed (step-over, step-into, step-inst).
+    StepComplete,
+    /// Function call finished (step-out / finish).
+    FunctionFinished,
+    /// Exited normally.
+    Exited,
+    /// Exited with signal.
+    ExitedSignalled,
+    /// Location reached (run-to-address completed).
+    LocationReached,
+    /// Fork.
+    Fork,
+    /// VFork.
+    VFork,
+    /// Syscall entry/exit.
+    SyscallEntry,
+    /// Solib event (shared library loaded/unloaded).
+    SolibEvent,
+    /// Exec.
+    Exec,
+    /// Unknown or unspecified.
+    Unknown,
+}
+
+impl GdbStopReason {
+    /// Convert from GDB/MI stop reason string.
+    pub fn from_gdb(reason: &str) -> Self {
+        match reason.to_lowercase().as_str() {
+            "breakpoint-hit" | "breakpoint" => Self::Breakpoint,
+            "watchpoint-trigger" | "watchpoint" => Self::Watchpoint,
+            "read-watchpoint-trigger" | "read-watchpoint" => Self::ReadWatchpoint,
+            "access-watchpoint-trigger" | "access-watchpoint" => Self::AccessWatchpoint,
+            "signal-received" | "signal" => Self::Signal,
+            "end-stepping-range" | "location-reached" => Self::StepComplete,
+            "function-finished" => Self::FunctionFinished,
+            "exited-normally" => Self::Exited,
+            "exited-signalled" => Self::ExitedSignalled,
+            "fork" => Self::Fork,
+            "vfork" => Self::VFork,
+            "syscall-entry" => Self::SyscallEntry,
+            "solib-event" => Self::SolibEvent,
+            "exec" => Self::Exec,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Breakpoint => "Breakpoint hit",
+            Self::Watchpoint => "Watchpoint triggered",
+            Self::ReadWatchpoint => "Read watchpoint triggered",
+            Self::AccessWatchpoint => "Access watchpoint triggered",
+            Self::Signal => "Signal received",
+            Self::StepComplete => "Step completed",
+            Self::FunctionFinished => "Function finished",
+            Self::Exited => "Exited normally",
+            Self::ExitedSignalled => "Exited with signal",
+            Self::LocationReached => "Location reached",
+            Self::Fork => "Fork",
+            Self::VFork => "VFork",
+            Self::SyscallEntry => "Syscall entry",
+            Self::SolibEvent => "Shared library event",
+            Self::Exec => "Exec",
+            Self::Unknown => "Unknown",
+        }
+    }
+
+    /// Whether this reason implies the inferior is stopped (can be resumed).
+    pub fn is_stopped(&self) -> bool {
+        !matches!(self, Self::Exited | Self::ExitedSignalled | Self::Unknown)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,5 +237,35 @@ mod tests {
         assert_eq!(paths::INFERIORS, "Inferiors");
         assert!(paths::THREAD.contains("{infnum}"));
         assert!(paths::REGS.contains("{level}"));
+    }
+
+    #[test]
+    fn test_gdb_stop_reason_from_gdb() {
+        assert_eq!(GdbStopReason::from_gdb("breakpoint-hit"), GdbStopReason::Breakpoint);
+        assert_eq!(GdbStopReason::from_gdb("signal-received"), GdbStopReason::Signal);
+        assert_eq!(GdbStopReason::from_gdb("end-stepping-range"), GdbStopReason::StepComplete);
+        assert_eq!(GdbStopReason::from_gdb("function-finished"), GdbStopReason::FunctionFinished);
+        assert_eq!(GdbStopReason::from_gdb("exited-normally"), GdbStopReason::Exited);
+        assert_eq!(GdbStopReason::from_gdb("exited-signalled"), GdbStopReason::ExitedSignalled);
+        assert_eq!(GdbStopReason::from_gdb("watchpoint-trigger"), GdbStopReason::Watchpoint);
+        assert_eq!(GdbStopReason::from_gdb("fork"), GdbStopReason::Fork);
+        assert_eq!(GdbStopReason::from_gdb("unknown_reason"), GdbStopReason::Unknown);
+    }
+
+    #[test]
+    fn test_gdb_stop_reason_description() {
+        assert_eq!(GdbStopReason::Breakpoint.description(), "Breakpoint hit");
+        assert_eq!(GdbStopReason::Signal.description(), "Signal received");
+        assert_eq!(GdbStopReason::StepComplete.description(), "Step completed");
+    }
+
+    #[test]
+    fn test_gdb_stop_reason_is_stopped() {
+        assert!(GdbStopReason::Breakpoint.is_stopped());
+        assert!(GdbStopReason::Signal.is_stopped());
+        assert!(GdbStopReason::StepComplete.is_stopped());
+        assert!(!GdbStopReason::Exited.is_stopped());
+        assert!(!GdbStopReason::ExitedSignalled.is_stopped());
+        assert!(!GdbStopReason::Unknown.is_stopped());
     }
 }

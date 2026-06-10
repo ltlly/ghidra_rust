@@ -1280,6 +1280,712 @@ impl RegisterAliasChain {
 }
 
 // ============================================================================
+// RegisterFileLayout -- physical layout of registers within a file
+// ============================================================================
+
+/// Describes the physical layout of a register file, mapping register names
+/// to their position and size within a contiguous byte buffer.
+///
+/// Ported from Ghidra's register file layout concept used in trace-based
+/// register storage. Each register occupies a fixed slice within a flat
+/// byte array indexed by (space_name, offset).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterFileLayout {
+    /// The address space name for this register file (typically "register").
+    pub space_name: String,
+    /// Register name -> (offset, size) within the register file.
+    entries: BTreeMap<String, RegisterLayoutEntry>,
+}
+
+/// A single register's position within the register file.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RegisterLayoutEntry {
+    /// Byte offset within the register file.
+    pub offset: u64,
+    /// Size in bytes.
+    pub size: u32,
+}
+
+impl RegisterFileLayout {
+    /// Create a new empty register file layout.
+    pub fn new(space_name: impl Into<String>) -> Self {
+        Self {
+            space_name: space_name.into(),
+            entries: BTreeMap::new(),
+        }
+    }
+
+    /// Add a register entry.
+    pub fn add_register(&mut self, name: impl Into<String>, offset: u64, size: u32) {
+        self.entries.insert(
+            name.into(),
+            RegisterLayoutEntry { offset, size },
+        );
+    }
+
+    /// Get the layout entry for a register.
+    pub fn get_entry(&self, name: &str) -> Option<&RegisterLayoutEntry> {
+        self.entries.get(name)
+    }
+
+    /// Get the byte range (offset, offset+size) for a register.
+    pub fn byte_range(&self, name: &str) -> Option<(u64, u64)> {
+        self.entries
+            .get(name)
+            .map(|e| (e.offset, e.offset + e.size as u64))
+    }
+
+    /// Extract a register value from a flat byte buffer.
+    pub fn extract_value(&self, name: &str, buffer: &[u8]) -> Option<Vec<u8>> {
+        let entry = self.entries.get(name)?;
+        let start = entry.offset as usize;
+        let end = start + entry.size as usize;
+        if end > buffer.len() {
+            return None;
+        }
+        Some(buffer[start..end].to_vec())
+    }
+
+    /// Write a register value into a flat byte buffer.
+    pub fn inject_value(
+        &self,
+        name: &str,
+        buffer: &mut [u8],
+        value: &[u8],
+    ) -> Result<(), String> {
+        let entry = self
+            .entries
+            .get(name)
+            .ok_or_else(|| format!("register '{}' not in layout", name))?;
+        let start = entry.offset as usize;
+        let end = start + entry.size as usize;
+        if end > buffer.len() {
+            return Err(format!(
+                "buffer too small: need {} bytes, have {}",
+                end,
+                buffer.len()
+            ));
+        }
+        let copy_len = value.len().min(entry.size as usize);
+        buffer[start..start + copy_len].copy_from_slice(&value[..copy_len]);
+        Ok(())
+    }
+
+    /// All register names in this layout.
+    pub fn register_names(&self) -> Vec<&str> {
+        self.entries.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// The number of registers.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the layout is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// The total byte size of the register file (max offset + size).
+    pub fn total_size(&self) -> u64 {
+        self.entries
+            .values()
+            .map(|e| e.offset + e.size as u64)
+            .max()
+            .unwrap_or(0)
+    }
+}
+
+// ============================================================================
+// RegisterValueSource -- track where a register value originated
+// ============================================================================
+
+/// Describes the source of a register value.
+///
+/// Ported from Ghidra's value-source tracking in emulation and debugging.
+/// When a register is read from a debug target, the source indicates how
+/// the value was obtained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterValueSource {
+    /// Value was read from the live target.
+    Target,
+    /// Value was read from the trace database.
+    Trace,
+    /// Value was read from a static image (program database).
+    StaticImage,
+    /// Value was set by the user or a script.
+    User,
+    /// Value was computed by the emulator.
+    Emulated,
+    /// Value was loaded from a core dump.
+    CoreDump,
+    /// Source is unknown.
+    Unknown,
+}
+
+/// A register value paired with its source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourcedRegisterValue {
+    /// The register name.
+    pub name: String,
+    /// The value bytes.
+    pub value: Vec<u8>,
+    /// Where the value came from.
+    pub source: RegisterValueSource,
+    /// The snap at which the value was obtained.
+    pub snap: i64,
+}
+
+impl SourcedRegisterValue {
+    /// Create a new sourced value.
+    pub fn new(
+        name: impl Into<String>,
+        value: Vec<u8>,
+        source: RegisterValueSource,
+        snap: i64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            value,
+            source,
+            snap,
+        }
+    }
+
+    /// Whether this value came from the live target.
+    pub fn is_live(&self) -> bool {
+        self.source == RegisterValueSource::Target
+    }
+}
+
+// ============================================================================
+// RegisterBankOverlay -- apply partial updates to a bank
+// ============================================================================
+
+/// An overlay of register values that can be applied on top of a base bank.
+///
+/// Ported from Ghidra's register overlay concept used when the emulated
+/// state differs from the trace state. Only registers present in the
+/// overlay are affected; base values for other registers are preserved.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterBankOverlay {
+    /// Register name -> overlay value (None means "use base").
+    overrides: BTreeMap<String, Option<Vec<u8>>>,
+    /// Registers explicitly cleared (marked unknown) by the overlay.
+    cleared: BTreeSet<String>,
+}
+
+impl RegisterBankOverlay {
+    /// Create a new empty overlay.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Override a register value in the overlay.
+    pub fn set(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        let name = name.into();
+        self.cleared.remove(&name);
+        self.overrides.insert(name, Some(value));
+    }
+
+    /// Mark a register as explicitly unknown in the overlay.
+    pub fn clear(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        self.overrides.remove(&name);
+        self.cleared.insert(name);
+    }
+
+    /// Remove a register from the overlay (revert to base).
+    pub fn remove_override(&mut self, name: &str) {
+        self.overrides.remove(name);
+        self.cleared.remove(name);
+    }
+
+    /// Check if the overlay has an entry for the given register.
+    pub fn has_override(&self, name: &str) -> bool {
+        self.overrides.contains_key(name) || self.cleared.contains(name)
+    }
+
+    /// Get the overridden value for a register, if any.
+    pub fn get_override(&self, name: &str) -> Option<Option<&Vec<u8>>> {
+        if self.cleared.contains(name) {
+            return Some(None); // Explicitly cleared
+        }
+        self.overrides.get(name).map(|v| v.as_ref())
+    }
+
+    /// Read a register, checking the overlay first, then falling back to the base bank.
+    pub fn read(&self, name: &str, base: &PcodeRegisterBank) -> Option<Vec<u8>> {
+        if self.cleared.contains(name) {
+            return None;
+        }
+        if let Some(Some(val)) = self.overrides.get(name) {
+            return Some(val.clone());
+        }
+        base.read_register(name)
+    }
+
+    /// Apply all overlay changes into a bank.
+    pub fn apply_to(&self, bank: &mut PcodeRegisterBank) {
+        for (name, value) in &self.overrides {
+            if let Some(val) = value {
+                bank.write_register(name, val);
+            }
+        }
+        for name in &self.cleared {
+            bank.values.remove(name);
+        }
+    }
+
+    /// The number of overridden registers.
+    pub fn len(&self) -> usize {
+        self.overrides.len() + self.cleared.len()
+    }
+
+    /// Whether the overlay is empty (no overrides).
+    pub fn is_empty(&self) -> bool {
+        self.overrides.is_empty() && self.cleared.is_empty()
+    }
+
+    /// All register names that have overrides.
+    pub fn overridden_names(&self) -> Vec<&str> {
+        self.overrides
+            .keys()
+            .chain(self.cleared.iter())
+            .map(|s| s.as_str())
+            .collect()
+    }
+}
+
+// ============================================================================
+// RegisterTracer -- record register read/write history
+// ============================================================================
+
+/// An entry in the register trace log.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterTraceEntry {
+    /// The register name.
+    pub name: String,
+    /// Whether this was a read or write.
+    pub access: RegisterAccessKind,
+    /// The value (for writes, this is the value written; for reads, the value read).
+    pub value: Option<Vec<u8>>,
+    /// Monotonic sequence number.
+    pub seq: u64,
+    /// The snap at which this occurred.
+    pub snap: i64,
+}
+
+/// Kind of register access.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterAccessKind {
+    /// A register read.
+    Read,
+    /// A register write.
+    Write,
+}
+
+/// Records a history of register reads and writes.
+///
+/// Ported from Ghidra's register tracing facilities used for debugging
+/// emulation and recording register access patterns.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterTracer {
+    entries: Vec<RegisterTraceEntry>,
+    next_seq: u64,
+    /// Maximum number of entries to keep (0 = unlimited).
+    max_entries: usize,
+}
+
+impl RegisterTracer {
+    /// Create a new register tracer.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum number of trace entries. Old entries are evicted FIFO.
+    pub fn with_max_entries(mut self, max: usize) -> Self {
+        self.max_entries = max;
+        self
+    }
+
+    /// Record a register read.
+    pub fn record_read(&mut self, name: &str, value: &[u8], snap: i64) {
+        self.push_entry(RegisterTraceEntry {
+            name: name.to_string(),
+            access: RegisterAccessKind::Read,
+            value: Some(value.to_vec()),
+            seq: self.next_seq,
+            snap,
+        });
+        self.next_seq += 1;
+    }
+
+    /// Record a register write.
+    pub fn record_write(&mut self, name: &str, value: &[u8], snap: i64) {
+        self.push_entry(RegisterTraceEntry {
+            name: name.to_string(),
+            access: RegisterAccessKind::Write,
+            value: Some(value.to_vec()),
+            seq: self.next_seq,
+            snap,
+        });
+        self.next_seq += 1;
+    }
+
+    fn push_entry(&mut self, entry: RegisterTraceEntry) {
+        if self.max_entries > 0 && self.entries.len() >= self.max_entries {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+
+    /// Get all trace entries.
+    pub fn entries(&self) -> &[RegisterTraceEntry] {
+        &self.entries
+    }
+
+    /// Get entries for a specific register.
+    pub fn entries_for(&self, name: &str) -> Vec<&RegisterTraceEntry> {
+        self.entries
+            .iter()
+            .filter(|e| e.name == name)
+            .collect()
+    }
+
+    /// Get entries of a specific kind.
+    pub fn entries_of_kind(&self, kind: RegisterAccessKind) -> Vec<&RegisterTraceEntry> {
+        self.entries.iter().filter(|e| e.access == kind).collect()
+    }
+
+    /// The number of recorded entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether no entries have been recorded.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.next_seq = 0;
+    }
+
+    /// The last (most recent) entry.
+    pub fn last(&self) -> Option<&RegisterTraceEntry> {
+        self.entries.last()
+    }
+}
+
+// ============================================================================
+// RegisterBankFork -- snapshot and fork register state
+// ============================================================================
+
+/// A forkable register bank that supports snapshot-and-restore semantics.
+///
+/// Ported from Ghidra's register state forking used in emulation where
+/// speculative execution needs to save and restore register state.
+#[derive(Debug, Clone)]
+pub struct RegisterBankFork {
+    /// The current (working) state.
+    current: PcodeRegisterBank,
+    /// Stack of saved snapshots.
+    saved_stack: Vec<PcodeRegisterBank>,
+}
+
+impl RegisterBankFork {
+    /// Create a new forkable bank.
+    pub fn new(bank: PcodeRegisterBank) -> Self {
+        Self {
+            current: bank,
+            saved_stack: Vec::new(),
+        }
+    }
+
+    /// Save the current state and begin modifying.
+    pub fn fork(&mut self) {
+        self.saved_stack.push(self.current.clone());
+    }
+
+    /// Discard the current state and restore the most recently saved snapshot.
+    pub fn restore(&mut self) -> Result<(), String> {
+        self.current = self
+            .saved_stack
+            .pop()
+            .ok_or_else(|| "no saved state to restore".to_string())?;
+        Ok(())
+    }
+
+    /// Accept the current state (discard the saved snapshot).
+    pub fn commit(&mut self) -> Result<(), String> {
+        self.saved_stack
+            .pop()
+            .ok_or_else(|| "no saved state to commit".to_string())?;
+        Ok(())
+    }
+
+    /// Get the current bank.
+    pub fn current(&self) -> &PcodeRegisterBank {
+        &self.current
+    }
+
+    /// Get a mutable reference to the current bank.
+    pub fn current_mut(&mut self) -> &mut PcodeRegisterBank {
+        &mut self.current
+    }
+
+    /// How many snapshots are saved.
+    pub fn depth(&self) -> usize {
+        self.saved_stack.len()
+    }
+}
+
+// ============================================================================
+// RegisterDependencyGraph -- track register read/write dependencies
+// ============================================================================
+
+/// Tracks dependencies between registers for data-flow analysis.
+///
+/// Ported from Ghidra's register dependency tracking used in pcode
+/// emulation to determine which registers affect which other registers.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterDependencyGraph {
+    /// register -> set of registers it depends on (reads from).
+    depends_on: BTreeMap<String, BTreeSet<String>>,
+    /// register -> set of registers that depend on it (read by).
+    depended_by: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl RegisterDependencyGraph {
+    /// Create a new empty dependency graph.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record that `target` depends on `source` (target reads from source).
+    pub fn add_dependency(&mut self, target: &str, source: &str) {
+        self.depends_on
+            .entry(target.to_string())
+            .or_default()
+            .insert(source.to_string());
+        self.depended_by
+            .entry(source.to_string())
+            .or_default()
+            .insert(target.to_string());
+    }
+
+    /// Get the set of registers that `name` depends on.
+    pub fn depends_on(&self, name: &str) -> Vec<String> {
+        self.depends_on
+            .get(name)
+            .map(|s| s.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get the set of registers that depend on `name`.
+    pub fn depended_by(&self, name: &str) -> Vec<String> {
+        self.depended_by
+            .get(name)
+            .map(|s| s.iter().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Transitively compute all registers affected if `name` changes.
+    pub fn transitive_dependents(&self, name: &str) -> BTreeSet<String> {
+        let mut result = BTreeSet::new();
+        let mut queue = std::collections::VecDeque::new();
+        if let Some(direct) = self.depended_by.get(name) {
+            for d in direct {
+                if result.insert(d.clone()) {
+                    queue.push_back(d.clone());
+                }
+            }
+        }
+        while let Some(current) = queue.pop_front() {
+            if let Some(dependents) = self.depended_by.get(&current) {
+                for d in dependents {
+                    if result.insert(d.clone()) {
+                        queue.push_back(d.clone());
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// The number of dependency edges.
+    pub fn num_edges(&self) -> usize {
+        self.depends_on.values().map(|s| s.len()).sum()
+    }
+
+    /// Whether the graph has no dependencies.
+    pub fn is_empty(&self) -> bool {
+        self.depends_on.is_empty()
+    }
+
+    /// Clear the graph.
+    pub fn clear(&mut self) {
+        self.depends_on.clear();
+        self.depended_by.clear();
+    }
+}
+
+// ============================================================================
+// RegisterWriteGate -- conditional writes with guard predicates
+// ============================================================================
+
+/// A guard that conditionally allows register writes.
+///
+/// Ported from Ghidra's conditional write gating used in trace-based
+/// emulation where writes should only proceed if a condition is met
+/// (e.g., the value has actually changed, or a permission flag is set).
+#[derive(Debug, Clone)]
+pub struct RegisterWriteGate {
+    /// Registers that are currently gated (writes blocked).
+    gated: BTreeSet<String>,
+    /// Registers that are locked (writes permanently blocked until explicitly unlocked).
+    locked: BTreeSet<String>,
+}
+
+impl RegisterWriteGate {
+    /// Create a new write gate with no restrictions.
+    pub fn new() -> Self {
+        Self {
+            gated: BTreeSet::new(),
+            locked: BTreeSet::new(),
+        }
+    }
+
+    /// Gate a register (temporarily block writes).
+    pub fn gate(&mut self, name: impl Into<String>) {
+        self.gated.insert(name.into());
+    }
+
+    /// Ungate a register.
+    pub fn ungate(&mut self, name: &str) {
+        self.gated.remove(name);
+    }
+
+    /// Lock a register (block writes until unlocked).
+    pub fn lock(&mut self, name: impl Into<String>) {
+        self.locked.insert(name.into());
+    }
+
+    /// Unlock a register.
+    pub fn unlock(&mut self, name: &str) {
+        self.locked.remove(name);
+    }
+
+    /// Check if a write to the given register is allowed.
+    pub fn is_write_allowed(&self, name: &str) -> bool {
+        !self.gated.contains(name) && !self.locked.contains(name)
+    }
+
+    /// Attempt a gated write. Returns `Err` if gated or locked.
+    pub fn attempt_write(
+        &self,
+        bank: &mut PcodeRegisterBank,
+        name: &str,
+        value: &[u8],
+    ) -> Result<(), String> {
+        if self.locked.contains(name) {
+            return Err(format!("register '{}' is locked", name));
+        }
+        if self.gated.contains(name) {
+            return Err(format!("register '{}' is gated", name));
+        }
+        bank.write_register(name, value);
+        Ok(())
+    }
+
+    /// Gate all registers in a group.
+    pub fn gate_group(&mut self, bank: &PcodeRegisterBank, group_name: &str) {
+        for name in bank.registers_in_group(group_name) {
+            self.gated.insert(name);
+        }
+    }
+
+    /// Ungate all registers in a group.
+    pub fn ungate_group(&mut self, bank: &PcodeRegisterBank, group_name: &str) {
+        for name in bank.registers_in_group(group_name) {
+            self.gated.remove(&name);
+        }
+    }
+
+    /// The number of gated registers.
+    pub fn num_gated(&self) -> usize {
+        self.gated.len()
+    }
+
+    /// The number of locked registers.
+    pub fn num_locked(&self) -> usize {
+        self.locked.len()
+    }
+
+    /// Clear all gates and locks.
+    pub fn clear(&mut self) {
+        self.gated.clear();
+        self.locked.clear();
+    }
+}
+
+// ============================================================================
+// RegisterReadPolicy -- control read behavior
+// ============================================================================
+
+/// Policy controlling how register reads are handled.
+///
+/// Ported from Ghidra's register read policy used in pcode emulation to
+/// determine what happens when a register is read with unknown state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterReadPolicy {
+    /// Return None for unknown registers.
+    Strict,
+    /// Return zero-filled bytes for unknown registers.
+    ZeroFill,
+    /// Return a pattern-filled byte (0xCC) for unknown registers.
+    PatternFill(u8),
+    /// Raise an error for unknown registers.
+    Error,
+}
+
+impl Default for RegisterReadPolicy {
+    fn default() -> Self {
+        Self::ZeroFill
+    }
+}
+
+impl RegisterReadPolicy {
+    /// Read a register value, applying the policy for unknown registers.
+    pub fn read_with_policy(
+        &self,
+        bank: &PcodeRegisterBank,
+        name: &str,
+    ) -> Result<Option<Vec<u8>>, String> {
+        match bank.read_register(name) {
+            some @ Some(_) => Ok(some),
+            None => match self {
+                Self::Strict => Ok(None),
+                Self::ZeroFill => {
+                    let def = bank.get_definition(name);
+                    let size = def.map(|d| d.byte_length() as usize).unwrap_or(8);
+                    Ok(Some(vec![0u8; size]))
+                }
+                Self::PatternFill(byte) => {
+                    let def = bank.get_definition(name);
+                    let size = def.map(|d| d.byte_length() as usize).unwrap_or(8);
+                    Ok(Some(vec![*byte; size]))
+                }
+                Self::Error => Err(format!("register '{}' has no value", name)),
+            },
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1788,5 +2494,265 @@ mod tests {
         // Should not infinite loop; resolves to one of them
         let resolved = chain.resolve("A");
         assert!(resolved == "A" || resolved == "B");
+    }
+
+    // -- RegisterFileLayout --
+
+    #[test]
+    fn test_register_file_layout_basic() {
+        let mut layout = RegisterFileLayout::new("register");
+        layout.add_register("RAX", 0, 8);
+        layout.add_register("RBX", 8, 8);
+        layout.add_register("RCX", 16, 8);
+
+        assert_eq!(layout.len(), 3);
+        assert_eq!(layout.total_size(), 24);
+        assert_eq!(layout.byte_range("RAX"), Some((0, 8)));
+        assert_eq!(layout.byte_range("RBX"), Some((8, 16)));
+    }
+
+    #[test]
+    fn test_register_file_layout_extract_inject() {
+        let mut layout = RegisterFileLayout::new("register");
+        layout.add_register("RAX", 0, 8);
+        layout.add_register("RBX", 8, 8);
+
+        let buffer = vec![0x78, 0x56, 0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+
+        let rax = layout.extract_value("RAX", &buffer).unwrap();
+        assert_eq!(rax, vec![0x78, 0x56, 0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE]);
+
+        let rbx = layout.extract_value("RBX", &buffer).unwrap();
+        assert_eq!(rbx, vec![0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88]);
+
+        // Inject into a new buffer
+        let mut buf = vec![0u8; 16];
+        layout.inject_value("RBX", &mut buf, &[0xAA, 0xBB]).unwrap();
+        assert_eq!(&buf[8..10], &[0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn test_register_file_layout_missing() {
+        let layout = RegisterFileLayout::new("register");
+        assert!(layout.get_entry("RAX").is_none());
+        assert!(layout.is_empty());
+    }
+
+    // -- SourcedRegisterValue --
+
+    #[test]
+    fn test_sourced_register_value() {
+        let srv = SourcedRegisterValue::new("RAX", vec![1, 2, 3, 4], RegisterValueSource::Target, 10);
+        assert!(srv.is_live());
+        assert_eq!(srv.name, "RAX");
+
+        let srv2 = SourcedRegisterValue::new("RBX", vec![5, 6], RegisterValueSource::Trace, 10);
+        assert!(!srv2.is_live());
+    }
+
+    // -- RegisterBankOverlay --
+
+    #[test]
+    fn test_register_bank_overlay() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[1, 2, 3, 4, 5, 6, 7, 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+
+        let mut overlay = RegisterBankOverlay::new();
+        overlay.set("RAX", vec![0xFF; 8]);
+
+        // RAX from overlay, RBX from base
+        assert_eq!(overlay.read("RAX", &bank), Some(vec![0xFF; 8]));
+        assert_eq!(overlay.read("RBX", &bank), Some(vec![0xAA; 8]));
+
+        // Clear RAX
+        overlay.clear("RAX");
+        assert_eq!(overlay.read("RAX", &bank), None);
+        assert!(overlay.has_override("RAX"));
+
+        // Remove override reverts to base
+        overlay.remove_override("RAX");
+        assert_eq!(overlay.read("RAX", &bank), Some(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+    }
+
+    #[test]
+    fn test_register_bank_overlay_apply() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0; 8]);
+
+        let mut overlay = RegisterBankOverlay::new();
+        overlay.set("RAX", vec![0xFF; 8]);
+
+        overlay.apply_to(&mut bank);
+        assert_eq!(bank.read_register("RAX"), Some(vec![0xFF; 8]));
+    }
+
+    // -- RegisterTracer --
+
+    #[test]
+    fn test_register_tracer_basic() {
+        let mut tracer = RegisterTracer::new();
+        tracer.record_read("RAX", &[1, 2, 3, 4], 0);
+        tracer.record_write("RAX", &[5, 6, 7, 8], 1);
+        tracer.record_read("RBX", &[0xAA; 4], 2);
+
+        assert_eq!(tracer.len(), 3);
+        assert_eq!(tracer.entries_for("RAX").len(), 2);
+        assert_eq!(tracer.entries_of_kind(RegisterAccessKind::Read).len(), 2);
+        assert_eq!(tracer.last().unwrap().name, "RBX");
+    }
+
+    #[test]
+    fn test_register_tracer_max_entries() {
+        let mut tracer = RegisterTracer::new().with_max_entries(2);
+        tracer.record_read("A", &[1], 0);
+        tracer.record_read("B", &[2], 1);
+        tracer.record_read("C", &[3], 2);
+
+        assert_eq!(tracer.len(), 2);
+        assert_eq!(tracer.entries()[0].name, "B");
+        assert_eq!(tracer.entries()[1].name, "C");
+    }
+
+    // -- RegisterBankFork --
+
+    #[test]
+    fn test_register_bank_fork() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[1, 2, 3, 4, 5, 6, 7, 8]);
+
+        let mut fork = RegisterBankFork::new(bank);
+        assert_eq!(fork.depth(), 0);
+
+        fork.fork();
+        assert_eq!(fork.depth(), 1);
+        fork.current_mut().write_register("RAX", &[0xFF; 8]);
+        assert_eq!(fork.current().read_register("RAX"), Some(vec![0xFF; 8]));
+
+        fork.restore().unwrap();
+        assert_eq!(fork.depth(), 0);
+        assert_eq!(fork.current().read_register("RAX"), Some(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+    }
+
+    #[test]
+    fn test_register_bank_fork_commit() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[1, 2, 3, 4, 5, 6, 7, 8]);
+
+        let mut fork = RegisterBankFork::new(bank);
+        fork.fork();
+        fork.current_mut().write_register("RAX", &[0xFF; 8]);
+        fork.commit().unwrap();
+
+        assert_eq!(fork.depth(), 0);
+        assert_eq!(fork.current().read_register("RAX"), Some(vec![0xFF; 8]));
+    }
+
+    // -- RegisterDependencyGraph --
+
+    #[test]
+    fn test_register_dependency_graph() {
+        let mut graph = RegisterDependencyGraph::new();
+        graph.add_dependency("RCX", "RAX"); // RCX reads RAX
+        graph.add_dependency("RDX", "RAX"); // RDX reads RAX
+        graph.add_dependency("RSI", "RCX"); // RSI reads RCX
+
+        assert_eq!(graph.depends_on("RCX"), vec!["RAX"]);
+        assert_eq!(graph.depended_by("RAX").len(), 2);
+
+        let transitive = graph.transitive_dependents("RAX");
+        assert!(transitive.contains("RCX"));
+        assert!(transitive.contains("RDX"));
+        assert!(transitive.contains("RSI")); // transitively via RCX
+    }
+
+    // -- RegisterWriteGate --
+
+    #[test]
+    fn test_register_write_gate() {
+        let mut gate = RegisterWriteGate::new();
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+
+        assert!(gate.is_write_allowed("RAX"));
+
+        gate.gate("RAX");
+        assert!(!gate.is_write_allowed("RAX"));
+        assert!(gate.attempt_write(&mut bank, "RAX", &[1, 2]).is_err());
+
+        gate.ungate("RAX");
+        assert!(gate.is_write_allowed("RAX"));
+        assert!(gate.attempt_write(&mut bank, "RAX", &[1, 2]).is_ok());
+    }
+
+    #[test]
+    fn test_register_write_gate_lock() {
+        let mut gate = RegisterWriteGate::new();
+        gate.lock("RAX");
+        assert!(!gate.is_write_allowed("RAX"));
+
+        // Ungating doesn't help with locks
+        gate.ungate("RAX");
+        assert!(!gate.is_write_allowed("RAX"));
+
+        gate.unlock("RAX");
+        assert!(gate.is_write_allowed("RAX"));
+    }
+
+    // -- RegisterReadPolicy --
+
+    #[test]
+    fn test_register_read_policy_strict() {
+        let bank = PcodeRegisterBank::new();
+        let policy = RegisterReadPolicy::Strict;
+        assert!(policy.read_with_policy(&bank, "RAX").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_register_read_policy_zero_fill() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        let policy = RegisterReadPolicy::ZeroFill;
+        let val = policy.read_with_policy(&bank, "RAX").unwrap().unwrap();
+        assert_eq!(val, vec![0u8; 8]);
+    }
+
+    #[test]
+    fn test_register_read_policy_pattern() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        let policy = RegisterReadPolicy::PatternFill(0xCC);
+        let val = policy.read_with_policy(&bank, "RAX").unwrap().unwrap();
+        assert_eq!(val, vec![0xCCu8; 8]);
+    }
+
+    #[test]
+    fn test_register_read_policy_error() {
+        let bank = PcodeRegisterBank::new();
+        let policy = RegisterReadPolicy::Error;
+        assert!(policy.read_with_policy(&bank, "RAX").is_err());
+    }
+
+    #[test]
+    fn test_register_read_policy_existing() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        // All policies should return the existing value
+        for policy in [
+            RegisterReadPolicy::Strict,
+            RegisterReadPolicy::ZeroFill,
+            RegisterReadPolicy::PatternFill(0xCC),
+            RegisterReadPolicy::Error,
+        ] {
+            let val = policy.read_with_policy(&bank, "RAX").unwrap().unwrap();
+            assert_eq!(val, vec![0x42; 8]);
+        }
     }
 }

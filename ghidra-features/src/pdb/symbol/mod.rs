@@ -105,7 +105,7 @@ pub use abstract_constant::AbstractConstant;
 pub use abstract_data::AbstractData;
 
 pub use s_bprel32::SBpRel32;
-pub use s_callsite::{SCallSite, SIndirectCallSiteInfo};
+pub use s_callsite::{SCallSite, SIndirectCallSiteInfo, SInlinedFunctionCallSite, SInlinedFunctionCallSiteExtended};
 pub use s_callsiteinfo::SCallSiteInfo;
 pub use s_coffgroup::SCoffGroup;
 pub use s_constant::SConstant;
@@ -123,9 +123,9 @@ pub use s_objname::SObjName;
 pub use s_procref::SProcRef;
 pub use s_pub32::SPub32;
 pub use s_regrel32::{SRegRel32, cv_register_name};
-pub use s_section::{SSection, SPeCoffSection};
+pub use s_section::{SSection, SPeCoffSection, SectionCharacteristics};
 pub use s_skip::SSkip;
-pub use s_thunk32::SThunk32;
+pub use s_thunk32::{SThunk32, SThunk16, SThunk32St};
 pub use s_trampoline::STrampoline;
 pub use s_udt::SUdt;
 

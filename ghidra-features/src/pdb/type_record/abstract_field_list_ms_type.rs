@@ -138,6 +138,11 @@ pub enum FieldListEntry {
         /// Function name.
         name: String,
     },
+    /// LF_FRIENDCLS — a friend class declaration.
+    FriendClass {
+        /// Record number of the friend class type.
+        type_record: RecordNumber,
+    },
     /// LF_BITFIELD — a bitfield member.
     Bitfield {
         /// Record number of the base type.
@@ -169,6 +174,11 @@ impl FieldListEntry {
         }
     }
 
+    /// Check if this is a friend entry (function or class).
+    pub fn is_friend(&self) -> bool {
+        matches!(self, Self::FriendFunction { .. } | Self::FriendClass { .. })
+    }
+
     /// Check if this is a base class entry (direct, virtual, or indirect).
     pub fn is_base_class(&self) -> bool {
         matches!(
@@ -192,6 +202,11 @@ impl FieldListEntry {
     /// Check if this is a continuation index.
     pub fn is_index(&self) -> bool {
         matches!(self, Self::Index { .. })
+    }
+
+    /// Check if this is a vftable-related entry (pointer or offset).
+    pub fn is_vftable(&self) -> bool {
+        matches!(self, Self::VfTablePointer { .. } | Self::VfFuncOffset { .. })
     }
 }
 
@@ -236,6 +251,9 @@ impl fmt::Display for FieldListEntry {
             }
             Self::FriendFunction { type_record, name } => {
                 write!(f, "friend {}: {}", name, type_record)
+            }
+            Self::FriendClass { type_record } => {
+                write!(f, "friend class {}", type_record)
             }
             Self::Bitfield { type_record, bit_length, bit_position } => {
                 write!(f, "bitfield({}, len={}, pos={})", type_record, bit_length, bit_position)

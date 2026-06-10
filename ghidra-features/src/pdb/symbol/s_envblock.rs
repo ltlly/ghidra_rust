@@ -1,6 +1,11 @@
 //! S_ENVBLOCK -- Environment block symbol.
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.EnvironmentBlockMsSymbol`.
+//!
+//! This module provides:
+//! - [`SEnvBlock`] -- The environment block symbol (`S_ENVBLOCK`, 0x1034 / `S_ENVBLOCK_V2`, 0x113D).
+//!
+//! Both v1 and v2 share the same binary layout; the difference is only the PDB ID.
 
 use std::fmt;
 
@@ -31,15 +36,31 @@ pub struct SEnvBlock {
 
     /// Key-value pairs from the environment block.
     pub fields: Vec<(String, String)>,
+
+    /// Whether this was parsed from a v2 record (`S_ENVBLOCK_V2`, 0x113D).
+    is_v2: bool,
 }
 
 impl SEnvBlock {
-    /// Create a new environment block symbol.
+    /// Create a new environment block symbol (v1, PDB ID 0x1034).
     pub fn new(flags: u8, fields: Vec<(String, String)>) -> Self {
         Self {
             flags,
             rev: (flags & 0x01) != 0,
             fields,
+            is_v2: false,
+        }
+    }
+
+    /// Create a new v2 environment block symbol (PDB ID 0x113D).
+    ///
+    /// The binary layout is identical to v1; only the PDB ID differs.
+    pub fn new_v2(flags: u8, fields: Vec<(String, String)>) -> Self {
+        Self {
+            flags,
+            rev: (flags & 0x01) != 0,
+            fields,
+            is_v2: true,
         }
     }
 
@@ -67,7 +88,17 @@ impl SEnvBlock {
             fields.push((key, val));
             pos = k2;
         }
-        Some(Self { flags, rev, fields })
+        Some(Self { flags, rev, fields, is_v2: false })
+    }
+
+    /// Parse an S_ENVBLOCK_V2 symbol from a byte slice.
+    ///
+    /// Identical to [`Self::parse`] but tags the result as v2
+    /// (PDB ID 0x113D).
+    pub fn parse_v2(data: &[u8]) -> Option<Self> {
+        let mut sym = Self::parse(data)?;
+        sym.is_v2 = true;
+        Some(sym)
     }
 
     /// Return the number of key-value pairs in this environment block.
@@ -81,6 +112,14 @@ impl SEnvBlock {
             .iter()
             .find(|(k, _)| k == key)
             .map(|(_, v)| v.as_str())
+    }
+
+    /// Return `true` if this was parsed from a v2 record (PDB ID 0x113D).
+    ///
+    /// The v2 variant uses the same binary layout but carries a different
+    /// PDB ID. This flag is set by [`Self::parse_v2`].
+    pub fn is_v2(&self) -> bool {
+        self.is_v2
     }
 }
 
@@ -101,7 +140,11 @@ fn read_nt_string(data: &[u8], offset: usize) -> (String, usize) {
 
 impl AbstractMsSymbol for SEnvBlock {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_ENVBLOCK
+        if self.is_v2 {
+            super::super::symbol_kind::S_ENVBLOCK_V2
+        } else {
+            super::super::symbol_kind::S_ENVBLOCK
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
@@ -243,5 +286,44 @@ mod tests {
         data.extend_from_slice(&[0xFF, 0xFE]); // garbage
         let sym = SEnvBlock::parse(&data).unwrap();
         assert_eq!(sym.fields.len(), 1);
+    }
+
+    // -- v2 tests --
+
+    #[test]
+    fn test_new_v2() {
+        let sym = SEnvBlock::new_v2(0, vec![("CC".into(), "cl.exe".into())]);
+        assert_eq!(sym.pdb_id(), 0x113D);
+        assert!(sym.is_v2());
+    }
+
+    #[test]
+    fn test_parse_v2() {
+        let data = make_envblock_bytes(0, &[(b"W", b"/O2")]);
+        let sym = SEnvBlock::parse_v2(&data).unwrap();
+        assert!(sym.is_v2());
+        assert_eq!(sym.pdb_id(), 0x113D);
+        assert_eq!(sym.get("W"), Some("/O2"));
+    }
+
+    #[test]
+    fn test_parse_v2_no_data() {
+        let data: [u8; 0] = [];
+        assert!(SEnvBlock::parse_v2(&data).is_none());
+    }
+
+    #[test]
+    fn test_v1_not_v2() {
+        let sym = SEnvBlock::new(0, vec![("A".into(), "1".into())]);
+        assert!(!sym.is_v2());
+        assert_eq!(sym.pdb_id(), 0x1034);
+    }
+
+    #[test]
+    fn test_v2_clone_eq() {
+        let a = SEnvBlock::new_v2(0, vec![("A".into(), "1".into())]);
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert!(b.is_v2());
     }
 }
