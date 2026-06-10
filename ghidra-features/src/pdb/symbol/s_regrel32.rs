@@ -1,6 +1,23 @@
 //! S_REGREL32 -- Register relative symbol (32-bit).
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.RegisterRelativeAddress32MsSymbol`.
+//!
+//! # Binary Format
+//!
+//! ```text
+//! offset        : i32       (signed offset from the register)
+//! type_record   : u32       (type index into TPI stream)
+//! register_index: u16       (CV register index)
+//! name          : NT string (null-terminated UTF-8)
+//! ```
+//!
+//! After the name, the stream is 4-byte aligned (the `align4` step in Java).
+//!
+//! # Register Name Lookup
+//!
+//! The Java implementation resolves the register index to a human-readable
+//! name via `RegisterName`. This port provides a static lookup for common
+//! x86/x64 register indices via [`SRegRel32::register_name`].
 
 use std::fmt;
 
@@ -41,6 +58,37 @@ pub struct SRegRel32 {
     pub name: String,
 }
 
+/// Well-known x86/x64 CV register indices.
+///
+/// These correspond to the `CV_REG_*` constants in the CodeView debug
+/// information specification.
+pub mod cv_reg {
+    /// x86 EAX / x64 RAX (0).
+    pub const EAX: u16 = 0;
+    /// x86 ECX / x64 RCX (1).
+    pub const ECX: u16 = 1;
+    /// x86 EDX / x64 RDX (2).
+    pub const EDX: u16 = 2;
+    /// x86 EBX / x64 RBX (3).
+    pub const EBX: u16 = 3;
+    /// x86 ESP / x64 RSP (4 for SP, 20 for RSP).
+    pub const ESP: u16 = 4;
+    /// x86 EBP / x64 RBP (5 for BP, 6 for EBP, 33 for RBP).
+    pub const EBP: u16 = 6;
+    /// x86 ESI / x64 RSI (7 for SI, 34 for RSI).
+    pub const ESI: u16 = 7;
+    /// x86 EDI / x64 RDI (8 for DI, 35 for RDI).
+    pub const EDI: u16 = 8;
+    /// x64 RSP (20).
+    pub const RSP: u16 = 20;
+    /// x64 RBP (33).
+    pub const RBP: u16 = 33;
+    /// x64 RSI (34).
+    pub const RSI: u16 = 34;
+    /// x64 RDI (35).
+    pub const RDI: u16 = 35;
+}
+
 impl SRegRel32 {
     /// Create a new register-relative symbol.
     pub fn new(
@@ -75,6 +123,71 @@ impl SRegRel32 {
             name,
         })
     }
+
+    /// Return the human-readable name of the register.
+    ///
+    /// Maps common x86/x64 CV register indices to their standard names.
+    /// Returns `None` for unrecognized indices (consumers can fall back to
+    /// displaying the raw index).
+    pub fn register_name(&self) -> Option<&'static str> {
+        cv_register_name(self.register_index)
+    }
+
+    /// Compute the absolute address given a register value.
+    ///
+    /// This is a convenience for consumers that know the register value at
+    /// runtime.
+    pub fn address_from_register_value(&self, register_value: u64) -> u64 {
+        (register_value as i64 + self.offset as i64) as u64
+    }
+}
+
+/// Look up the human-readable name for a CV register index.
+///
+/// Returns `None` for indices that are not mapped. This covers the most
+/// common x86 and x64 registers; a full implementation would consult the
+/// target-specific register map from the PDB's DBI stream.
+pub fn cv_register_name(index: u16) -> Option<&'static str> {
+    match index {
+        0 => Some("EAX"),
+        1 => Some("ECX"),
+        2 => Some("EDX"),
+        3 => Some("EBX"),
+        4 => Some("ESP"),
+        5 => Some("EBP"),
+        6 => Some("ESI"),
+        7 => Some("EDI"),
+        8 => Some("EIP"),
+        9 => Some("EFLAGS"),
+        10 => Some("ST0"),
+        11 => Some("ST1"),
+        12 => Some("ST2"),
+        13 => Some("ST3"),
+        14 => Some("ST4"),
+        15 => Some("ST5"),
+        16 => Some("ST6"),
+        17 => Some("ST7"),
+        // x64 extended registers
+        18 => Some("XMM0"),
+        19 => Some("XMM1"),
+        20 => Some("RSP"),
+        21 => Some("RBP"),
+        22 => Some("RIP"),
+        23 => Some("RFLAGS"),
+        32 => Some("XMM0"),
+        33 => Some("RBP"),
+        34 => Some("RSI"),
+        35 => Some("RDI"),
+        36 => Some("R8"),
+        37 => Some("R9"),
+        38 => Some("R10"),
+        39 => Some("R11"),
+        40 => Some("R12"),
+        41 => Some("R13"),
+        42 => Some("R14"),
+        43 => Some("R15"),
+        _ => None,
+    }
 }
 
 impl AbstractMsSymbol for SRegRel32 {
@@ -87,10 +200,12 @@ impl AbstractMsSymbol for SRegRel32 {
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let reg_name = cv_register_name(self.register_index)
+            .unwrap_or("REG");
         write!(
             f,
-            "RegRel32: Reg+{:#X}, Offset: {}, Type: {}, {}",
-            self.register_index, self.offset, self.type_record_number, self.name
+            "REGREL32: {}{:+08X}, Type: {}, {}",
+            reg_name, self.offset, self.type_record_number, self.name
         )
     }
 }
@@ -177,9 +292,21 @@ mod tests {
             "param_a".to_string(),
         );
         let s = format!("{}", sym);
-        assert!(s.contains("RegRel32"));
+        assert!(s.contains("REGREL32"));
         assert!(s.contains("param_a"));
-        assert!(s.contains("6"));
+        assert!(s.contains("ESI"));
+    }
+
+    #[test]
+    fn test_display_unknown_register() {
+        let sym = SRegRel32::new(
+            0,
+            RecordNumber::type_record_number(0x1000),
+            99,
+            "x".to_string(),
+        );
+        let s = format!("{}", sym);
+        assert!(s.contains("REG"));
     }
 
     #[test]
@@ -200,5 +327,72 @@ mod tests {
         let data_rbp = make_regrel32_bytes(16, 0x1000, 6, b"bp_var");
         let sym_rbp = SRegRel32::parse(&data_rbp).unwrap();
         assert_eq!(sym_rbp.register_index, 6);
+    }
+
+    #[test]
+    fn test_register_name_rsp() {
+        let sym = SRegRel32::new(
+            -8,
+            RecordNumber::type_record_number(0x1000),
+            cv_reg::RSP,
+            "stack_var".to_string(),
+        );
+        assert_eq!(sym.register_name(), Some("RSP"));
+    }
+
+    #[test]
+    fn test_register_name_rbp() {
+        let sym = SRegRel32::new(
+            16,
+            RecordNumber::type_record_number(0x1000),
+            cv_reg::RBP,
+            "bp_var".to_string(),
+        );
+        assert_eq!(sym.register_name(), Some("RBP"));
+    }
+
+    #[test]
+    fn test_register_name_unknown() {
+        let sym = SRegRel32::new(
+            0,
+            RecordNumber::type_record_number(0x1000),
+            999,
+            "x".to_string(),
+        );
+        assert_eq!(sym.register_name(), None);
+    }
+
+    #[test]
+    fn test_cv_register_name_common() {
+        assert_eq!(cv_register_name(0), Some("EAX"));
+        assert_eq!(cv_register_name(1), Some("ECX"));
+        assert_eq!(cv_register_name(20), Some("RSP"));
+        assert_eq!(cv_register_name(33), Some("RBP"));
+        assert_eq!(cv_register_name(36), Some("R8"));
+        assert_eq!(cv_register_name(999), None);
+    }
+
+    #[test]
+    fn test_address_from_register_value() {
+        let sym = SRegRel32::new(
+            -16,
+            RecordNumber::type_record_number(0x1000),
+            cv_reg::RSP,
+            "local".to_string(),
+        );
+        // RSP = 0x7FFF_FFF0, offset = -16 => address = 0x7FFF_FFE0
+        assert_eq!(sym.address_from_register_value(0x7FFF_FFF0), 0x7FFF_FFE0);
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let a = SRegRel32::new(
+            -16,
+            RecordNumber::type_record_number(0x1020),
+            20,
+            "buf".to_string(),
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }

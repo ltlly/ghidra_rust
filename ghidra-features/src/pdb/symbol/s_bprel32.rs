@@ -1,6 +1,24 @@
 //! S_BPREL32 -- Base pointer relative symbol (32-bit).
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.BasePointerRelative32MsSymbol`.
+//!
+//! # Binary Format
+//!
+//! The 32-bit base-pointer-relative symbol has the layout:
+//!
+//! ```text
+//! offset       : i32       (signed offset from base/frame pointer)
+//! type_record  : u32       (type index into TPI stream)
+//! name         : NT string (null-terminated UTF-8)
+//! ```
+//!
+//! After the name, the stream is 4-byte aligned (the `align4` step in Java).
+//!
+//! # Register
+//!
+//! On x86, the base pointer register is `EBP` (index 6). On x86-64 it is
+//! `RBP` (index 33). The register is implicit -- determined by the
+//! architecture, not stored in the record.
 
 use std::fmt;
 
@@ -13,8 +31,8 @@ use super::record_number::RecordNumber;
 ///
 /// This symbol describes a local variable or parameter whose address is
 /// computed as a signed offset from the base/frame pointer register (e.g.,
-/// `EBP` on x86). It is the 32-bit, NT-string flavor of the base-pointer-
-/// relative symbol family.
+/// `EBP` on x86, `RBP` on x86-64). It is the 32-bit, NT-string flavor of
+/// the base-pointer-relative symbol family.
 ///
 /// Internally this wraps [`AbstractBasePointerRelative`] which holds the
 /// shared fields (offset, type record number, name).
@@ -45,6 +63,8 @@ impl SBpRel32 {
     /// Parse an S_BPREL32 symbol from a byte slice.
     ///
     /// Expects the layout: `offset(i32) + type_record(u32) + name(NT)`.
+    /// The stream should be 4-byte aligned after the name (handled by the
+    /// caller).
     pub fn parse(data: &[u8]) -> Option<Self> {
         let inner = AbstractBasePointerRelative::parse(data)?;
         Some(Self { inner })
@@ -58,6 +78,28 @@ impl SBpRel32 {
     /// Return the type record number describing this variable's type.
     pub fn type_record_number(&self) -> &RecordNumber {
         &self.inner.type_record_number
+    }
+
+    /// Return the name of the base pointer register for the given
+    /// architecture.
+    ///
+    /// On x86 this is `"EBP"` (register index 6), on x86-64 this is
+    /// `"RBP"` (register index 33). The register is implicit in the symbol
+    /// record -- this helper returns the conventional name for the most
+    /// common architectures.
+    pub fn base_pointer_register_name(&self) -> &'static str {
+        // The register is architecture-dependent and not stored in the
+        // record. Return the conventional x86 name as a default.
+        "EBP"
+    }
+
+    /// Compute the absolute address offset from the base pointer.
+    ///
+    /// Given a base pointer value, returns the address of this variable.
+    /// This is a convenience for consumers that know the frame pointer
+    /// value at runtime.
+    pub fn address_from_frame_pointer(&self, frame_pointer: u64) -> u64 {
+        (frame_pointer as i64 + self.inner.offset as i64) as u64
     }
 }
 
@@ -73,7 +115,7 @@ impl AbstractMsSymbol for SBpRel32 {
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "BpRel32: Offset: {}, Type: {}, {}",
+            "BPREL32: [{:+08X}], Type: {}, {}",
             self.inner.offset, self.inner.type_record_number, self.inner.name
         )
     }
@@ -149,9 +191,20 @@ mod tests {
             "arg0".to_string(),
         );
         let s = format!("{}", sym);
-        assert!(s.contains("BpRel32"));
-        assert!(s.contains("12"));
+        assert!(s.contains("BPREL32"));
         assert!(s.contains("arg0"));
+    }
+
+    #[test]
+    fn test_display_negative_offset() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -8,
+            "param".to_string(),
+        );
+        let s = format!("{}", sym);
+        assert!(s.contains("BPREL32"));
+        assert!(s.contains("param"));
     }
 
     #[test]
@@ -167,5 +220,47 @@ mod tests {
         let sym = SBpRel32::parse(&data).unwrap();
         assert_eq!(sym.offset(), 4);
         assert_eq!(sym.name(), "ret_addr");
+    }
+
+    #[test]
+    fn test_base_pointer_register_name() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -4,
+            "x".to_string(),
+        );
+        assert_eq!(sym.base_pointer_register_name(), "EBP");
+    }
+
+    #[test]
+    fn test_address_from_frame_pointer() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -8,
+            "local".to_string(),
+        );
+        // Frame pointer at 0x1000, offset -8 => address 0x0FF8
+        assert_eq!(sym.address_from_frame_pointer(0x1000), 0x0FF8);
+    }
+
+    #[test]
+    fn test_address_from_frame_pointer_positive() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            16,
+            "arg".to_string(),
+        );
+        assert_eq!(sym.address_from_frame_pointer(0x2000), 0x2010);
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let a = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -8,
+            "x".to_string(),
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }

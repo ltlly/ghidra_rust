@@ -34,7 +34,7 @@ use super::RecordNumber;
 ///
 /// Corresponds to the Java `VirtualFunctionTablePointerMsType` class and
 /// its parent `AbstractVirtualFunctionTablePointerMsType`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfVfunctab {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,
@@ -56,11 +56,49 @@ impl LfVfunctab {
         Self::new(RecordNumber::type_record(vftable_type_index))
     }
 
+    /// Parse an `LF_VFUNCTAB` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `VirtualFunctionTablePointerMsType(AbstractPdb,
+    /// PdbByteReader)` constructor. The `data` slice should start at the
+    /// `padding` field (after the 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   padding           2 bytes of documented padding (skipped)
+    /// +2  u32   vftableType       Type index of the vftable type
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 6 {
+            return Err(format!(
+                "LF_VFUNCTAB payload too short: need >= 6 bytes, got {}",
+                data.len()
+            ));
+        }
+        // Skip 2 bytes of padding at offset 0.
+        let vftable_ti = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+        Ok(Self::from_parsed(vftable_ti))
+    }
+
     /// Get the record number of the vftable pointer type.
     ///
     /// Mirrors Java `AbstractVirtualFunctionTablePointerMsType.getPointerTypeRecordNumber()`.
     pub fn pointer_type_record_number(&self) -> RecordNumber {
         self.vftable_type_record_number
+    }
+
+    /// Get the pointer offset.
+    ///
+    /// Mirrors Java `AbstractVirtualFunctionTablePointerMsType.getOffset()`.
+    /// Always returns 0 for the base `LF_VFUNCTAB` record. Subclasses
+    /// (like `VirtualFunctionTablePointerWithOffsetMsType`) override this.
+    pub fn offset(&self) -> u32 {
+        0
+    }
+
+    /// Whether the vftable type record number references a valid type.
+    pub fn has_valid_vftable_type(&self) -> bool {
+        !self.vftable_type_record_number.is_no_type()
     }
 }
 
@@ -179,5 +217,66 @@ mod tests {
             vt.vftable_type_record_number,
             RecordNumber::type_record(0)
         );
+    }
+
+    #[test]
+    fn test_vfunctab_parse() {
+        // LF_VFUNCTAB payload: padding=0x0000, vftableType=0x3001
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x3001u32.to_le_bytes()); // vftableType
+
+        let vt = LfVfunctab::parse(&data).unwrap();
+        assert_eq!(vt.pdb_id(), 0x1409);
+        assert_eq!(
+            vt.vftable_type_record_number,
+            RecordNumber::type_record(0x3001)
+        );
+    }
+
+    #[test]
+    fn test_vfunctab_parse_with_nonzero_padding() {
+        // The padding field should be skipped regardless of its value.
+        let mut data = Vec::new();
+        data.extend_from_slice(&0xABCDu16.to_le_bytes()); // non-zero padding
+        data.extend_from_slice(&0x4001u32.to_le_bytes()); // vftableType
+
+        let vt = LfVfunctab::parse(&data).unwrap();
+        assert_eq!(
+            vt.vftable_type_record_number,
+            RecordNumber::type_record(0x4001)
+        );
+    }
+
+    #[test]
+    fn test_vfunctab_parse_too_short() {
+        let data = [0u8; 4];
+        assert!(LfVfunctab::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_vfunctab_offset() {
+        // Base LF_VFUNCTAB always returns offset 0.
+        let vt = make_test_vfunctab();
+        assert_eq!(vt.offset(), 0);
+    }
+
+    #[test]
+    fn test_vfunctab_has_valid_vftable_type() {
+        let vt = make_test_vfunctab();
+        assert!(vt.has_valid_vftable_type());
+
+        let vt2 = LfVfunctab::new(RecordNumber::NO_TYPE);
+        assert!(!vt2.has_valid_vftable_type());
+    }
+
+    #[test]
+    fn test_vfunctab_eq() {
+        let vt1 = make_test_vfunctab();
+        let vt2 = make_test_vfunctab();
+        assert_eq!(vt1, vt2);
+
+        let vt3 = LfVfunctab::new(RecordNumber::type_record(0x4000));
+        assert_ne!(vt1, vt3);
     }
 }

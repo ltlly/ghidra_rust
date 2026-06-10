@@ -29,7 +29,7 @@ use super::RecordNumber;
 ///
 /// Corresponds to the Java `OverloadedMethodMsType` class and its parent
 /// `AbstractOverloadedMethodMsType`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfMethod {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,
@@ -70,6 +70,36 @@ impl LfMethod {
         )
     }
 
+    /// Parse an `LF_METHOD` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `OverloadedMethodMsType(AbstractPdb, PdbByteReader)`
+    /// constructor. The `data` slice should start at the `count` field
+    /// (after the 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   count             Number of overloads
+    /// +2  u32   methodList        Type index of the LF_METHODLIST
+    /// +6  StringNt name           Null-terminated method name
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 6 {
+            return Err(format!(
+                "LF_METHOD payload too short: need >= 6 bytes, got {}",
+                data.len()
+            ));
+        }
+        let count = u16::from_le_bytes([data[0], data[1]]);
+        let method_list_ti = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+        let name = if data.len() > 6 {
+            crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[6..])
+        } else {
+            String::new()
+        };
+        Ok(Self::from_parsed(count, method_list_ti, name))
+    }
+
     /// Get the number of overloads sharing this name.
     ///
     /// Mirrors Java `AbstractOverloadedMethodMsType.getCount()`.
@@ -82,6 +112,16 @@ impl LfMethod {
     /// Mirrors Java `AbstractOverloadedMethodMsType.getTypeMethodListRecordNumber()`.
     pub fn method_list_record_number(&self) -> RecordNumber {
         self.method_list_record_number
+    }
+
+    /// Whether the method list record number references a valid type.
+    pub fn has_valid_method_list(&self) -> bool {
+        !self.method_list_record_number.is_no_type()
+    }
+
+    /// Whether this represents multiple overloads (count > 1).
+    pub fn is_overloaded(&self) -> bool {
+        self.count > 1
     }
 }
 
@@ -218,5 +258,111 @@ mod tests {
             m.method_list_record_number(),
             RecordNumber::type_record(0x2000)
         );
+    }
+
+    #[test]
+    fn test_method_parse() {
+        // LF_METHOD payload: count=3, methodList=0x1010, name="foo"
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());        // count
+        data.extend_from_slice(&0x1010u32.to_le_bytes());   // methodList
+        data.extend_from_slice(b"foo\0");                    // name
+
+        let m = LfMethod::parse(&data).unwrap();
+        assert_eq!(m.name(), "foo");
+        assert_eq!(m.count(), 3);
+        assert_eq!(
+            m.method_list_record_number(),
+            RecordNumber::type_record(0x1010)
+        );
+        assert_eq!(m.pdb_id(), 0x150F);
+    }
+
+    #[test]
+    fn test_method_parse_single() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&0x2000u32.to_le_bytes());
+        data.extend_from_slice(b"bar\0");
+
+        let m = LfMethod::parse(&data).unwrap();
+        assert_eq!(m.count(), 1);
+        assert_eq!(m.name(), "bar");
+    }
+
+    #[test]
+    fn test_method_parse_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&0x1010u32.to_le_bytes());
+        data.push(0); // empty null-terminated string
+
+        let m = LfMethod::parse(&data).unwrap();
+        assert!(m.name().is_empty());
+    }
+
+    #[test]
+    fn test_method_parse_no_name_bytes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&0x1010u32.to_le_bytes());
+
+        let m = LfMethod::parse(&data).unwrap();
+        assert!(m.name().is_empty());
+    }
+
+    #[test]
+    fn test_method_parse_too_short() {
+        let data = [0u8; 4];
+        assert!(LfMethod::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_method_has_valid_method_list() {
+        let m = make_test_method();
+        assert!(m.has_valid_method_list());
+
+        let m2 = LfMethod::new(
+            1,
+            RecordNumber::NO_TYPE,
+            "bad".to_string(),
+        );
+        assert!(!m2.has_valid_method_list());
+    }
+
+    #[test]
+    fn test_method_is_overloaded() {
+        let m = make_test_method(); // count=3
+        assert!(m.is_overloaded());
+
+        let m2 = LfMethod::new(
+            1,
+            RecordNumber::type_record(0x1010),
+            "single".to_string(),
+        );
+        assert!(!m2.is_overloaded());
+    }
+
+    #[test]
+    fn test_method_eq() {
+        let m1 = make_test_method();
+        let m2 = make_test_method();
+        assert_eq!(m1, m2);
+
+        let m3 = LfMethod::new(
+            3,
+            RecordNumber::type_record(0x1010),
+            "different".to_string(),
+        );
+        assert_ne!(m1, m3);
+    }
+
+    #[test]
+    fn test_method_emit_format() {
+        let m = make_test_method();
+        let emitted = m.emit(Bind::NONE);
+        // Format: "overloaded[3]:foo0x1010"
+        assert!(emitted.starts_with("overloaded["));
+        assert!(emitted.contains("]:"));
     }
 }

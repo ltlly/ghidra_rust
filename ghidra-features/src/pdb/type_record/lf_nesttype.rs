@@ -28,7 +28,7 @@ use super::RecordNumber;
 ///
 /// Corresponds to the Java `NestedTypeMsType` class and its parent
 /// `AbstractNestedTypeMsType`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfNesttype {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,
@@ -65,11 +65,46 @@ impl LfNesttype {
         )
     }
 
+    /// Parse an `LF_NESTTYPE` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `NestedTypeMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `padding` field (after the
+    /// 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   padding           2 bytes of documented padding (skipped)
+    /// +2  u32   nestedType        Type index of the nested type definition
+    /// +6  StringNt name           Null-terminated type name
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 6 {
+            return Err(format!(
+                "LF_NESTTYPE payload too short: need >= 6 bytes, got {}",
+                data.len()
+            ));
+        }
+        // Skip 2 bytes of padding at offset 0.
+        let nested_type_ti = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+        let name = if data.len() > 6 {
+            crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[6..])
+        } else {
+            String::new()
+        };
+        Ok(Self::from_parsed(nested_type_ti, name))
+    }
+
     /// Get the record number of the nested type definition.
     ///
     /// Mirrors Java `AbstractNestedTypeMsType.getNestedTypeDefinitionRecordNumber()`.
     pub fn nested_type_definition_record_number(&self) -> RecordNumber {
         self.nested_type_record_number
+    }
+
+    /// Whether the nested type record number references a valid type.
+    pub fn has_valid_nested_type(&self) -> bool {
+        !self.nested_type_record_number.is_no_type()
     }
 }
 
@@ -183,5 +218,98 @@ mod tests {
             String::new(),
         );
         assert!(nt.name().is_empty());
+    }
+
+    #[test]
+    fn test_nesttype_parse() {
+        // LF_NESTTYPE payload: padding=0x0000, nestedType=0x1001, name="InnerClass"
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x1001u32.to_le_bytes()); // nestedType
+        data.extend_from_slice(b"InnerClass\0");           // name
+
+        let nt = LfNesttype::parse(&data).unwrap();
+        assert_eq!(nt.name(), "InnerClass");
+        assert_eq!(nt.pdb_id(), 0x1510);
+        assert_eq!(
+            nt.nested_type_record_number,
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_nesttype_parse_with_nonzero_padding() {
+        // The padding field should be skipped regardless of its value.
+        let mut data = Vec::new();
+        data.extend_from_slice(&0xABCDu16.to_le_bytes()); // non-zero padding
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // nestedType
+        data.extend_from_slice(b"MyType\0");
+
+        let nt = LfNesttype::parse(&data).unwrap();
+        assert_eq!(nt.name(), "MyType");
+        assert_eq!(
+            nt.nested_type_record_number,
+            RecordNumber::type_record(0x2000)
+        );
+    }
+
+    #[test]
+    fn test_nesttype_parse_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        data.push(0); // empty null-terminated string
+
+        let nt = LfNesttype::parse(&data).unwrap();
+        assert!(nt.name().is_empty());
+    }
+
+    #[test]
+    fn test_nesttype_parse_no_name_bytes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+
+        let nt = LfNesttype::parse(&data).unwrap();
+        assert!(nt.name().is_empty());
+    }
+
+    #[test]
+    fn test_nesttype_parse_too_short() {
+        let data = [0u8; 4];
+        assert!(LfNesttype::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_nesttype_has_valid_nested_type() {
+        let nt = make_test_nesttype();
+        assert!(nt.has_valid_nested_type());
+
+        let nt2 = LfNesttype::new(
+            RecordNumber::NO_TYPE,
+            "bad".to_string(),
+        );
+        assert!(!nt2.has_valid_nested_type());
+    }
+
+    #[test]
+    fn test_nesttype_eq() {
+        let nt1 = make_test_nesttype();
+        let nt2 = make_test_nesttype();
+        assert_eq!(nt1, nt2);
+
+        let nt3 = LfNesttype::new(
+            RecordNumber::type_record(0x1001),
+            "Different".to_string(),
+        );
+        assert_ne!(nt1, nt3);
+    }
+
+    #[test]
+    fn test_nesttype_emit_format() {
+        let nt = make_test_nesttype();
+        let emitted = nt.emit(Bind::NONE);
+        // Format: "InnerClass 0x1001"
+        assert!(emitted.starts_with("InnerClass "));
     }
 }

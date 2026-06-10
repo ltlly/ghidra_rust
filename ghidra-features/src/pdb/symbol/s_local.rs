@@ -1,6 +1,22 @@
 //! S_LOCAL_V2 / S_LOCAL_2005 -- Local variable symbol (v2 format).
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.LocalMsSymbol`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.LocalMsSymbol` and
+//! `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.LocalVariableFlags`.
+//!
+//! # Binary Format
+//!
+//! ```text
+//! type_index : u32       (type index into TPI stream)
+//! flags      : u16       (LocalVariableFlags bitfield)
+//! name       : NT string (null-terminated UTF-8)
+//! ```
+//!
+//! After the name, the stream is 4-byte aligned (the `align4` step in Java).
+//!
+//! # Flag Bits
+//!
+//! The 16-bit `flags` field is decoded as a bitfield following the Java
+//! `LocalVariableFlags.processFlags()` layout (bits 0-10).
 
 use std::fmt;
 
@@ -13,6 +29,22 @@ use super::record_number::{RecordCategory, RecordNumber};
 /// These flags are encoded in the 16-bit `flags` field of the `S_LOCAL_V2`
 /// record. They describe the storage class and properties of the local
 /// variable.
+///
+/// The bit layout matches Ghidra's `LocalVariableFlags.processFlags()`:
+///
+/// | Bit | Field |
+/// |-----|-------|
+/// | 0   | is_parameter |
+/// | 1   | is_address_taken |
+/// | 2   | is_compiler_generated |
+/// | 3   | is_aggregate (isAggregateWhole) |
+/// | 4   | is_aggregate_member (isAggregatedPart) |
+/// | 5   | is_aliased |
+/// | 6   | is_alias (isAggregateContainingAggregate) |
+/// | 7   | is_function_return_value |
+/// | 8   | is_optimized_out |
+/// | 9   | is_enregistered_global |
+/// | 10  | is_enregistered_static |
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LocalFlags {
     /// Variable is a parameter (not a local).
@@ -28,11 +60,15 @@ pub struct LocalFlags {
     /// Variable is aliased (shared storage with another variable).
     pub is_aliased: bool,
     /// Variable is aliased through an aggregate member.
-    pub is_aggregate_containing_aggregate: bool,
-    /// Variable is an "inlined" argument from an inlined function.
-    pub is_inlined_argument: bool,
-    /// Variable has a non-trivially copyable type.
-    pub is_non_trivial: bool,
+    pub is_alias: bool,
+    /// Variable is a function return value.
+    pub is_function_return_value: bool,
+    /// Variable has been optimized out by the compiler.
+    pub is_optimized_out: bool,
+    /// Variable is an enregistered global.
+    pub is_enregistered_global: bool,
+    /// Variable is an enregistered static local.
+    pub is_enregistered_static: bool,
 }
 
 impl LocalFlags {
@@ -45,10 +81,53 @@ impl LocalFlags {
             is_aggregate: (raw & 0x0008) != 0,
             is_aggregate_member: (raw & 0x0010) != 0,
             is_aliased: (raw & 0x0020) != 0,
-            is_aggregate_containing_aggregate: (raw & 0x0040) != 0,
-            is_inlined_argument: (raw & 0x0080) != 0,
-            is_non_trivial: (raw & 0x0100) != 0,
+            is_alias: (raw & 0x0040) != 0,
+            is_function_return_value: (raw & 0x0080) != 0,
+            is_optimized_out: (raw & 0x0100) != 0,
+            is_enregistered_global: (raw & 0x0200) != 0,
+            is_enregistered_static: (raw & 0x0400) != 0,
         }
+    }
+
+    /// Return a human-readable description of the active flags.
+    ///
+    /// This matches the Java `LocalVariableFlags.emit()` output format.
+    pub fn emit_description(&self) -> String {
+        let mut parts = Vec::new();
+        if self.is_address_taken {
+            parts.push("Address Taken");
+        }
+        if self.is_compiler_generated {
+            parts.push("Compiler Generated");
+        }
+        if self.is_aggregate {
+            parts.push("aggregate");
+        }
+        if self.is_aggregate_member {
+            parts.push("aggregated");
+        }
+        if self.is_aliased {
+            parts.push("aliased");
+        }
+        if self.is_alias {
+            parts.push("alias");
+        }
+        if self.is_function_return_value {
+            parts.push("return value");
+        }
+        if self.is_optimized_out {
+            parts.push("optimized away");
+        }
+        if self.is_enregistered_global {
+            if self.is_enregistered_static {
+                parts.push("file static");
+            } else {
+                parts.push("global");
+            }
+        } else if self.is_enregistered_static {
+            parts.push("static local");
+        }
+        parts.join(", ")
     }
 }
 
@@ -131,6 +210,39 @@ impl SLocal {
     pub fn is_compiler_generated(&self) -> bool {
         self.local_flags.is_compiler_generated
     }
+
+    /// Return `true` if this variable is a function return value.
+    pub fn is_function_return_value(&self) -> bool {
+        self.local_flags.is_function_return_value
+    }
+
+    /// Return `true` if this variable has been optimized out.
+    pub fn is_optimized_out(&self) -> bool {
+        self.local_flags.is_optimized_out
+    }
+
+    /// Return `true` if this variable is an enregistered global.
+    pub fn is_enregistered_global(&self) -> bool {
+        self.local_flags.is_enregistered_global
+    }
+
+    /// Return `true` if this variable is an enregistered static local.
+    pub fn is_enregistered_static(&self) -> bool {
+        self.local_flags.is_enregistered_static
+    }
+
+    /// Return a human-readable description of the flag state.
+    ///
+    /// Matches the Java `LocalVariableFlags.emit()` format.
+    pub fn flags_description(&self) -> String {
+        let prefix = if self.is_parameter() { "Param" } else { "Local" };
+        let detail = self.local_flags.emit_description();
+        if detail.is_empty() {
+            prefix.to_string()
+        } else {
+            format!("{}, {}", prefix, detail)
+        }
+    }
 }
 
 impl AbstractMsSymbol for SLocal {
@@ -143,11 +255,25 @@ impl AbstractMsSymbol for SLocal {
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Local: {}, Type: {}, Flags: {:#06X}",
-            self.name, self.type_record_number, self.raw_flags,
-        )
+        let flags_desc = self.local_flags.emit_description();
+        if flags_desc.is_empty() {
+            write!(
+                f,
+                "LOCAL: {:#010X} {}, {}",
+                self.type_record_number.number(),
+                if self.is_parameter() { "Param" } else { "Local" },
+                self.name,
+            )
+        } else {
+            write!(
+                f,
+                "LOCAL: {:#010X} {}, {}, {}",
+                self.type_record_number.number(),
+                if self.is_parameter() { "Param" } else { "Local" },
+                flags_desc,
+                self.name,
+            )
+        }
     }
 }
 
@@ -239,6 +365,83 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_function_return_value_flag() {
+        let data = make_local_bytes(0x1020, 0x0080, b"$ret");
+        let sym = SLocal::parse(&data).unwrap();
+        assert!(sym.is_function_return_value());
+        assert!(!sym.is_parameter());
+    }
+
+    #[test]
+    fn test_parse_optimized_out_flag() {
+        let data = make_local_bytes(0x1020, 0x0100, b"$opt");
+        let sym = SLocal::parse(&data).unwrap();
+        assert!(sym.is_optimized_out());
+    }
+
+    #[test]
+    fn test_parse_enregistered_global_flag() {
+        let data = make_local_bytes(0x1020, 0x0200, b"g_var");
+        let sym = SLocal::parse(&data).unwrap();
+        assert!(sym.is_enregistered_global());
+        assert!(!sym.is_enregistered_static());
+    }
+
+    #[test]
+    fn test_parse_enregistered_static_flag() {
+        let data = make_local_bytes(0x1020, 0x0400, b"s_var");
+        let sym = SLocal::parse(&data).unwrap();
+        assert!(sym.is_enregistered_static());
+        assert!(!sym.is_enregistered_global());
+    }
+
+    #[test]
+    fn test_parse_enregistered_file_static() {
+        // global + static = 0x0200 | 0x0400 = 0x0600
+        let data = make_local_bytes(0x1020, 0x0600, b"fs_var");
+        let sym = SLocal::parse(&data).unwrap();
+        assert!(sym.is_enregistered_global());
+        assert!(sym.is_enregistered_static());
+    }
+
+    #[test]
+    fn test_parse_alias_flag() {
+        let data = make_local_bytes(0x1020, 0x0040, b"alias_var");
+        let sym = SLocal::parse(&data).unwrap();
+        assert!(sym.local_flags.is_alias);
+    }
+
+    #[test]
+    fn test_flags_description_parameter() {
+        let sym = SLocal::new(
+            RecordNumber::type_record_number(0x1020),
+            0x0001,
+            "p".to_string(),
+        );
+        assert_eq!(sym.flags_description(), "Param");
+    }
+
+    #[test]
+    fn test_flags_description_with_details() {
+        let sym = SLocal::new(
+            RecordNumber::type_record_number(0x1020),
+            0x0001 | 0x0002, // parameter + address_taken
+            "p".to_string(),
+        );
+        assert_eq!(sym.flags_description(), "Param, Address Taken");
+    }
+
+    #[test]
+    fn test_flags_description_optimized_out() {
+        let sym = SLocal::new(
+            RecordNumber::type_record_number(0x1020),
+            0x0100,
+            "x".to_string(),
+        );
+        assert_eq!(sym.flags_description(), "Local, optimized away");
+    }
+
+    #[test]
     fn test_trait_impls() {
         let sym = SLocal::new(
             RecordNumber::type_record_number(0x1020),
@@ -258,7 +461,8 @@ mod tests {
             "my_param".to_string(),
         );
         let s = format!("{}", sym);
-        assert!(s.contains("Local"));
+        assert!(s.contains("LOCAL"));
+        assert!(s.contains("Param"));
         assert!(s.contains("my_param"));
     }
 

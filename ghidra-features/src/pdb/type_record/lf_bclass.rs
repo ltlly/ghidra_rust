@@ -33,7 +33,7 @@ use super::RecordNumber;
 ///
 /// Corresponds to the Java `BaseClassMsType` class and its parent
 /// `AbstractBaseClassMsType`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfBclass {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,
@@ -73,6 +73,39 @@ impl LfBclass {
         )
     }
 
+    /// Parse an `LF_BCLASS` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `BaseClassMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `attributes` field (after the
+    /// 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   attributes        Access protection flags
+    /// +2  u32   baseClass         Type index of the base class type
+    /// +6  Numeric offset          Byte offset of base within derived class
+    /// ```
+    ///
+    /// The offset field uses PDB numeric encoding: if the first u16 is
+    /// < 0x8000, it is the value itself (2 bytes consumed). Otherwise it
+    /// indicates the byte width of the following integer (0x8000=u16,
+    /// 0x8001=u32, etc.).
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 6 {
+            return Err(format!(
+                "LF_BCLASS payload too short: need >= 6 bytes, got {}",
+                data.len()
+            ));
+        }
+        let attributes_raw = u16::from_le_bytes([data[0], data[1]]);
+        let base_class_ti = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+
+        let (offset, _next) = crate::pdb::pdb_byte_reader::parse_numeric(data, 6);
+
+        Ok(Self::from_parsed(attributes_raw, base_class_ti, offset as u32))
+    }
+
     /// Create a simple public base class.
     pub fn public_base(
         base_class_type_index: u32,
@@ -107,6 +140,11 @@ impl LfBclass {
     /// Get the access protection level.
     pub fn access(&self) -> AccessProtection {
         self.attributes.access
+    }
+
+    /// Whether the base class record number references a valid type.
+    pub fn has_valid_base_class(&self) -> bool {
+        !self.base_class_record_number.is_no_type()
     }
 }
 
@@ -270,5 +308,78 @@ mod tests {
             bc.base_class_record_number(),
             RecordNumber::type_record(0x2000)
         );
+    }
+
+    #[test]
+    fn test_bclass_parse() {
+        // LF_BCLASS payload: attributes=0x0003(public), baseClass=0x1000, offset=8
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // attributes
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // baseClass
+        data.extend_from_slice(&8u16.to_le_bytes());      // offset (numeric: < 0x8000 so literal)
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.pdb_id(), 0x1400);
+        assert_eq!(
+            bc.base_class_record_number(),
+            RecordNumber::type_record(0x1000)
+        );
+        assert_eq!(bc.byte_offset(), 8);
+        assert_eq!(bc.access(), AccessProtection::Public);
+    }
+
+    #[test]
+    fn test_bclass_parse_zero_offset() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&0x2000u32.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes()); // offset = 0
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.byte_offset(), 0);
+        assert_eq!(
+            bc.base_class_record_number(),
+            RecordNumber::type_record(0x2000)
+        );
+    }
+
+    #[test]
+    fn test_bclass_parse_private() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // private
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&4u16.to_le_bytes());
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.access(), AccessProtection::Private);
+    }
+
+    #[test]
+    fn test_bclass_parse_too_short() {
+        let data = [0u8; 4];
+        assert!(LfBclass::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_bclass_has_valid_base_class() {
+        let bc = make_test_bclass();
+        assert!(bc.has_valid_base_class());
+
+        let bc2 = LfBclass::new(
+            RecordNumber::NO_TYPE,
+            0,
+            MemberAttributes::public_member(),
+        );
+        assert!(!bc2.has_valid_base_class());
+    }
+
+    #[test]
+    fn test_bclass_eq() {
+        let bc1 = make_test_bclass();
+        let bc2 = make_test_bclass();
+        assert_eq!(bc1, bc2);
+
+        let bc3 = LfBclass::public_base(0x2000, 0);
+        assert_ne!(bc1, bc3);
     }
 }

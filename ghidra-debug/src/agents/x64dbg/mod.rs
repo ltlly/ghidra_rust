@@ -11,6 +11,8 @@ pub mod arch;
 pub mod commands;
 pub mod connection;
 pub mod hooks;
+pub mod x64dbg_inferior_process;
+pub mod x64dbg_thread;
 
 use serde::{Deserialize, Serialize};
 

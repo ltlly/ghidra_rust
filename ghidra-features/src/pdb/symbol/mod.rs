@@ -122,19 +122,19 @@ pub use s_lthread32::SLThread32;
 pub use s_objname::SObjName;
 pub use s_procref::SProcRef;
 pub use s_pub32::SPub32;
-pub use s_regrel32::SRegRel32;
+pub use s_regrel32::{SRegRel32, cv_register_name};
 pub use s_section::{SSection, SPeCoffSection};
 pub use s_skip::SSkip;
 pub use s_thunk32::SThunk32;
 pub use s_trampoline::STrampoline;
 pub use s_udt::SUdt;
 
-pub use s_defrange_register::SDefRangeRegister;
+pub use s_defrange_register::{SDefRangeRegister, AddressRange, AddressGap, RangeAttribute};
 pub use s_defrange_framepointer::SDefRangeFramePointer;
 pub use s_defrange_subfield::SDefRangeSubfield;
 pub use s_defrange_register_rel::SDefRangeRegisterRel;
 pub use s_local::{SLocal, LocalFlags};
-pub use s_inlinesite::SInlineSite;
+pub use s_inlinesite::{SInlineSite, BinaryAnnotation, BinaryAnnotationOpcode};
 
 pub use s_envblock::SEnvBlock;
 pub use s_buildinfo::SBuildInfo;

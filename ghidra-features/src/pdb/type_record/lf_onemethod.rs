@@ -34,7 +34,7 @@ use super::RecordNumber;
 ///
 /// Corresponds to the Java `OneMethodMsType` class and its parent
 /// `AbstractOneMethodMsType`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfOnemethod {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,
@@ -84,6 +84,67 @@ impl LfOnemethod {
             MemberAttributes::from_u16(attributes_raw),
             name,
         )
+    }
+
+    /// Parse an `LF_ONEMETHOD` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `OneMethodMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `attributes` field (after the
+    /// 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   attributes        Member access and property flags
+    /// +2  u32   procedureType     Type index of the method's procedure type
+    /// +6  u32   vftableOffset     (conditional) VFTable offset
+    ///     StringNt name           Null-terminated method name
+    /// ```
+    ///
+    /// The VFTable offset (4 bytes at +6) is only present when the property
+    /// is `Intro` (4) or `IntroPure` (6). The Java implementation reads it
+    /// conditionally; this parse method follows the same logic.
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 6 {
+            return Err(format!(
+                "LF_ONEMETHOD payload too short: need >= 6 bytes, got {}",
+                data.len()
+            ));
+        }
+        let attributes_raw = u16::from_le_bytes([data[0], data[1]]);
+        let procedure_type_ti = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+
+        let attrs = MemberAttributes::from_u16(attributes_raw);
+        let is_intro = matches!(
+            attrs.property,
+            MemberProperty::Intro | MemberProperty::IntroPure
+        );
+
+        let (vftable_offset, name_offset) = if is_intro {
+            if data.len() < 10 {
+                return Err(format!(
+                    "LF_ONEMETHOD payload too short for intro vftable offset: need >= 10, got {}",
+                    data.len()
+                ));
+            }
+            let offset = u32::from_le_bytes([data[6], data[7], data[8], data[9]]) as i32;
+            (offset, 10)
+        } else {
+            (-1, 6)
+        };
+
+        let name = if name_offset < data.len() {
+            crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[name_offset..])
+        } else {
+            String::new()
+        };
+
+        Ok(Self::new(
+            RecordNumber::type_record(procedure_type_ti),
+            vftable_offset,
+            attrs,
+            name,
+        ))
     }
 
     /// Create a simple public method (non-virtual).
@@ -148,6 +209,11 @@ impl LfOnemethod {
     /// Whether this is any kind of virtual method.
     pub fn is_virtual(&self) -> bool {
         self.attributes.property.is_virtual()
+    }
+
+    /// Whether the procedure type record number references a valid type.
+    pub fn has_valid_procedure_type(&self) -> bool {
+        !self.procedure_type_record_number.is_no_type()
     }
 }
 
@@ -333,5 +399,136 @@ mod tests {
     fn test_onemethod_property() {
         let m = LfOnemethod::from_parsed(0x0007, 0x1011, 8, "virt".to_string());
         assert_eq!(m.property(), MemberProperty::Virtual);
+    }
+
+    #[test]
+    fn test_onemethod_parse_non_virtual() {
+        // LF_ONEMETHOD: attributes=0x0003(public), procedureType=0x1011, name="bar"
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());   // attributes
+        data.extend_from_slice(&0x1011u32.to_le_bytes());   // procedureType
+        data.extend_from_slice(b"bar\0");                    // name
+
+        let m = LfOnemethod::parse(&data).unwrap();
+        assert_eq!(m.name(), "bar");
+        assert_eq!(m.pdb_id(), 0x1511);
+        assert_eq!(
+            m.procedure_type_record_number(),
+            RecordNumber::type_record(0x1011)
+        );
+        assert_eq!(m.vftable_offset, -1);
+        assert!(!m.is_virtual());
+    }
+
+    #[test]
+    fn test_onemethod_parse_intro_virtual() {
+        // LF_ONEMETHOD: attributes=0x0013(public+intro), procedureType=0x2000,
+        //               vftableOffset=16, name="introFunc"
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0013u16.to_le_bytes());   // attributes (public + intro)
+        data.extend_from_slice(&0x2000u32.to_le_bytes());   // procedureType
+        data.extend_from_slice(&16u32.to_le_bytes());       // vftableOffset
+        data.extend_from_slice(b"introFunc\0");              // name
+
+        let m = LfOnemethod::parse(&data).unwrap();
+        assert_eq!(m.name(), "introFunc");
+        assert!(m.is_intro_virtual());
+        assert!(m.is_virtual());
+        assert_eq!(m.vftable_offset, 16);
+        assert_eq!(
+            m.procedure_type_record_number(),
+            RecordNumber::type_record(0x2000)
+        );
+    }
+
+    #[test]
+    fn test_onemethod_parse_intro_pure() {
+        // attributes=0x001B(public+intro_pure), procedureType=0x3000, vftableOffset=24
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x001Bu16.to_le_bytes());
+        data.extend_from_slice(&0x3000u32.to_le_bytes());
+        data.extend_from_slice(&24u32.to_le_bytes());
+        data.extend_from_slice(b"pureIntro\0");
+
+        let m = LfOnemethod::parse(&data).unwrap();
+        assert!(m.is_intro_virtual());
+        assert!(m.is_pure_virtual());
+        assert_eq!(m.vftable_offset, 24);
+    }
+
+    #[test]
+    fn test_onemethod_parse_pure_non_intro() {
+        // attributes=0x0017(public+pure), no vftable offset
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0017u16.to_le_bytes());
+        data.extend_from_slice(&0x4000u32.to_le_bytes());
+        data.extend_from_slice(b"pureFunc\0");
+
+        let m = LfOnemethod::parse(&data).unwrap();
+        assert!(m.is_pure_virtual());
+        assert!(!m.is_intro_virtual());
+        assert_eq!(m.vftable_offset, -1);
+    }
+
+    #[test]
+    fn test_onemethod_parse_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&0x1011u32.to_le_bytes());
+        data.push(0);
+
+        let m = LfOnemethod::parse(&data).unwrap();
+        assert!(m.name().is_empty());
+    }
+
+    #[test]
+    fn test_onemethod_parse_no_name_bytes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&0x1011u32.to_le_bytes());
+
+        let m = LfOnemethod::parse(&data).unwrap();
+        assert!(m.name().is_empty());
+    }
+
+    #[test]
+    fn test_onemethod_parse_too_short() {
+        let data = [0u8; 4];
+        assert!(LfOnemethod::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_onemethod_parse_intro_too_short() {
+        // Intro virtual but not enough bytes for vftable offset
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0013u16.to_le_bytes()); // intro
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // procedureType
+        // Missing vftable offset bytes
+
+        assert!(LfOnemethod::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_onemethod_has_valid_procedure_type() {
+        let m = make_test_onemethod();
+        assert!(m.has_valid_procedure_type());
+
+        let m2 = LfOnemethod::new(
+            RecordNumber::NO_TYPE,
+            -1,
+            super::super::lf_member::MemberAttributes::public_member(),
+            "bad".to_string(),
+        );
+        assert!(!m2.has_valid_procedure_type());
+    }
+
+    #[test]
+    fn test_onemethod_eq() {
+        let m1 = make_test_onemethod();
+        let m2 = make_test_onemethod();
+        assert_eq!(m1, m2);
+
+        let m3 = LfOnemethod::public_method(0x1011, "different".to_string());
+        assert_ne!(m1, m3);
     }
 }
