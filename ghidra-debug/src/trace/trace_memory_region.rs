@@ -1,14 +1,22 @@
 //! TraceMemoryRegion -- enhanced memory region modeling for the debug trace.
 //!
-//! Ported from Ghidra's `ghidra.trace.model.memory.TraceMemoryRegion` and
+//! Ported from Ghidra's `ghidra.trace.model.memory.TraceMemoryRegion`,
+//! `ghidra.trace.model.memory.TraceMemoryFlag`, and
 //! `ghidra.trace.database.memory.DBTraceMemoryRegion`.
 //!
 //! This module provides a richer memory region type than the basic
 //! `model::memory::TraceMemoryRegion`, adding permissions, address space
 //! association, lifespan-based lifecycle, mapping metadata, and collection
 //! management with overlap detection.
+//!
+//! New in this update: `TraceMemoryFlag` enum (from Java `TraceMemoryFlag`),
+//! snap-based flag operations (`set_flags`, `add_flags`, `clear_flags`,
+//! `get_flags`, `set_read`, `set_write`, `set_execute`, `set_volatile`),
+//! snap-based range operations (`set_range`, `get_range`, `set_min_address`,
+//! `set_max_address`, `set_length`, `get_length`), snap-based name
+//! operations (`set_name`, `get_name`), and `delete`/`remove` lifecycle.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -17,12 +25,77 @@ use crate::model::Lifespan;
 use crate::model::TraceMemoryState;
 
 // ---------------------------------------------------------------------------
+// TraceMemoryFlag
+// ---------------------------------------------------------------------------
+
+/// Flags for memory regions, ported from Ghidra's `TraceMemoryFlag`.
+///
+/// Each flag corresponds to a bit in the Java `MemoryBlock` constants:
+/// READ, WRITE, EXECUTE, VOLATILE.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub enum TraceMemoryFlag {
+    /// Region is readable.
+    Read,
+    /// Region is writable.
+    Write,
+    /// Region is executable.
+    Execute,
+    /// Region is volatile (e.g., memory-mapped I/O).
+    Volatile,
+}
+
+impl TraceMemoryFlag {
+    /// The bit mask for this flag (matching Java's `MemoryBlock` constants).
+    pub fn bits(&self) -> u8 {
+        match self {
+            TraceMemoryFlag::Read => 0x01,
+            TraceMemoryFlag::Write => 0x02,
+            TraceMemoryFlag::Execute => 0x04,
+            TraceMemoryFlag::Volatile => 0x08,
+        }
+    }
+
+    /// Convert a bit mask to a set of flags.
+    pub fn from_bits(mask: u8) -> BTreeSet<TraceMemoryFlag> {
+        let mut flags = BTreeSet::new();
+        for f in &[
+            TraceMemoryFlag::Read,
+            TraceMemoryFlag::Write,
+            TraceMemoryFlag::Execute,
+            TraceMemoryFlag::Volatile,
+        ] {
+            if mask & f.bits() != 0 {
+                flags.insert(*f);
+            }
+        }
+        flags
+    }
+
+    /// Convert a set of flags to a bit mask.
+    pub fn to_bits(flags: &BTreeSet<TraceMemoryFlag>) -> u8 {
+        flags.iter().fold(0u8, |acc, f| acc | f.bits())
+    }
+
+    /// All flag variants.
+    pub fn all() -> &'static [TraceMemoryFlag] {
+        &[
+            TraceMemoryFlag::Read,
+            TraceMemoryFlag::Write,
+            TraceMemoryFlag::Execute,
+            TraceMemoryFlag::Volatile,
+        ]
+    }
+}
+
+// ---------------------------------------------------------------------------
 // MemoryRegionPermissions
 // ---------------------------------------------------------------------------
 
 /// Access permissions for a memory region.
 ///
-/// Ported from Ghidra's region permission flags.
+/// Ported from Ghidra's region permission flags. This is a convenience
+/// wrapper that maps directly to the `TraceMemoryFlag` Read/Write/Execute
+/// flags; Volatile is tracked separately on the entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct MemoryRegionPermissions {
     /// Whether the region is readable.
@@ -98,6 +171,30 @@ impl MemoryRegionPermissions {
             execute: self.execute && other.execute,
         }
     }
+
+    /// Convert to a `BTreeSet<TraceMemoryFlag>`.
+    pub fn to_flags(&self) -> BTreeSet<TraceMemoryFlag> {
+        let mut flags = BTreeSet::new();
+        if self.read {
+            flags.insert(TraceMemoryFlag::Read);
+        }
+        if self.write {
+            flags.insert(TraceMemoryFlag::Write);
+        }
+        if self.execute {
+            flags.insert(TraceMemoryFlag::Execute);
+        }
+        flags
+    }
+
+    /// Create from a `BTreeSet<TraceMemoryFlag>`.
+    pub fn from_flags(flags: &BTreeSet<TraceMemoryFlag>) -> Self {
+        Self {
+            read: flags.contains(&TraceMemoryFlag::Read),
+            write: flags.contains(&TraceMemoryFlag::Write),
+            execute: flags.contains(&TraceMemoryFlag::Execute),
+        }
+    }
 }
 
 impl Default for MemoryRegionPermissions {
@@ -122,30 +219,53 @@ impl fmt::Display for MemoryRegionPermissions {
 // TraceMemoryRegionEntry
 // ---------------------------------------------------------------------------
 
+/// A snap-indexed value entry for properties that change over time.
+///
+/// Ported from the object-tree model in Ghidra where attributes have
+/// per-lifespan values. Each `SnapValue` associates a value with the
+/// snap from which it becomes active.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SnapValue<T> {
+    /// The snap from which this value becomes active (inclusive).
+    pub snap: i64,
+    /// The value.
+    pub value: T,
+}
+
 /// An enhanced memory region entry for the debug trace.
 ///
 /// Ported from Ghidra's `DBTraceMemoryRegion`. Each region lives in a
 /// specific address space, has a bounded range of offsets, permissions,
 /// a lifespan, and optional mapping metadata (e.g., file offset for
 /// loaded modules).
+///
+/// Supports snap-based property history for name, range, and flags
+/// (matching the Java object-tree model where these are per-lifespan
+/// attributes).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceMemoryRegionEntry {
     /// Unique key identifying this region.
     pub key: i64,
     /// The object path (e.g., "MemoryRegions[0]").
     pub path: String,
-    /// Display name (e.g., ".text", ".data", "[heap]").
+    /// The current display name (e.g., ".text", ".data", "[heap]").
     pub name: String,
+    /// Name history (snap -> name).
+    name_history: Vec<SnapValue<String>>,
     /// The address space this region belongs to (e.g., "ram", "register").
     pub space: String,
-    /// Start offset within the address space.
+    /// Current start offset within the address space.
     pub min_address: u64,
-    /// End offset within the address space (inclusive).
+    /// Current end offset within the address space (inclusive).
     pub max_address: u64,
-    /// Access permissions.
+    /// Range history (snap -> (min, max)).
+    range_history: Vec<SnapValue<(u64, u64)>>,
+    /// Current access permissions.
     pub permissions: MemoryRegionPermissions,
-    /// Whether this region is volatile (e.g., memory-mapped I/O).
-    pub volatile: bool,
+    /// Current flags as a set (superset of permissions).
+    flags: BTreeSet<TraceMemoryFlag>,
+    /// Flag history (snap -> flags).
+    flag_history: Vec<SnapValue<BTreeSet<TraceMemoryFlag>>>,
     /// The lifespan during which this region exists.
     pub lifespan: Lifespan,
     /// The memory state of this region.
@@ -169,15 +289,34 @@ impl TraceMemoryRegionEntry {
         max_address: u64,
         lifespan: Lifespan,
     ) -> Self {
+        let name_str = name.into();
+        let perms = MemoryRegionPermissions::default();
+        let mut flags = BTreeSet::new();
+        flags.insert(TraceMemoryFlag::Read);
+        flags.insert(TraceMemoryFlag::Write);
+        flags.insert(TraceMemoryFlag::Execute);
+        let snap = lifespan.lmin();
         Self {
             key,
             path: path.into(),
-            name: name.into(),
+            name: name_str.clone(),
+            name_history: vec![SnapValue {
+                snap,
+                value: name_str,
+            }],
             space: space.into(),
             min_address,
             max_address,
-            permissions: MemoryRegionPermissions::default(),
-            volatile: false,
+            range_history: vec![SnapValue {
+                snap,
+                value: (min_address, max_address),
+            }],
+            permissions: perms,
+            flags: flags.clone(),
+            flag_history: vec![SnapValue {
+                snap,
+                value: flags,
+            }],
             lifespan,
             state: TraceMemoryState::Unknown,
             source_file: None,
@@ -189,12 +328,25 @@ impl TraceMemoryRegionEntry {
     /// Set permissions.
     pub fn with_permissions(mut self, perms: MemoryRegionPermissions) -> Self {
         self.permissions = perms;
+        self.flags = perms.to_flags();
+        // Also update the flag history entry for the initial snap.
+        if let Some(last) = self.flag_history.last_mut() {
+            last.value = self.flags.clone();
+        }
         self
     }
 
     /// Mark as volatile.
     pub fn with_volatile(mut self, volatile: bool) -> Self {
-        self.volatile = volatile;
+        if volatile {
+            self.flags.insert(TraceMemoryFlag::Volatile);
+        } else {
+            self.flags.remove(&TraceMemoryFlag::Volatile);
+        }
+        // Also update the flag history entry for the initial snap.
+        if let Some(last) = self.flag_history.last_mut() {
+            last.value = self.flags.clone();
+        }
         self
     }
 
@@ -217,12 +369,293 @@ impl TraceMemoryRegionEntry {
         self
     }
 
-    /// Size of this region in bytes.
+    // -----------------------------------------------------------------------
+    // Snap-based name operations (ported from Java TraceMemoryRegion)
+    // -----------------------------------------------------------------------
+
+    /// Set the display name, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setName(Lifespan, String)`.
+    pub fn set_name(&mut self, snap: i64, name: impl Into<String>) {
+        let name_str = name.into();
+        self.name = name_str.clone();
+        self.name_history.push(SnapValue {
+            snap,
+            value: name_str,
+        });
+    }
+
+    /// Get the display name at the given `snap`.
+    ///
+    /// Returns the most recent name set at or before `snap`.
+    /// Ported from `TraceMemoryRegion.getName(long)`.
+    pub fn get_name(&self, snap: i64) -> &str {
+        self.name_history
+            .iter()
+            .rev()
+            .find(|sv| sv.snap <= snap)
+            .map(|sv| sv.value.as_str())
+            .unwrap_or(&self.name)
+    }
+
+    /// The name history.
+    pub fn name_history(&self) -> &[SnapValue<String>] {
+        &self.name_history
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap-based range operations (ported from Java TraceMemoryRegion)
+    // -----------------------------------------------------------------------
+
+    /// Set the address range, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setRange(Lifespan, AddressRange)`.
+    pub fn set_range(&mut self, snap: i64, min_address: u64, max_address: u64) {
+        self.min_address = min_address;
+        self.max_address = max_address;
+        self.range_history.push(SnapValue {
+            snap,
+            value: (min_address, max_address),
+        });
+    }
+
+    /// Get the address range at the given `snap`.
+    ///
+    /// Returns `(min, max)` for the range effective at `snap`.
+    /// Ported from `TraceMemoryRegion.getRange(long)`.
+    pub fn get_range(&self, snap: i64) -> (u64, u64) {
+        self.range_history
+            .iter()
+            .rev()
+            .find(|sv| sv.snap <= snap)
+            .map(|sv| sv.value)
+            .unwrap_or((self.min_address, self.max_address))
+    }
+
+    /// Set the minimum address, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setMinAddress(long, Address)`.
+    pub fn set_min_address(&mut self, snap: i64, min: u64) {
+        let max = self.max_address;
+        self.set_range(snap, min, max);
+    }
+
+    /// Get the minimum address at the given `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.getMinAddress(long)`.
+    pub fn get_min_address(&self, snap: i64) -> u64 {
+        self.get_range(snap).0
+    }
+
+    /// Set the maximum address, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setMaxAddress(long, Address)`.
+    pub fn set_max_address(&mut self, snap: i64, max: u64) {
+        let min = self.min_address;
+        self.set_range(snap, min, max);
+    }
+
+    /// Get the maximum address at the given `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.getMaxAddress(long)`.
+    pub fn get_max_address(&self, snap: i64) -> u64 {
+        self.get_range(snap).1
+    }
+
+    /// Set the length of the region, adjusting the max address.
+    ///
+    /// Ported from `TraceMemoryRegion.setLength(long, long)`.
+    pub fn set_length(&mut self, snap: i64, length: u64) {
+        let (min, _) = self.get_range(snap);
+        self.set_range(snap, min, min + length - 1);
+    }
+
+    /// Get the length of the region at the given `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.getLength(long)`.
+    pub fn get_length(&self, snap: i64) -> u64 {
+        let (min, max) = self.get_range(snap);
+        max - min + 1
+    }
+
+    /// The range history.
+    pub fn range_history(&self) -> &[SnapValue<(u64, u64)>] {
+        &self.range_history
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap-based flag operations (ported from Java TraceMemoryRegion)
+    // -----------------------------------------------------------------------
+
+    /// Set the complete flag set, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setFlags(Lifespan, Collection)`.
+    pub fn set_flags(&mut self, snap: i64, flags: BTreeSet<TraceMemoryFlag>) {
+        self.permissions = MemoryRegionPermissions::from_flags(&flags);
+        self.flags = flags.clone();
+        self.flag_history.push(SnapValue { snap, value: flags });
+    }
+
+    /// Add flags to the current set, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.addFlags(Lifespan, Collection)`.
+    pub fn add_flags(&mut self, snap: i64, new_flags: &BTreeSet<TraceMemoryFlag>) {
+        for f in new_flags {
+            self.flags.insert(*f);
+        }
+        self.permissions = MemoryRegionPermissions::from_flags(&self.flags);
+        self.flag_history
+            .push(SnapValue {
+                snap,
+                value: self.flags.clone(),
+            });
+    }
+
+    /// Clear flags from the current set, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.clearFlags(Lifespan, Collection)`.
+    pub fn clear_flags(&mut self, snap: i64, to_clear: &BTreeSet<TraceMemoryFlag>) {
+        for f in to_clear {
+            self.flags.remove(f);
+        }
+        self.permissions = MemoryRegionPermissions::from_flags(&self.flags);
+        self.flag_history
+            .push(SnapValue {
+                snap,
+                value: self.flags.clone(),
+            });
+    }
+
+    /// Get the flags effective at the given `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.getFlags(long)`.
+    pub fn get_flags(&self, snap: i64) -> &BTreeSet<TraceMemoryFlag> {
+        self.flag_history
+            .iter()
+            .rev()
+            .find(|sv| sv.snap <= snap)
+            .map(|sv| &sv.value)
+            .unwrap_or(&self.flags)
+    }
+
+    /// Set or clear the Read flag at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.setRead(long, boolean)`.
+    pub fn set_read(&mut self, snap: i64, read: bool) {
+        if read {
+            let mut new_flags = self.flags.clone();
+            new_flags.insert(TraceMemoryFlag::Read);
+            self.add_flags(snap, &BTreeSet::from([TraceMemoryFlag::Read]));
+        } else {
+            self.clear_flags(snap, &BTreeSet::from([TraceMemoryFlag::Read]));
+        }
+    }
+
+    /// Set or clear the Write flag at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.setWrite(long, boolean)`.
+    pub fn set_write(&mut self, snap: i64, write: bool) {
+        if write {
+            self.add_flags(snap, &BTreeSet::from([TraceMemoryFlag::Write]));
+        } else {
+            self.clear_flags(snap, &BTreeSet::from([TraceMemoryFlag::Write]));
+        }
+    }
+
+    /// Set or clear the Execute flag at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.setExecute(long, boolean)`.
+    pub fn set_execute(&mut self, snap: i64, execute: bool) {
+        if execute {
+            self.add_flags(snap, &BTreeSet::from([TraceMemoryFlag::Execute]));
+        } else {
+            self.clear_flags(snap, &BTreeSet::from([TraceMemoryFlag::Execute]));
+        }
+    }
+
+    /// Set or clear the Volatile flag at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.setVolatile(long, boolean)`.
+    pub fn set_volatile(&mut self, snap: i64, volatile: bool) {
+        if volatile {
+            self.add_flags(snap, &BTreeSet::from([TraceMemoryFlag::Volatile]));
+        } else {
+            self.clear_flags(snap, &BTreeSet::from([TraceMemoryFlag::Volatile]));
+        }
+    }
+
+    /// Check if the Read flag is set at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.isRead(long)`.
+    pub fn is_read_at(&self, snap: i64) -> bool {
+        self.get_flags(snap).contains(&TraceMemoryFlag::Read)
+    }
+
+    /// Check if the Write flag is set at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.isWrite(long)`.
+    pub fn is_write_at(&self, snap: i64) -> bool {
+        self.get_flags(snap).contains(&TraceMemoryFlag::Write)
+    }
+
+    /// Check if the Execute flag is set at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.isExecute(long)`.
+    pub fn is_execute_at(&self, snap: i64) -> bool {
+        self.get_flags(snap).contains(&TraceMemoryFlag::Execute)
+    }
+
+    /// Check if the Volatile flag is set at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.isVolatile(long)`.
+    pub fn is_volatile_at(&self, snap: i64) -> bool {
+        self.get_flags(snap).contains(&TraceMemoryFlag::Volatile)
+    }
+
+    /// The current flags set.
+    pub fn flags(&self) -> &BTreeSet<TraceMemoryFlag> {
+        &self.flags
+    }
+
+    /// The flag history.
+    pub fn flag_history(&self) -> &[SnapValue<BTreeSet<TraceMemoryFlag>>] {
+        &self.flag_history
+    }
+
+    // -----------------------------------------------------------------------
+    // Lifecycle (ported from Java TraceMemoryRegion)
+    // -----------------------------------------------------------------------
+
+    /// Delete this region entirely (clear all history, mark lifespan as
+    /// empty).
+    ///
+    /// Ported from `TraceMemoryRegion.delete()`.
+    pub fn delete(&mut self) {
+        self.lifespan = Lifespan::EMPTY;
+        self.name_history.clear();
+        self.range_history.clear();
+        self.flag_history.clear();
+    }
+
+    /// End this region's life at the given snap.
+    ///
+    /// Ported from `TraceMemoryRegion.remove(long)`.
+    pub fn remove(&mut self, snap: i64) {
+        self.lifespan = self.lifespan.with_max(snap);
+    }
+
+    // -----------------------------------------------------------------------
+    // Query helpers
+    // -----------------------------------------------------------------------
+
+    /// Size of this region in bytes (current values).
     pub fn size(&self) -> u64 {
         self.max_address - self.min_address + 1
     }
 
     /// Whether this region is valid at `snap`.
+    ///
+    /// Ported from `TraceMemoryRegion.isValid(long)`.
     pub fn is_valid_at(&self, snap: i64) -> bool {
         self.lifespan.contains(snap)
     }
@@ -237,17 +670,18 @@ impl TraceMemoryRegionEntry {
         self.lifespan.lmax() == Lifespan::MAX
     }
 
-    /// End this region's life at the given snap.
-    pub fn remove(&mut self, snap: i64) {
-        self.lifespan = self.lifespan.with_max(snap);
-    }
-
-    /// Whether the given offset falls within this region.
+    /// Whether the given offset falls within this region (current range).
     pub fn contains_offset(&self, offset: u64) -> bool {
         offset >= self.min_address && offset <= self.max_address
     }
 
-    /// Whether this region overlaps with another.
+    /// Whether the given offset falls within this region at `snap`.
+    pub fn contains_offset_at(&self, offset: u64, snap: i64) -> bool {
+        let (min, max) = self.get_range(snap);
+        offset >= min && offset <= max
+    }
+
+    /// Whether this region overlaps with another (current ranges).
     pub fn overlaps(&self, other: &Self) -> bool {
         self.space == other.space
             && self.lifespan.intersects(&other.lifespan)
@@ -318,6 +752,28 @@ impl TraceMemoryRegionManager {
         self.regions.remove(&key)
     }
 
+    /// Delete a region by key (call `delete()` on the region before removing).
+    ///
+    /// Ported from `DBTraceMemoryRegion.delete()`.
+    pub fn delete_region(&mut self, key: i64) -> Option<TraceMemoryRegionEntry> {
+        if let Some(region) = self.regions.get_mut(&key) {
+            region.delete();
+        }
+        self.regions.remove(&key)
+    }
+
+    /// End a region's life at `snap` (call `remove(snap)` on the region).
+    ///
+    /// Ported from `DBTraceMemoryRegion.remove(long)`.
+    pub fn remove_region_at(&mut self, key: i64, snap: i64) -> bool {
+        if let Some(region) = self.regions.get_mut(&key) {
+            region.remove(snap);
+            true
+        } else {
+            false
+        }
+    }
+
     /// All region keys.
     pub fn region_keys(&self) -> Vec<i64> {
         self.regions.keys().copied().collect()
@@ -345,6 +801,8 @@ impl TraceMemoryRegionManager {
     }
 
     /// Find the region containing the given offset in a space at `snap`.
+    ///
+    /// Uses snap-based range lookup when available.
     pub fn region_containing(
         &self,
         space: &str,
@@ -352,7 +810,7 @@ impl TraceMemoryRegionManager {
         snap: i64,
     ) -> Option<&TraceMemoryRegionEntry> {
         self.regions.values().find(|r| {
-            r.space == space && r.is_valid_at(snap) && r.contains_offset(offset)
+            r.space == space && r.is_valid_at(snap) && r.contains_offset_at(offset, snap)
         })
     }
 
@@ -378,7 +836,7 @@ impl TraceMemoryRegionManager {
         snap: i64,
     ) -> Option<MemoryRegionPermissions> {
         self.region_containing(space, offset, snap)
-            .map(|r| r.permissions)
+            .map(|r| MemoryRegionPermissions::from_flags(r.get_flags(snap)))
     }
 
     /// Get the memory state at a specific offset in a space at `snap`.
@@ -390,6 +848,17 @@ impl TraceMemoryRegionManager {
     ) -> Option<TraceMemoryState> {
         self.region_containing(space, offset, snap)
             .map(|r| r.state)
+    }
+
+    /// Get the flags at a specific offset in a space at `snap`.
+    pub fn flags_at(
+        &self,
+        space: &str,
+        offset: u64,
+        snap: i64,
+    ) -> Option<&BTreeSet<TraceMemoryFlag>> {
+        self.region_containing(space, offset, snap)
+            .map(|r| r.get_flags(snap))
     }
 }
 
@@ -423,6 +892,37 @@ mod tests {
     fn test_permissions_superset() {
         assert!(MemoryRegionPermissions::RWX.superset_of(&MemoryRegionPermissions::READ_ONLY));
         assert!(!MemoryRegionPermissions::READ_ONLY.superset_of(&MemoryRegionPermissions::RWX));
+    }
+
+    #[test]
+    fn test_permissions_to_from_flags() {
+        let perms = MemoryRegionPermissions::RX;
+        let flags = perms.to_flags();
+        assert!(flags.contains(&TraceMemoryFlag::Read));
+        assert!(!flags.contains(&TraceMemoryFlag::Write));
+        assert!(flags.contains(&TraceMemoryFlag::Execute));
+
+        let back = MemoryRegionPermissions::from_flags(&flags);
+        assert_eq!(back, perms);
+    }
+
+    #[test]
+    fn test_memory_flag_bits() {
+        assert_eq!(TraceMemoryFlag::Read.bits(), 0x01);
+        assert_eq!(TraceMemoryFlag::Write.bits(), 0x02);
+        assert_eq!(TraceMemoryFlag::Execute.bits(), 0x04);
+        assert_eq!(TraceMemoryFlag::Volatile.bits(), 0x08);
+
+        let mask = TraceMemoryFlag::to_bits(&BTreeSet::from([
+            TraceMemoryFlag::Read,
+            TraceMemoryFlag::Execute,
+        ]));
+        assert_eq!(mask, 0x05);
+
+        let flags = TraceMemoryFlag::from_bits(0x05);
+        assert!(flags.contains(&TraceMemoryFlag::Read));
+        assert!(!flags.contains(&TraceMemoryFlag::Write));
+        assert!(flags.contains(&TraceMemoryFlag::Execute));
     }
 
     #[test]
@@ -463,7 +963,7 @@ mod tests {
         .with_comment("data section");
 
         assert_eq!(r.permissions, MemoryRegionPermissions::RW);
-        assert!(!r.volatile);
+        assert!(!r.is_volatile_at(0));
         assert_eq!(r.state, TraceMemoryState::Known);
         assert_eq!(r.source_file.as_deref(), Some("/usr/lib/libc.so"));
         assert_eq!(r.file_offset, Some(0));
@@ -483,6 +983,18 @@ mod tests {
     }
 
     #[test]
+    fn test_region_delete() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        r.delete();
+        assert_eq!(r.lifespan, Lifespan::EMPTY);
+        assert!(r.name_history().is_empty());
+        assert!(r.range_history().is_empty());
+        assert!(r.flag_history().is_empty());
+    }
+
+    #[test]
     fn test_region_contains_offset() {
         let r = TraceMemoryRegionEntry::new(
             0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
@@ -492,6 +1004,21 @@ mod tests {
         assert!(r.contains_offset(0x1FF));
         assert!(!r.contains_offset(0x0FF));
         assert!(!r.contains_offset(0x200));
+    }
+
+    #[test]
+    fn test_region_contains_offset_at() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        // Change range at snap 10
+        r.set_range(10, 0x200, 0x2FF);
+        // At snap 0, range is 0x100..0x1FF
+        assert!(r.contains_offset_at(0x180, 0));
+        assert!(!r.contains_offset_at(0x250, 0));
+        // At snap 10, range is 0x200..0x2FF
+        assert!(r.contains_offset_at(0x250, 10));
+        assert!(!r.contains_offset_at(0x180, 10));
     }
 
     #[test]
@@ -527,6 +1054,147 @@ mod tests {
         assert!(r.is_readable());
         assert!(!r.is_writable());
         assert!(r.is_executable());
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap-based name tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_snap_name() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        assert_eq!(r.get_name(0), ".text");
+        r.set_name(10, ".text_v2");
+        assert_eq!(r.get_name(5), ".text");
+        assert_eq!(r.get_name(10), ".text_v2");
+        assert_eq!(r.get_name(100), ".text_v2");
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap-based range tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_snap_range() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        );
+        assert_eq!(r.get_range(0), (0x400000, 0x400FFF));
+        assert_eq!(r.get_length(0), 0x1000);
+        assert_eq!(r.get_min_address(0), 0x400000);
+        assert_eq!(r.get_max_address(0), 0x400FFF);
+
+        r.set_range(10, 0x500000, 0x500FFF);
+        assert_eq!(r.get_range(5), (0x400000, 0x400FFF));
+        assert_eq!(r.get_range(10), (0x500000, 0x500FFF));
+    }
+
+    #[test]
+    fn test_region_set_length() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        );
+        r.set_length(5, 0x2000);
+        assert_eq!(r.get_range(5), (0x400000, 0x401FFF));
+        assert_eq!(r.get_length(5), 0x2000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Snap-based flag tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_snap_flags() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        // Default: RWX
+        assert!(r.is_read_at(0));
+        assert!(r.is_write_at(0));
+        assert!(r.is_execute_at(0));
+
+        // Change to RX at snap 10
+        r.set_flags(
+            10,
+            BTreeSet::from([TraceMemoryFlag::Read, TraceMemoryFlag::Execute]),
+        );
+        assert!(r.is_read_at(5));
+        assert!(r.is_write_at(5));
+        assert!(r.is_read_at(10));
+        assert!(!r.is_write_at(10));
+        assert!(r.is_execute_at(10));
+    }
+
+    #[test]
+    fn test_region_set_read_write_execute() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        r.set_write(5, false);
+        assert!(!r.is_write_at(5));
+        assert!(r.is_read_at(5));
+
+        r.set_execute(10, false);
+        assert!(!r.is_execute_at(10));
+        assert!(!r.is_write_at(10));
+        assert!(r.is_read_at(10));
+    }
+
+    #[test]
+    fn test_region_set_volatile() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", "mmio", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        assert!(!r.is_volatile_at(0));
+        r.set_volatile(5, true);
+        assert!(r.is_volatile_at(5));
+        r.set_volatile(10, false);
+        assert!(!r.is_volatile_at(10));
+    }
+
+    // -----------------------------------------------------------------------
+    // Manager lifecycle tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_delete() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        let k = mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        assert_eq!(mgr.region_count(), 1);
+        mgr.delete_region(k);
+        assert_eq!(mgr.region_count(), 0);
+    }
+
+    #[test]
+    fn test_region_manager_remove_at() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        let k = mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        assert!(mgr.remove_region_at(k, 10));
+        let r = mgr.region(k).unwrap();
+        assert!(r.is_valid_at(10));
+        assert!(!r.is_valid_at(11));
+    }
+
+    #[test]
+    fn test_region_manager_flags_at() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RX),
+        );
+
+        let flags = mgr.flags_at("ram", 0x400500, 0).unwrap();
+        assert!(flags.contains(&TraceMemoryFlag::Read));
+        assert!(!flags.contains(&TraceMemoryFlag::Write));
+        assert!(flags.contains(&TraceMemoryFlag::Execute));
     }
 
     #[test]

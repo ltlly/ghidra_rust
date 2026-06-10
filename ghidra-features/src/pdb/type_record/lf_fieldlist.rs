@@ -23,7 +23,7 @@ use super::RecordNumber;
 /// all field list fields and behaviour to the embedded
 /// [`AbstractFieldListMsType`], overriding only the PDB ID to `0x1203`
 /// for the MsType variant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfFieldlist {
     /// The underlying field list data.
     pub field_list: AbstractFieldListMsType,
@@ -191,6 +191,67 @@ impl LfFieldlist {
     /// Count the number of virtual base classes (direct + indirect).
     pub fn num_virtual_base_classes(&self) -> usize {
         self.virtual_base_classes().count() + self.indirect_virtual_base_classes().count()
+    }
+
+    /// Get the name of this field list.
+    ///
+    /// Field lists do not have names in PDB; this always returns `""`.
+    /// Provided for API symmetry with other type records.
+    pub fn name(&self) -> &str {
+        ""
+    }
+
+    /// Whether this field list has any entries at all.
+    pub fn has_entries(&self) -> bool {
+        !self.field_list.is_empty()
+    }
+
+    /// Whether this field list has any base class entries (direct or virtual).
+    pub fn has_base_classes(&self) -> bool {
+        self.num_base_classes() > 0
+    }
+
+    /// Whether this field list has any method entries.
+    pub fn has_methods(&self) -> bool {
+        self.num_methods() > 0
+    }
+
+    /// Whether this field list has any non-static member entries.
+    pub fn has_nonstatic_members(&self) -> bool {
+        self.num_nonstatic_members() > 0
+    }
+
+    /// Whether this field list has any static member entries.
+    pub fn has_static_members(&self) -> bool {
+        self.num_static_members() > 0
+    }
+
+    /// Whether this field list has any enumerate entries.
+    pub fn has_enumerates(&self) -> bool {
+        self.num_enumerates() > 0
+    }
+
+    /// Whether this field list has any nested type entries.
+    pub fn has_nested_types(&self) -> bool {
+        self.num_nested_types() > 0
+    }
+
+    /// Whether this field list has any continuation indices.
+    ///
+    /// Continuation indices link to additional field list records when
+    /// a single field list cannot hold all entries.
+    pub fn has_continuation(&self) -> bool {
+        self.num_continuation_indices() > 0
+    }
+
+    /// Whether this field list has any vftable pointer entries.
+    pub fn has_vftable_pointers(&self) -> bool {
+        self.num_vftable_pointers() > 0
+    }
+
+    /// Whether this field list has any friend function entries.
+    pub fn has_friend_functions(&self) -> bool {
+        self.num_friend_functions() > 0
     }
 }
 
@@ -1055,5 +1116,224 @@ mod tests {
             type_record: RecordNumber::type_record(0x1006),
         });
         assert_eq!(fl.num_continuation_indices(), 2);
+    }
+
+    #[test]
+    fn test_fieldlist_name() {
+        let fl = LfFieldlist::new();
+        assert_eq!(fl.name(), "");
+    }
+
+    #[test]
+    fn test_fieldlist_has_entries() {
+        let fl = LfFieldlist::new();
+        assert!(!fl.has_entries());
+
+        let mut fl2 = LfFieldlist::new();
+        fl2.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+        assert!(fl2.has_entries());
+    }
+
+    #[test]
+    fn test_fieldlist_has_base_classes() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_base_classes());
+
+        fl.add_entry(FieldListEntry::BaseClass {
+            type_record: RecordNumber::type_record(0x1000),
+            offset: 0,
+            access: 3,
+        });
+        assert!(fl.has_base_classes());
+    }
+
+    #[test]
+    fn test_fieldlist_has_methods() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_methods());
+
+        fl.add_entry(FieldListEntry::OneMethod {
+            type_record: RecordNumber::type_record(0x1011),
+            vftable_offset: -1,
+            access: 3,
+            name: "foo".to_string(),
+        });
+        assert!(fl.has_methods());
+    }
+
+    #[test]
+    fn test_fieldlist_has_nonstatic_members() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_nonstatic_members());
+
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+        assert!(fl.has_nonstatic_members());
+    }
+
+    #[test]
+    fn test_fieldlist_has_static_members() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_static_members());
+
+        fl.add_entry(FieldListEntry::StaticMember {
+            type_record: RecordNumber::type_record(0x0074),
+            access: 3,
+            name: "count".to_string(),
+        });
+        assert!(fl.has_static_members());
+    }
+
+    #[test]
+    fn test_fieldlist_has_enumerates() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_enumerates());
+
+        fl.add_entry(FieldListEntry::Enumerate {
+            value: 0,
+            access: 3,
+            name: "RED".to_string(),
+        });
+        assert!(fl.has_enumerates());
+    }
+
+    #[test]
+    fn test_fieldlist_has_nested_types() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_nested_types());
+
+        fl.add_entry(FieldListEntry::NestedType {
+            type_record: RecordNumber::type_record(0x3000),
+            name: "Inner".to_string(),
+        });
+        assert!(fl.has_nested_types());
+    }
+
+    #[test]
+    fn test_fieldlist_has_continuation() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_continuation());
+
+        fl.add_entry(FieldListEntry::Index {
+            type_record: RecordNumber::type_record(0x1005),
+        });
+        assert!(fl.has_continuation());
+    }
+
+    #[test]
+    fn test_fieldlist_has_vftable_pointers() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_vftable_pointers());
+
+        fl.add_entry(FieldListEntry::VfTablePointer {
+            type_record: RecordNumber::type_record(0x2000),
+        });
+        assert!(fl.has_vftable_pointers());
+    }
+
+    #[test]
+    fn test_fieldlist_has_friend_functions() {
+        let mut fl = LfFieldlist::new();
+        assert!(!fl.has_friend_functions());
+
+        fl.add_entry(FieldListEntry::FriendFunction {
+            type_record: RecordNumber::type_record(0x1010),
+            name: "operator+".to_string(),
+        });
+        assert!(fl.has_friend_functions());
+    }
+
+    #[test]
+    fn test_fieldlist_eq() {
+        let mut fl1 = LfFieldlist::new();
+        fl1.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+
+        let mut fl2 = LfFieldlist::new();
+        fl2.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+
+        assert_eq!(fl1, fl2);
+    }
+
+    #[test]
+    fn test_fieldlist_mixed_entries_comprehensive() {
+        let mut fl = LfFieldlist::new();
+
+        // Add one of every type
+        fl.add_entry(FieldListEntry::BaseClass {
+            type_record: RecordNumber::type_record(0x1000),
+            offset: 0,
+            access: 3,
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 8,
+            access: 3,
+            name: "data".to_string(),
+        });
+        fl.add_entry(FieldListEntry::StaticMember {
+            type_record: RecordNumber::type_record(0x0074),
+            access: 3,
+            name: "count".to_string(),
+        });
+        fl.add_entry(FieldListEntry::OneMethod {
+            type_record: RecordNumber::type_record(0x1011),
+            vftable_offset: -1,
+            access: 3,
+            name: "foo".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Enumerate {
+            value: 42,
+            access: 3,
+            name: "ANSWER".to_string(),
+        });
+        fl.add_entry(FieldListEntry::NestedType {
+            type_record: RecordNumber::type_record(0x3000),
+            name: "Inner".to_string(),
+        });
+        fl.add_entry(FieldListEntry::VfTablePointer {
+            type_record: RecordNumber::type_record(0x2000),
+        });
+        fl.add_entry(FieldListEntry::Index {
+            type_record: RecordNumber::type_record(0x1005),
+        });
+        fl.add_entry(FieldListEntry::FriendFunction {
+            type_record: RecordNumber::type_record(0x1010),
+            name: "operator+".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Bitfield {
+            type_record: RecordNumber::type_record(0x0074),
+            bit_length: 4,
+            bit_position: 0,
+        });
+
+        assert_eq!(fl.len(), 10);
+        assert_eq!(fl.num_base_classes(), 1);
+        assert_eq!(fl.num_nonstatic_members(), 1);
+        assert_eq!(fl.num_static_members(), 1);
+        assert_eq!(fl.num_methods(), 1);
+        assert_eq!(fl.num_enumerates(), 1);
+        assert_eq!(fl.num_nested_types(), 1);
+        assert_eq!(fl.num_vftable_pointers(), 1);
+        assert_eq!(fl.num_continuation_indices(), 1);
+        assert_eq!(fl.num_friend_functions(), 1);
     }
 }

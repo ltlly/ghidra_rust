@@ -21,7 +21,7 @@ use super::RecordNumber;
 /// Mirrors the various `MsTypeField` subtypes from the Java implementation.
 /// Each variant corresponds to a specific LF_* sub-record that can appear
 /// inside an `LF_FIELDLIST`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FieldListEntry {
     /// LF_BCLASS — a direct base class.
     BaseClass {
@@ -260,7 +260,7 @@ impl fmt::Display for FieldListEntry {
 ///
 /// Sub-records are categorized into separate lists for convenient access,
 /// mirroring the Java implementation's approach of filtering by `instanceof`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbstractFieldListMsType {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,

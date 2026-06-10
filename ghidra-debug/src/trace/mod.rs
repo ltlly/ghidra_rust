@@ -26,7 +26,8 @@ pub use trace_execution_state::{
     StateQuery, StateTransition, TraceExecutionStateManager,
 };
 pub use trace_memory_region::{
-    MemoryRegionPermissions, TraceMemoryRegionEntry, TraceMemoryRegionManager,
+    MemoryRegionPermissions, SnapValue, TraceMemoryFlag, TraceMemoryRegionEntry,
+    TraceMemoryRegionManager,
 };
 pub use trace_stack_frame::{
     FrameKind, FrameRegisterValue, SourceLocation,

@@ -18,7 +18,7 @@ use super::RecordNumber;
 ///
 /// In the Java hierarchy this is a direct subclass of `AbstractCompositeMsType`
 /// that only overrides `getTypeString()` to return `"class"`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbstractClassMsType {
     /// The underlying composite data.
     pub composite: AbstractCompositeMsType,

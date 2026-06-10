@@ -34,7 +34,7 @@ use super::RecordNumber;
 /// all composite fields and behaviour to the embedded
 /// [`AbstractCompositeMsType`], overriding only the type string to
 /// `"union"` and the PDB ID to `0x1506`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfUnion {
     /// The underlying composite data (count, field list, size, name, etc.).
     pub composite: AbstractCompositeMsType,
@@ -243,6 +243,39 @@ impl LfUnion {
     /// Whether this union is sealed (cannot be inherited).
     pub fn is_sealed(&self) -> bool {
         self.composite.property.contains(MsProperty::SEALED)
+    }
+
+    /// Get the size in bytes as `u64`.
+    ///
+    /// Alias for [`get_size`](Self::get_size) providing a more descriptive
+    /// name when the context is about byte sizes.
+    pub fn size_in_bytes(&self) -> u64 {
+        self.composite.get_size()
+    }
+
+    /// Whether this union is a forward reference.
+    ///
+    /// Forward references are placeholders for types whose full definition
+    /// appears elsewhere in the type stream.
+    pub fn is_forward_ref(&self) -> bool {
+        self.composite.is_forward_ref()
+    }
+
+    /// Whether the property flags are empty (no special properties).
+    pub fn has_no_properties(&self) -> bool {
+        self.composite.property.is_empty()
+    }
+
+    /// Get the number of members that are known (not -1/unknown).
+    ///
+    /// Returns `Some(count)` if the count is >= 0, `None` if the count
+    /// is -1 (meaning the member count is unknown).
+    pub fn known_member_count(&self) -> Option<u32> {
+        if self.composite.count >= 0 {
+            Some(self.composite.count as u32)
+        } else {
+            None
+        }
     }
 }
 
@@ -576,5 +609,84 @@ mod tests {
         assert!(!u.is_sealed());
         u.composite.property |= MsProperty::SEALED;
         assert!(u.is_sealed());
+    }
+
+    #[test]
+    fn test_union_size_in_bytes() {
+        let u = make_test_union();
+        assert_eq!(u.size_in_bytes(), 16);
+    }
+
+    #[test]
+    fn test_union_is_forward_ref() {
+        let u = make_test_union();
+        assert!(!u.is_forward_ref());
+
+        let u2 = LfUnion::new(
+            0,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "FwdUnion".to_string(),
+            String::new(),
+        );
+        assert!(u2.is_forward_ref());
+    }
+
+    #[test]
+    fn test_union_has_no_properties() {
+        let u = make_test_union();
+        assert!(u.has_no_properties());
+
+        let mut u2 = make_test_union();
+        u2.composite.property |= MsProperty::NESTED;
+        assert!(!u2.has_no_properties());
+    }
+
+    #[test]
+    fn test_union_known_member_count() {
+        let u = make_test_union();
+        assert_eq!(u.known_member_count(), Some(3));
+
+        let u2 = LfUnion::new(
+            -1,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::empty(),
+            "Unknown".to_string(),
+            String::new(),
+        );
+        assert_eq!(u2.known_member_count(), None);
+    }
+
+    #[test]
+    fn test_union_eq() {
+        let u1 = make_test_union();
+        let u2 = make_test_union();
+        assert_eq!(u1, u2);
+
+        let u3 = LfUnion::new(
+            3,
+            RecordNumber::type_record(0x1001),
+            16,
+            MsProperty::empty(),
+            "Different".to_string(),
+            String::new(),
+        );
+        assert_ne!(u1, u3);
+    }
+
+    #[test]
+    fn test_union_large_size() {
+        let u = LfUnion::new(
+            50,
+            RecordNumber::type_record(0x1001),
+            0x1_0000_0000,
+            MsProperty::empty(),
+            "LargeUnion".to_string(),
+            String::new(),
+        );
+        assert_eq!(u.get_size(), 0x1_0000_0000);
+        assert_eq!(u.size_in_bytes(), 0x1_0000_0000);
     }
 }

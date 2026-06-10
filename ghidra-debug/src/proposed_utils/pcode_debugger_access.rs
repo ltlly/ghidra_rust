@@ -803,6 +803,554 @@ pub enum AccessError {
     /// The breakpoint ID is invalid.
     #[error("breakpoint not found: {0}")]
     BreakpointNotFound(u64),
+
+    /// The watchpoint ID is invalid.
+    #[error("watchpoint not found: {0}")]
+    WatchpointNotFound(u64),
+
+    /// Memory region overlap error.
+    #[error("memory region overlaps with existing region")]
+    RegionOverlap,
+
+    /// The requested memory region was not found.
+    #[error("memory region not found: {0}")]
+    RegionNotFound(String),
+}
+
+// ============================================================================
+// MemoryRegionMap -- tracks named memory regions with permissions
+// ============================================================================
+
+/// Permissions for a memory region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MemoryPermissions {
+    /// Region is readable.
+    pub read: bool,
+    /// Region is writable.
+    pub write: bool,
+    /// Region is executable.
+    pub execute: bool,
+}
+
+impl MemoryPermissions {
+    /// Read-only permissions.
+    pub const READ: Self = Self { read: true, write: false, execute: false };
+    /// Read-write permissions.
+    pub const RW: Self = Self { read: true, write: true, execute: false };
+    /// Read-execute permissions (typical for code).
+    pub const RX: Self = Self { read: true, write: false, execute: true };
+    /// Read-write-execute permissions.
+    pub const RWX: Self = Self { read: true, write: true, execute: true };
+    /// No permissions.
+    pub const NONE: Self = Self { read: false, write: false, execute: false };
+
+    /// Whether the given access is allowed by these permissions.
+    pub fn allows(&self, read: bool, write: bool, execute: bool) -> bool {
+        (!read || self.read) && (!write || self.write) && (!execute || self.execute)
+    }
+}
+
+impl Default for MemoryPermissions {
+    fn default() -> Self {
+        Self::RW
+    }
+}
+
+/// A named memory region with permissions and a description.
+///
+/// Ported from Ghidra's proposed memory region tracking for debug sessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryRegion {
+    /// The region name (e.g., ".text", ".data", "stack").
+    pub name: String,
+    /// The address space this region belongs to.
+    pub space: String,
+    /// Start offset (inclusive).
+    pub start: u64,
+    /// End offset (exclusive).
+    pub end: u64,
+    /// Permissions.
+    pub permissions: MemoryPermissions,
+    /// Optional description.
+    pub description: String,
+}
+
+impl MemoryRegion {
+    /// Create a new memory region.
+    pub fn new(
+        name: impl Into<String>,
+        space: impl Into<String>,
+        start: u64,
+        end: u64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            space: space.into(),
+            start,
+            end,
+            permissions: MemoryPermissions::default(),
+            description: String::new(),
+        }
+    }
+
+    /// Set permissions.
+    pub fn with_permissions(mut self, perms: MemoryPermissions) -> Self {
+        self.permissions = perms;
+        self
+    }
+
+    /// Set description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
+    }
+
+    /// The size of this region in bytes.
+    pub fn size(&self) -> u64 {
+        self.end - self.start
+    }
+
+    /// Whether this region contains the given offset.
+    pub fn contains(&self, offset: u64) -> bool {
+        offset >= self.start && offset < self.end
+    }
+
+    /// Whether this region overlaps with another region in the same space.
+    pub fn overlaps(&self, other: &MemoryRegion) -> bool {
+        self.space == other.space && self.start < other.end && other.start < self.end
+    }
+}
+
+/// A map of named memory regions for a debug session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MemoryRegionMap {
+    regions: Vec<MemoryRegion>,
+}
+
+impl MemoryRegionMap {
+    /// Create a new empty region map.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a region. Returns `Err` if it overlaps an existing region in the
+    /// same address space.
+    pub fn add_region(&mut self, region: MemoryRegion) -> Result<(), AccessError> {
+        for existing in &self.regions {
+            if existing.overlaps(&region) {
+                return Err(AccessError::RegionOverlap);
+            }
+        }
+        self.regions.push(region);
+        Ok(())
+    }
+
+    /// Find the region that contains the given address.
+    pub fn find_region(&self, space: &str, offset: u64) -> Option<&MemoryRegion> {
+        self.regions
+            .iter()
+            .find(|r| r.space == space && r.contains(offset))
+    }
+
+    /// Get a region by name.
+    pub fn get_by_name(&self, name: &str) -> Option<&MemoryRegion> {
+        self.regions.iter().find(|r| r.name == name)
+    }
+
+    /// Remove a region by name.
+    pub fn remove_by_name(&mut self, name: &str) -> Option<MemoryRegion> {
+        if let Some(pos) = self.regions.iter().position(|r| r.name == name) {
+            Some(self.regions.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// All regions.
+    pub fn regions(&self) -> &[MemoryRegion] {
+        &self.regions
+    }
+
+    /// All regions in a specific address space.
+    pub fn regions_in_space(&self, space: &str) -> Vec<&MemoryRegion> {
+        self.regions.iter().filter(|r| r.space == space).collect()
+    }
+
+    /// Check if an access to the given address is permitted.
+    pub fn check_access(&self, space: &str, offset: u64, read: bool, write: bool, execute: bool) -> bool {
+        match self.find_region(space, offset) {
+            Some(region) => region.permissions.allows(read, write, execute),
+            None => true, // Allow access to unmapped regions (no restriction)
+        }
+    }
+
+    /// The number of regions.
+    pub fn len(&self) -> usize {
+        self.regions.len()
+    }
+
+    /// Whether there are no regions.
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+
+    /// Clear all regions.
+    pub fn clear(&mut self) {
+        self.regions.clear();
+    }
+}
+
+// ============================================================================
+// PcodeWatchpointManager -- watch memory ranges for access
+// ============================================================================
+
+/// A watchpoint that triggers when a memory range is accessed.
+///
+/// Ported from Ghidra's proposed memory watchpoint utilities for pcode
+/// debugging sessions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PcodeWatchpoint {
+    /// Unique ID.
+    pub id: u64,
+    /// Address space name.
+    pub space: String,
+    /// Start offset (inclusive).
+    pub start: u64,
+    /// End offset (exclusive).
+    pub end: u64,
+    /// What kind of access triggers this watchpoint.
+    pub kind: BreakpointKind,
+    /// Whether enabled.
+    pub enabled: bool,
+    /// Hit count.
+    pub hit_count: u64,
+    /// Optional user note.
+    pub note: String,
+}
+
+impl PcodeWatchpoint {
+    /// Create a new watchpoint.
+    pub fn new(id: u64, space: impl Into<String>, start: u64, end: u64, kind: BreakpointKind) -> Self {
+        Self {
+            id,
+            space: space.into(),
+            start,
+            end,
+            kind,
+            enabled: true,
+            hit_count: 0,
+            note: String::new(),
+        }
+    }
+
+    /// Whether this watchpoint covers the given single-byte address.
+    pub fn covers(&self, space: &str, offset: u64) -> bool {
+        self.enabled && self.space == space && offset >= self.start && offset < self.end
+    }
+
+    /// Whether this watchpoint covers any part of the given range.
+    pub fn covers_range(&self, space: &str, offset: u64, len: u64) -> bool {
+        self.enabled && self.space == space && self.start < offset + len && offset < self.end
+    }
+}
+
+/// Manages memory watchpoints for a pcode debug session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PcodeWatchpointManager {
+    watchpoints: BTreeMap<u64, PcodeWatchpoint>,
+    next_id: u64,
+}
+
+impl PcodeWatchpointManager {
+    /// Create a new empty manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a watchpoint.
+    pub fn add_watchpoint(
+        &mut self,
+        space: impl Into<String>,
+        start: u64,
+        end: u64,
+        kind: BreakpointKind,
+    ) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.watchpoints
+            .insert(id, PcodeWatchpoint::new(id, space, start, end, kind));
+        id
+    }
+
+    /// Remove a watchpoint.
+    pub fn remove_watchpoint(&mut self, id: u64) -> Option<PcodeWatchpoint> {
+        self.watchpoints.remove(&id)
+    }
+
+    /// Enable or disable a watchpoint.
+    pub fn set_enabled(&mut self, id: u64, enabled: bool) {
+        if let Some(wp) = self.watchpoints.get_mut(&id) {
+            wp.enabled = enabled;
+        }
+    }
+
+    /// Check all watchpoints against a single-byte access.
+    pub fn check_hit(&mut self, space: &str, offset: u64, kind: BreakpointKind) -> Vec<u64> {
+        let mut hits = Vec::new();
+        for wp in self.watchpoints.values_mut() {
+            if wp.covers(space, offset) && (wp.kind == kind || wp.kind == BreakpointKind::ReadWrite) {
+                wp.hit_count += 1;
+                hits.push(wp.id);
+            }
+        }
+        hits
+    }
+
+    /// Check all watchpoints against a range access.
+    pub fn check_range_hit(
+        &mut self,
+        space: &str,
+        offset: u64,
+        len: u64,
+        kind: BreakpointKind,
+    ) -> Vec<u64> {
+        let mut hits = Vec::new();
+        for wp in self.watchpoints.values_mut() {
+            if wp.covers_range(space, offset, len)
+                && (wp.kind == kind || wp.kind == BreakpointKind::ReadWrite)
+            {
+                wp.hit_count += 1;
+                hits.push(wp.id);
+            }
+        }
+        hits
+    }
+
+    /// Get a watchpoint by ID.
+    pub fn get(&self, id: u64) -> Option<&PcodeWatchpoint> {
+        self.watchpoints.get(&id)
+    }
+
+    /// All watchpoints.
+    pub fn all(&self) -> &BTreeMap<u64, PcodeWatchpoint> {
+        &self.watchpoints
+    }
+
+    /// The number of watchpoints.
+    pub fn len(&self) -> usize {
+        self.watchpoints.len()
+    }
+
+    /// Whether there are no watchpoints.
+    pub fn is_empty(&self) -> bool {
+        self.watchpoints.is_empty()
+    }
+
+    /// Clear all watchpoints.
+    pub fn clear(&mut self) {
+        self.watchpoints.clear();
+    }
+}
+
+// ============================================================================
+// AccessMetrics -- track access statistics
+// ============================================================================
+
+/// Tracks access statistics for performance analysis.
+///
+/// Ported from Ghidra's proposed access metrics for pcode debugging.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AccessMetrics {
+    /// Total memory reads.
+    pub memory_reads: u64,
+    /// Total memory writes.
+    pub memory_writes: u64,
+    /// Total register reads.
+    pub register_reads: u64,
+    /// Total register writes.
+    pub register_writes: u64,
+    /// Total breakpoints checked.
+    pub breakpoint_checks: u64,
+    /// Total watchpoints checked.
+    pub watchpoint_checks: u64,
+    /// Total step events logged.
+    pub step_events: u64,
+    /// Total errors encountered.
+    pub errors: u64,
+}
+
+impl AccessMetrics {
+    /// Create a new zeroed metrics tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a memory read.
+    pub fn record_memory_read(&mut self) {
+        self.memory_reads += 1;
+    }
+
+    /// Record a memory write.
+    pub fn record_memory_write(&mut self) {
+        self.memory_writes += 1;
+    }
+
+    /// Record a register read.
+    pub fn record_register_read(&mut self) {
+        self.register_reads += 1;
+    }
+
+    /// Record a register write.
+    pub fn record_register_write(&mut self) {
+        self.register_writes += 1;
+    }
+
+    /// Record a breakpoint check.
+    pub fn record_breakpoint_check(&mut self) {
+        self.breakpoint_checks += 1;
+    }
+
+    /// Record a watchpoint check.
+    pub fn record_watchpoint_check(&mut self) {
+        self.watchpoint_checks += 1;
+    }
+
+    /// Record a step event.
+    pub fn record_step_event(&mut self) {
+        self.step_events += 1;
+    }
+
+    /// Record an error.
+    pub fn record_error(&mut self) {
+        self.errors += 1;
+    }
+
+    /// Total number of tracked operations.
+    pub fn total_operations(&self) -> u64 {
+        self.memory_reads
+            + self.memory_writes
+            + self.register_reads
+            + self.register_writes
+            + self.breakpoint_checks
+            + self.watchpoint_checks
+            + self.step_events
+    }
+
+    /// Reset all counters to zero.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+// ============================================================================
+// PcodeFrameSnapshot -- complete execution frame capture
+// ============================================================================
+
+/// A complete snapshot of a thread's execution frame.
+///
+/// Ported from Ghidra's proposed frame snapshot utilities. Captures
+/// the full state of a thread at a specific point including memory,
+/// registers, and context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PcodeFrameSnapshot {
+    /// The thread key this snapshot belongs to.
+    pub thread_key: i64,
+    /// The snap value when captured.
+    pub snap: i64,
+    /// The program counter at the time of capture.
+    pub pc: u64,
+    /// Register name -> value bytes.
+    pub registers: BTreeMap<String, Vec<u8>>,
+    /// Memory snapshots: (space, start_offset, bytes).
+    pub memory_regions: Vec<(String, u64, Vec<u8>)>,
+    /// Context register fields.
+    pub context_fields: BTreeMap<String, u64>,
+    /// Execution mode at snapshot time.
+    pub execution_mode: String,
+    /// Whether the thread was running at snapshot time.
+    pub was_running: bool,
+}
+
+impl PcodeFrameSnapshot {
+    /// Create a new frame snapshot.
+    pub fn new(thread_key: i64, snap: i64) -> Self {
+        Self {
+            thread_key,
+            snap,
+            pc: 0,
+            registers: BTreeMap::new(),
+            memory_regions: Vec::new(),
+            context_fields: BTreeMap::new(),
+            execution_mode: String::new(),
+            was_running: false,
+        }
+    }
+
+    /// Capture a frame from a `PcodeDebuggerAccess` instance.
+    pub fn capture_from_access(
+        thread_key: i64,
+        access: &PcodeDebuggerAccess,
+        memory_regions: &[(&str, u64, u32)],
+    ) -> Self {
+        let mut frame = Self::new(thread_key, access.snap);
+
+        // Capture PC from thread context
+        if let Some(ctx) = access.thread_contexts.get(&thread_key) {
+            frame.pc = ctx.pc;
+            frame.context_fields = ctx.context_fields.clone();
+            frame.execution_mode = ctx.execution_mode.clone();
+            frame.was_running = ctx.is_running;
+        }
+
+        // Capture registers
+        if let Some(reg_view) = access.register_views.get(&thread_key) {
+            for name in reg_view.known_registers() {
+                if let Some(val) = reg_view.read(&name) {
+                    frame.registers.insert(name, val);
+                }
+            }
+        }
+
+        // Capture memory regions
+        for (space, offset, len) in memory_regions {
+            if let Some(bytes) = access.memory.read(space, *offset, *len) {
+                frame.memory_regions.push(((*space).to_string(), *offset, bytes));
+            }
+        }
+
+        frame
+    }
+
+    /// Get a register value.
+    pub fn get_register(&self, name: &str) -> Option<&Vec<u8>> {
+        self.registers.get(name)
+    }
+
+    /// Read bytes from a captured memory region.
+    pub fn read_memory(&self, space: &str, offset: u64, len: usize) -> Option<Vec<u8>> {
+        for (s, start, bytes) in &self.memory_regions {
+            if s == space && offset >= *start && (offset + len as u64) <= (*start + bytes.len() as u64) {
+                let rel = (offset - *start) as usize;
+                return Some(bytes[rel..rel + len].to_vec());
+            }
+        }
+        None
+    }
+
+    /// The number of captured registers.
+    pub fn num_registers(&self) -> usize {
+        self.registers.len()
+    }
+
+    /// The number of captured memory regions.
+    pub fn num_memory_regions(&self) -> usize {
+        self.memory_regions.len()
+    }
+
+    /// Total captured memory bytes.
+    pub fn total_memory_bytes(&self) -> usize {
+        self.memory_regions.iter().map(|(_, _, b)| b.len()).sum()
+    }
 }
 
 // ============================================================================
@@ -1075,5 +1623,214 @@ mod tests {
 
         mgr.clear();
         assert!(mgr.is_empty());
+    }
+
+    // -- MemoryPermissions --
+
+    #[test]
+    fn test_memory_permissions() {
+        assert!(MemoryPermissions::RW.allows(true, true, false));
+        assert!(!MemoryPermissions::RW.allows(true, true, true));
+        assert!(MemoryPermissions::RX.allows(true, false, true));
+        assert!(!MemoryPermissions::RX.allows(true, true, false));
+        assert!(MemoryPermissions::NONE.allows(false, false, false));
+        assert!(!MemoryPermissions::NONE.allows(true, false, false));
+    }
+
+    // -- MemoryRegion --
+
+    #[test]
+    fn test_memory_region_basic() {
+        let r = MemoryRegion::new(".text", "ram", 0x400000, 0x500000)
+            .with_permissions(MemoryPermissions::RX)
+            .with_description("code section");
+        assert_eq!(r.size(), 0x100000);
+        assert!(r.contains(0x450000));
+        assert!(!r.contains(0x300000));
+        assert!(!r.contains(0x500000)); // exclusive end
+    }
+
+    #[test]
+    fn test_memory_region_overlaps() {
+        let a = MemoryRegion::new("a", "ram", 0x1000, 0x2000);
+        let b = MemoryRegion::new("b", "ram", 0x1500, 0x2500);
+        let c = MemoryRegion::new("c", "ram", 0x3000, 0x4000);
+        assert!(a.overlaps(&b));
+        assert!(!a.overlaps(&c));
+
+        // Different spaces don't overlap
+        let d = MemoryRegion::new("d", "reg", 0x1000, 0x2000);
+        assert!(!a.overlaps(&d));
+    }
+
+    // -- MemoryRegionMap --
+
+    #[test]
+    fn test_memory_region_map() {
+        let mut map = MemoryRegionMap::new();
+        map.add_region(MemoryRegion::new(".text", "ram", 0x400000, 0x500000)
+            .with_permissions(MemoryPermissions::RX))
+            .unwrap();
+        map.add_region(MemoryRegion::new(".data", "ram", 0x600000, 0x700000)
+            .with_permissions(MemoryPermissions::RW))
+            .unwrap();
+
+        assert_eq!(map.len(), 2);
+        assert!(map.find_region("ram", 0x450000).is_some());
+        assert_eq!(map.find_region("ram", 0x450000).unwrap().name, ".text");
+        assert!(map.find_region("ram", 0x300000).is_none());
+    }
+
+    #[test]
+    fn test_memory_region_map_overlap_rejected() {
+        let mut map = MemoryRegionMap::new();
+        map.add_region(MemoryRegion::new("a", "ram", 0x1000, 0x2000)).unwrap();
+        let result = map.add_region(MemoryRegion::new("b", "ram", 0x1500, 0x2500));
+        assert_eq!(result, Err(AccessError::RegionOverlap));
+    }
+
+    #[test]
+    fn test_memory_region_map_access_check() {
+        let mut map = MemoryRegionMap::new();
+        map.add_region(MemoryRegion::new(".text", "ram", 0x400000, 0x500000)
+            .with_permissions(MemoryPermissions::RX))
+            .unwrap();
+
+        assert!(map.check_access("ram", 0x450000, true, false, true)); // RX ok
+        assert!(!map.check_access("ram", 0x450000, true, true, false)); // write denied
+        assert!(map.check_access("ram", 0x300000, true, true, true)); // unmapped: allowed
+    }
+
+    #[test]
+    fn test_memory_region_map_remove() {
+        let mut map = MemoryRegionMap::new();
+        map.add_region(MemoryRegion::new("a", "ram", 0x1000, 0x2000)).unwrap();
+        assert_eq!(map.len(), 1);
+        map.remove_by_name("a");
+        assert!(map.is_empty());
+    }
+
+    // -- PcodeWatchpointManager --
+
+    #[test]
+    fn test_watchpoint_manager_basic() {
+        let mut mgr = PcodeWatchpointManager::new();
+        let id = mgr.add_watchpoint("ram", 0x2000, 0x2010, BreakpointKind::Write);
+        assert_eq!(mgr.len(), 1);
+
+        let hits = mgr.check_hit("ram", 0x2005, BreakpointKind::Write);
+        assert_eq!(hits, vec![id]);
+        assert_eq!(mgr.get(id).unwrap().hit_count, 1);
+    }
+
+    #[test]
+    fn test_watchpoint_manager_readwrite() {
+        let mut mgr = PcodeWatchpointManager::new();
+        let id = mgr.add_watchpoint("ram", 0x3000, 0x3100, BreakpointKind::ReadWrite);
+
+        let hits_r = mgr.check_hit("ram", 0x3050, BreakpointKind::Read);
+        assert_eq!(hits_r, vec![id]);
+
+        let hits_w = mgr.check_hit("ram", 0x3050, BreakpointKind::Write);
+        assert_eq!(hits_w, vec![id]);
+    }
+
+    #[test]
+    fn test_watchpoint_manager_no_hit() {
+        let mut mgr = PcodeWatchpointManager::new();
+        mgr.add_watchpoint("ram", 0x2000, 0x2010, BreakpointKind::Write);
+
+        // Wrong space
+        assert!(mgr.check_hit("reg", 0x2005, BreakpointKind::Write).is_empty());
+        // Wrong kind
+        assert!(mgr.check_hit("ram", 0x2005, BreakpointKind::Read).is_empty());
+        // Outside range
+        assert!(mgr.check_hit("ram", 0x5000, BreakpointKind::Write).is_empty());
+    }
+
+    #[test]
+    fn test_watchpoint_manager_range_hit() {
+        let mut mgr = PcodeWatchpointManager::new();
+        let id = mgr.add_watchpoint("ram", 0x2000, 0x2010, BreakpointKind::Read);
+
+        // Range that partially overlaps
+        let hits = mgr.check_range_hit("ram", 0x2008, 16, BreakpointKind::Read);
+        assert_eq!(hits, vec![id]);
+    }
+
+    #[test]
+    fn test_watchpoint_manager_disabled() {
+        let mut mgr = PcodeWatchpointManager::new();
+        let id = mgr.add_watchpoint("ram", 0x2000, 0x2010, BreakpointKind::Write);
+        mgr.set_enabled(id, false);
+
+        assert!(mgr.check_hit("ram", 0x2005, BreakpointKind::Write).is_empty());
+    }
+
+    // -- AccessMetrics --
+
+    #[test]
+    fn test_access_metrics() {
+        let mut m = AccessMetrics::new();
+        m.record_memory_read();
+        m.record_memory_read();
+        m.record_memory_write();
+        m.record_register_read();
+        m.record_step_event();
+
+        assert_eq!(m.memory_reads, 2);
+        assert_eq!(m.memory_writes, 1);
+        assert_eq!(m.register_reads, 1);
+        assert_eq!(m.step_events, 1);
+        assert_eq!(m.total_operations(), 5);
+
+        m.reset();
+        assert_eq!(m.total_operations(), 0);
+    }
+
+    // -- PcodeFrameSnapshot --
+
+    #[test]
+    fn test_frame_snapshot_basic() {
+        let mut snap = PcodeFrameSnapshot::new(42, 0);
+        snap.pc = 0x400000;
+        snap.registers.insert("RAX".to_string(), vec![0x78, 0x56, 0x34, 0x12]);
+        snap.memory_regions.push(("ram".to_string(), 0x400000, vec![0xEB, 0xFE]));
+
+        assert_eq!(snap.num_registers(), 1);
+        assert_eq!(snap.get_register("RAX"), Some(&vec![0x78, 0x56, 0x34, 0x12]));
+        assert_eq!(snap.num_memory_regions(), 1);
+        assert_eq!(snap.total_memory_bytes(), 2);
+    }
+
+    #[test]
+    fn test_frame_snapshot_read_memory() {
+        let mut snap = PcodeFrameSnapshot::new(0, 0);
+        snap.memory_regions.push(("ram".to_string(), 0x1000, vec![0x90, 0xCC, 0xEB, 0xFE]));
+
+        let bytes = snap.read_memory("ram", 0x1001, 2);
+        assert_eq!(bytes, Some(vec![0xCC, 0xEB]));
+
+        assert!(snap.read_memory("ram", 0x5000, 1).is_none());
+        assert!(snap.read_memory("reg", 0x1000, 1).is_none());
+    }
+
+    #[test]
+    fn test_frame_snapshot_capture_from_access() {
+        let mut access = PcodeDebuggerAccess::new("t1", 0);
+        access.set_active_thread(42);
+        access.write_memory("ram", 0x400000, &[0xEB, 0xFE, 0x90, 0xCC]);
+        access.write_register("RAX", &[1, 2, 3, 4, 5, 6, 7, 8]).unwrap();
+
+        let snap = PcodeFrameSnapshot::capture_from_access(
+            42,
+            &access,
+            &[("ram", 0x400000, 4)],
+        );
+
+        assert_eq!(snap.thread_key, 42);
+        assert_eq!(snap.num_registers(), 1);
+        assert_eq!(snap.get_register("RAX"), Some(&vec![1, 2, 3, 4, 5, 6, 7, 8]));
+        assert_eq!(snap.read_memory("ram", 0x400000, 4), Some(vec![0xEB, 0xFE, 0x90, 0xCC]));
     }
 }

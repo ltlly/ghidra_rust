@@ -1,6 +1,7 @@
 //! S_UDT -- User-defined type symbol.
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.S_UDTMSSymbol`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.UserDefinedTypeMsSymbol`
+//! (0x1108) and `UserDefinedTypeStMsSymbol` (0x1003).
 
 use std::fmt;
 
@@ -13,11 +14,18 @@ use super::record_number::{RecordCategory, RecordNumber};
 /// This symbol associates a name with a type index, defining a named
 /// user-defined type (struct, class, union, enum, typedef) in the PDB.
 ///
-/// # PDB Binary Layout
+/// # PDB Binary Layout (S_UDT, 32-bit type index)
 ///
 /// ```text
 /// type_index : u32
 /// name       : NT string
+/// ```
+///
+/// # PDB Binary Layout (S_UDT_ST, 16-bit type index)
+///
+/// ```text
+/// type_index : u16
+/// name       : NT string (ST format)
 /// ```
 ///
 /// This corresponds to `S_UDT` (0x0004) and `S_UDT_ST` (0x1003) in the
@@ -40,9 +48,11 @@ impl SUdt {
         }
     }
 
-    /// Parse an S_UDT symbol from a byte slice.
+    /// Parse an S_UDT symbol from a byte slice (32-bit type index).
     ///
     /// Expects the layout: `type_index(u32) + name(NT)`.
+    ///
+    /// This handles `S_UDT` (0x0004).
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 5 {
             return None;
@@ -53,6 +63,31 @@ impl SUdt {
             type_record_number: trn,
             name,
         })
+    }
+
+    /// Parse an S_UDT_ST symbol from a byte slice (32-bit type index, ST string).
+    ///
+    /// Expects the layout: `type_index(u32) + name(ST)`.
+    ///
+    /// The Java `UserDefinedTypeStMsSymbol` uses `recordNumberSize=32` and
+    /// `StringParseType.StringUtf8St` (16-bit length-prefixed UTF-8 string).
+    ///
+    /// This handles `S_UDT_ST` (0x1003).
+    pub fn parse_st(data: &[u8]) -> Option<Self> {
+        if data.len() < 6 {
+            return None;
+        }
+        let (trn, _) = RecordNumber::parse(data, 0, RecordCategory::Type, 32);
+        let name = parse_st_string(&data[4..]);
+        Some(Self {
+            type_record_number: trn,
+            name,
+        })
+    }
+
+    /// Return the type record number for this UDT.
+    pub fn type_record_number(&self) -> &RecordNumber {
+        &self.type_record_number
     }
 }
 
@@ -92,6 +127,20 @@ fn parse_nt_string(data: &[u8]) -> String {
     String::from_utf8_lossy(&data[..end]).to_string()
 }
 
+/// Parse an ST-format UTF-8 string (16-bit length prefix followed by that
+/// many bytes of UTF-8 data).
+fn parse_st_string(data: &[u8]) -> String {
+    if data.len() < 2 {
+        return String::new();
+    }
+    let len = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let end = 2 + len;
+    if end > data.len() {
+        return String::from_utf8_lossy(&data[2..]).to_string();
+    }
+    String::from_utf8_lossy(&data[2..end]).to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +175,37 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_st_basic() {
+        // type_index(u32=0x0100) + name(ST "StStruct")
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0100u32.to_le_bytes());
+        let name = b"StStruct";
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+
+        let sym = SUdt::parse_st(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x0100);
+        assert_eq!(sym.name, "StStruct");
+    }
+
+    #[test]
+    fn test_parse_st_truncated() {
+        let data = [0x00]; // too short for ST format (need 6 min: 4 type + 2 st len)
+        assert!(SUdt::parse_st(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_st_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0050u32.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes()); // ST string with length 0
+
+        let sym = SUdt::parse_st(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x0050);
+        assert_eq!(sym.name, "");
+    }
+
+    #[test]
     fn test_trait_impls() {
         let sym = SUdt::new(
             RecordNumber::type_record_number(0x1020),
@@ -146,5 +226,51 @@ mod tests {
         assert!(s.contains("UserDefinedType"));
         assert!(s.contains("Point"));
         assert!(s.contains("4128")); // 0x1020 = 4128 decimal (RecordNumber displays decimal)
+    }
+
+    #[test]
+    fn test_type_record_number_accessor() {
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x2000),
+            "MyType".to_string(),
+        );
+        assert_eq!(sym.type_record_number().number(), 0x2000);
+    }
+
+    #[test]
+    fn test_st_format_roundtrip() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0080u32.to_le_bytes());
+        let name = b"Enum";
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+
+        let sym = SUdt::parse_st(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x0080);
+        assert_eq!(sym.name, "Enum");
+    }
+
+    #[test]
+    fn test_parse_st_32bit_type_index() {
+        // ST variants use 32-bit type index, not 16-bit
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x12345678u32.to_le_bytes());
+        let name = b"BigType";
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+
+        let sym = SUdt::parse_st(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x12345678);
+        assert_eq!(sym.name, "BigType");
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let a = SUdt::new(
+            RecordNumber::type_record_number(0x1020),
+            "CloneTest".to_string(),
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }

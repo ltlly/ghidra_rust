@@ -19,7 +19,7 @@ use super::RecordNumber;
 /// Extends the concept of `AbstractComplexMsType` from the Java hierarchy
 /// with the additional composite-specific fields: `derived_from_list`,
 /// `vshape_table`, and `size`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbstractCompositeMsType {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,

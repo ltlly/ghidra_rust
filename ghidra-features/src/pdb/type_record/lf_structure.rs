@@ -33,7 +33,7 @@ use super::RecordNumber;
 /// all composite fields and behaviour to the embedded
 /// [`AbstractCompositeMsType`], overriding only the type string to
 /// `"struct"` and the PDB ID to `0x1505`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfStructure {
     /// The underlying composite data (count, field list, size, name, etc.).
     pub composite: AbstractCompositeMsType,
@@ -304,6 +304,39 @@ impl LfStructure {
             // Without access to individual member types and their sizes,
             // we can only return the recorded size.
             self.composite.get_size()
+        }
+    }
+
+    /// Get the size in bytes as `u64`.
+    ///
+    /// Alias for [`get_size`](Self::get_size) providing a more descriptive
+    /// name when the context is about byte sizes.
+    pub fn size_in_bytes(&self) -> u64 {
+        self.composite.get_size()
+    }
+
+    /// Whether this structure is a forward reference.
+    ///
+    /// Forward references are placeholders for types whose full definition
+    /// appears elsewhere in the type stream.
+    pub fn is_forward_ref(&self) -> bool {
+        self.composite.is_forward_ref()
+    }
+
+    /// Whether the property flags are empty (no special properties).
+    pub fn has_no_properties(&self) -> bool {
+        self.composite.property.is_empty()
+    }
+
+    /// Get the number of members that are known (not -1/unknown).
+    ///
+    /// Returns `Some(count)` if the count is >= 0, `None` if the count
+    /// is -1 (meaning the member count is unknown).
+    pub fn known_member_count(&self) -> Option<u32> {
+        if self.composite.count >= 0 {
+            Some(self.composite.count as u32)
+        } else {
+            None
         }
     }
 }
@@ -678,5 +711,107 @@ mod tests {
         let mut s2 = make_test_structure();
         s2.composite.property |= MsProperty::PACKED;
         assert_eq!(s2.packed_size(), 24);
+    }
+
+    #[test]
+    fn test_structure_size_in_bytes() {
+        let s = make_test_structure();
+        assert_eq!(s.size_in_bytes(), 24);
+    }
+
+    #[test]
+    fn test_structure_is_forward_ref() {
+        let s = make_test_structure();
+        assert!(!s.is_forward_ref());
+
+        let s2 = LfStructure::new(
+            0,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "FwdStruct".to_string(),
+            String::new(),
+        );
+        assert!(s2.is_forward_ref());
+    }
+
+    #[test]
+    fn test_structure_has_no_properties() {
+        let s = make_test_structure();
+        assert!(s.has_no_properties());
+
+        let mut s2 = make_test_structure();
+        s2.composite.property |= MsProperty::NESTED;
+        assert!(!s2.has_no_properties());
+    }
+
+    #[test]
+    fn test_structure_known_member_count() {
+        let s = make_test_structure();
+        assert_eq!(s.known_member_count(), Some(3));
+
+        let s2 = LfStructure::new(
+            -1,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "Unknown".to_string(),
+            String::new(),
+        );
+        assert_eq!(s2.known_member_count(), None);
+    }
+
+    #[test]
+    fn test_structure_eq() {
+        let s1 = make_test_structure();
+        let s2 = make_test_structure();
+        assert_eq!(s1, s2);
+
+        let s3 = LfStructure::new(
+            3,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::type_record(0x1002),
+            RecordNumber::type_record(0x1003),
+            24,
+            MsProperty::empty(),
+            "Different".to_string(),
+            String::new(),
+        );
+        assert_ne!(s1, s3);
+    }
+
+    #[test]
+    fn test_structure_empty_name() {
+        let s = LfStructure::new(
+            0,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::empty(),
+            String::new(),
+            String::new(),
+        );
+        assert!(s.name().is_empty());
+    }
+
+    #[test]
+    fn test_structure_large_size() {
+        let s = LfStructure::new(
+            100,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0x1_0000_0000, // 4 GB
+            MsProperty::empty(),
+            "LargeStruct".to_string(),
+            String::new(),
+        );
+        assert_eq!(s.get_size(), 0x1_0000_0000);
+        assert_eq!(s.size_in_bytes(), 0x1_0000_0000);
     }
 }

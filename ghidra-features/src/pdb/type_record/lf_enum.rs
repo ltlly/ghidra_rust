@@ -30,7 +30,7 @@ use super::RecordNumber;
 /// This is the Rust equivalent of Ghidra's `EnumMsType`. It delegates all
 /// enum fields and behaviour to the embedded [`AbstractEnumMsType`],
 /// overriding only the PDB ID to `0x1507` for the MsType variant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfEnum {
     /// The underlying enum data (count, field list, underlying type, name, etc.).
     pub enum_data: AbstractEnumMsType,
@@ -197,6 +197,32 @@ impl LfEnum {
     /// Returns `true` if `field_list_record_number` is not `NO_TYPE`.
     pub fn has_field_list(&self) -> bool {
         !self.enum_data.field_list_record_number.is_no_type()
+    }
+
+    /// Whether this enum is a forward reference.
+    ///
+    /// Forward references are placeholders for types whose full definition
+    /// appears elsewhere in the type stream. This is an alias for
+    /// [`is_forward_ref`](Self::is_forward_ref).
+    pub fn is_forward_ref_check(&self) -> bool {
+        self.enum_data.is_forward_ref()
+    }
+
+    /// Whether the property flags are empty (no special properties).
+    pub fn has_no_properties(&self) -> bool {
+        self.enum_data.property.is_empty()
+    }
+
+    /// Get the number of enumerators that are known (not -1/unknown).
+    ///
+    /// Returns `Some(count)` if the count is >= 0, `None` if the count
+    /// is -1 (meaning the enumerator count is unknown, e.g. for a forward ref).
+    pub fn known_enumerator_count(&self) -> Option<u32> {
+        if self.enum_data.count >= 0 {
+            Some(self.enum_data.count as u32)
+        } else {
+            None
+        }
     }
 }
 
@@ -484,5 +510,109 @@ mod tests {
             RecordNumber::type_record(0x0074),
         );
         assert!(!e2.has_field_list());
+    }
+
+    #[test]
+    fn test_enum_is_forward_ref_check() {
+        let e = make_test_enum();
+        assert!(!e.is_forward_ref_check());
+
+        let e2 = LfEnum::new(
+            -1,
+            RecordNumber::NO_TYPE,
+            MsProperty::FORWARD_REF,
+            "FwdEnum".to_string(),
+            String::new(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert!(e2.is_forward_ref_check());
+    }
+
+    #[test]
+    fn test_enum_has_no_properties() {
+        let e = make_test_enum();
+        assert!(e.has_no_properties());
+
+        let mut e2 = make_test_enum();
+        e2.enum_data.property |= MsProperty::NESTED;
+        assert!(!e2.has_no_properties());
+    }
+
+    #[test]
+    fn test_enum_known_enumerator_count() {
+        let e = make_test_enum();
+        assert_eq!(e.known_enumerator_count(), Some(4));
+
+        let e2 = LfEnum::new(
+            -1,
+            RecordNumber::NO_TYPE,
+            MsProperty::FORWARD_REF,
+            "FwdEnum".to_string(),
+            String::new(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert_eq!(e2.known_enumerator_count(), None);
+    }
+
+    #[test]
+    fn test_enum_eq() {
+        let e1 = make_test_enum();
+        let e2 = make_test_enum();
+        assert_eq!(e1, e2);
+
+        let e3 = LfEnum::new(
+            4,
+            RecordNumber::type_record(0x1001),
+            MsProperty::empty(),
+            "Different".to_string(),
+            String::new(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert_ne!(e1, e3);
+    }
+
+    #[test]
+    fn test_enum_scoped_enum_class() {
+        // C++11 enum class
+        let e = LfEnum::new(
+            3,
+            RecordNumber::type_record(0x1001),
+            MsProperty::SCOPED | MsProperty::NESTED,
+            "Color".to_string(),
+            String::new(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert!(e.is_scoped());
+        assert!(e.is_nested());
+        assert_eq!(e.get_num_enumerators(), 3);
+    }
+
+    #[test]
+    fn test_enum_with_unique_name() {
+        let e = LfEnum::new(
+            2,
+            RecordNumber::type_record(0x1001),
+            MsProperty::HAS_UNIQUE_NAME,
+            "MyEnum".to_string(),
+            ".AW4MyEnum@@".to_string(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert!(e.has_unique_name());
+        assert_eq!(e.mangled_name(), ".AW4MyEnum@@");
+    }
+
+    #[test]
+    fn test_enum_zero_enumerators() {
+        let e = LfEnum::new(
+            0,
+            RecordNumber::type_record(0x1001),
+            MsProperty::empty(),
+            "EmptyEnum".to_string(),
+            String::new(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert_eq!(e.get_count(), 0);
+        assert_eq!(e.get_num_enumerators(), 0);
+        assert_eq!(e.known_enumerator_count(), Some(0));
     }
 }

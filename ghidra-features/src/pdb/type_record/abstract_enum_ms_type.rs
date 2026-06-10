@@ -18,7 +18,7 @@ use super::RecordNumber;
 /// In the Java hierarchy this extends `AbstractComplexMsType` directly,
 /// adding the `underlyingRecordNumber` field.  We flatten the hierarchy
 /// here since Rust traits do not carry data.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AbstractEnumMsType {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,

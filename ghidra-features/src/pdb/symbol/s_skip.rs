@@ -17,7 +17,9 @@ use super::abstract_ms_symbol::AbstractMsSymbol;
 ///
 /// The `record_length` field stores the remaining length of the skip
 /// region (the number of bytes from the end of this record to the end
-/// of the skipped region).
+/// of the skipped region). In Ghidra's Java implementation this is
+/// computed as `reader.getLimit() - reader.getIndex()` -- the number
+/// of unconsumed bytes in the record's payload.
 ///
 /// This corresponds to `S_SKIP` (0x0007) in the CodeView symbol set.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,10 +39,28 @@ impl SSkip {
     /// The S_SKIP symbol's payload length is determined by the outer record
     /// framing. The `data` parameter represents the payload bytes after the
     /// symbol header. The length of `data` is stored as the `record_length`.
+    ///
+    /// This mirrors the Java implementation where `recordLength = reader.getLimit() - reader.getIndex()`.
     pub fn parse(data: &[u8]) -> Option<Self> {
         Some(Self {
             record_length: data.len() as u32,
         })
+    }
+
+    /// Return the skip length in bytes.
+    pub fn length(&self) -> u32 {
+        self.record_length
+    }
+
+    /// Return whether this skip symbol covers zero bytes (no-op skip).
+    pub fn is_empty(&self) -> bool {
+        self.record_length == 0
+    }
+}
+
+impl Default for SSkip {
+    fn default() -> Self {
+        Self::new(0)
     }
 }
 
@@ -123,5 +143,30 @@ mod tests {
         let data = vec![0xAA; 256];
         let sym = SSkip::parse(&data).unwrap();
         assert_eq!(sym.record_length, 256);
+    }
+
+    #[test]
+    fn test_length_accessor() {
+        let sym = SSkip::new(42);
+        assert_eq!(sym.length(), 42);
+    }
+
+    #[test]
+    fn test_is_empty_true() {
+        let sym = SSkip::new(0);
+        assert!(sym.is_empty());
+    }
+
+    #[test]
+    fn test_is_empty_false() {
+        let sym = SSkip::new(10);
+        assert!(!sym.is_empty());
+    }
+
+    #[test]
+    fn test_default() {
+        let sym = SSkip::default();
+        assert_eq!(sym.record_length, 0);
+        assert_eq!(sym, SSkip::new(0));
     }
 }

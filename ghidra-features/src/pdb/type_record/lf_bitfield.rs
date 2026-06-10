@@ -31,7 +31,7 @@ use super::RecordNumber;
 /// // C: unsigned int x : 4;
 /// // Underlying type: unsigned int, length=4, position=0
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfBitfield {
     /// Record number of this type (set during TPI/IPI registration).
     record_number: RecordNumber,
@@ -124,12 +124,16 @@ impl LfBitfield {
     ///
     /// For a bitfield of `bit_length` bits at `bit_position`, the mask is
     /// `((1 << bit_length) - 1) << bit_position`.
+    ///
+    /// Uses saturating shifts to avoid overflow when `bit_length == 32`.
     pub fn bit_mask(&self) -> u32 {
         let width = self.bit_length.min(32);
         if width == 0 {
             0
+        } else if width >= 32 {
+            u32::MAX.wrapping_shl(self.bit_position as u32)
         } else {
-            ((1u32 << width) - 1) << self.bit_position
+            ((1u32 << width) - 1).wrapping_shl(self.bit_position as u32)
         }
     }
 
@@ -411,5 +415,81 @@ mod tests {
 
         let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 1, 31);
         assert_eq!(bf.total_bits_spanned(), 32);
+    }
+
+    #[test]
+    fn test_bitfield_eq() {
+        let bf1 = make_test_bitfield();
+        let bf2 = make_test_bitfield();
+        assert_eq!(bf1, bf2);
+
+        let bf3 = LfBitfield::new(
+            RecordNumber::type_record(0x0074),
+            8,
+            0,
+        );
+        assert_ne!(bf1, bf3);
+    }
+
+    #[test]
+    fn test_bitfield_bit_mask_edge_cases() {
+        // 32-bit field at position 0: mask = 0xFFFF_FFFF
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 32, 0);
+        assert_eq!(bf.bit_mask(), 0xFFFF_FFFF);
+
+        // 16-bit field at position 16: mask = 0xFFFF_0000
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 16, 16);
+        assert_eq!(bf.bit_mask(), 0xFFFF_0000);
+
+        // 4-bit field at position 4: mask = 0xF0
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 4, 4);
+        assert_eq!(bf.bit_mask(), 0xF0);
+    }
+
+    #[test]
+    fn test_bitfield_byte_length_edge_cases() {
+        // 32 bits at position 0 -> 4 bytes
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 32, 0);
+        assert_eq!(bf.byte_length(), 4);
+
+        // 1 bit at position 31 -> 4 bytes
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 1, 31);
+        assert_eq!(bf.byte_length(), 4);
+
+        // 16 bits at position 16 -> 4 bytes
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 16, 16);
+        assert_eq!(bf.byte_length(), 4);
+    }
+
+    #[test]
+    fn test_bitfield_is_valid_edge_cases() {
+        // Exactly 32 bits is valid
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 32, 0);
+        assert!(bf.is_valid());
+
+        // 1 bit is valid
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 1, 0);
+        assert!(bf.is_valid());
+
+        // 0 bits is invalid
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 0, 0);
+        assert!(!bf.is_valid());
+    }
+
+    #[test]
+    fn test_bitfield_parse_alignment_note() {
+        // Java calls reader.align4() after parsing. The Rust parse
+        // returns the parsed data; alignment is handled externally.
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.push(4);  // length
+        data.push(0);  // position
+        // Remaining bytes would be padding in aligned format
+        data.push(0);
+        data.push(0);
+
+        let bf = LfBitfield::parse(&data).unwrap();
+        assert_eq!(bf.bit_length, 4);
+        assert_eq!(bf.bit_position, 0);
     }
 }

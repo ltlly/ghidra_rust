@@ -817,6 +817,469 @@ impl RegisterConvention {
 }
 
 // ============================================================================
+// RegisterSnapshot -- full register state at a point in time
+// ============================================================================
+
+/// A snapshot of all register values at a specific point in time.
+///
+/// Ported from Ghidra's proposed register snapshot utilities. Captures
+/// the full state of a register bank so it can be compared, restored,
+/// or serialized for later analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterSnapshot {
+    /// Human-readable label (e.g., "before syscall", "at breakpoint 3").
+    pub label: String,
+    /// Timestamp or snap value when the snapshot was taken.
+    pub snap: i64,
+    /// Register name -> value bytes.
+    pub values: BTreeMap<String, Vec<u8>>,
+    /// Register name -> state.
+    pub states: BTreeMap<String, RegisterSnapshotState>,
+}
+
+/// The state of a register within a snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterSnapshotState {
+    /// Register has a known value.
+    Known,
+    /// Register value was unknown at snapshot time.
+    Unknown,
+    /// Register value was not requested (not included in snapshot).
+    Omitted,
+}
+
+impl RegisterSnapshot {
+    /// Create a new empty snapshot.
+    pub fn new(label: impl Into<String>, snap: i64) -> Self {
+        Self {
+            label: label.into(),
+            snap,
+            values: BTreeMap::new(),
+            states: BTreeMap::new(),
+        }
+    }
+
+    /// Capture a snapshot from a register bank.
+    pub fn capture_from_bank(label: impl Into<String>, snap: i64, bank: &PcodeRegisterBank) -> Self {
+        let mut snapshot = Self::new(label, snap);
+        for name in bank.register_names() {
+            if let Some(val) = bank.read_register(name) {
+                snapshot.values.insert(name.to_string(), val);
+                snapshot.states.insert(name.to_string(), RegisterSnapshotState::Known);
+            }
+        }
+        snapshot
+    }
+
+    /// Record a register value in the snapshot.
+    pub fn record(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        let name = name.into();
+        self.values.insert(name.clone(), value);
+        self.states.insert(name, RegisterSnapshotState::Known);
+    }
+
+    /// Mark a register as unknown in the snapshot.
+    pub fn record_unknown(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        self.states.insert(name, RegisterSnapshotState::Unknown);
+    }
+
+    /// Get a register value from the snapshot.
+    pub fn get(&self, name: &str) -> Option<&Vec<u8>> {
+        self.values.get(name)
+    }
+
+    /// Get the state of a register in the snapshot.
+    pub fn get_state(&self, name: &str) -> RegisterSnapshotState {
+        self.states.get(name).copied().unwrap_or(RegisterSnapshotState::Omitted)
+    }
+
+    /// All register names included in this snapshot.
+    pub fn register_names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.states.keys().map(|s| s.as_str()).collect();
+        names.sort();
+        names
+    }
+
+    /// The number of registers with known values.
+    pub fn num_known(&self) -> usize {
+        self.values.len()
+    }
+}
+
+// ============================================================================
+// RegisterBankDiff -- compare two snapshots
+// ============================================================================
+
+/// The result of comparing two register snapshots.
+///
+/// Ported from Ghidra's register comparison utilities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterBankDiff {
+    /// Registers that changed value between the two snapshots.
+    pub changed: Vec<RegisterChange>,
+    /// Registers that were present in `after` but not in `before`.
+    pub appeared: Vec<String>,
+    /// Registers that were present in `before` but not in `after`.
+    pub disappeared: Vec<String>,
+}
+
+/// A single register change between two snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterChange {
+    /// The register name.
+    pub name: String,
+    /// The value in the "before" snapshot.
+    pub before: Vec<u8>,
+    /// The value in the "after" snapshot.
+    pub after: Vec<u8>,
+}
+
+impl RegisterBankDiff {
+    /// Compute the diff between two snapshots.
+    pub fn compute(before: &RegisterSnapshot, after: &RegisterSnapshot) -> Self {
+        let mut changed = Vec::new();
+        let mut appeared = Vec::new();
+        let mut disappeared = Vec::new();
+
+        // Find changed and disappeared registers
+        for name in before.register_names() {
+            let bstate = before.get_state(name);
+            let astate = after.get_state(name);
+
+            if astate == RegisterSnapshotState::Omitted {
+                disappeared.push(name.to_string());
+                continue;
+            }
+
+            if bstate == RegisterSnapshotState::Unknown && astate == RegisterSnapshotState::Known {
+                // Register became known -- treat as change
+                if let Some(val) = after.get(name) {
+                    changed.push(RegisterChange {
+                        name: name.to_string(),
+                        before: Vec::new(),
+                        after: val.clone(),
+                    });
+                }
+                continue;
+            }
+
+            if let (Some(bval), Some(aval)) = (before.get(name), after.get(name)) {
+                if bval != aval {
+                    changed.push(RegisterChange {
+                        name: name.to_string(),
+                        before: bval.clone(),
+                        after: aval.clone(),
+                    });
+                }
+            }
+        }
+
+        // Find appeared registers
+        for name in after.register_names() {
+            if before.get_state(name) == RegisterSnapshotState::Omitted {
+                appeared.push(name.to_string());
+            }
+        }
+
+        Self {
+            changed,
+            appeared,
+            disappeared,
+        }
+    }
+
+    /// Whether there are any differences.
+    pub fn is_empty(&self) -> bool {
+        self.changed.is_empty() && self.appeared.is_empty() && self.disappeared.is_empty()
+    }
+
+    /// The total number of differences.
+    pub fn num_changes(&self) -> usize {
+        self.changed.len() + self.appeared.len() + self.disappeared.len()
+    }
+}
+
+// ============================================================================
+// RegisterWatchpoint -- watch for register value changes
+// ============================================================================
+
+/// A watchpoint that triggers when a register's value changes.
+///
+/// Ported from Ghidra's proposed register watchpoint utilities.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterWatchpoint {
+    /// Unique watchpoint ID.
+    pub id: u64,
+    /// The register name to watch.
+    pub register_name: String,
+    /// Optional condition: if set, only triggers if the new value matches.
+    pub condition_value: Option<Vec<u8>>,
+    /// Whether the watchpoint is enabled.
+    pub enabled: bool,
+    /// How many times this watchpoint has fired.
+    pub hit_count: u64,
+    /// Optional user note.
+    pub note: String,
+}
+
+impl RegisterWatchpoint {
+    /// Create a new register watchpoint.
+    pub fn new(id: u64, register_name: impl Into<String>) -> Self {
+        Self {
+            id,
+            register_name: register_name.into(),
+            condition_value: None,
+            enabled: true,
+            hit_count: 0,
+            note: String::new(),
+        }
+    }
+
+    /// Set a condition value.
+    pub fn with_condition(mut self, value: Vec<u8>) -> Self {
+        self.condition_value = Some(value);
+        self
+    }
+
+    /// Set a note.
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.note = note.into();
+        self
+    }
+
+    /// Check whether this watchpoint should fire given a new value.
+    pub fn should_fire(&self, new_value: &[u8]) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        match &self.condition_value {
+            Some(cond) => cond.as_slice() == new_value,
+            None => true, // Any change fires
+        }
+    }
+}
+
+/// A manager for register watchpoints.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterWatchpointManager {
+    watchpoints: BTreeMap<u64, RegisterWatchpoint>,
+    next_id: u64,
+}
+
+impl RegisterWatchpointManager {
+    /// Create a new empty manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a watchpoint for a register.
+    pub fn add_watchpoint(&mut self, register_name: impl Into<String>) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.watchpoints
+            .insert(id, RegisterWatchpoint::new(id, register_name));
+        id
+    }
+
+    /// Remove a watchpoint.
+    pub fn remove_watchpoint(&mut self, id: u64) -> Option<RegisterWatchpoint> {
+        self.watchpoints.remove(&id)
+    }
+
+    /// Enable or disable a watchpoint.
+    pub fn set_enabled(&mut self, id: u64, enabled: bool) {
+        if let Some(wp) = self.watchpoints.get_mut(&id) {
+            wp.enabled = enabled;
+        }
+    }
+
+    /// Check all enabled watchpoints against a register name and new value.
+    /// Returns the IDs of watchpoints that fired.
+    pub fn check(&mut self, register_name: &str, new_value: &[u8]) -> Vec<u64> {
+        let mut hits = Vec::new();
+        for wp in self.watchpoints.values_mut() {
+            if wp.register_name == register_name && wp.should_fire(new_value) {
+                wp.hit_count += 1;
+                hits.push(wp.id);
+            }
+        }
+        hits
+    }
+
+    /// Get a watchpoint by ID.
+    pub fn get(&self, id: u64) -> Option<&RegisterWatchpoint> {
+        self.watchpoints.get(&id)
+    }
+
+    /// Get all watchpoints.
+    pub fn all(&self) -> &BTreeMap<u64, RegisterWatchpoint> {
+        &self.watchpoints
+    }
+
+    /// The number of watchpoints.
+    pub fn len(&self) -> usize {
+        self.watchpoints.len()
+    }
+
+    /// Whether there are no watchpoints.
+    pub fn is_empty(&self) -> bool {
+        self.watchpoints.is_empty()
+    }
+
+    /// Clear all watchpoints.
+    pub fn clear(&mut self) {
+        self.watchpoints.clear();
+    }
+}
+
+// ============================================================================
+// CallingConventionMapper -- translate register names between conventions
+// ============================================================================
+
+/// Translates register arguments between two calling conventions.
+///
+/// Ported from Ghidra's proposed calling convention mapping utilities.
+/// Useful for cross-ABI debugging where the caller uses one convention
+/// and the callee uses another.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallingConventionMapper {
+    /// The source convention (caller's convention).
+    pub source: RegisterConvention,
+    /// The target convention (callee's convention).
+    pub target: RegisterConvention,
+}
+
+impl CallingConventionMapper {
+    /// Create a new mapper.
+    pub fn new(source: RegisterConvention, target: RegisterConvention) -> Self {
+        Self { source, target }
+    }
+
+    /// Map integer argument registers from source to target.
+    ///
+    /// Returns a list of (source_register, target_register) pairs for
+    /// the overlapping number of argument slots.
+    pub fn map_integer_args(&self) -> Vec<(&str, &str)> {
+        self.source
+            .integer_arg_registers
+            .iter()
+            .zip(self.target.integer_arg_registers.iter())
+            .map(|(s, t)| (s.as_str(), t.as_str()))
+            .collect()
+    }
+
+    /// Map float argument registers from source to target.
+    pub fn map_float_args(&self) -> Vec<(&str, &str)> {
+        self.source
+            .float_arg_registers
+            .iter()
+            .zip(self.target.float_arg_registers.iter())
+            .map(|(s, t)| (s.as_str(), t.as_str()))
+            .collect()
+    }
+
+    /// The number of integer argument slots that can be mapped.
+    pub fn num_integer_arg_slots(&self) -> usize {
+        self.source
+            .integer_arg_registers
+            .len()
+            .min(self.target.integer_arg_registers.len())
+    }
+
+    /// The number of float argument slots that can be mapped.
+    pub fn num_float_arg_slots(&self) -> usize {
+        self.source
+            .float_arg_registers
+            .len()
+            .min(self.target.float_arg_registers.len())
+    }
+
+    /// Whether the two conventions use the same stack pointer.
+    pub fn same_stack_pointer(&self) -> bool {
+        self.source.stack_pointer == self.target.stack_pointer
+    }
+
+    /// Whether the two conventions use the same frame pointer.
+    pub fn same_frame_pointer(&self) -> bool {
+        self.source.frame_pointer == self.target.frame_pointer
+    }
+}
+
+// ============================================================================
+// RegisterAliasChain -- resolve chains of register aliases
+// ============================================================================
+
+/// Resolves chains of register aliases to find the ultimate canonical name.
+///
+/// Ported from Ghidra's proposed alias resolution utilities. Some registers
+/// have multi-level aliasing (e.g., AL -> AX -> EAX -> RAX).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterAliasChain {
+    /// child -> parent mapping (same as RegisterMapping but for aliases).
+    aliases: BTreeMap<String, String>,
+}
+
+impl RegisterAliasChain {
+    /// Create a new empty alias chain.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an alias mapping.
+    pub fn add_alias(&mut self, alias: impl Into<String>, canonical: impl Into<String>) {
+        self.aliases.insert(alias.into(), canonical.into());
+    }
+
+    /// Resolve a register name to its ultimate canonical name by following
+    /// the alias chain.
+    pub fn resolve(&self, name: &str) -> String {
+        let mut current = name.to_string();
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(current.clone());
+        while let Some(next) = self.aliases.get(&current) {
+            if !seen.insert(next.clone()) {
+                // Cycle detected -- break
+                break;
+            }
+            current = next.clone();
+        }
+        current
+    }
+
+    /// Get the full alias chain from a name to its canonical form.
+    pub fn chain(&self, name: &str) -> Vec<String> {
+        let mut result = vec![name.to_string()];
+        let mut current = name.to_string();
+        let mut seen = std::collections::HashSet::new();
+        seen.insert(current.clone());
+        while let Some(next) = self.aliases.get(&current) {
+            if !seen.insert(next.clone()) {
+                break;
+            }
+            result.push(next.clone());
+            current = next.clone();
+        }
+        result
+    }
+
+    /// Check if two names resolve to the same canonical register.
+    pub fn is_same_register(&self, a: &str, b: &str) -> bool {
+        self.resolve(a) == self.resolve(b)
+    }
+
+    /// The number of alias entries.
+    pub fn len(&self) -> usize {
+        self.aliases.len()
+    }
+
+    /// Whether there are no aliases.
+    pub fn is_empty(&self) -> bool {
+        self.aliases.is_empty()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -1139,5 +1602,191 @@ mod tests {
         assert!(conv.is_caller_saved("RAX"));
         assert!(conv.is_caller_saved("RCX"));
         assert!(!conv.is_caller_saved("RBX"));
+    }
+
+    // -- RegisterSnapshot --
+
+    #[test]
+    fn test_register_snapshot_capture() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x78, 0x56, 0x34, 0x12, 0xEF, 0xBE, 0xAD, 0xDE]);
+        bank.write_register("RBX", &[0x11; 8]);
+
+        let snap = RegisterSnapshot::capture_from_bank("test", 0, &bank);
+        assert_eq!(snap.num_known(), 2);
+        assert_eq!(snap.get_state("RAX"), RegisterSnapshotState::Known);
+        assert_eq!(snap.get_state("RCX"), RegisterSnapshotState::Omitted);
+    }
+
+    #[test]
+    fn test_register_snapshot_manual_record() {
+        let mut snap = RegisterSnapshot::new("manual", 5);
+        snap.record("RAX", vec![1, 2, 3, 4]);
+        snap.record_unknown("RBX");
+
+        assert_eq!(snap.get_state("RAX"), RegisterSnapshotState::Known);
+        assert_eq!(snap.get_state("RBX"), RegisterSnapshotState::Unknown);
+        assert_eq!(snap.get("RAX"), Some(&vec![1, 2, 3, 4]));
+    }
+
+    // -- RegisterBankDiff --
+
+    #[test]
+    fn test_register_bank_diff_no_changes() {
+        let mut before = RegisterSnapshot::new("b", 0);
+        before.record("RAX", vec![1, 2, 3, 4]);
+        let mut after = RegisterSnapshot::new("a", 1);
+        after.record("RAX", vec![1, 2, 3, 4]);
+
+        let diff = RegisterBankDiff::compute(&before, &after);
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn test_register_bank_diff_changed() {
+        let mut before = RegisterSnapshot::new("b", 0);
+        before.record("RAX", vec![1, 2, 3, 4]);
+        before.record("RBX", vec![5, 6, 7, 8]);
+        let mut after = RegisterSnapshot::new("a", 1);
+        after.record("RAX", vec![0xFF, 2, 3, 4]);
+        after.record("RBX", vec![5, 6, 7, 8]);
+
+        let diff = RegisterBankDiff::compute(&before, &after);
+        assert_eq!(diff.changed.len(), 1);
+        assert_eq!(diff.changed[0].name, "RAX");
+        assert_eq!(diff.changed[0].before, vec![1, 2, 3, 4]);
+        assert_eq!(diff.changed[0].after, vec![0xFF, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_register_bank_diff_appeared_disappeared() {
+        let mut before = RegisterSnapshot::new("b", 0);
+        before.record("RAX", vec![1, 2, 3, 4]);
+        let mut after = RegisterSnapshot::new("a", 1);
+        after.record("RAX", vec![1, 2, 3, 4]);
+        after.record("RCX", vec![9, 9, 9, 9]);
+
+        let diff = RegisterBankDiff::compute(&before, &after);
+        assert!(diff.changed.is_empty());
+        assert_eq!(diff.appeared, vec!["RCX"]);
+        assert_eq!(diff.disappeared, vec!["RAX"]); // RAX in before but not in after states
+    }
+
+    // -- RegisterWatchpoint --
+
+    #[test]
+    fn test_register_watchpoint_unconditional() {
+        let wp = RegisterWatchpoint::new(1, "RAX");
+        assert!(wp.should_fire(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn test_register_watchpoint_conditional() {
+        let wp = RegisterWatchpoint::new(1, "RAX").with_condition(vec![0xFF]);
+        assert!(wp.should_fire(&[0xFF]));
+        assert!(!wp.should_fire(&[0x00]));
+    }
+
+    #[test]
+    fn test_register_watchpoint_disabled() {
+        let mut wp = RegisterWatchpoint::new(1, "RAX");
+        wp.enabled = false;
+        assert!(!wp.should_fire(&[1, 2, 3]));
+    }
+
+    #[test]
+    fn test_register_watchpoint_manager() {
+        let mut mgr = RegisterWatchpointManager::new();
+        let id1 = mgr.add_watchpoint("RAX");
+        let id2 = mgr.add_watchpoint("RBX");
+        assert_eq!(mgr.len(), 2);
+
+        let hits = mgr.check("RAX", &[0x42]);
+        assert_eq!(hits, vec![id1]);
+        assert_eq!(mgr.get(id1).unwrap().hit_count, 1);
+
+        let hits2 = mgr.check("RCX", &[0x42]);
+        assert!(hits2.is_empty());
+
+        mgr.set_enabled(id2, false);
+        let hits3 = mgr.check("RBX", &[0x99]);
+        assert!(hits3.is_empty());
+
+        mgr.remove_watchpoint(id1);
+        assert_eq!(mgr.len(), 1);
+    }
+
+    // -- CallingConventionMapper --
+
+    #[test]
+    fn test_convention_mapper_sysv_to_ms() {
+        let mapper = CallingConventionMapper::new(
+            RegisterConvention::system_v_amd64(),
+            RegisterConvention::ms_x64(),
+        );
+        let int_args = mapper.map_integer_args();
+        assert_eq!(int_args.len(), 4); // min(6, 4)
+        assert_eq!(int_args[0], ("RDI", "RCX"));
+        assert_eq!(int_args[1], ("RSI", "RDX"));
+        assert!(mapper.same_stack_pointer());
+        assert!(mapper.same_frame_pointer());
+    }
+
+    #[test]
+    fn test_convention_mapper_to_arm() {
+        let mapper = CallingConventionMapper::new(
+            RegisterConvention::system_v_amd64(),
+            RegisterConvention::arm_aapcs(),
+        );
+        assert_eq!(mapper.num_integer_arg_slots(), 4); // min(6, 4)
+        assert!(!mapper.same_stack_pointer()); // RSP vs SP
+    }
+
+    // -- RegisterAliasChain --
+
+    #[test]
+    fn test_alias_chain_simple() {
+        let mut chain = RegisterAliasChain::new();
+        chain.add_alias("AL", "AX");
+        chain.add_alias("AX", "EAX");
+        chain.add_alias("EAX", "RAX");
+
+        assert_eq!(chain.resolve("AL"), "RAX");
+        assert_eq!(chain.resolve("EAX"), "RAX");
+        assert_eq!(chain.resolve("RAX"), "RAX");
+    }
+
+    #[test]
+    fn test_alias_chain_chain() {
+        let mut chain = RegisterAliasChain::new();
+        chain.add_alias("AL", "AX");
+        chain.add_alias("AX", "EAX");
+        chain.add_alias("EAX", "RAX");
+
+        let c = chain.chain("AL");
+        assert_eq!(c, vec!["AL", "AX", "EAX", "RAX"]);
+    }
+
+    #[test]
+    fn test_alias_chain_same_register() {
+        let mut chain = RegisterAliasChain::new();
+        chain.add_alias("AL", "AX");
+        chain.add_alias("AX", "EAX");
+
+        assert!(chain.is_same_register("AL", "EAX"));
+        assert!(!chain.is_same_register("AL", "RBX"));
+    }
+
+    #[test]
+    fn test_alias_chain_cycle_detection() {
+        let mut chain = RegisterAliasChain::new();
+        chain.add_alias("A", "B");
+        chain.add_alias("B", "A");
+
+        // Should not infinite loop; resolves to one of them
+        let resolved = chain.resolve("A");
+        assert!(resolved == "A" || resolved == "B");
     }
 }

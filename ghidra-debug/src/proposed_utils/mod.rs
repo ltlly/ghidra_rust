@@ -7,9 +7,17 @@
 //! - **Database utilities**: Key spans, field spans, cached object stores,
 //!   directed iterators, and annotated object frameworks.
 //! - **Pcode debugger access**: High-level access facade for pcode-based
-//!   debugging, combining memory, register, thread, and breakpoint management.
+//!   debugging, combining memory, register, thread, breakpoint, and
+//!   watchpoint management. Includes `MemoryRegionMap` for tracking
+//!   memory regions with permissions, `PcodeWatchpointManager` for
+//!   memory range watchpoints, `AccessMetrics` for performance tracking,
+//!   and `PcodeFrameSnapshot` for full execution frame capture.
 //! - **Pcode debugger registers**: Register bank abstraction, register mapping,
-//!   register groups, value transformations, and calling conventions.
+//!   register groups, value transformations, calling conventions,
+//!   `RegisterSnapshot` / `RegisterBankDiff` for capturing and comparing
+//!   register state, `RegisterWatchpointManager` for register change
+//!   monitoring, `CallingConventionMapper` for cross-ABI argument
+//!   translation, and `RegisterAliasChain` for multi-level alias resolution.
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 

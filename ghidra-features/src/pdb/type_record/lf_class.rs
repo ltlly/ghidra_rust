@@ -36,7 +36,7 @@ use super::RecordNumber;
 /// `LF_CLASS` has the same binary layout as `LF_STRUCTURE` (0x1505) and
 /// `LF_UNION` (0x1506) but uses the `"class"` type string and a different
 /// PDB ID constant.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LfClass {
     /// The underlying class data (composite with type_string = "class").
     pub class_data: AbstractClassMsType,
@@ -280,6 +280,39 @@ impl LfClass {
     /// Otherwise returns the recorded size (which may include alignment padding).
     pub fn packed_size(&self) -> u64 {
         self.class_data.composite.get_size()
+    }
+
+    /// Get the size in bytes as `u64`.
+    ///
+    /// Alias for [`get_size`](Self::get_size) providing a more descriptive
+    /// name when the context is about byte sizes.
+    pub fn size_in_bytes(&self) -> u64 {
+        self.class_data.composite.get_size()
+    }
+
+    /// Whether this class is a forward reference.
+    ///
+    /// Forward references are placeholders for types whose full definition
+    /// appears elsewhere in the type stream.
+    pub fn is_forward_ref(&self) -> bool {
+        self.class_data.composite.is_forward_ref()
+    }
+
+    /// Whether the property flags are empty (no special properties).
+    pub fn has_no_properties(&self) -> bool {
+        self.class_data.composite.property.is_empty()
+    }
+
+    /// Get the number of members that are known (not -1/unknown).
+    ///
+    /// Returns `Some(count)` if the count is >= 0, `None` if the count
+    /// is -1 (meaning the member count is unknown).
+    pub fn known_member_count(&self) -> Option<u32> {
+        if self.class_data.composite.count >= 0 {
+            Some(self.class_data.composite.count as u32)
+        } else {
+            None
+        }
     }
 }
 
@@ -731,5 +764,101 @@ mod tests {
     fn test_class_packed_size() {
         let c = make_test_class();
         assert_eq!(c.packed_size(), 32);
+    }
+
+    #[test]
+    fn test_class_size_in_bytes() {
+        let c = make_test_class();
+        assert_eq!(c.size_in_bytes(), 32);
+    }
+
+    #[test]
+    fn test_class_is_forward_ref() {
+        let c = make_test_class();
+        assert!(!c.is_forward_ref());
+
+        let c2 = LfClass::new(
+            0,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "FwdClass".to_string(),
+            String::new(),
+        );
+        assert!(c2.is_forward_ref());
+    }
+
+    #[test]
+    fn test_class_has_no_properties() {
+        let c = LfClass::new(
+            2,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            16,
+            MsProperty::empty(),
+            "Plain".to_string(),
+            String::new(),
+        );
+        assert!(c.has_no_properties());
+
+        let c2 = make_test_class();
+        assert!(!c2.has_no_properties());
+    }
+
+    #[test]
+    fn test_class_known_member_count() {
+        let c = make_test_class();
+        assert_eq!(c.known_member_count(), Some(5));
+
+        let c2 = LfClass::new(
+            -1,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "Unknown".to_string(),
+            String::new(),
+        );
+        assert_eq!(c2.known_member_count(), None);
+    }
+
+    #[test]
+    fn test_class_eq() {
+        let c1 = make_test_class();
+        let c2 = make_test_class();
+        assert_eq!(c1, c2);
+
+        let c3 = LfClass::new(
+            5,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::type_record(0x0000),
+            RecordNumber::type_record(0x1003),
+            32,
+            MsProperty::NESTED | MsProperty::CTOR,
+            "Different".to_string(),
+            String::new(),
+        );
+        assert_ne!(c1, c3);
+    }
+
+    #[test]
+    fn test_class_large_size() {
+        let c = LfClass::new(
+            200,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::NO_TYPE,
+            RecordNumber::type_record(0x1003),
+            0x2_0000_0000,
+            MsProperty::empty(),
+            "LargeClass".to_string(),
+            String::new(),
+        );
+        assert_eq!(c.get_size(), 0x2_0000_0000);
+        assert_eq!(c.size_in_bytes(), 0x2_0000_0000);
+        assert_eq!(c.get_count(), 200);
     }
 }

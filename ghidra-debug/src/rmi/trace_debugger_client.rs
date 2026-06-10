@@ -603,6 +603,361 @@ impl TraceRmiTransport {
 }
 
 // ---------------------------------------------------------------------------
+// TraceRmiMethodType - standard RMI operations
+// ---------------------------------------------------------------------------
+
+/// Standard RMI method types recognized by the Ghidra RMI protocol.
+///
+/// Ported from the request types in Ghidra's `TraceRmi` protobuf and the
+/// corresponding handler methods in `TraceRmiHandler`. These represent
+/// the well-known operations that the front-end and back-end exchange.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TraceRmiMethodType {
+    /// Negotiate protocol version and capabilities.
+    Negotiate,
+    /// Create a new trace on the back-end.
+    CreateTrace,
+    /// Close an existing trace.
+    CloseTrace,
+    /// Save a trace to disk.
+    SaveTrace,
+    /// Open a transaction on a trace.
+    StartTx,
+    /// Close a transaction on a trace.
+    EndTx,
+    /// Create a snapshot in the trace timeline.
+    Snapshot,
+    /// Create an overlay address space.
+    CreateOverlaySpace,
+    /// Write bytes to target memory.
+    PutBytes,
+    /// Set memory state (initialized, etc.).
+    SetMemoryState,
+    /// Delete bytes from target memory.
+    DeleteBytes,
+    /// Write register values.
+    PutRegisterValue,
+    /// Delete register values.
+    DeleteRegisterValue,
+    /// Create the root object in the trace schema.
+    CreateRootObject,
+    /// Create a trace object.
+    CreateObject,
+    /// Insert a trace object into the timeline.
+    InsertObject,
+    /// Remove a trace object from the timeline.
+    RemoveObject,
+    /// Set a value on a trace object.
+    SetValue,
+    /// Retain only specific values on a trace object.
+    RetainValues,
+    /// Get a trace object by path.
+    GetObject,
+    /// Get values matching a pattern.
+    GetValues,
+    /// Get values intersecting an address range.
+    GetValuesIntersecting,
+    /// Activate a trace object for the current debugging coordinates.
+    Activate,
+    /// Disassemble bytes at an address.
+    Disassemble,
+    /// Invoke a custom method on the back-end.
+    InvokeMethod,
+}
+
+impl TraceRmiMethodType {
+    /// The wire name used in the RMI protocol for this method.
+    pub fn wire_name(&self) -> &'static str {
+        match self {
+            Self::Negotiate => "negotiate",
+            Self::CreateTrace => "createTrace",
+            Self::CloseTrace => "closeTrace",
+            Self::SaveTrace => "saveTrace",
+            Self::StartTx => "startTx",
+            Self::EndTx => "endTx",
+            Self::Snapshot => "snapshot",
+            Self::CreateOverlaySpace => "createOverlaySpace",
+            Self::PutBytes => "putBytes",
+            Self::SetMemoryState => "setMemoryState",
+            Self::DeleteBytes => "deleteBytes",
+            Self::PutRegisterValue => "putRegisterValue",
+            Self::DeleteRegisterValue => "deleteRegisterValue",
+            Self::CreateRootObject => "createRootObject",
+            Self::CreateObject => "createObject",
+            Self::InsertObject => "insertObject",
+            Self::RemoveObject => "removeObject",
+            Self::SetValue => "setValue",
+            Self::RetainValues => "retainValues",
+            Self::GetObject => "getObject",
+            Self::GetValues => "getValues",
+            Self::GetValuesIntersecting => "getValuesIntersecting",
+            Self::Activate => "activate",
+            Self::Disassemble => "disassemble",
+            Self::InvokeMethod => "invokeMethod",
+        }
+    }
+
+    /// Look up a method type from its wire name.
+    pub fn from_wire_name(name: &str) -> Option<Self> {
+        match name {
+            "negotiate" => Some(Self::Negotiate),
+            "createTrace" => Some(Self::CreateTrace),
+            "closeTrace" => Some(Self::CloseTrace),
+            "saveTrace" => Some(Self::SaveTrace),
+            "startTx" => Some(Self::StartTx),
+            "endTx" => Some(Self::EndTx),
+            "snapshot" => Some(Self::Snapshot),
+            "createOverlaySpace" => Some(Self::CreateOverlaySpace),
+            "putBytes" => Some(Self::PutBytes),
+            "setMemoryState" => Some(Self::SetMemoryState),
+            "deleteBytes" => Some(Self::DeleteBytes),
+            "putRegisterValue" => Some(Self::PutRegisterValue),
+            "deleteRegisterValue" => Some(Self::DeleteRegisterValue),
+            "createRootObject" => Some(Self::CreateRootObject),
+            "createObject" => Some(Self::CreateObject),
+            "insertObject" => Some(Self::InsertObject),
+            "removeObject" => Some(Self::RemoveObject),
+            "setValue" => Some(Self::SetValue),
+            "retainValues" => Some(Self::RetainValues),
+            "getObject" => Some(Self::GetObject),
+            "getValues" => Some(Self::GetValues),
+            "getValuesIntersecting" => Some(Self::GetValuesIntersecting),
+            "activate" => Some(Self::Activate),
+            "disassemble" => Some(Self::Disassemble),
+            "invokeMethod" => Some(Self::InvokeMethod),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceRmiResolution / TraceRmiValueKind
+// ---------------------------------------------------------------------------
+
+/// Conflict resolution mode for trace object mutations.
+///
+/// Ported from Ghidra's `TraceRmi.Resolution` protobuf enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TraceRmiResolution {
+    /// Adjust existing entries when there is a conflict.
+    Adjust,
+    /// Deny the mutation when there is a conflict.
+    Deny,
+    /// Truncate existing entries that overlap.
+    Truncate,
+}
+
+impl TraceRmiResolution {
+    /// The wire value used in the protobuf.
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::Adjust => "adjust",
+            Self::Deny => "deny",
+            Self::Truncate => "truncate",
+        }
+    }
+
+    /// Parse from a wire value string.
+    pub fn from_wire_value(val: &str) -> Option<Self> {
+        match val {
+            "adjust" => Some(Self::Adjust),
+            "deny" => Some(Self::Deny),
+            "truncate" => Some(Self::Truncate),
+            _ => None,
+        }
+    }
+}
+
+impl Default for TraceRmiResolution {
+    fn default() -> Self {
+        Self::Adjust
+    }
+}
+
+/// The kind of values to consider when retaining.
+///
+/// Ported from Ghidra's `TraceRmi.ValueKinds` protobuf enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TraceRmiValueKind {
+    /// Only attributes (entry-key / value pairs).
+    Attributes,
+    /// Only elements (indexed children).
+    Elements,
+    /// Both attributes and elements.
+    Both,
+}
+
+impl TraceRmiValueKind {
+    /// The wire value used in the protobuf.
+    pub fn wire_value(&self) -> &'static str {
+        match self {
+            Self::Attributes => "attributes",
+            Self::Elements => "elements",
+            Self::Both => "both",
+        }
+    }
+}
+
+impl Default for TraceRmiValueKind {
+    fn default() -> Self {
+        Self::Both
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceRmiRequest / TraceRmiReply
+// ---------------------------------------------------------------------------
+
+/// A request message in the RMI protocol.
+///
+/// This is the Rust-side representation of a request that would be encoded
+/// as a `RootMessage` protobuf on the wire.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceRmiRequest {
+    /// The method being invoked.
+    pub method: TraceRmiMethodType,
+    /// The trace object ID this request operates on.
+    pub trace_id: Option<u32>,
+    /// Named parameters (JSON).
+    pub parameters: BTreeMap<String, serde_json::Value>,
+    /// Request ID for correlation with replies.
+    pub request_id: u64,
+}
+
+impl TraceRmiRequest {
+    /// Create a new request.
+    pub fn new(method: TraceRmiMethodType, request_id: u64) -> Self {
+        Self {
+            method,
+            trace_id: None,
+            parameters: BTreeMap::new(),
+            request_id,
+        }
+    }
+
+    /// Set the trace ID.
+    pub fn with_trace_id(mut self, trace_id: u32) -> Self {
+        self.trace_id = Some(trace_id);
+        self
+    }
+
+    /// Add a parameter.
+    pub fn with_param(mut self, key: impl Into<String>, value: serde_json::Value) -> Self {
+        self.parameters.insert(key.into(), value);
+        self
+    }
+}
+
+/// A reply message in the RMI protocol.
+///
+/// Rust-side representation of a reply from the back-end.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceRmiReply {
+    /// The request ID this reply corresponds to.
+    pub request_id: u64,
+    /// Whether the request succeeded.
+    pub success: bool,
+    /// The result value (JSON), if successful.
+    pub result: Option<serde_json::Value>,
+    /// Error message, if the request failed.
+    pub error: Option<String>,
+}
+
+impl TraceRmiReply {
+    /// Create a success reply.
+    pub fn success(request_id: u64, result: serde_json::Value) -> Self {
+        Self {
+            request_id,
+            success: true,
+            result: Some(result),
+            error: None,
+        }
+    }
+
+    /// Create an error reply.
+    pub fn error(request_id: u64, error: impl Into<String>) -> Self {
+        Self {
+            request_id,
+            success: false,
+            result: None,
+            error: Some(error.into()),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceRmiReplyHandler
+// ---------------------------------------------------------------------------
+
+/// Processes incoming RMI replies and dispatches them to the correct handler.
+///
+/// Ported from Ghidra's `RmiReplyHandlerThread` which runs a loop reading
+/// protobuf messages from the socket and dispatching them to the appropriate
+/// trace or request handler.
+#[derive(Debug)]
+pub struct TraceRmiReplyHandler {
+    /// Replies that have been received but not yet consumed.
+    pending_replies: BTreeMap<u64, TraceRmiReply>,
+    /// Whether the handler is running.
+    pub running: bool,
+    /// Total number of replies processed.
+    pub replies_processed: u64,
+    /// Total number of errors encountered.
+    pub errors_encountered: u64,
+}
+
+impl TraceRmiReplyHandler {
+    /// Create a new reply handler.
+    pub fn new() -> Self {
+        Self {
+            pending_replies: BTreeMap::new(),
+            running: true,
+            replies_processed: 0,
+            errors_encountered: 0,
+        }
+    }
+
+    /// Enqueue a reply for processing.
+    pub fn enqueue_reply(&mut self, reply: TraceRmiReply) {
+        self.pending_replies.insert(reply.request_id, reply);
+        self.replies_processed += 1;
+    }
+
+    /// Consume the reply for a given request ID.
+    pub fn take_reply(&mut self, request_id: u64) -> Option<TraceRmiReply> {
+        self.pending_replies.remove(&request_id)
+    }
+
+    /// Check if a reply is available for a given request ID.
+    pub fn has_reply(&self, request_id: u64) -> bool {
+        self.pending_replies.contains_key(&request_id)
+    }
+
+    /// Number of pending replies.
+    pub fn pending_count(&self) -> usize {
+        self.pending_replies.len()
+    }
+
+    /// Drain all pending replies.
+    pub fn drain_all(&mut self) -> Vec<TraceRmiReply> {
+        let replies: Vec<_> = self.pending_replies.values().cloned().collect();
+        self.pending_replies.clear();
+        replies
+    }
+
+    /// Stop the handler.
+    pub fn stop(&mut self) {
+        self.running = false;
+    }
+}
+
+impl Default for TraceRmiReplyHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TraceDebuggerSession / TraceDebuggerSessionState
 // ---------------------------------------------------------------------------
 
@@ -642,6 +997,7 @@ impl TraceDebuggerSessionState {
 /// - The debugger client (`DebuggerClient`) for backend abstraction
 /// - The RMI client (`RmiClient`) for protobuf communication
 /// - Memory/register mappers for address translation
+/// - The reply handler for processing RMI responses
 #[derive(Debug)]
 pub struct TraceDebuggerSession {
     /// Unique session ID.
@@ -668,6 +1024,14 @@ pub struct TraceDebuggerSession {
     pub target_map: BTreeMap<String, String>,
     /// Session creation timestamp (millis since epoch).
     pub created_at: i64,
+    /// The reply handler for processing RMI responses.
+    pub reply_handler: TraceRmiReplyHandler,
+    /// Current snapshot counter (auto-incremented).
+    current_snap: i64,
+    /// Overlay space names that have been created.
+    overlay_spaces: BTreeMap<String, String>,
+    /// Negotiated protocol version from the back-end.
+    negotiated_version: Option<String>,
 }
 
 impl TraceDebuggerSession {
@@ -698,6 +1062,10 @@ impl TraceDebuggerSession {
             register_mapper: RegisterMapper::new(),
             target_map: BTreeMap::new(),
             created_at: 0,
+            reply_handler: TraceRmiReplyHandler::new(),
+            current_snap: -1,
+            overlay_spaces: BTreeMap::new(),
+            negotiated_version: None,
         }
     }
 
@@ -756,6 +1124,67 @@ impl TraceDebuggerSession {
         self.state.is_alive()
     }
 
+    /// Get the current snapshot number.
+    pub fn current_snap(&self) -> i64 {
+        self.current_snap
+    }
+
+    /// Advance to the next snapshot and return its number.
+    pub fn next_snap(&mut self) -> i64 {
+        self.current_snap += 1;
+        self.current_snap
+    }
+
+    /// Set the current snapshot number.
+    pub fn set_snap(&mut self, snap: i64) {
+        self.current_snap = snap;
+    }
+
+    /// Return the current snap or the provided override.
+    pub fn snap_or_current(&self, snap: Option<i64>) -> i64 {
+        snap.unwrap_or(self.current_snap)
+    }
+
+    /// Create an overlay address space if it does not already exist.
+    pub fn ensure_overlay_space(
+        &mut self,
+        base_space: impl Into<String>,
+        overlay_name: impl Into<String>,
+    ) -> bool {
+        let name = overlay_name.into();
+        if self.overlay_spaces.contains_key(&name) {
+            return false;
+        }
+        let base = base_space.into();
+        self.overlay_spaces.insert(name, base);
+        true
+    }
+
+    /// Get the base space for an overlay.
+    pub fn overlay_base_space(&self, overlay_name: &str) -> Option<&str> {
+        self.overlay_spaces.get(overlay_name).map(|s| s.as_str())
+    }
+
+    /// Record the negotiated protocol version.
+    pub fn set_negotiated_version(&mut self, version: impl Into<String>) {
+        self.negotiated_version = Some(version.into());
+    }
+
+    /// Get the negotiated protocol version, if any.
+    pub fn negotiated_version(&self) -> Option<&str> {
+        self.negotiated_version.as_deref()
+    }
+
+    /// Process a reply from the RMI reply handler.
+    pub fn process_reply(&mut self, reply: TraceRmiReply) {
+        self.reply_handler.enqueue_reply(reply);
+    }
+
+    /// Take a specific reply by request ID.
+    pub fn take_reply(&mut self, request_id: u64) -> Option<TraceRmiReply> {
+        self.reply_handler.take_reply(request_id)
+    }
+
     /// Close the session and its connection.
     pub fn close(&mut self) {
         self.state = TraceDebuggerSessionState::Terminated;
@@ -763,6 +1192,7 @@ impl TraceDebuggerSession {
             conn.close();
         }
         self.rmi_client.close();
+        self.reply_handler.stop();
     }
 }
 
@@ -892,6 +1322,25 @@ impl TraceDebuggerClient {
         } else {
             Vec::new()
         }
+    }
+
+    /// Get the session for a given trace key.
+    pub fn session_for_trace(&self, trace_key: i64) -> Option<&TraceDebuggerSession> {
+        self.sessions.values().find(|s| s.trace_key == Some(trace_key))
+    }
+
+    /// Get all session IDs that are in a specific state.
+    pub fn session_ids_in_state(&self, state: TraceDebuggerSessionState) -> Vec<String> {
+        self.sessions
+            .values()
+            .filter(|s| s.state == state)
+            .map(|s| s.session_id.clone())
+            .collect()
+    }
+
+    /// Get the total number of targets across all sessions.
+    pub fn total_target_count(&self) -> usize {
+        self.sessions.values().map(|s| s.target_map.len()).sum()
     }
 
     /// Get all session summaries.
@@ -1698,5 +2147,318 @@ mod tests {
                 }
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceRmiMethodType tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_method_type_wire_name() {
+        assert_eq!(TraceRmiMethodType::Negotiate.wire_name(), "negotiate");
+        assert_eq!(TraceRmiMethodType::CreateTrace.wire_name(), "createTrace");
+        assert_eq!(TraceRmiMethodType::Snapshot.wire_name(), "snapshot");
+        assert_eq!(TraceRmiMethodType::PutBytes.wire_name(), "putBytes");
+        assert_eq!(TraceRmiMethodType::PutRegisterValue.wire_name(), "putRegisterValue");
+        assert_eq!(TraceRmiMethodType::CreateRootObject.wire_name(), "createRootObject");
+        assert_eq!(TraceRmiMethodType::InsertObject.wire_name(), "insertObject");
+        assert_eq!(TraceRmiMethodType::SetValue.wire_name(), "setValue");
+        assert_eq!(TraceRmiMethodType::Activate.wire_name(), "activate");
+        assert_eq!(TraceRmiMethodType::Disassemble.wire_name(), "disassemble");
+    }
+
+    #[test]
+    fn test_method_type_from_wire_name() {
+        assert_eq!(
+            TraceRmiMethodType::from_wire_name("negotiate"),
+            Some(TraceRmiMethodType::Negotiate)
+        );
+        assert_eq!(
+            TraceRmiMethodType::from_wire_name("createTrace"),
+            Some(TraceRmiMethodType::CreateTrace)
+        );
+        assert_eq!(
+            TraceRmiMethodType::from_wire_name("unknown"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_method_type_roundtrip() {
+        let all = [
+            TraceRmiMethodType::Negotiate,
+            TraceRmiMethodType::CreateTrace,
+            TraceRmiMethodType::CloseTrace,
+            TraceRmiMethodType::SaveTrace,
+            TraceRmiMethodType::StartTx,
+            TraceRmiMethodType::EndTx,
+            TraceRmiMethodType::Snapshot,
+            TraceRmiMethodType::CreateOverlaySpace,
+            TraceRmiMethodType::PutBytes,
+            TraceRmiMethodType::SetMemoryState,
+            TraceRmiMethodType::DeleteBytes,
+            TraceRmiMethodType::PutRegisterValue,
+            TraceRmiMethodType::DeleteRegisterValue,
+            TraceRmiMethodType::CreateRootObject,
+            TraceRmiMethodType::CreateObject,
+            TraceRmiMethodType::InsertObject,
+            TraceRmiMethodType::RemoveObject,
+            TraceRmiMethodType::SetValue,
+            TraceRmiMethodType::RetainValues,
+            TraceRmiMethodType::GetObject,
+            TraceRmiMethodType::GetValues,
+            TraceRmiMethodType::GetValuesIntersecting,
+            TraceRmiMethodType::Activate,
+            TraceRmiMethodType::Disassemble,
+            TraceRmiMethodType::InvokeMethod,
+        ];
+        for m in &all {
+            let name = m.wire_name();
+            assert_eq!(TraceRmiMethodType::from_wire_name(name), Some(*m));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceRmiResolution tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_resolution_default() {
+        assert_eq!(TraceRmiResolution::default(), TraceRmiResolution::Adjust);
+    }
+
+    #[test]
+    fn test_resolution_wire_roundtrip() {
+        assert_eq!(
+            TraceRmiResolution::from_wire_value(TraceRmiResolution::Adjust.wire_value()),
+            Some(TraceRmiResolution::Adjust)
+        );
+        assert_eq!(
+            TraceRmiResolution::from_wire_value(TraceRmiResolution::Deny.wire_value()),
+            Some(TraceRmiResolution::Deny)
+        );
+        assert_eq!(
+            TraceRmiResolution::from_wire_value(TraceRmiResolution::Truncate.wire_value()),
+            Some(TraceRmiResolution::Truncate)
+        );
+        assert_eq!(TraceRmiResolution::from_wire_value("bogus"), None);
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceRmiValueKind tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_value_kind_default() {
+        assert_eq!(TraceRmiValueKind::default(), TraceRmiValueKind::Both);
+    }
+
+    #[test]
+    fn test_value_kind_wire_values() {
+        assert_eq!(TraceRmiValueKind::Attributes.wire_value(), "attributes");
+        assert_eq!(TraceRmiValueKind::Elements.wire_value(), "elements");
+        assert_eq!(TraceRmiValueKind::Both.wire_value(), "both");
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceRmiRequest / TraceRmiReply tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_request_builder() {
+        let req = TraceRmiRequest::new(TraceRmiMethodType::PutBytes, 1)
+            .with_trace_id(42)
+            .with_param("address", serde_json::json!(0x400000))
+            .with_param("data", serde_json::json!("deadbeef"));
+        assert_eq!(req.method, TraceRmiMethodType::PutBytes);
+        assert_eq!(req.trace_id, Some(42));
+        assert_eq!(req.parameters.len(), 2);
+        assert_eq!(req.request_id, 1);
+    }
+
+    #[test]
+    fn test_reply_success() {
+        let reply = TraceRmiReply::success(1, serde_json::json!("ok"));
+        assert!(reply.success);
+        assert!(reply.error.is_none());
+        assert_eq!(reply.request_id, 1);
+    }
+
+    #[test]
+    fn test_reply_error() {
+        let reply = TraceRmiReply::error(2, "version mismatch");
+        assert!(!reply.success);
+        assert_eq!(reply.error.as_deref(), Some("version mismatch"));
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceRmiReplyHandler tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_reply_handler_new() {
+        let handler = TraceRmiReplyHandler::new();
+        assert!(handler.running);
+        assert_eq!(handler.pending_count(), 0);
+        assert_eq!(handler.replies_processed, 0);
+    }
+
+    #[test]
+    fn test_reply_handler_enqueue_and_take() {
+        let mut handler = TraceRmiReplyHandler::new();
+        handler.enqueue_reply(TraceRmiReply::success(1, serde_json::json!("ok")));
+        handler.enqueue_reply(TraceRmiReply::error(2, "fail"));
+        assert_eq!(handler.pending_count(), 2);
+        assert_eq!(handler.replies_processed, 2);
+
+        let r1 = handler.take_reply(1).unwrap();
+        assert!(r1.success);
+        assert_eq!(handler.pending_count(), 1);
+
+        let r2 = handler.take_reply(2).unwrap();
+        assert!(!r2.success);
+        assert_eq!(handler.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_reply_handler_has_reply() {
+        let mut handler = TraceRmiReplyHandler::new();
+        assert!(!handler.has_reply(1));
+        handler.enqueue_reply(TraceRmiReply::success(1, serde_json::json!(null)));
+        assert!(handler.has_reply(1));
+        assert!(!handler.has_reply(2));
+    }
+
+    #[test]
+    fn test_reply_handler_drain() {
+        let mut handler = TraceRmiReplyHandler::new();
+        handler.enqueue_reply(TraceRmiReply::success(1, serde_json::json!(null)));
+        handler.enqueue_reply(TraceRmiReply::success(2, serde_json::json!(null)));
+
+        let all = handler.drain_all();
+        assert_eq!(all.len(), 2);
+        assert_eq!(handler.pending_count(), 0);
+    }
+
+    #[test]
+    fn test_reply_handler_stop() {
+        let mut handler = TraceRmiReplyHandler::new();
+        assert!(handler.running);
+        handler.stop();
+        assert!(!handler.running);
+    }
+
+    #[test]
+    fn test_reply_handler_default() {
+        let handler = TraceRmiReplyHandler::default();
+        assert!(handler.running);
+    }
+
+    // -----------------------------------------------------------------------
+    // Session snap/overlay tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_session_snap_management() {
+        let mut session = TraceDebuggerSession::new("s1", DebuggerClientKind::Gdb, "test");
+        assert_eq!(session.current_snap(), -1);
+
+        let snap = session.next_snap();
+        assert_eq!(snap, 0);
+        assert_eq!(session.current_snap(), 0);
+
+        let snap2 = session.next_snap();
+        assert_eq!(snap2, 1);
+
+        session.set_snap(10);
+        assert_eq!(session.current_snap(), 10);
+    }
+
+    #[test]
+    fn test_session_snap_or_current() {
+        let mut session = TraceDebuggerSession::new("s1", DebuggerClientKind::Gdb, "test");
+        session.set_snap(5);
+        assert_eq!(session.snap_or_current(None), 5);
+        assert_eq!(session.snap_or_current(Some(10)), 10);
+    }
+
+    #[test]
+    fn test_session_overlay_space() {
+        let mut session = TraceDebuggerSession::new("s1", DebuggerClientKind::Gdb, "test");
+        assert!(session.overlay_base_space("myOverlay").is_none());
+
+        let created = session.ensure_overlay_space("ram", "myOverlay");
+        assert!(created);
+        assert_eq!(session.overlay_base_space("myOverlay"), Some("ram"));
+
+        // Creating again should return false (already exists)
+        let created_again = session.ensure_overlay_space("ram", "myOverlay");
+        assert!(!created_again);
+    }
+
+    #[test]
+    fn test_session_negotiated_version() {
+        let mut session = TraceDebuggerSession::new("s1", DebuggerClientKind::Gdb, "test");
+        assert!(session.negotiated_version().is_none());
+        session.set_negotiated_version("12.2");
+        assert_eq!(session.negotiated_version(), Some("12.2"));
+    }
+
+    #[test]
+    fn test_session_process_reply() {
+        let mut session = TraceDebuggerSession::new("s1", DebuggerClientKind::Gdb, "test");
+        session.process_reply(TraceRmiReply::success(1, serde_json::json!("done")));
+        assert!(session.reply_handler.has_reply(1));
+
+        let reply = session.take_reply(1).unwrap();
+        assert!(reply.success);
+    }
+
+    // -----------------------------------------------------------------------
+    // TraceDebuggerClient new method tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_trace_debugger_client_session_for_trace() {
+        let config = TraceDebuggerClientConfig::default();
+        let mut client = TraceDebuggerClient::new(config);
+        let s1 = client.start_session(DebuggerClientKind::Gdb, "GDB");
+        client.get_session_mut(&s1).unwrap().set_trace_key(42);
+
+        assert!(client.session_for_trace(42).is_some());
+        assert_eq!(client.session_for_trace(42).unwrap().session_id, s1);
+        assert!(client.session_for_trace(99).is_none());
+    }
+
+    #[test]
+    fn test_trace_debugger_client_ids_in_state() {
+        let config = TraceDebuggerClientConfig::default();
+        let mut client = TraceDebuggerClient::new(config);
+        let s1 = client.start_session(DebuggerClientKind::Gdb, "a");
+        let s2 = client.start_session(DebuggerClientKind::Lldb, "b");
+        client.start_session(DebuggerClientKind::Drgn, "c");
+
+        client.get_session_mut(&s1).unwrap().set_state(TraceDebuggerSessionState::Active);
+        client.get_session_mut(&s2).unwrap().set_state(TraceDebuggerSessionState::Active);
+
+        let active_ids = client.session_ids_in_state(TraceDebuggerSessionState::Active);
+        assert_eq!(active_ids.len(), 2);
+
+        let idle_ids = client.session_ids_in_state(TraceDebuggerSessionState::Idle);
+        assert_eq!(idle_ids.len(), 1);
+    }
+
+    #[test]
+    fn test_trace_debugger_client_total_target_count() {
+        let config = TraceDebuggerClientConfig::default();
+        let mut client = TraceDebuggerClient::new(config);
+        let s1 = client.start_session(DebuggerClientKind::Gdb, "a");
+        let s2 = client.start_session(DebuggerClientKind::Lldb, "b");
+
+        client.get_session_mut(&s1).unwrap().map_target("t1", "Processes[0]");
+        client.get_session_mut(&s1).unwrap().map_target("t2", "Processes[1]");
+        client.get_session_mut(&s2).unwrap().map_target("t3", "Processes[0]");
+
+        assert_eq!(client.total_target_count(), 3);
     }
 }
