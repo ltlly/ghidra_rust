@@ -1,6 +1,7 @@
 //! ISF server: TCP listener with connection management and graceful shutdown.
 //!
-//! Ported from Ghidra's `IsfServer` in the `ghidra.dbg.isf` package.
+//! Ported from Ghidra's `IsfServer` and `IsfServerLauncher` in the
+//! `ghidra.dbg.isf` package.
 //!
 //! The server binds to a TCP port, accepts incoming connections, and hands
 //! each connection off to an [`IsfClientHandler`] for protocol processing.
@@ -9,6 +10,8 @@
 //! - Maximum concurrent connection limiting
 //! - Graceful shutdown via a shared atomic flag
 //! - Per-connection statistics tracking
+//! - Namespace-based data type manager mapping
+//! - CLI launcher for standalone ISF server operation
 
 use std::io;
 use std::net::{TcpListener, TcpStream};
@@ -85,6 +88,102 @@ pub struct ConnectionRecord {
 }
 
 // ---------------------------------------------------------------------------
+// IsfServerLauncher
+// ---------------------------------------------------------------------------
+
+/// Launcher for a standalone ISF server process.
+///
+/// Ported from Ghidra's `IsfServerLauncher`. Parses command-line arguments
+/// and starts the ISF server on the specified port.
+///
+/// # Usage
+///
+/// ```text
+/// isf_server <port> [bind_address]
+/// ```
+#[derive(Debug)]
+pub struct IsfServerLauncher {
+    /// The server instance.
+    server: Option<IsfServer>,
+    /// The port number.
+    port: u16,
+    /// Optional bind address override.
+    bind_address: Option<String>,
+}
+
+impl IsfServerLauncher {
+    /// Create a new launcher.
+    pub fn new() -> Self {
+        Self {
+            server: None,
+            port: 54321,
+            bind_address: None,
+        }
+    }
+
+    /// Parse command-line arguments and configure the launcher.
+    ///
+    /// Arguments: `<port> [bind_address]`
+    pub fn parse_args(&mut self, args: &[String]) -> Result<(), String> {
+        if args.is_empty() {
+            return Err("Usage: isf_server <port> [bind_address]".into());
+        }
+
+        self.port = args[0]
+            .parse::<u16>()
+            .map_err(|e| format!("Invalid port '{}': {}", args[0], e))?;
+
+        if args.len() > 1 {
+            self.bind_address = Some(args[1].clone());
+        }
+
+        Ok(())
+    }
+
+    /// Create and start the ISF server.
+    pub fn launch(&mut self) -> io::Result<()> {
+        let bind_addr = self
+            .bind_address
+            .clone()
+            .unwrap_or_else(|| "127.0.0.1".into());
+
+        let config = IsfServerConfig {
+            bind_addr: format!("{}:{}", bind_addr, self.port),
+            ..Default::default()
+        };
+
+        let mut server = IsfServer::new(config);
+        server.start()?;
+        self.server = Some(server);
+        Ok(())
+    }
+
+    /// Get the port the server is listening on.
+    pub fn port(&self) -> u16 {
+        self.port
+    }
+
+    /// Stop the server.
+    pub fn close(&mut self) {
+        if let Some(ref mut server) = self.server {
+            server.shutdown();
+        }
+        self.server = None;
+    }
+
+    /// Whether the server is running.
+    pub fn is_running(&self) -> bool {
+        self.server.as_ref().map_or(false, |s| s.is_running())
+    }
+}
+
+impl Default for IsfServerLauncher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // IsfServer
 // ---------------------------------------------------------------------------
 
@@ -100,6 +199,12 @@ pub struct ConnectionRecord {
 /// 2. Pre-populate the type store via [`IsfServer::add_type`] and friends.
 /// 3. Call [`IsfServer::start`] to bind and begin accepting.
 /// 4. Call [`IsfServer::shutdown`] to stop accepting and close all connections.
+///
+/// # Data Type Manager Integration
+///
+/// The server supports mapping namespaces to type store entries, allowing
+/// clients to query types by namespace. This is analogous to the Java
+/// `IsfServer`'s `DataTypeManager` mapping.
 pub struct IsfServer {
     /// Server configuration.
     pub config: IsfServerConfig,
@@ -117,6 +222,8 @@ pub struct IsfServer {
     pub stats: ServerStats,
     /// Records of closed/active connections.
     pub connection_records: Vec<ConnectionRecord>,
+    /// Registered namespace names (mirrors keys of `types`).
+    namespaces: Vec<String>,
 }
 
 impl std::fmt::Debug for IsfServer {
@@ -125,6 +232,7 @@ impl std::fmt::Debug for IsfServer {
             .field("config", &self.config)
             .field("listening", &self.listener.is_some())
             .field("stats", &self.stats)
+            .field("namespaces", &self.namespaces)
             .finish()
     }
 }
@@ -141,6 +249,7 @@ impl IsfServer {
             shutdown_flag: Arc::new(AtomicBool::new(false)),
             stats: ServerStats::default(),
             connection_records: Vec::new(),
+            namespaces: Vec::new(),
         }
     }
 
@@ -148,7 +257,11 @@ impl IsfServer {
 
     /// Add a type definition to the shared type store.
     pub fn add_type(&mut self, namespace: impl Into<String>, type_def: IsfTypeDef) {
-        self.types.entry(namespace.into()).or_default().push(type_def);
+        let ns = namespace.into();
+        if !self.types.contains_key(&ns) {
+            self.namespaces.push(ns.clone());
+        }
+        self.types.entry(ns).or_default().push(type_def);
     }
 
     /// Allocate a new type ID.
@@ -161,6 +274,21 @@ impl IsfServer {
     /// Get a snapshot of the current type store for injecting into a handler.
     fn clone_types(&self) -> std::collections::BTreeMap<String, Vec<IsfTypeDef>> {
         self.types.clone()
+    }
+
+    /// Get the list of registered namespaces.
+    pub fn namespaces(&self) -> &[String] {
+        &self.namespaces
+    }
+
+    /// Check whether a namespace is registered.
+    pub fn has_namespace(&self, namespace: &str) -> bool {
+        self.types.contains_key(namespace)
+    }
+
+    /// Get the number of types in a namespace.
+    pub fn type_count(&self, namespace: &str) -> usize {
+        self.types.get(namespace).map_or(0, |v| v.len())
     }
 
     // -- Lifecycle ------------------------------------------------------------
@@ -341,7 +469,7 @@ impl IsfServer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::isf::server::{IsfComponent, IsfRequest, IsfResponse, IsfTypeKind};
+    use crate::isf::server::{IsfRequest, IsfResponse, IsfTypeKind};
 
     #[test]
     fn test_server_config_default() {
@@ -357,6 +485,7 @@ mod tests {
         assert!(!server.is_running());
         assert_eq!(server.stats.connections_accepted, 0);
         assert_eq!(server.stats.connections_active, 0);
+        assert!(server.namespaces().is_empty());
     }
 
     #[test]
@@ -374,6 +503,33 @@ mod tests {
         let types = server.clone_types();
         assert!(types.contains_key("ns"));
         assert_eq!(types["ns"].len(), 1);
+        assert!(server.has_namespace("ns"));
+        assert_eq!(server.type_count("ns"), 1);
+    }
+
+    #[test]
+    fn test_server_namespace_tracking() {
+        let mut server = IsfServer::new(IsfServerConfig::default());
+        server.add_type("linux", IsfTypeDef {
+            type_id: 1, name: "int".into(), kind: IsfTypeKind::BuiltIn,
+            size: 4, alignment: 4, components: vec![], properties: std::collections::BTreeMap::new(),
+        });
+        server.add_type("windows", IsfTypeDef {
+            type_id: 2, name: "DWORD".into(), kind: IsfTypeKind::BuiltIn,
+            size: 4, alignment: 4, components: vec![], properties: std::collections::BTreeMap::new(),
+        });
+        server.add_type("linux", IsfTypeDef {
+            type_id: 3, name: "char".into(), kind: IsfTypeKind::BuiltIn,
+            size: 1, alignment: 1, components: vec![], properties: std::collections::BTreeMap::new(),
+        });
+
+        let ns = server.namespaces();
+        assert_eq!(ns.len(), 2);
+        assert!(ns.contains(&"linux".to_string()));
+        assert!(ns.contains(&"windows".to_string()));
+        assert_eq!(server.type_count("linux"), 2);
+        assert_eq!(server.type_count("windows"), 1);
+        assert!(!server.has_namespace("macos"));
     }
 
     #[test]
@@ -547,6 +703,42 @@ mod tests {
         let cfg2 = cfg.clone();
         assert_eq!(cfg.bind_addr, cfg2.bind_addr);
         assert_eq!(cfg.max_connections, cfg2.max_connections);
+    }
+
+    #[test]
+    fn test_launcher_creation() {
+        let launcher = IsfServerLauncher::new();
+        assert_eq!(launcher.port(), 54321);
+        assert!(!launcher.is_running());
+    }
+
+    #[test]
+    fn test_launcher_parse_args() {
+        let mut launcher = IsfServerLauncher::new();
+        let args = vec!["8080".to_string()];
+        launcher.parse_args(&args).unwrap();
+        assert_eq!(launcher.port(), 8080);
+
+        let mut launcher2 = IsfServerLauncher::new();
+        let args2 = vec!["9090".to_string(), "0.0.0.0".to_string()];
+        launcher2.parse_args(&args2).unwrap();
+        assert_eq!(launcher2.port(), 9090);
+    }
+
+    #[test]
+    fn test_launcher_parse_args_error() {
+        let mut launcher = IsfServerLauncher::new();
+        let args: Vec<String> = vec![];
+        assert!(launcher.parse_args(&args).is_err());
+
+        let args = vec!["not_a_number".to_string()];
+        assert!(launcher.parse_args(&args).is_err());
+    }
+
+    #[test]
+    fn test_launcher_default() {
+        let launcher = IsfServerLauncher::default();
+        assert_eq!(launcher.port(), 54321);
     }
 }
 

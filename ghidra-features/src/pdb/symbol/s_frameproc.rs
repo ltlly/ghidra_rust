@@ -6,6 +6,39 @@ use std::fmt;
 
 use super::abstract_ms_symbol::AbstractMsSymbol;
 
+/// Register name for explicitly encoded base pointer fields.
+///
+/// The 2-bit fields in `S_FRAMEPROC` flags for `local_base_pointer_register`
+/// and `parameter_pointer_register` encode a register index. This enum
+/// provides a human-readable name matching the PDB register numbering.
+///
+/// The mapping follows the x86 register numbering from the CodeView spec:
+/// - 0 = None (no explicitly encoded register)
+/// - 1 = al / ax / eax
+/// - 2 = cl / cx / ecx
+/// - 3 = dl / dx / edx
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct FramePointerRegister(pub u8);
+
+impl FramePointerRegister {
+    /// Return the register name string for x86/x64.
+    pub fn name(&self) -> &'static str {
+        match self.0 {
+            0 => "None",
+            1 => "ax",
+            2 => "cx",
+            3 => "dx",
+            _ => "???",
+        }
+    }
+}
+
+impl fmt::Display for FramePointerRegister {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 /// A frame procedure information symbol (`S_FRAMEPROC`).
 ///
 /// This symbol contains detailed information about a function's stack frame
@@ -93,9 +126,9 @@ pub struct FrameProcFlags {
     /// Function is `__declspec(safebuffers)`.
     pub is_declspec_safebuffers: bool,
     /// Bits 14-15: explicitly encoded local base pointer register (2 bits).
-    pub local_base_pointer_register: u8,
+    pub local_base_pointer_register: FramePointerRegister,
     /// Bits 16-17: explicitly encoded parameter pointer register (2 bits).
-    pub parameter_pointer_register: u8,
+    pub parameter_pointer_register: FramePointerRegister,
     /// Function was compiled with PGO/PGU (Profile Guided Optimization).
     pub compiled_with_pgo_pgu: bool,
     /// PGO/PGU counts are valid.
@@ -142,9 +175,9 @@ impl FrameProcFlags {
         f >>= 1;
         let is_declspec_safebuffers = (f & 0x01) != 0;
         f >>= 1;
-        let local_base_pointer_register = (f & 0x03) as u8;
+        let local_base_pointer_register = FramePointerRegister((f & 0x03) as u8);
         f >>= 2;
-        let parameter_pointer_register = (f & 0x03) as u8;
+        let parameter_pointer_register = FramePointerRegister((f & 0x03) as u8);
         f >>= 2;
         let compiled_with_pgo_pgu = (f & 0x01) != 0;
         f >>= 1;
@@ -294,15 +327,22 @@ impl AbstractMsSymbol for SFrameProc {
         if ff.is_declspec_strict_gs_check { hints.push("strict_gs_check"); }
         if ff.is_declspec_safebuffers { hints.push("safebuffers"); }
         if ff.compiled_with_pgo_pgu { hints.push("pgo_on"); }
-        if ff.has_valid_pogo_counts { hints.push("valid_pgo_counts"); }
+        if ff.has_valid_pogo_counts { hints.push("valid_pgo_counts"); } else { hints.push("invalid_pgo_counts"); }
         if ff.optimized_for_speed { hints.push("opt_for_speed"); }
-        if ff.contains_cfg_checks_no_write_checks { hints.push("guardcf"); }
-        if ff.contains_cfw_checks_or_instrumentation { hints.push("guardcfw"); }
 
         if !hints.is_empty() {
             write!(f, "\n   Function info: {}", hints.join(" "))?;
         }
-        write!(f, "\n   ({:08X})", self.flags)
+
+        write!(
+            f,
+            " Local={} Param={} {} {} ({:08X})",
+            ff.local_base_pointer_register,
+            ff.parameter_pointer_register,
+            if ff.contains_cfg_checks_no_write_checks { "guardcf" } else { "" },
+            if ff.contains_cfw_checks_or_instrumentation { "guardcfw" } else { "" },
+            self.flags,
+        )
     }
 }
 
@@ -402,8 +442,10 @@ mod tests {
         let flags = 0x0002C000u32;
         let data = make_frameproc_bytes(0, 0, 0, 0, 0, 0, flags);
         let sym = SFrameProc::parse(&data).unwrap();
-        assert_eq!(sym.frame_flags.local_base_pointer_register, 3);
-        assert_eq!(sym.frame_flags.parameter_pointer_register, 2);
+        assert_eq!(sym.frame_flags.local_base_pointer_register, FramePointerRegister(3));
+        assert_eq!(sym.frame_flags.parameter_pointer_register, FramePointerRegister(2));
+        assert_eq!(sym.frame_flags.local_base_pointer_register.name(), "dx");
+        assert_eq!(sym.frame_flags.parameter_pointer_register.name(), "cx");
     }
 
     #[test]
@@ -441,8 +483,8 @@ mod tests {
         assert!(!sym.frame_flags.uses_longjmp);
         assert!(!sym.frame_flags.uses_inline_asm);
         assert!(!sym.frame_flags.has_exception_handling_states);
-        assert_eq!(sym.frame_flags.local_base_pointer_register, 0);
-        assert_eq!(sym.frame_flags.parameter_pointer_register, 0);
+        assert_eq!(sym.frame_flags.local_base_pointer_register, FramePointerRegister(0));
+        assert_eq!(sym.frame_flags.parameter_pointer_register, FramePointerRegister(0));
     }
 
     #[test]
@@ -450,6 +492,14 @@ mod tests {
         let ff = FrameProcFlags::default();
         assert!(!ff.uses_alloca);
         assert!(!ff.optimized_for_speed);
-        assert_eq!(ff.local_base_pointer_register, 0);
+        assert_eq!(ff.local_base_pointer_register, FramePointerRegister(0));
+    }
+
+    #[test]
+    fn test_register_name_display() {
+        assert_eq!(format!("{}", FramePointerRegister(0)), "None");
+        assert_eq!(format!("{}", FramePointerRegister(1)), "ax");
+        assert_eq!(format!("{}", FramePointerRegister(2)), "cx");
+        assert_eq!(format!("{}", FramePointerRegister(3)), "dx");
     }
 }

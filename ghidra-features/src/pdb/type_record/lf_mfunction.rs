@@ -26,6 +26,8 @@ use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_procedure::{CallingConvention, FunctionAttributes};
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB member function type record (`LF_MFUNCTION`).
 ///
@@ -213,6 +215,39 @@ impl LfMfunction {
         self.return_value_record_number == RecordNumber::NO_TYPE
             && !self.function_attributes.is_constructor()
             && self.num_parameters == 0
+    }
+
+    /// Parse a member function type record from a byte reader (32-bit MsType).
+    ///
+    /// Reads the return type index, class type index, this-pointer type
+    /// index, calling convention byte, function attributes byte, parameter
+    /// count, argument list type index, and this-pointer adjustment.
+    /// This mirrors the Java `MemberFunctionMsType` constructor which calls
+    /// the `AbstractMemberFunctionMsType` base with `recordNumberSize=32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let return_type_index = reader.read_u32()?;
+        let class_type_index = reader.read_u32()?;
+        let this_type_index = reader.read_u32()?;
+        let calling_convention_byte = reader.read_u8()?;
+        let attributes_byte = reader.read_u8()?;
+        let num_parameters = reader.read_u16()?;
+        let arg_list_type_index = reader.read_u32()?;
+        let this_adjustment = reader.read_i32()? as u32;
+        reader.align(4); // skipPadding
+        Ok(Self::from_parsed(
+            return_type_index,
+            class_type_index,
+            this_type_index,
+            calling_convention_byte,
+            attributes_byte,
+            num_parameters,
+            arg_list_type_index,
+            this_adjustment,
+        ))
     }
 
     /// Emit the full signature including class qualification, this-pointer
@@ -677,5 +712,78 @@ mod tests {
         let emitted = mf.emit(Bind::NONE);
         assert!(emitted.contains("virtual base"));
         assert!(emitted.contains(",12,"));
+    }
+
+    // =========================================================================
+    // Binary parsing tests
+    // =========================================================================
+
+    use crate::pdb::pdb_byte_reader::PdbByteReader;
+
+    #[test]
+    fn test_mfunction_parse_from_reader() {
+        // returnType=0x0074(u32), classType=0x1000(u32), thisType=0x1001(u32),
+        // cc=0x0b(ThisCall)(u8), attrs=0x00(u8), numParams=2(u16),
+        // argList=0x1002(u32), thisAdjustment=0(i32)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        data.push(0x0bu8); // ThisCall
+        data.push(0x00u8); // no attributes
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u32.to_le_bytes());
+        data.extend_from_slice(&0i32.to_le_bytes()); // this_adjustment
+        let mut reader = PdbByteReader::new(&data);
+        let mf = LfMfunction::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(mf.calling_convention, CallingConvention::ThisCall);
+        assert_eq!(mf.num_parameters, 2);
+        assert_eq!(mf.this_adjustment, 0);
+        assert_eq!(mf.class_record_number, RecordNumber::type_record(0x1000));
+        assert_eq!(mf.this_record_number, RecordNumber::type_record(0x1001));
+    }
+
+    #[test]
+    fn test_mfunction_parse_from_reader_with_adjustment() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        data.push(0x0bu8);
+        data.push(0x04u8); // virtual base constructor
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u32.to_le_bytes());
+        data.extend_from_slice(&8i32.to_le_bytes()); // this_adjustment = 8
+        let mut reader = PdbByteReader::new(&data);
+        let mf = LfMfunction::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(mf.this_adjustment, 8);
+        assert!(mf.has_this_adjustment());
+        assert!(mf.has_virtual_base_this_adjustment());
+    }
+
+    #[test]
+    fn test_mfunction_parse_from_reader_truncated() {
+        let data = [0x74u8, 0x00, 0x00, 0x00]; // only 4 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfMfunction::parse_from_reader(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mfunction_parse_from_reader_cdecl() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        data.push(0x00u8); // NearC
+        data.push(0x00u8);
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u32.to_le_bytes());
+        data.extend_from_slice(&0i32.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let mf = LfMfunction::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(mf.calling_convention, CallingConvention::NearC);
+        let emitted = mf.emit(Bind::NONE);
+        assert!(emitted.contains("[__cdecl]"));
     }
 }

@@ -23,8 +23,11 @@ use super::abstract_ms_symbol::AbstractMsSymbol;
 /// This corresponds to `S_ENVBLOCK` (0x1034) in the CodeView symbol set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SEnvBlock {
-    /// Raw flags byte. Meaning is not publicly documented.
+    /// Raw flags byte.
     pub flags: u8,
+
+    /// Whether the compilation was for edit-and-continue (derived from flags).
+    pub rev: bool,
 
     /// Key-value pairs from the environment block.
     pub fields: Vec<(String, String)>,
@@ -33,7 +36,11 @@ pub struct SEnvBlock {
 impl SEnvBlock {
     /// Create a new environment block symbol.
     pub fn new(flags: u8, fields: Vec<(String, String)>) -> Self {
-        Self { flags, fields }
+        Self {
+            flags,
+            rev: (flags & 0x01) != 0,
+            fields,
+        }
     }
 
     /// Parse an S_ENVBLOCK symbol from a byte slice.
@@ -45,6 +52,7 @@ impl SEnvBlock {
             return None;
         }
         let flags = data[0];
+        let rev = (flags & 0x01) != 0;
         let mut fields = Vec::new();
         let mut pos = 1usize;
         while pos < data.len() {
@@ -59,7 +67,7 @@ impl SEnvBlock {
             fields.push((key, val));
             pos = k2;
         }
-        Some(Self { flags, fields })
+        Some(Self { flags, rev, fields })
     }
 
     /// Return the number of key-value pairs in this environment block.
@@ -101,12 +109,15 @@ impl AbstractMsSymbol for SEnvBlock {
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "EnvBlock: Flags: {:#04X}, {} fields", self.flags, self.fields.len())?;
-        for (i, (key, val)) in self.fields.iter().enumerate() {
-            if i > 0 {
-                write!(f, "\n")?;
-            }
-            write!(f, "   {} = {}", key, val)?;
+        writeln!(f, "ENVBLOCK:")?;
+        writeln!(
+            f,
+            "Compiled for edit and continue: {}",
+            if self.rev { "yes" } else { "no" }
+        )?;
+        writeln!(f, "Command block: ")?;
+        for (key, val) in self.fields.iter() {
+            writeln!(f, "   {} = '{}'", key, val)?;
         }
         Ok(())
     }
@@ -139,6 +150,7 @@ mod tests {
         let data = make_envblock_bytes(0, &[(b"key1", b"val1"), (b"key2", b"val2")]);
         let sym = SEnvBlock::parse(&data).unwrap();
         assert_eq!(sym.flags, 0);
+        assert!(!sym.rev);
         assert_eq!(sym.fields.len(), 2);
         assert_eq!(sym.fields[0], ("key1".to_string(), "val1".to_string()));
         assert_eq!(sym.fields[1], ("key2".to_string(), "val2".to_string()));
@@ -163,6 +175,7 @@ mod tests {
         let data = make_envblock_bytes(1, &[(b"W", b"/O2")]);
         let sym = SEnvBlock::parse(&data).unwrap();
         assert_eq!(sym.flags, 1);
+        assert!(sym.rev);
         assert_eq!(sym.fields.len(), 1);
         assert_eq!(sym.get("W"), Some("/O2"));
     }
@@ -194,15 +207,24 @@ mod tests {
         let sym = SEnvBlock::new(0, vec![("CC".into(), "cl.exe".into())]);
         assert_eq!(sym.pdb_id(), 0x1034);
         assert_eq!(sym.symbol_type_name(), "S_ENVBLOCK");
+        assert!(!sym.rev);
     }
 
     #[test]
     fn test_display() {
         let sym = SEnvBlock::new(0, vec![("CC".into(), "cl.exe".into())]);
         let s = format!("{}", sym);
-        assert!(s.contains("EnvBlock"));
+        assert!(s.contains("ENVBLOCK"));
         assert!(s.contains("CC"));
         assert!(s.contains("cl.exe"));
+        assert!(s.contains("Compiled for edit and continue: no"));
+    }
+
+    #[test]
+    fn test_display_rev() {
+        let sym = SEnvBlock::new(1, vec![("W".into(), "/O2".into())]);
+        let s = format!("{}", sym);
+        assert!(s.contains("Compiled for edit and continue: yes"));
     }
 
     #[test]

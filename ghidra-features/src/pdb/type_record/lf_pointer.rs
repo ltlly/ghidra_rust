@@ -35,6 +35,8 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 // =============================================================================
 // PointerType -- the kind of pointer address model
@@ -631,6 +633,91 @@ impl LfPointer {
     pub fn is_function_pointer_mode(&self) -> bool {
         self.pointer_mode == PointerMode::MemberFunctionPointer
     }
+
+    /// Parse the core fields (underlying type + attributes) from a byte reader.
+    ///
+    /// This corresponds to the Java `PointerMsType` constructor that reads
+    /// `underlyingRecordNumber` and calls `parseAttributes()`. After calling
+    /// this, the caller should invoke [`parse_extended_pointer_info`] if there
+    /// are remaining bytes in the record.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let underlying_type_index = reader.read_u32()?;
+        let attributes = reader.read_u32()?;
+        Ok(Self::from_parsed(underlying_type_index, attributes))
+    }
+
+    /// Parse extended pointer info from remaining record bytes.
+    ///
+    /// Mirrors Java `AbstractPointerMsType.parseExtendedPointerInfo()`.
+    /// After the core pointer fields are parsed, optional extended data
+    /// may follow depending on the pointer mode and type. This method
+    /// dispatches on the current `pointer_mode` and `pointer_type` to
+    /// parse that extended data.
+    ///
+    /// The `record_number_size` parameter controls how many bytes are used
+    /// for record number fields (typically 4 for 32-bit MsType variant).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_extended_pointer_info(
+        &mut self,
+        reader: &mut PdbByteReader,
+    ) -> Result<(), PdbException> {
+        if self.pointer_mode == PointerMode::MemberDataPointer
+            || self.pointer_mode == PointerMode::MemberFunctionPointer
+        {
+            // Member pointer: containing class record number + member pointer type.
+            let class_index = reader.read_u32()?;
+            let mpt_val = reader.read_u16()? as u8;
+            self.member_pointer_containing_class_record_number =
+                RecordNumber::type_record(class_index);
+            self.member_pointer_type = Some(MemberPointerType::from_value(mpt_val));
+            // Skip any remaining padding.
+            while reader.remaining() > 0 && !reader.is_eof() {
+                reader.skip(reader.remaining())?;
+            }
+        } else if self.pointer_type == PointerType::SegmentBased {
+            // Segment-based pointer: base segment.
+            self.base_segment = reader.read_u16()?;
+            while reader.remaining() > 0 && !reader.is_eof() {
+                reader.skip(reader.remaining())?;
+            }
+        } else if self.pointer_type == PointerType::TypeBased {
+            // Type-based pointer: base type record number + name string.
+            let base_type_index = reader.read_u32()?;
+            self.pointer_base_type_record_number = RecordNumber::type_record(base_type_index);
+            self.pointer_name = reader.read_cstring_aligned4()?;
+            while reader.remaining() > 0 && !reader.is_eof() {
+                reader.skip(reader.remaining())?;
+            }
+        } else if self.pointer_type == PointerType::Invalid {
+            // Invalid pointer type: base symbol name.
+            self.base_symbol = reader.read_cstring_aligned4()?;
+        }
+        // Skip final padding (matches Java: reader.skipPadding()).
+        reader.align(4);
+        Ok(())
+    }
+
+    /// Full parse: core fields + extended pointer info from a single reader.
+    ///
+    /// This is a convenience method that combines [`parse_from_reader`] and
+    /// [`parse_extended_pointer_info`] into a single call, which is the
+    /// typical flow in the Java `PointerMsType` constructor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_full(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let mut ptr = Self::parse_from_reader(reader)?;
+        ptr.parse_extended_pointer_info(reader)?;
+        Ok(ptr)
+    }
 }
 
 impl AbstractMsType for LfPointer {
@@ -1144,5 +1231,204 @@ mod tests {
         let emitted = p.emit(Bind::NONE);
         assert!(emitted.contains('&'));
         assert!(emitted.contains("const "));
+    }
+
+    // =========================================================================
+    // Binary parsing tests
+    // =========================================================================
+
+    use crate::pdb::pdb_byte_reader::PdbByteReader;
+
+    #[test]
+    fn test_pointer_parse_from_reader() {
+        // Build a byte buffer for: underlyingType=0x0074, attributes with
+        // ptrType=10(near32), mode=0(*), size=4
+        let attrs: u32 = 10 | (0 << 5) | (0 << 8) | (0 << 9) | (0 << 10)
+            | (0 << 11) | (0 << 12) | (4u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&attrs.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(p.underlying_record_number, RecordNumber::type_record(0x0074));
+        assert_eq!(p.pointer_type, PointerType::Near32);
+        assert_eq!(p.pointer_mode, PointerMode::Pointer);
+        assert_eq!(p.size, 4);
+        assert!(!p.is_const);
+        assert!(!p.is_volatile);
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_truncated() {
+        let data = [0x74u8, 0x00]; // only 2 bytes, need 8
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfPointer::parse_from_reader(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_const_volatile() {
+        // ptrType=10(near32), mode=0(*), volatile=1(bit9), const=1(bit10), size=8
+        let attrs: u32 = 10 | (0 << 5) | (1 << 9) | (1 << 10) | (8u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&attrs.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader(&mut reader).unwrap();
+        assert!(p.is_const);
+        assert!(p.is_volatile);
+        assert_eq!(p.size, 8);
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_ref() {
+        // ptrType=10(near32), mode=1(lvalue ref), size=4
+        let attrs: u32 = 10 | (1 << 5) | (4u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&attrs.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(p.pointer_mode, PointerMode::LValueReference);
+        assert!(p.is_reference());
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_rvalue_ref() {
+        // ptrType=10(near32), mode=4(rvalue ref), size=4
+        let attrs: u32 = 10 | (4 << 5) | (4u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&attrs.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(p.pointer_mode, PointerMode::RValueReference);
+        assert!(p.is_reference());
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_ptr64() {
+        // ptrType=12(ptr64), mode=0(*), size=8
+        let attrs: u32 = 12 | (0 << 5) | (8u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&attrs.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(p.pointer_type, PointerType::Ptr64);
+        assert_eq!(p.size, 8);
+    }
+
+    #[test]
+    fn test_pointer_parse_extended_member_pointer() {
+        // Build a pointer with MemberDataPointer mode.
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::MemberDataPointer;
+        // Extended data: class_type_index(u32) + member_pointer_type(u16)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // class record
+        data.extend_from_slice(&1u16.to_le_bytes());       // DataSingleInheritance
+        let mut reader = PdbByteReader::new(&data);
+        p.parse_extended_pointer_info(&mut reader).unwrap();
+        assert_eq!(
+            p.member_pointer_containing_class_record_number,
+            RecordNumber::type_record(0x2000)
+        );
+        assert_eq!(
+            p.member_pointer_type,
+            Some(MemberPointerType::DataSingleInheritance)
+        );
+    }
+
+    #[test]
+    fn test_pointer_parse_extended_segment_based() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::SegmentBased;
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0042u16.to_le_bytes()); // base segment
+        let mut reader = PdbByteReader::new(&data);
+        p.parse_extended_pointer_info(&mut reader).unwrap();
+        assert_eq!(p.base_segment, 0x0042);
+    }
+
+    #[test]
+    fn test_pointer_parse_full_basic() {
+        // A simple near32 pointer with no extended data.
+        let attrs: u32 = 10 | (0 << 5) | (4u32 << 13); // near32, *, size=4
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&attrs.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_full(&mut reader).unwrap();
+        assert_eq!(p.pointer_type, PointerType::Near32);
+        assert_eq!(p.pointer_mode, PointerMode::Pointer);
+        assert_eq!(p.size, 4);
+        assert!(p.is_valid());
+    }
+
+    #[test]
+    fn test_pointer_label_all_variants() {
+        // Verify all PointerType labels match expected strings.
+        assert_eq!(PointerType::Near.label(), "");
+        assert_eq!(PointerType::Far.label(), "far ");
+        assert_eq!(PointerType::Huge.label(), "huge ");
+        assert_eq!(PointerType::SegmentBased.label(), "base(seg) ");
+        assert_eq!(PointerType::ValueBased.label(), "base(val) ");
+        assert_eq!(PointerType::SegmentValueBased.label(), "base(segval) ");
+        assert_eq!(PointerType::AddressBased.label(), "base(addr) ");
+        assert_eq!(PointerType::SegmentAddressBased.label(), "base(segaddr) ");
+        assert_eq!(PointerType::TypeBased.label(), "base(type) ");
+        assert_eq!(PointerType::SelfBased.label(), "base(addr) ");
+        assert_eq!(PointerType::Near32.label(), "");
+        assert_eq!(PointerType::Far32.label(), "far32 ");
+        assert_eq!(PointerType::Ptr64.label(), "far64 ");
+        assert_eq!(PointerType::Unspecified.label(), "unspecified ");
+    }
+
+    #[test]
+    fn test_pointer_mode_all_variants() {
+        assert_eq!(PointerMode::Pointer.label(), "*");
+        assert_eq!(PointerMode::LValueReference.label(), "&");
+        assert_eq!(PointerMode::MemberDataPointer.label(), "::*");
+        assert_eq!(PointerMode::MemberFunctionPointer.label(), "::*");
+        assert_eq!(PointerMode::RValueReference.label(), "&&");
+        assert_eq!(PointerMode::Reserved.label(), "");
+        assert_eq!(PointerMode::Invalid.label(), "");
+    }
+
+    #[test]
+    fn test_member_pointer_type_all_labels() {
+        assert_eq!(MemberPointerType::Unspecified.label(), "pdm16_nonvirt");
+        assert_eq!(MemberPointerType::DataSingleInheritance.label(), "pdm16_vfcn");
+        assert_eq!(MemberPointerType::DataMultipleInheritance.label(), "pdm16_vbase");
+        assert_eq!(MemberPointerType::DataVirtualInheritance.label(), "pdm32_nvvfcn");
+        assert_eq!(MemberPointerType::DataGeneral.label(), "pdm32_vbase");
+        assert_eq!(MemberPointerType::FunctionSingleInheritance.label(), "pmf16_nearnvsa");
+        assert_eq!(MemberPointerType::FunctionMultipleInheritance.label(), "pmf16_nearnvma");
+        assert_eq!(MemberPointerType::FunctionVirtualInheritance.label(), "pmf16_nearvbase");
+        assert_eq!(
+            MemberPointerType::FunctionSingleInheritance1632.label(),
+            "pmf16_farnvsa"
+        );
+        assert_eq!(
+            MemberPointerType::FunctionMultipleInheritance1632.label(),
+            "pmf16_farnvma"
+        );
+        assert_eq!(
+            MemberPointerType::FunctionVirtualInheritance1632.label(),
+            "pmf16_farvbase"
+        );
+        assert_eq!(
+            MemberPointerType::FunctionSingleInheritance32.label(),
+            "pmf32_nvsa"
+        );
+        assert_eq!(
+            MemberPointerType::FunctionMultipleInheritance32.label(),
+            "pmf32_nvma"
+        );
+        assert_eq!(
+            MemberPointerType::FunctionVirtualInheritance32.label(),
+            "pmf32_vbase"
+        );
     }
 }

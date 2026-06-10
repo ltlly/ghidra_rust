@@ -7,6 +7,13 @@
 //! - Message framing (length-prefixed JSON over TCP)
 //! - Request dispatch against a shared data type store
 //! - Connection lifecycle and statistics
+//!
+//! The handler supports the full set of ISF protocol requests:
+//! - Ping (health check)
+//! - ListNamespaces, ListTypes, GetType, GetAllTypes
+//! - FullExport (full ISF JSON export)
+//! - LookType, LookSymbol, LookAddress (individual lookups)
+//! - EnumTypes, EnumSymbols (enumeration queries)
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -127,6 +134,21 @@ pub enum HandlerState {
 /// 2. Server responds with a `HandshakeAck` (version echo + status).
 /// 3. Client sends requests as: 4-byte length (big-endian u32) + JSON payload.
 /// 4. Server responds with the same framing for each response.
+///
+/// # Supported Requests
+///
+/// The handler dispatches all ISF request variants:
+/// - `Ping` -- health check, returns `Pong`
+/// - `ListNamespaces` -- returns all available namespace names
+/// - `ListTypes` -- returns type names in a namespace
+/// - `GetType` -- returns a specific type definition
+/// - `GetAllTypes` -- returns all type definitions in a namespace
+/// - `FullExport` -- returns full ISF JSON export for a namespace
+/// - `LookType` -- looks up a type by key and returns JSON
+/// - `LookSymbol` -- looks up a symbol by name (stub)
+/// - `LookAddress` -- looks up a symbol by address (stub)
+/// - `EnumTypes` -- enumerates all types as ISF JSON
+/// - `EnumSymbols` -- enumerates all symbols (stub)
 #[derive(Debug)]
 pub struct IsfClientHandler {
     /// Unique handler ID assigned by the server.
@@ -310,11 +332,17 @@ impl IsfClientHandler {
     }
 
     /// Dispatch a request against the local type store and produce a response.
+    ///
+    /// This handles all ISF request variants including the full export,
+    /// type/symbol/address look-ups, and enumeration queries.
     pub fn dispatch(&self, request: &IsfRequest) -> IsfResponse {
         match request {
+            IsfRequest::Ping => IsfResponse::Pong,
+
             IsfRequest::ListNamespaces => {
                 IsfResponse::Namespaces(self.types.keys().cloned().collect())
             }
+
             IsfRequest::ListTypes { namespace } => match self.types.get(namespace) {
                 Some(type_list) => {
                     IsfResponse::TypeNames(type_list.iter().map(|t| t.name.clone()).collect())
@@ -324,6 +352,7 @@ impl IsfClientHandler {
                     namespace
                 ))),
             },
+
             IsfRequest::GetType {
                 namespace,
                 type_name,
@@ -340,6 +369,7 @@ impl IsfClientHandler {
                     namespace
                 ))),
             },
+
             IsfRequest::GetAllTypes { namespace } => match self.types.get(namespace) {
                 Some(type_list) => IsfResponse::AllTypes(type_list.clone()),
                 None => IsfResponse::Error(IsfError::not_found(format!(
@@ -347,8 +377,107 @@ impl IsfClientHandler {
                     namespace
                 ))),
             },
-            IsfRequest::Ping => IsfResponse::Pong,
+
+            IsfRequest::FullExport { namespace } => match self.types.get(namespace) {
+                Some(type_list) => {
+                    let json = self.export_namespace_json(namespace, type_list);
+                    IsfResponse::FullExport(json)
+                }
+                None => IsfResponse::Error(IsfError::not_found(format!(
+                    "Namespace '{}' not found",
+                    namespace
+                ))),
+            },
+
+            IsfRequest::LookType { namespace, key } => match self.types.get(namespace) {
+                Some(type_list) => match type_list.iter().find(|t| t.name == *key) {
+                    Some(td) => {
+                        let json = serde_json::to_string(td)
+                            .unwrap_or_else(|_| "{}".to_string());
+                        IsfResponse::LookTypeResult(json)
+                    }
+                    None => IsfResponse::Error(IsfError::not_found(format!(
+                        "Type '{}' not found in namespace '{}'",
+                        key, namespace
+                    ))),
+                },
+                None => IsfResponse::Error(IsfError::not_found(format!(
+                    "Namespace '{}' not found",
+                    namespace
+                ))),
+            },
+
+            IsfRequest::LookSymbol { namespace: _, key: _ } => {
+                // Symbols require a program model; return empty result.
+                IsfResponse::LookSymbolResult("{}".to_string())
+            }
+
+            IsfRequest::LookAddress { namespace: _, key: _ } => {
+                // Address look-up requires a program model; return empty result.
+                IsfResponse::LookAddressResult("{}".to_string())
+            }
+
+            IsfRequest::EnumTypes { namespace } => match self.types.get(namespace) {
+                Some(type_list) => {
+                    let json = self.export_namespace_json(namespace, type_list);
+                    IsfResponse::EnumTypesResult(json)
+                }
+                None => IsfResponse::Error(IsfError::not_found(format!(
+                    "Namespace '{}' not found",
+                    namespace
+                ))),
+            },
+
+            IsfRequest::EnumSymbols { namespace: _ } => {
+                IsfResponse::EnumSymbolsResult("{}".to_string())
+            }
         }
+    }
+
+    /// Export a namespace as an ISF JSON string, categorizing types into
+    /// base_types, user_types, and enums (matching the Java IsfDataTypeWriter
+    /// output format).
+    fn export_namespace_json(
+        &self,
+        namespace: &str,
+        types: &[IsfTypeDef],
+    ) -> String {
+        let mut base_types = serde_json::Map::new();
+        let mut user_types = serde_json::Map::new();
+        let mut enums_map = serde_json::Map::new();
+
+        for td in types {
+            let json_val = serde_json::to_value(td).unwrap_or(serde_json::Value::Null);
+            match td.kind {
+                IsfTypeKind::BuiltIn | IsfTypeKind::Pointer => {
+                    base_types.insert(td.name.clone(), json_val);
+                }
+                IsfTypeKind::Enum => {
+                    enums_map.insert(td.name.clone(), json_val);
+                }
+                _ => {
+                    user_types.insert(td.name.clone(), json_val);
+                }
+            }
+        }
+
+        let mut root = serde_json::Map::new();
+        root.insert(
+            "metadata".to_string(),
+            serde_json::json!({ "format": "6.2.0", "namespace": namespace }),
+        );
+        root.insert(
+            "base_types".to_string(),
+            serde_json::Value::Object(base_types),
+        );
+        root.insert(
+            "user_types".to_string(),
+            serde_json::Value::Object(user_types),
+        );
+        root.insert("enums".to_string(), serde_json::Value::Object(enums_map));
+        root.insert("symbols".to_string(), serde_json::json!({}));
+
+        serde_json::to_string(&root).unwrap_or_else(|_| "{}".to_string())
     }
 
     /// Close the handler's stream and transition to `Closed` state.
@@ -543,6 +672,35 @@ impl IsfClientHandler {
         );
         id
     }
+
+    /// Create an array type definition.
+    pub fn add_array(
+        &mut self,
+        namespace: impl Into<String>,
+        name: impl Into<String>,
+        element_type_id: u64,
+        element_count: u64,
+        element_size: u64,
+    ) -> u64 {
+        let id = self.alloc_type_id();
+        let mut props = BTreeMap::new();
+        props.insert("element_type".into(), serde_json::json!(element_type_id));
+        props.insert("element_count".into(), serde_json::json!(element_count));
+
+        self.add_type(
+            namespace,
+            IsfTypeDef {
+                type_id: id,
+                name: name.into(),
+                kind: IsfTypeKind::Array,
+                size: element_count * element_size,
+                alignment: element_size,
+                components: vec![],
+                properties: props,
+            },
+        );
+        id
+    }
 }
 
 // ===========================================================================
@@ -716,6 +874,141 @@ mod tests {
     }
 
     #[test]
+    fn test_dispatch_full_export() {
+        let mut h = test_handler();
+        h.add_type("ns", IsfTypeDef {
+            type_id: 1,
+            name: "int".into(),
+            kind: IsfTypeKind::BuiltIn,
+            size: 4,
+            alignment: 4,
+            components: vec![],
+            properties: BTreeMap::new(),
+        });
+
+        let resp = h.dispatch(&IsfRequest::FullExport {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::FullExport(json) = resp {
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            assert!(parsed.get("base_types").is_some());
+            assert!(parsed.get("metadata").is_some());
+            assert!(parsed.get("symbols").is_some());
+        } else {
+            panic!("Expected FullExport");
+        }
+    }
+
+    #[test]
+    fn test_dispatch_full_export_not_found() {
+        let h = test_handler();
+        let resp = h.dispatch(&IsfRequest::FullExport {
+            namespace: "missing".into(),
+        });
+        assert!(matches!(resp, IsfResponse::Error(_)));
+    }
+
+    #[test]
+    fn test_dispatch_look_type() {
+        let mut h = test_handler();
+        h.add_type("ns", IsfTypeDef {
+            type_id: 1,
+            name: "my_struct".into(),
+            kind: IsfTypeKind::Composite,
+            size: 16,
+            alignment: 8,
+            components: vec![],
+            properties: BTreeMap::new(),
+        });
+
+        let resp = h.dispatch(&IsfRequest::LookType {
+            namespace: "ns".into(),
+            key: "my_struct".into(),
+        });
+        if let IsfResponse::LookTypeResult(json) = resp {
+            assert!(json.contains("my_struct"));
+        } else {
+            panic!("Expected LookTypeResult");
+        }
+    }
+
+    #[test]
+    fn test_dispatch_look_type_not_found() {
+        let h = test_handler();
+        let resp = h.dispatch(&IsfRequest::LookType {
+            namespace: "ns".into(),
+            key: "missing".into(),
+        });
+        assert!(matches!(resp, IsfResponse::Error(_)));
+    }
+
+    #[test]
+    fn test_dispatch_look_symbol() {
+        let h = test_handler();
+        let resp = h.dispatch(&IsfRequest::LookSymbol {
+            namespace: "ns".into(),
+            key: "main".into(),
+        });
+        assert!(matches!(resp, IsfResponse::LookSymbolResult(_)));
+    }
+
+    #[test]
+    fn test_dispatch_look_address() {
+        let h = test_handler();
+        let resp = h.dispatch(&IsfRequest::LookAddress {
+            namespace: "ns".into(),
+            key: "0x401000".into(),
+        });
+        assert!(matches!(resp, IsfResponse::LookAddressResult(_)));
+    }
+
+    #[test]
+    fn test_dispatch_enum_types() {
+        let mut h = test_handler();
+        h.add_type("ns", IsfTypeDef {
+            type_id: 1,
+            name: "int".into(),
+            kind: IsfTypeKind::BuiltIn,
+            size: 4,
+            alignment: 4,
+            components: vec![],
+            properties: BTreeMap::new(),
+        });
+
+        let resp = h.dispatch(&IsfRequest::EnumTypes {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::EnumTypesResult(json) = resp {
+            assert!(json.contains("base_types"));
+            assert!(json.contains("int"));
+        } else {
+            panic!("Expected EnumTypesResult");
+        }
+    }
+
+    #[test]
+    fn test_dispatch_enum_types_not_found() {
+        let h = test_handler();
+        let resp = h.dispatch(&IsfRequest::EnumTypes {
+            namespace: "missing".into(),
+        });
+        assert!(matches!(resp, IsfResponse::Error(_)));
+    }
+
+    #[test]
+    fn test_dispatch_enum_symbols() {
+        let h = test_handler();
+        let resp = h.dispatch(&IsfRequest::EnumSymbols {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::EnumSymbolsResult(json) = resp {
+            assert_eq!(json, "{}");
+        } else {
+            panic!("Expected EnumSymbolsResult");
+        }
+    }
+
+    #[test]
     fn test_alloc_type_id() {
         let mut h = test_handler();
         assert_eq!(h.alloc_type_id(), 0);
@@ -853,6 +1146,25 @@ mod tests {
     }
 
     #[test]
+    fn test_add_array_convenience() {
+        let mut h = test_handler();
+        let id = h.add_array("ns", "int_arr", 1, 10, 4);
+        assert_eq!(id, 0);
+
+        let resp = h.dispatch(&IsfRequest::GetType {
+            namespace: "ns".into(),
+            type_name: "int_arr".into(),
+        });
+        if let IsfResponse::TypeDef(td) = resp {
+            assert_eq!(td.kind, IsfTypeKind::Array);
+            assert_eq!(td.size, 40);
+            assert_eq!(td.properties["element_count"], serde_json::json!(10));
+        } else {
+            panic!("Expected TypeDef");
+        }
+    }
+
+    #[test]
     fn test_close_transitions_to_closed() {
         let mut h = test_handler();
         assert_eq!(h.state, HandlerState::Handshake);
@@ -884,6 +1196,33 @@ mod tests {
             let json = serde_json::to_string(state).unwrap();
             let back: HandlerState = serde_json::from_str(&json).unwrap();
             assert_eq!(*state, back);
+        }
+    }
+
+    #[test]
+    fn test_export_namespace_categorization() {
+        let mut h = test_handler();
+        h.add_builtin("ns", "int", 4, true, false);
+        h.add_pointer("ns", "int*", 8, 0);
+        h.add_composite("ns", "my_struct", 16, 8, false, vec![]);
+        let mut vals = BTreeMap::new();
+        vals.insert("A".into(), 0);
+        h.add_enum("ns", "my_enum", 4, vals);
+
+        let resp = h.dispatch(&IsfRequest::FullExport {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::FullExport(json) = resp {
+            let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+            let base = parsed["base_types"].as_object().unwrap();
+            assert!(base.contains_key("int"));
+            assert!(base.contains_key("int*"));
+            let user = parsed["user_types"].as_object().unwrap();
+            assert!(user.contains_key("my_struct"));
+            let enums = parsed["enums"].as_object().unwrap();
+            assert!(enums.contains_key("my_enum"));
+        } else {
+            panic!("Expected FullExport");
         }
     }
 }

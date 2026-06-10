@@ -29,6 +29,8 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB modifier type record (`LF_MODIFIER`).
 ///
@@ -168,6 +170,36 @@ impl LfModifier {
             result.push_str("__unaligned ");
         }
         result
+    }
+
+    /// Parse a modifier record from a byte reader (32-bit MsType variant).
+    ///
+    /// Reads the modified type index (u32), the attributes (u16), then
+    /// aligns to 4 bytes. This mirrors the Java `ModifierMsType` constructor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let modified_type_index = reader.read_u32()?;
+        let attributes = reader.read_u16()?;
+        reader.align(4); // skipPadding
+        Ok(Self::from_parsed(modified_type_index, attributes))
+    }
+
+    /// Parse a 16-bit modifier record from a byte reader.
+    ///
+    /// Reads the attributes (u16) first, then the modified type index (u16).
+    /// This mirrors the Java `Modifier16MsType` constructor where the byte
+    /// order is reversed compared to the MsType variant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let attributes = reader.read_u16()?;
+        let modified_type_index = reader.read_u16()?;
+        Ok(Self::from_parsed_16(modified_type_index, attributes))
     }
 }
 
@@ -432,6 +464,24 @@ impl LfModifierEx {
             result.push_str(modifier.label());
         }
         result
+    }
+
+    /// Parse an extended modifier record from a byte reader.
+    ///
+    /// Reads the modified type index, the modifier count, and the modifier
+    /// value array from the reader.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let modified_type_index = reader.read_u32()?;
+        let count = reader.read_u16()? as usize;
+        let mut modifier_values = Vec::with_capacity(count);
+        for _ in 0..count {
+            modifier_values.push(reader.read_u16()?);
+        }
+        Ok(Self::from_parsed(modified_type_index, modifier_values))
     }
 }
 
@@ -913,5 +963,114 @@ mod tests {
     #[test]
     fn test_modifier_ex_pdb_id_constant() {
         assert_eq!(LfModifierEx::PDB_ID_32, 0x1518);
+    }
+
+    // =========================================================================
+    // Binary parsing tests
+    // =========================================================================
+
+    use crate::pdb::pdb_byte_reader::PdbByteReader;
+
+    #[test]
+    fn test_modifier_parse_from_reader_const() {
+        // modifiedType=0x0074(u32), attributes=0x01(u16) => const
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x01u16.to_le_bytes());
+        // padding to 4-byte alignment (already 8 bytes total, no padding needed)
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifier::parse_from_reader(&mut reader).unwrap();
+        assert!(m.is_const);
+        assert!(!m.is_volatile);
+        assert!(!m.is_unaligned);
+        assert_eq!(m.modified_record_number, RecordNumber::type_record(0x0074));
+    }
+
+    #[test]
+    fn test_modifier_parse_from_reader_all() {
+        // modifiedType=0x1000(u32), attributes=0x07(u16) => const+volatile+unaligned
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x07u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifier::parse_from_reader(&mut reader).unwrap();
+        assert!(m.is_const);
+        assert!(m.is_volatile);
+        assert!(m.is_unaligned);
+    }
+
+    #[test]
+    fn test_modifier_parse_from_reader_truncated() {
+        let data = [0x74u8, 0x00]; // only 2 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfModifier::parse_from_reader(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_modifier_parse_from_reader_16() {
+        // attributes=0x01(u16) => const, modifiedType=0x0074(u16)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x01u16.to_le_bytes());
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifier::parse_from_reader_16(&mut reader).unwrap();
+        assert!(m.is_const);
+        assert!(!m.is_volatile);
+        assert_eq!(m.modified_record_number, RecordNumber::type_record(0x0074));
+    }
+
+    #[test]
+    fn test_modifier_parse_from_reader_16_all() {
+        // attributes=0x07, modifiedType=0x1000
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x07u16.to_le_bytes());
+        data.extend_from_slice(&0x1000u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifier::parse_from_reader_16(&mut reader).unwrap();
+        assert!(m.is_const);
+        assert!(m.is_volatile);
+        assert!(m.is_unaligned);
+    }
+
+    #[test]
+    fn test_modifier_ex_parse_from_reader() {
+        // modifiedType=0x0074(u32), count=2(u16), mods=[1,2] (const, volatile)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&1u16.to_le_bytes()); // Const
+        data.extend_from_slice(&2u16.to_le_bytes()); // Volatile
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifierEx::parse_from_reader(&mut reader).unwrap();
+        assert!(m.is_const());
+        assert!(m.is_volatile());
+        assert!(!m.is_unaligned());
+        assert_eq!(m.num_modifiers(), 2);
+    }
+
+    #[test]
+    fn test_modifier_ex_parse_from_reader_empty() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes()); // count=0
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifierEx::parse_from_reader(&mut reader).unwrap();
+        assert!(!m.is_const());
+        assert_eq!(m.num_modifiers(), 0);
+    }
+
+    #[test]
+    fn test_modifier_ex_parse_from_reader_hlsl() {
+        // modifiedType=0x0074, count=2, mods=[0x0200 (uniform), 1 (const)]
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&0x0200u16.to_le_bytes()); // HlslUniform
+        data.extend_from_slice(&1u16.to_le_bytes());       // Const
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfModifierEx::parse_from_reader(&mut reader).unwrap();
+        assert!(m.is_const());
+        assert!(m.has_hlsl_modifiers());
     }
 }

@@ -25,6 +25,8 @@ use super::abstract_array_ms_type::AbstractArrayMsType;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB array type record (`LF_ARRAY`).
 ///
@@ -195,6 +197,85 @@ impl LfArray {
     /// Get the name of the array type.
     pub fn array_name(&self) -> &str {
         self.array.name()
+    }
+
+    /// Parse an array type record from a byte reader (32-bit MsType variant).
+    ///
+    /// Reads the element type index, index type index, a `Numeric`-encoded
+    /// size value, and a null-terminated name string. This mirrors the Java
+    /// `ArrayMsType` constructor which calls the `AbstractArrayMsType` base
+    /// with `recordNumberSize=32`, `strType=StringNt`, and `readStride=false`.
+    ///
+    /// The size field uses PDB's `Numeric` encoding: a u16 sub-type index
+    /// followed by the appropriate number of bytes for the value. For sizes
+    /// that fit in a u16 (< 0x8000), the sub-type index IS the value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data
+    /// or if the Numeric encoding is unsupported.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let element_type_index = reader.read_u32()?;
+        let index_type_index = reader.read_u32()?;
+        let size = parse_numeric_u64(reader)?;
+        let name = reader.read_cstring_aligned4()?;
+        Ok(Self::from_parsed(element_type_index, index_type_index, size, name))
+    }
+
+    /// Parse an array type record with stride from a byte reader.
+    ///
+    /// Like [`parse_from_reader`] but also reads the stride field (u32)
+    /// after the size. This corresponds to array variants such as
+    /// `LF_STRARRAY` that carry explicit stride information.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_with_stride(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let element_type_index = reader.read_u32()?;
+        let index_type_index = reader.read_u32()?;
+        let size = parse_numeric_u64(reader)?;
+        let stride = reader.read_u32()?;
+        let name = reader.read_cstring_aligned4()?;
+        Ok(Self::from_parsed_with_stride(element_type_index, index_type_index, size, name, stride))
+    }
+}
+
+/// Parse a PDB `Numeric` value as a `u64`.
+///
+/// PDB uses a variable-length encoding for numeric values:
+/// - If the u16 value is < 0x8000, it is the value itself.
+/// - If the u16 value is >= 0x8000, it is a sub-type index that indicates
+///   the size and signedness of the following bytes.
+///
+/// This function handles the common integral sub-types (char, short,
+/// int16, int32, int64, int128, and their unsigned variants).
+///
+/// # Errors
+///
+/// Returns [`PdbException`] if the reader does not have enough data
+/// or if the sub-type is not an integral type.
+pub(super) fn parse_numeric_u64(reader: &mut PdbByteReader) -> Result<u64, PdbException> {
+    let sub_type = reader.read_u16()?;
+    if sub_type < 0x8000 {
+        return Ok(sub_type as u64);
+    }
+    match sub_type {
+        0x8000 => Ok(reader.read_u8()? as u64),                        // char (signed 8-bit)
+        0x8001 => Ok(reader.read_i16()? as u64),                       // short (signed 16-bit)
+        0x8002 => Ok(reader.read_u16()? as u64),                       // unsigned short
+        0x8003 => Ok(reader.read_i32()? as u64),                       // signed 32-bit
+        0x8004 => Ok(reader.read_u32()? as u64),                       // unsigned 32-bit
+        0x8009 => Ok(reader.read_i64()? as u64),                       // signed 64-bit
+        0x800a => reader.read_u64(),                                    // unsigned 64-bit
+        // For non-integral types (float, double, etc.), skip the bytes
+        // and return 0 -- the caller should check if the value makes sense.
+        0x8005 => { reader.skip(4)?; Ok(0) } // Real32
+        0x8006 => { reader.skip(8)?; Ok(0) } // Real64
+        0x8007 => { reader.skip(10)?; Ok(0) } // Real80
+        0x8008 => { reader.skip(16)?; Ok(0) } // Real128
+        0x800b => { reader.skip(6)?; Ok(0) } // Real48
+        _ => Err(PdbException::invalid_value("Numeric", &format!("unsupported sub-type 0x{:04X}", sub_type))),
     }
 }
 
@@ -492,5 +573,138 @@ mod tests {
     fn test_array_array_name_from_parsed() {
         let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
         assert_eq!(a.array_name(), "float[4]");
+    }
+
+    // =========================================================================
+    // Binary parsing tests
+    // =========================================================================
+
+    use crate::pdb::pdb_byte_reader::PdbByteReader;
+
+    fn build_numeric_u16(val: u16) -> Vec<u8> {
+        // When val < 0x8000, the u16 IS the value.
+        val.to_le_bytes().to_vec()
+    }
+
+    fn build_numeric_u32(val: u32) -> Vec<u8> {
+        // subType=0x8004 (unsigned 32-bit), then 4 bytes of value.
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x8004u16.to_le_bytes());
+        data.extend_from_slice(&val.to_le_bytes());
+        data
+    }
+
+    fn build_cstring_aligned4(s: &str) -> Vec<u8> {
+        let mut data: Vec<u8> = s.as_bytes().to_vec();
+        data.push(0); // null terminator
+        // Pad to 4-byte alignment.
+        while data.len() % 4 != 0 {
+            data.push(0);
+        }
+        data
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_u16_size() {
+        // element_type=0x0074(u32), index_type=0x0075(u32), size=40(u16 numeric), name="int[10]"
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x0075u32.to_le_bytes());
+        data.extend_from_slice(&build_numeric_u16(40));
+        data.extend_from_slice(&build_cstring_aligned4("int[10]"));
+        let mut reader = PdbByteReader::new(&data);
+        let a = LfArray::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(a.name(), "int[10]");
+        assert_eq!(a.get_size(), 40);
+        assert_eq!(
+            a.array.element_type_record_number,
+            RecordNumber::type_record(0x0074)
+        );
+        assert_eq!(
+            a.array.index_type_record_number,
+            RecordNumber::type_record(0x0075)
+        );
+        // ArrayMsType does not read stride.
+        assert!(!a.has_stride());
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_u32_size() {
+        // size encoded as unsigned 32-bit numeric (subType=0x8004)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x0075u32.to_le_bytes());
+        data.extend_from_slice(&build_numeric_u32(256));
+        data.extend_from_slice(&build_cstring_aligned4("big"));
+        let mut reader = PdbByteReader::new(&data);
+        let a = LfArray::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(a.get_size(), 256);
+        assert_eq!(a.name(), "big");
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_truncated() {
+        let data = [0x74u8, 0x00]; // only 2 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfArray::parse_from_reader(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_with_stride() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x0075u32.to_le_bytes());
+        data.extend_from_slice(&build_numeric_u16(40));  // size
+        data.extend_from_slice(&4u32.to_le_bytes());      // stride
+        data.extend_from_slice(&build_cstring_aligned4("int[10]"));
+        let mut reader = PdbByteReader::new(&data);
+        let a = LfArray::parse_from_reader_with_stride(&mut reader).unwrap();
+        assert_eq!(a.name(), "int[10]");
+        assert_eq!(a.get_size(), 40);
+        assert!(a.has_stride());
+        assert_eq!(a.get_stride(), 4);
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(&0x0075u32.to_le_bytes());
+        data.extend_from_slice(&build_numeric_u16(0));
+        data.extend_from_slice(&build_cstring_aligned4(""));
+        let mut reader = PdbByteReader::new(&data);
+        let a = LfArray::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(a.name(), "");
+        assert_eq!(a.get_size(), 0);
+        assert!(a.is_empty());
+    }
+
+    #[test]
+    fn test_numeric_u16_small_value() {
+        let data = 42u16.to_le_bytes();
+        let mut reader = PdbByteReader::new(&data);
+        let val = super::parse_numeric_u64(&mut reader).unwrap();
+        assert_eq!(val, 42);
+    }
+
+    #[test]
+    fn test_numeric_u32_subtype() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x8004u16.to_le_bytes()); // unsigned 32-bit
+        data.extend_from_slice(&1000u32.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let val = super::parse_numeric_u64(&mut reader).unwrap();
+        assert_eq!(val, 1000);
+    }
+
+    #[test]
+    fn test_numeric_u64_subtype() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x800au16.to_le_bytes()); // unsigned 64-bit
+        data.extend_from_slice(&u64::MAX.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let val = super::parse_numeric_u64(&mut reader).unwrap();
+        assert_eq!(val, u64::MAX);
     }
 }

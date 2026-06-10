@@ -1524,6 +1524,14 @@ pub mod symbol_kind {
     pub const S_FILESTATIC: u16=0x1120;
     pub const S_HEAPALLOCA: u16=0x115E;
     pub const S_UNAMESPACE: u16=0x1124;
+    pub const S_PECOFF_SECTION: u16=0x1136;
+    pub const S_INDIRECT_CALLSITEINFO: u16=0x1139;
+    pub const S_ENVBLOCK_V2: u16=0x113D;
+    pub const S_BUILDINFO_V2: u16=0x114C;
+    pub const S_GPROCREF: u16=0x1125;
+    pub const S_LPROCREF_V2: u16=0x1127;
+    pub const S_THUNK32_V2: u16=0x1102;
+    pub const S_THUNK32_ST: u16=0x1114;
 }
 
 

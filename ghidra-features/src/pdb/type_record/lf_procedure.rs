@@ -21,6 +21,8 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 // =============================================================================
 // CallingConvention
@@ -370,6 +372,32 @@ impl LfProcedure {
         (self.function_attributes.has_cpp_style_return_udt as u8)
             | ((self.function_attributes.is_instance_constructor as u8) << 1)
             | ((self.function_attributes.is_instance_constructor_virtual_bases as u8) << 2)
+    }
+
+    /// Parse a procedure type record from a byte reader (32-bit MsType variant).
+    ///
+    /// Reads the return type index, calling convention byte, function
+    /// attributes byte, parameter count, and argument list type index.
+    /// This mirrors the Java `ProcedureMsType` constructor which calls the
+    /// `AbstractProcedureMsType` base with `recordNumberSize=32`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let return_type_index = reader.read_u32()?;
+        let calling_convention_byte = reader.read_u8()?;
+        let attributes_byte = reader.read_u8()?;
+        let num_parameters = reader.read_u16()?;
+        let arg_list_type_index = reader.read_u32()?;
+        reader.align(4); // skipPadding
+        Ok(Self::from_parsed(
+            return_type_index,
+            calling_convention_byte,
+            attributes_byte,
+            num_parameters,
+            arg_list_type_index,
+        ))
     }
 
     /// Emit the full signature including calling convention, parameter count,
@@ -781,5 +809,86 @@ mod tests {
             RecordNumber::type_record(0x1001),
         );
         assert_eq!(p.attributes_byte(), 0x07);
+    }
+
+    // =========================================================================
+    // Binary parsing tests
+    // =========================================================================
+
+    use crate::pdb::pdb_byte_reader::PdbByteReader;
+
+    #[test]
+    fn test_procedure_parse_from_reader() {
+        // returnType=0x0074(u32), cc=0x07(NearStd)(u8), attrs=0x00(u8),
+        // numParams=3(u16), argList=0x1002(u32)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.push(0x07u8);  // NearStd
+        data.push(0x00u8);  // no attributes
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u32.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfProcedure::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(p.calling_convention, CallingConvention::NearStd);
+        assert_eq!(p.num_parameters, 3);
+        assert_eq!(
+            p.arg_list_record_number,
+            RecordNumber::type_record(0x1002)
+        );
+        assert_eq!(
+            p.return_value_record_number,
+            RecordNumber::type_record(0x0074)
+        );
+        assert!(!p.is_constructor());
+    }
+
+    #[test]
+    fn test_procedure_parse_from_reader_constructor() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.push(0x0bu8);  // ThisCall
+        data.push(0x02u8);  // instance constructor
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u32.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfProcedure::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(p.calling_convention, CallingConvention::ThisCall);
+        assert!(p.is_constructor());
+        assert_eq!(p.num_parameters, 0);
+    }
+
+    #[test]
+    fn test_procedure_parse_from_reader_unknown_cc() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.push(0xFFu8);  // unknown calling convention
+        data.push(0x00u8);
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfProcedure::parse_from_reader(&mut reader).unwrap();
+        // Falls back to NearC for unknown values.
+        assert_eq!(p.calling_convention, CallingConvention::NearC);
+    }
+
+    #[test]
+    fn test_procedure_parse_from_reader_truncated() {
+        let data = [0x74u8, 0x00, 0x00, 0x00]; // only 4 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfProcedure::parse_from_reader(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_procedure_parse_from_reader_cpp_return_udt() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.push(0x00u8);  // NearC
+        data.push(0x01u8);  // has_cpp_style_return_udt
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u32.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfProcedure::parse_from_reader(&mut reader).unwrap();
+        assert!(p.has_cpp_return_udt());
     }
 }

@@ -10,12 +10,132 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fmt;
 use std::time::Duration;
 
 use super::manager::{
     DebugStatus, JdiBreakpointInfo, JdiCause, JdiEventsListener, JdiStateListener, JdiThreadInfo,
 };
 use super::rmi::{JdiArch, JdiArguments, JdiConnectorType};
+
+// ---------------------------------------------------------------------------
+// JdiProcessInfo
+// ---------------------------------------------------------------------------
+
+/// Information about a JVM process attached to or launched by the client.
+///
+/// Ported from Ghidra's `VirtualMachine.process()` usage in `JdiManagerImpl`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JdiProcessInfo {
+    /// OS-level process ID.
+    pub pid: u64,
+    /// Command line used to launch the process.
+    pub command: Option<String>,
+    /// Full command line (including arguments).
+    pub command_line: Option<String>,
+    /// Whether the process is still alive.
+    pub is_alive: bool,
+    /// Exit code, if the process has terminated.
+    pub exit_code: Option<i32>,
+}
+
+impl JdiProcessInfo {
+    /// Create a new process info entry.
+    pub fn new(pid: u64) -> Self {
+        Self {
+            pid,
+            command: None,
+            command_line: None,
+            is_alive: true,
+            exit_code: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JdiStackFrameInfo
+// ---------------------------------------------------------------------------
+
+/// Summary information about a stack frame on a suspended thread.
+///
+/// Ported from Ghidra's `StackFrame` usage in `JdiCommands`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JdiStackFrameInfo {
+    /// Zero-based frame index.
+    pub index: u32,
+    /// Method name.
+    pub method_name: String,
+    /// Declaring type (class) name.
+    pub declaring_type: String,
+    /// Code index (bytecode offset within the method).
+    pub code_index: i64,
+    /// Source file line number, if available.
+    pub line_number: Option<u32>,
+    /// Source file name, if available.
+    pub source_name: Option<String>,
+    /// Register values captured for this frame: register name -> value.
+    pub registers: BTreeMap<String, u64>,
+}
+
+impl JdiStackFrameInfo {
+    /// Create a new stack frame info.
+    pub fn new(
+        index: u32,
+        method_name: impl Into<String>,
+        declaring_type: impl Into<String>,
+        code_index: i64,
+    ) -> Self {
+        Self {
+            index,
+            method_name: method_name.into(),
+            declaring_type: declaring_type.into(),
+            code_index,
+            line_number: None,
+            source_name: None,
+            registers: BTreeMap::new(),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// JdiThreadState
+// ---------------------------------------------------------------------------
+
+/// Thread state constants mirroring JDI's `ThreadReference` status values.
+///
+/// Ported from `com.sun.jdi.ThreadReference` constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum JdiThreadState {
+    /// Thread has not yet been started.
+    NotStarted,
+    /// Thread is runnable.
+    Running,
+    /// Thread is sleeping (Thread.sleep).
+    Sleeping,
+    /// Thread is blocked on monitor entry.
+    Blocked,
+    /// Thread is waiting (Object.wait).
+    Waiting,
+    /// Thread is in a timed wait.
+    TimedWaiting,
+    /// Thread has exited.
+    Zombie,
+}
+
+impl fmt::Display for JdiThreadState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::NotStarted => "NOT_STARTED",
+            Self::Running => "RUNNING",
+            Self::Sleeping => "SLEEPING",
+            Self::Blocked => "BLOCKED",
+            Self::Waiting => "WAITING",
+            Self::TimedWaiting => "TIMED_WAITING",
+            Self::Zombie => "ZOMBIE",
+        };
+        write!(f, "{name}")
+    }
+}
 
 // ---------------------------------------------------------------------------
 // JdiDebuggerClientConfig
@@ -136,6 +256,21 @@ impl JdiVmInfo {
             classes: BTreeMap::new(),
         }
     }
+
+    /// Get all thread IDs.
+    pub fn thread_ids(&self) -> Vec<u64> {
+        self.threads.keys().copied().collect()
+    }
+
+    /// Get a thread by ID.
+    pub fn thread(&self, thread_id: u64) -> Option<&JdiThreadInfo> {
+        self.threads.get(&thread_id)
+    }
+
+    /// Get all class names.
+    pub fn class_names(&self) -> Vec<String> {
+        self.classes.keys().cloned().collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +299,20 @@ pub struct JdiDebuggerClient {
     events_listeners: BTreeMap<u64, Vec<Box<dyn JdiEventsListener>>>,
     /// State listeners keyed by VM ID.
     state_listeners: BTreeMap<u64, Vec<Box<dyn JdiStateListener>>>,
+
+    // -- Ported from JdiManagerImpl state tracking --
+    /// Currently focused VM ID (the "current VM").
+    current_vm_id: Option<u64>,
+    /// Currently focused thread ID within the current VM.
+    current_thread_id: Option<u64>,
+    /// Stack frames for the current thread, populated when suspended.
+    current_frames: Vec<JdiStackFrameInfo>,
+    /// Process info keyed by VM ID.
+    processes: BTreeMap<u64, JdiProcessInfo>,
+    /// Console output buffer (channel, text).
+    console_output: Vec<(String, String)>,
+    /// Whether the event handler loop is running for a given VM.
+    event_handler_running: BTreeMap<u64, bool>,
 }
 
 impl JdiDebuggerClient {
@@ -178,6 +327,12 @@ impl JdiDebuggerClient {
             breakpoints: BTreeMap::new(),
             events_listeners: BTreeMap::new(),
             state_listeners: BTreeMap::new(),
+            current_vm_id: None,
+            current_thread_id: None,
+            current_frames: Vec::new(),
+            processes: BTreeMap::new(),
+            console_output: Vec::new(),
+            event_handler_running: BTreeMap::new(),
         }
     }
 
@@ -482,6 +637,117 @@ impl JdiDebuggerClient {
         Ok(status)
     }
 
+    // -- Ported from JdiManagerImpl: current context tracking --
+
+    /// Get the currently focused VM ID.
+    pub fn current_vm_id(&self) -> Option<u64> {
+        self.current_vm_id
+    }
+
+    /// Set the currently focused VM.
+    pub fn set_current_vm(&mut self, vm_id: u64) -> Result<(), String> {
+        self.ensure_vm(vm_id)?;
+        self.current_vm_id = Some(vm_id);
+        Ok(())
+    }
+
+    /// Get the currently focused thread ID.
+    pub fn current_thread_id(&self) -> Option<u64> {
+        self.current_thread_id
+    }
+
+    /// Set the currently focused thread.
+    pub fn set_current_thread(&mut self, thread_id: u64) {
+        self.current_thread_id = Some(thread_id);
+    }
+
+    /// Get the stack frames for the current thread.
+    pub fn current_frames(&self) -> &[JdiStackFrameInfo] {
+        &self.current_frames
+    }
+
+    /// Set the stack frames for the current thread (populated on suspend).
+    pub fn set_current_frames(&mut self, frames: Vec<JdiStackFrameInfo>) {
+        self.current_frames = frames;
+    }
+
+    /// Get process info for a VM.
+    pub fn process(&self, vm_id: u64) -> Option<&JdiProcessInfo> {
+        self.processes.get(&vm_id)
+    }
+
+    /// Register process info for a VM.
+    pub fn set_process(&mut self, vm_id: u64, info: JdiProcessInfo) {
+        self.processes.insert(vm_id, info);
+    }
+
+    /// Append console output.
+    pub fn append_console_output(&mut self, channel: impl Into<String>, text: impl Into<String>) {
+        self.console_output.push((channel.into(), text.into()));
+    }
+
+    /// Drain and return all buffered console output.
+    pub fn drain_console_output(&mut self) -> Vec<(String, String)> {
+        std::mem::take(&mut self.console_output)
+    }
+
+    /// Check if the event handler is running for a VM.
+    pub fn is_event_handler_running(&self, vm_id: u64) -> bool {
+        self.event_handler_running.get(&vm_id).copied().unwrap_or(false)
+    }
+
+    /// Mark the event handler as running/stopped for a VM.
+    pub fn set_event_handler_running(&mut self, vm_id: u64, running: bool) {
+        self.event_handler_running.insert(vm_id, running);
+    }
+
+    /// Interrupt all threads in all connected VMs (ported from
+    /// `JdiManagerImpl.sendInterruptNow`).
+    pub fn interrupt_all_threads(&mut self) {
+        for vm in self.vms.values_mut() {
+            for thread in vm.threads.values_mut() {
+                thread.is_suspended = false;
+            }
+        }
+    }
+
+    /// Get the number of connected VMs.
+    pub fn vm_count(&self) -> usize {
+        self.vms.len()
+    }
+
+    /// List all VM names (IDs as strings for compatibility).
+    pub fn list_vm_names(&self) -> Vec<String> {
+        self.vms.keys().map(|id| id.to_string()).collect()
+    }
+
+    /// Get the description of a VM.
+    pub fn vm_description(&self, vm_id: u64) -> Option<&str> {
+        self.vms.get(&vm_id).map(|vm| vm.description.as_str())
+    }
+
+    /// Update the state of a specific thread.
+    pub fn set_thread_state(
+        &mut self,
+        vm_id: u64,
+        thread_id: u64,
+        state: JdiThreadState,
+    ) -> Result<(), String> {
+        let vm = self
+            .vms
+            .get_mut(&vm_id)
+            .ok_or_else(|| format!("Unknown VM id {vm_id}"))?;
+        if let Some(thread) = vm.threads.get_mut(&thread_id) {
+            thread.status = state.to_string();
+        }
+        Ok(())
+    }
+
+    /// Get the total number of active breakpoints across all VMs.
+    pub fn total_breakpoint_count(&self) -> usize {
+        self.breakpoints.len()
+    }
+
     // -- private helpers --
 
     fn ensure_vm(&self, vm_id: u64) -> Result<(), String> {
@@ -767,5 +1033,202 @@ mod tests {
                 assert_ne!(a, b);
             }
         }
+    }
+
+    #[test]
+    fn test_process_info() {
+        let mut info = JdiProcessInfo::new(1234);
+        assert_eq!(info.pid, 1234);
+        assert!(info.is_alive);
+        assert!(info.exit_code.is_none());
+
+        info.command = Some("java".into());
+        info.command_line = Some("java -jar app.jar".into());
+        info.is_alive = false;
+        info.exit_code = Some(0);
+        assert_eq!(info.exit_code, Some(0));
+    }
+
+    #[test]
+    fn test_stack_frame_info() {
+        let frame = JdiStackFrameInfo::new(0, "main", "com.example.Main", 42);
+        assert_eq!(frame.index, 0);
+        assert_eq!(frame.method_name, "main");
+        assert_eq!(frame.declaring_type, "com.example.Main");
+        assert_eq!(frame.code_index, 42);
+        assert!(frame.line_number.is_none());
+    }
+
+    #[test]
+    fn test_thread_state_display() {
+        assert_eq!(JdiThreadState::Running.to_string(), "RUNNING");
+        assert_eq!(JdiThreadState::Blocked.to_string(), "BLOCKED");
+        assert_eq!(JdiThreadState::Zombie.to_string(), "ZOMBIE");
+    }
+
+    #[test]
+    fn test_thread_state_variants_distinct() {
+        let states = [
+            JdiThreadState::NotStarted,
+            JdiThreadState::Running,
+            JdiThreadState::Sleeping,
+            JdiThreadState::Blocked,
+            JdiThreadState::Waiting,
+            JdiThreadState::TimedWaiting,
+            JdiThreadState::Zombie,
+        ];
+        for (i, a) in states.iter().enumerate() {
+            for b in states.iter().skip(i + 1) {
+                assert_ne!(a, b);
+            }
+        }
+    }
+
+    #[test]
+    fn test_client_current_vm_and_thread() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        let vm_id = client.connect().unwrap();
+
+        assert_eq!(client.current_vm_id(), None);
+        client.set_current_vm(vm_id).unwrap();
+        assert_eq!(client.current_vm_id(), Some(vm_id));
+
+        assert_eq!(client.current_thread_id(), None);
+        client.set_current_thread(42);
+        assert_eq!(client.current_thread_id(), Some(42));
+    }
+
+    #[test]
+    fn test_client_stack_frames() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        assert!(client.current_frames().is_empty());
+
+        let frames = vec![
+            JdiStackFrameInfo::new(0, "main", "Main", 0),
+            JdiStackFrameInfo::new(1, "run", "Worker", 100),
+        ];
+        client.set_current_frames(frames);
+        assert_eq!(client.current_frames().len(), 2);
+        assert_eq!(client.current_frames()[0].method_name, "main");
+    }
+
+    #[test]
+    fn test_client_process_management() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        let vm_id = client.connect().unwrap();
+
+        assert!(client.process(vm_id).is_none());
+
+        let mut proc = JdiProcessInfo::new(5678);
+        proc.command = Some("java".into());
+        client.set_process(vm_id, proc);
+
+        let proc = client.process(vm_id).unwrap();
+        assert_eq!(proc.pid, 5678);
+        assert_eq!(proc.command.as_deref(), Some("java"));
+    }
+
+    #[test]
+    fn test_client_console_output() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        assert!(client.drain_console_output().is_empty());
+
+        client.append_console_output("stdout", "hello");
+        client.append_console_output("stderr", "error");
+        let output = client.drain_console_output();
+        assert_eq!(output.len(), 2);
+        assert_eq!(output[0].1, "hello");
+        assert_eq!(output[1].0, "stderr");
+
+        // drain clears the buffer
+        assert!(client.drain_console_output().is_empty());
+    }
+
+    #[test]
+    fn test_client_event_handler_running() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        let vm_id = client.connect().unwrap();
+
+        assert!(!client.is_event_handler_running(vm_id));
+        client.set_event_handler_running(vm_id, true);
+        assert!(client.is_event_handler_running(vm_id));
+        client.set_event_handler_running(vm_id, false);
+        assert!(!client.is_event_handler_running(vm_id));
+    }
+
+    #[test]
+    fn test_client_vm_count_and_names() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        assert_eq!(client.vm_count(), 0);
+
+        let vm1 = client.connect().unwrap();
+        assert_eq!(client.vm_count(), 1);
+
+        let names = client.list_vm_names();
+        assert_eq!(names.len(), 1);
+        assert_eq!(names[0], vm1.to_string());
+    }
+
+    #[test]
+    fn test_client_vm_description() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        let vm_id = client.connect().unwrap();
+        let desc = client.vm_description(vm_id).unwrap();
+        assert!(!desc.is_empty());
+    }
+
+    #[test]
+    fn test_client_thread_state_update() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        let vm_id = client.connect().unwrap();
+
+        let info = JdiThreadInfo::new(10, "main");
+        client.update_thread(vm_id, 10, info).unwrap();
+
+        client.set_thread_state(vm_id, 10, JdiThreadState::Blocked).unwrap();
+        let thread = client.vm(vm_id).unwrap().thread(10).unwrap();
+        assert_eq!(thread.status, "BLOCKED");
+    }
+
+    #[test]
+    fn test_client_total_breakpoint_count() {
+        let mut client = JdiDebuggerClient::new(default_config());
+        assert_eq!(client.total_breakpoint_count(), 0);
+
+        let bp1 = JdiBreakpointInfo::line(1, "Main", 10);
+        let bp2 = JdiBreakpointInfo::line(2, "Main", 20);
+        client.set_breakpoint(bp1).unwrap();
+        client.set_breakpoint(bp2).unwrap();
+        assert_eq!(client.total_breakpoint_count(), 2);
+    }
+
+    #[test]
+    fn test_vm_info_thread_queries() {
+        let mut vm = JdiVmInfo::new(1, "test");
+        assert!(vm.thread_ids().is_empty());
+
+        let t1 = JdiThreadInfo::new(10, "main");
+        let t2 = JdiThreadInfo::new(20, "worker");
+        vm.threads.insert(10, t1);
+        vm.threads.insert(20, t2);
+
+        let ids = vm.thread_ids();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&10));
+        assert!(ids.contains(&20));
+
+        assert!(vm.thread(10).is_some());
+        assert!(vm.thread(999).is_none());
+    }
+
+    #[test]
+    fn test_vm_info_class_queries() {
+        let mut vm = JdiVmInfo::new(1, "test");
+        vm.classes.insert("java.lang.String".into(), 100);
+        vm.classes.insert("java.lang.Integer".into(), 200);
+
+        let names = vm.class_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"java.lang.String".to_string()));
     }
 }

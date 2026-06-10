@@ -43,6 +43,20 @@ impl SBuildInfo {
         let (item_id, _) = RecordNumber::parse(data, 0, RecordCategory::Item, 32);
         Some(Self { item_id })
     }
+
+    /// Resolve the build info item to a display string using a type record
+    /// lookup function.
+    ///
+    /// This mirrors Java's `BuildInformationMsSymbol.getItemString()` which
+    /// calls `pdb.getTypeRecord(itemRecordNumber).toString()`. The caller
+    /// provides a closure that maps a `RecordNumber` to its string
+    /// representation from the IPI stream.
+    pub fn resolve<F>(&self, type_lookup: F) -> String
+    where
+        F: Fn(&RecordNumber) -> String,
+    {
+        type_lookup(&self.item_id)
+    }
 }
 
 impl AbstractMsSymbol for SBuildInfo {
@@ -124,5 +138,25 @@ mod tests {
         let a = SBuildInfo::new(RecordNumber::item_record_number(0x1042));
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_resolve() {
+        let sym = SBuildInfo::new(RecordNumber::item_record_number(0x1042));
+        let result = sym.resolve(|rn| format!("LF_BUILDINFO[{:04X}]", rn.number()));
+        assert_eq!(result, "LF_BUILDINFO[1042]");
+    }
+
+    #[test]
+    fn test_resolve_with_lookup() {
+        let sym = SBuildInfo::new(RecordNumber::item_record_number(0x100));
+        // Simulate a type record lookup that returns a description
+        let resolved = sym.resolve(|rn| {
+            match rn.number() {
+                0x100 => "LF_BUILDINFO: cl.exe 19.29 /O2 /Zi".to_string(),
+                _ => format!("Unknown({:04X})", rn.number()),
+            }
+        });
+        assert_eq!(resolved, "LF_BUILDINFO: cl.exe 19.29 /O2 /Zi");
     }
 }

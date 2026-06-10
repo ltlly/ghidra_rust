@@ -40,6 +40,16 @@ impl IsfError {
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(404, message)
     }
+
+    /// A bad-request error.
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(400, message)
+    }
+
+    /// A not-supported error.
+    pub fn not_supported(message: impl Into<String>) -> Self {
+        Self::new(501, message)
+    }
 }
 
 impl std::fmt::Display for IsfError {
@@ -54,10 +64,14 @@ impl std::error::Error for IsfError {}
 // ISF Message Types
 // ---------------------------------------------------------------------------
 
-/// Top-level message sent between ISF client and server.
+/// Top-level request sent from an ISF client to the server.
+///
+/// Ported from the protobuf `RootMessage.MsgCase` in Ghidra's ISF protocol.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IsfRequest {
-    /// List available namespaces.
+    /// Health-check ping.
+    Ping,
+    /// List available namespaces (data type managers).
     ListNamespaces,
     /// List data types in a namespace.
     ListTypes {
@@ -76,13 +90,49 @@ pub enum IsfRequest {
         /// The namespace.
         namespace: String,
     },
-    /// Ping (health check).
-    Ping,
+    /// Full ISF JSON export of a namespace (types + symbols).
+    FullExport {
+        /// The namespace to export.
+        namespace: String,
+    },
+    /// Look up a specific type by key within a namespace.
+    LookType {
+        /// The namespace.
+        namespace: String,
+        /// The type key / path name.
+        key: String,
+    },
+    /// Look up a symbol by name within a namespace.
+    LookSymbol {
+        /// The namespace.
+        namespace: String,
+        /// The symbol name.
+        key: String,
+    },
+    /// Look up a symbol by address within a namespace.
+    LookAddress {
+        /// The namespace.
+        namespace: String,
+        /// The address key (hex string).
+        key: String,
+    },
+    /// Enumerate all types in a namespace.
+    EnumTypes {
+        /// The namespace.
+        namespace: String,
+    },
+    /// Enumerate all symbols in a namespace.
+    EnumSymbols {
+        /// The namespace.
+        namespace: String,
+    },
 }
 
 /// Response from the ISF server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum IsfResponse {
+    /// Pong reply to a Ping.
+    Pong,
     /// List of namespaces.
     Namespaces(Vec<String>),
     /// List of type names.
@@ -91,8 +141,18 @@ pub enum IsfResponse {
     TypeDef(IsfTypeDef),
     /// All data types.
     AllTypes(Vec<IsfTypeDef>),
-    /// Pong.
-    Pong,
+    /// Full ISF JSON export string.
+    FullExport(String),
+    /// Look-up result as ISF JSON string.
+    LookTypeResult(String),
+    /// Symbol look-up result as ISF JSON string.
+    LookSymbolResult(String),
+    /// Address look-up result as ISF JSON string.
+    LookAddressResult(String),
+    /// Enumerated types as ISF JSON string.
+    EnumTypesResult(String),
+    /// Enumerated symbols as ISF JSON string.
+    EnumSymbolsResult(String),
     /// Error.
     Error(IsfError),
 }
@@ -155,7 +215,7 @@ pub struct IsfComponent {
 }
 
 // ---------------------------------------------------------------------------
-// IsfClientHandler
+// IsfClientHandler (synchronous, non-network version)
 // ---------------------------------------------------------------------------
 
 /// Handles ISF protocol messages from a connected client.
@@ -218,6 +278,54 @@ impl IsfClientHandler {
                     namespace
                 ))),
             },
+            IsfRequest::FullExport { namespace } => match self.namespaces.get(namespace) {
+                Some(types) => {
+                    let json = self.export_namespace_json(namespace, types);
+                    IsfResponse::FullExport(json)
+                }
+                None => IsfResponse::Error(IsfError::not_found(format!(
+                    "Namespace '{}' not found",
+                    namespace
+                ))),
+            },
+            IsfRequest::LookType { namespace, key } => match self.namespaces.get(namespace) {
+                Some(types) => match types.iter().find(|t| t.name == *key) {
+                    Some(td) => {
+                        let json = serde_json::to_string(td)
+                            .unwrap_or_else(|_| "{}".to_string());
+                        IsfResponse::LookTypeResult(json)
+                    }
+                    None => IsfResponse::Error(IsfError::not_found(format!(
+                        "Type '{}' not found in namespace '{}'",
+                        key, namespace
+                    ))),
+                },
+                None => IsfResponse::Error(IsfError::not_found(format!(
+                    "Namespace '{}' not found",
+                    namespace
+                ))),
+            },
+            IsfRequest::LookSymbol { namespace: _, key: _ } => {
+                // Symbols are not yet stored in the type store; return empty.
+                IsfResponse::LookSymbolResult("{}".to_string())
+            }
+            IsfRequest::LookAddress { namespace: _, key: _ } => {
+                // Address look-up requires a program model; return empty.
+                IsfResponse::LookAddressResult("{}".to_string())
+            }
+            IsfRequest::EnumTypes { namespace } => match self.namespaces.get(namespace) {
+                Some(types) => {
+                    let json = self.export_namespace_json(namespace, types);
+                    IsfResponse::EnumTypesResult(json)
+                }
+                None => IsfResponse::Error(IsfError::not_found(format!(
+                    "Namespace '{}' not found",
+                    namespace
+                ))),
+            },
+            IsfRequest::EnumSymbols { namespace: _ } => {
+                IsfResponse::EnumSymbolsResult("{}".to_string())
+            }
             IsfRequest::Ping => IsfResponse::Pong,
         }
     }
@@ -235,6 +343,50 @@ impl IsfClientHandler {
         let id = self.next_type_id;
         self.next_type_id += 1;
         id
+    }
+
+    /// Export a namespace as an ISF JSON string.
+    fn export_namespace_json(
+        &self,
+        namespace: &str,
+        types: &[IsfTypeDef],
+    ) -> String {
+        let mut base_types = serde_json::Map::new();
+        let mut user_types = serde_json::Map::new();
+        let mut enums_map = serde_json::Map::new();
+
+        for td in types {
+            let json_val = serde_json::to_value(td).unwrap_or(serde_json::Value::Null);
+            match td.kind {
+                IsfTypeKind::BuiltIn | IsfTypeKind::Pointer => {
+                    base_types.insert(td.name.clone(), json_val);
+                }
+                IsfTypeKind::Enum => {
+                    enums_map.insert(td.name.clone(), json_val);
+                }
+                _ => {
+                    user_types.insert(td.name.clone(), json_val);
+                }
+            }
+        }
+
+        let mut root = serde_json::Map::new();
+        root.insert(
+            "metadata".to_string(),
+            serde_json::json!({ "format": "6.2.0", "namespace": namespace }),
+        );
+        root.insert(
+            "base_types".to_string(),
+            serde_json::Value::Object(base_types),
+        );
+        root.insert(
+            "user_types".to_string(),
+            serde_json::Value::Object(user_types),
+        );
+        root.insert("enums".to_string(), serde_json::Value::Object(enums_map));
+        root.insert("symbols".to_string(), serde_json::json!({}));
+
+        serde_json::to_string(&root).unwrap_or_else(|_| "{}".to_string())
     }
 }
 
@@ -277,7 +429,7 @@ impl IsfConnectionHandler {
 }
 
 // ---------------------------------------------------------------------------
-// IsfServer
+// IsfServer (non-network, synchronous version)
 // ---------------------------------------------------------------------------
 
 /// Configuration for the ISF server.
@@ -372,6 +524,18 @@ mod tests {
         let err = IsfError::not_found("type missing");
         assert_eq!(err.code, 404);
         assert!(err.to_string().contains("type missing"));
+    }
+
+    #[test]
+    fn test_isf_error_variants() {
+        let err = IsfError::internal("oops");
+        assert_eq!(err.code, 500);
+
+        let err = IsfError::bad_request("bad");
+        assert_eq!(err.code, 400);
+
+        let err = IsfError::not_supported("nope");
+        assert_eq!(err.code, 501);
     }
 
     #[test]
@@ -477,6 +641,138 @@ mod tests {
         } else {
             panic!("Expected AllTypes response");
         }
+    }
+
+    #[test]
+    fn test_isf_client_handler_full_export() {
+        let mut handler = IsfClientHandler::new();
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 1,
+            name: "int".into(),
+            kind: IsfTypeKind::BuiltIn,
+            size: 4,
+            alignment: 4,
+            components: vec![],
+            properties: BTreeMap::new(),
+        });
+
+        let resp = handler.process_message(&IsfRequest::FullExport {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::FullExport(json) = resp {
+            assert!(json.contains("base_types"));
+            assert!(json.contains("int"));
+            assert!(json.contains("metadata"));
+        } else {
+            panic!("Expected FullExport response");
+        }
+    }
+
+    #[test]
+    fn test_isf_client_handler_look_type() {
+        let mut handler = IsfClientHandler::new();
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 1,
+            name: "my_type".into(),
+            kind: IsfTypeKind::Composite,
+            size: 16,
+            alignment: 8,
+            components: vec![],
+            properties: BTreeMap::new(),
+        });
+
+        let resp = handler.process_message(&IsfRequest::LookType {
+            namespace: "ns".into(),
+            key: "my_type".into(),
+        });
+        if let IsfResponse::LookTypeResult(json) = resp {
+            assert!(json.contains("my_type"));
+        } else {
+            panic!("Expected LookTypeResult response");
+        }
+    }
+
+    #[test]
+    fn test_isf_client_handler_look_type_not_found() {
+        let mut handler = IsfClientHandler::new();
+        let resp = handler.process_message(&IsfRequest::LookType {
+            namespace: "ns".into(),
+            key: "missing".into(),
+        });
+        assert!(matches!(resp, IsfResponse::Error(_)));
+    }
+
+    #[test]
+    fn test_isf_client_handler_enum_types() {
+        let mut handler = IsfClientHandler::new();
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 1,
+            name: "int".into(),
+            kind: IsfTypeKind::BuiltIn,
+            size: 4,
+            alignment: 4,
+            components: vec![],
+            properties: BTreeMap::new(),
+        });
+
+        let resp = handler.process_message(&IsfRequest::EnumTypes {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::EnumTypesResult(json) = resp {
+            assert!(json.contains("base_types"));
+        } else {
+            panic!("Expected EnumTypesResult response");
+        }
+    }
+
+    #[test]
+    fn test_isf_client_handler_enum_symbols() {
+        let mut handler = IsfClientHandler::new();
+        let resp = handler.process_message(&IsfRequest::EnumSymbols {
+            namespace: "ns".into(),
+        });
+        if let IsfResponse::EnumSymbolsResult(json) = resp {
+            assert_eq!(json, "{}");
+        } else {
+            panic!("Expected EnumSymbolsResult response");
+        }
+    }
+
+    #[test]
+    fn test_isf_client_handler_look_symbol() {
+        let mut handler = IsfClientHandler::new();
+        let resp = handler.process_message(&IsfRequest::LookSymbol {
+            namespace: "ns".into(),
+            key: "main".into(),
+        });
+        if let IsfResponse::LookSymbolResult(json) = resp {
+            assert_eq!(json, "{}");
+        } else {
+            panic!("Expected LookSymbolResult response");
+        }
+    }
+
+    #[test]
+    fn test_isf_client_handler_look_address() {
+        let mut handler = IsfClientHandler::new();
+        let resp = handler.process_message(&IsfRequest::LookAddress {
+            namespace: "ns".into(),
+            key: "0x401000".into(),
+        });
+        if let IsfResponse::LookAddressResult(json) = resp {
+            assert_eq!(json, "{}");
+        } else {
+            panic!("Expected LookAddressResult response");
+        }
+    }
+
+    #[test]
+    fn test_isf_client_handler_full_export_not_found() {
+        let mut handler = IsfClientHandler::new();
+        let resp = handler.process_message(&IsfRequest::FullExport {
+            namespace: "missing".into(),
+        });
+        assert!(matches!(resp, IsfResponse::Error(_)));
     }
 
     #[test]
@@ -587,5 +883,43 @@ mod tests {
             let back: IsfTypeKind = serde_json::from_str(&json).unwrap();
             assert_eq!(*kind, back);
         }
+    }
+
+    #[test]
+    fn test_export_namespace_json_categorization() {
+        let mut handler = IsfClientHandler::new();
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 1, name: "int".into(), kind: IsfTypeKind::BuiltIn,
+            size: 4, alignment: 4, components: vec![], properties: BTreeMap::new(),
+        });
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 2, name: "my_struct".into(), kind: IsfTypeKind::Composite,
+            size: 16, alignment: 8, components: vec![], properties: BTreeMap::new(),
+        });
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 3, name: "color".into(), kind: IsfTypeKind::Enum,
+            size: 4, alignment: 4, components: vec![], properties: BTreeMap::new(),
+        });
+        handler.add_type("ns", IsfTypeDef {
+            type_id: 4, name: "int_ptr".into(), kind: IsfTypeKind::Pointer,
+            size: 8, alignment: 8, components: vec![], properties: BTreeMap::new(),
+        });
+
+        let types = handler.namespaces.get("ns").unwrap();
+        let json = handler.export_namespace_json("ns", types);
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // base_types should contain int and int_ptr
+        let base = parsed.get("base_types").unwrap().as_object().unwrap();
+        assert!(base.contains_key("int"));
+        assert!(base.contains_key("int_ptr"));
+
+        // user_types should contain my_struct
+        let user = parsed.get("user_types").unwrap().as_object().unwrap();
+        assert!(user.contains_key("my_struct"));
+
+        // enums should contain color
+        let enums = parsed.get("enums").unwrap().as_object().unwrap();
+        assert!(enums.contains_key("color"));
     }
 }
