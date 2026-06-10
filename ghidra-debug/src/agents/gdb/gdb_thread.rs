@@ -12,7 +12,7 @@
 //! `put_event_thread`, etc.).
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::agents::{
     ExecutionState, RegisterValue, StackFrameInfo, ThreadInfo,
@@ -1271,6 +1271,396 @@ impl FrameSelection {
     }
 }
 
+/// Source information for a stack frame.
+///
+/// Extended source-level debugging info for a frame, including file path,
+/// line number, and function demangled name. This is more detailed than
+/// the basic `GdbFrameDetails` and corresponds to source info from
+/// GDB's `info source` and `info line` commands.
+///
+/// Ported from the Python `put_frames` source info extraction.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct GdbFrameSourceInfo {
+    /// Source file path.
+    pub file: Option<String>,
+    /// Source line number.
+    pub line: Option<u32>,
+    /// Full function name (possibly demangled).
+    pub full_function: Option<String>,
+    /// Compilation directory.
+    pub compilation_dir: Option<String>,
+    /// Whether source is available.
+    pub source_available: bool,
+}
+
+impl GdbFrameSourceInfo {
+    /// Create empty source info.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the source file and line.
+    pub fn with_location(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.file = Some(file.into());
+        self.line = Some(line);
+        self.source_available = true;
+        self
+    }
+
+    /// Set the full function name.
+    pub fn with_function(mut self, func: impl Into<String>) -> Self {
+        self.full_function = Some(func.into());
+        self
+    }
+
+    /// Set the compilation directory.
+    pub fn with_compilation_dir(mut self, dir: impl Into<String>) -> Self {
+        self.compilation_dir = Some(dir.into());
+        self
+    }
+
+    /// Build a display string for this source info.
+    pub fn build_display(&self) -> Option<String> {
+        match (&self.file, self.line) {
+            (Some(file), Some(line)) => Some(format!("{}:{}", file, line)),
+            (Some(file), None) => Some(file.clone()),
+            _ => None,
+        }
+    }
+
+    /// Get the full path including compilation directory if available.
+    pub fn full_path(&self) -> Option<String> {
+        match (&self.file, &self.compilation_dir) {
+            (Some(file), Some(dir)) if !file.starts_with('/') => {
+                Some(format!("{}/{}", dir, file))
+            }
+            (Some(file), _) => Some(file.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Tracks which threads and frames have been synchronized to the trace
+/// since the last stop event.
+///
+/// Ported from the `visited` set in `InferiorState` in `hooks.py`.
+/// The agent uses this to avoid re-syncing thread and frame data that
+/// hasn't changed.
+#[derive(Debug, Clone, Default)]
+pub struct GdbTraceSyncTracker {
+    /// Threads that have been synced since the last stop.
+    synced_threads: BTreeMap<u32, BTreeSet<u32>>,
+    /// Frames that have been synced (inferior -> thread -> set of frame levels).
+    synced_frames: BTreeMap<u32, BTreeMap<u32, BTreeSet<u32>>>,
+    /// Registers that have been synced (inferior -> thread -> frame -> set of names).
+    synced_registers: BTreeMap<u32, BTreeMap<u32, BTreeMap<u32, BTreeSet<String>>>>,
+}
+
+impl GdbTraceSyncTracker {
+    /// Create a new sync tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Clear all tracking state (called when a new stop occurs).
+    pub fn clear(&mut self) {
+        self.synced_threads.clear();
+        self.synced_frames.clear();
+        self.synced_registers.clear();
+    }
+
+    /// Mark a thread as synced.
+    pub fn mark_thread_synced(&mut self, inferior_num: u32, thread_num: u32) {
+        self.synced_threads
+            .entry(inferior_num)
+            .or_default()
+            .insert(thread_num);
+    }
+
+    /// Check if a thread has been synced.
+    pub fn is_thread_synced(&self, inferior_num: u32, thread_num: u32) -> bool {
+        self.synced_threads
+            .get(&inferior_num)
+            .map_or(false, |threads| threads.contains(&thread_num))
+    }
+
+    /// Mark a frame as synced.
+    pub fn mark_frame_synced(
+        &mut self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    ) {
+        self.synced_frames
+            .entry(inferior_num)
+            .or_default()
+            .entry(thread_num)
+            .or_default()
+            .insert(frame_level);
+    }
+
+    /// Check if a frame has been synced.
+    pub fn is_frame_synced(
+        &self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    ) -> bool {
+        self.synced_frames
+            .get(&inferior_num)
+            .and_then(|threads| threads.get(&thread_num))
+            .map_or(false, |frames| frames.contains(&frame_level))
+    }
+
+    /// Mark registers for a frame as synced.
+    pub fn mark_registers_synced(
+        &mut self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+        register_names: &[String],
+    ) {
+        let entry = self
+            .synced_registers
+            .entry(inferior_num)
+            .or_default()
+            .entry(thread_num)
+            .or_default()
+            .entry(frame_level)
+            .or_default();
+        for name in register_names {
+            entry.insert(name.clone());
+        }
+    }
+
+    /// Check if registers for a frame have been synced.
+    pub fn are_registers_synced(
+        &self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    ) -> bool {
+        self.synced_registers
+            .get(&inferior_num)
+            .and_then(|threads| threads.get(&thread_num))
+            .and_then(|frames| frames.get(&frame_level))
+            .map_or(false, |regs| !regs.is_empty())
+    }
+
+    /// Get all synced thread numbers for an inferior.
+    pub fn synced_thread_numbers(&self, inferior_num: u32) -> Vec<u32> {
+        self.synced_threads
+            .get(&inferior_num)
+            .map(|threads| threads.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get all synced frame levels for a thread.
+    pub fn synced_frame_levels(
+        &self,
+        inferior_num: u32,
+        thread_num: u32,
+    ) -> Vec<u32> {
+        self.synced_frames
+            .get(&inferior_num)
+            .and_then(|threads| threads.get(&thread_num))
+            .map(|frames| frames.iter().copied().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get the total number of synced threads.
+    pub fn total_synced_threads(&self) -> usize {
+        self.synced_threads.values().map(|s| s.len()).sum()
+    }
+
+    /// Get the total number of synced frames.
+    pub fn total_synced_frames(&self) -> usize {
+        self.synced_frames
+            .values()
+            .flat_map(|threads| threads.values())
+            .map(|frames| frames.len())
+            .sum()
+    }
+}
+
+/// Batch of operations to perform during a trace synchronization.
+///
+/// Groups multiple trace writes together for efficiency. Ported from
+/// the `Batch` concept in the Python agent's `hooks.py` (`ensure_batch`
+/// / `end_batch`).
+#[derive(Debug, Clone, Default)]
+pub struct GdbSyncBatch {
+    /// Thread operations to perform.
+    pub thread_ops: Vec<ThreadSyncOp>,
+    /// Frame operations to perform.
+    pub frame_ops: Vec<FrameSyncOp>,
+    /// Register operations to perform.
+    pub register_ops: Vec<RegisterSyncOp>,
+}
+
+/// A thread synchronization operation.
+#[derive(Debug, Clone)]
+pub enum ThreadSyncOp {
+    /// Create/update a thread.
+    Upsert {
+        inferior_num: u32,
+        thread: GdbThread,
+    },
+    /// Remove a thread.
+    Remove {
+        inferior_num: u32,
+        thread_num: u32,
+    },
+}
+
+/// A frame synchronization operation.
+#[derive(Debug, Clone)]
+pub enum FrameSyncOp {
+    /// Create/update a frame.
+    Upsert {
+        inferior_num: u32,
+        thread_num: u32,
+        frame: GdbStackFrame,
+    },
+    /// Remove a frame.
+    Remove {
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    },
+    /// Clear all frames for a thread.
+    ClearAll {
+        inferior_num: u32,
+        thread_num: u32,
+    },
+}
+
+/// A register synchronization operation.
+#[derive(Debug, Clone)]
+pub enum RegisterSyncOp {
+    /// Set a register value.
+    SetValue {
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+        register: RegisterValue,
+    },
+    /// Clear registers for a frame.
+    ClearAll {
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    },
+}
+
+impl GdbSyncBatch {
+    /// Create a new empty batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a thread upsert operation.
+    pub fn upsert_thread(&mut self, inferior_num: u32, thread: GdbThread) {
+        self.thread_ops.push(ThreadSyncOp::Upsert {
+            inferior_num,
+            thread,
+        });
+    }
+
+    /// Add a thread removal operation.
+    pub fn remove_thread(&mut self, inferior_num: u32, thread_num: u32) {
+        self.thread_ops.push(ThreadSyncOp::Remove {
+            inferior_num,
+            thread_num,
+        });
+    }
+
+    /// Add a frame upsert operation.
+    pub fn upsert_frame(
+        &mut self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame: GdbStackFrame,
+    ) {
+        self.frame_ops.push(FrameSyncOp::Upsert {
+            inferior_num,
+            thread_num,
+            frame,
+        });
+    }
+
+    /// Add a frame removal operation.
+    pub fn remove_frame(
+        &mut self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    ) {
+        self.frame_ops.push(FrameSyncOp::Remove {
+            inferior_num,
+            thread_num,
+            frame_level,
+        });
+    }
+
+    /// Add a clear-all-frames operation.
+    pub fn clear_frames(&mut self, inferior_num: u32, thread_num: u32) {
+        self.frame_ops.push(FrameSyncOp::ClearAll {
+            inferior_num,
+            thread_num,
+        });
+    }
+
+    /// Add a register set operation.
+    pub fn set_register(
+        &mut self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+        register: RegisterValue,
+    ) {
+        self.register_ops.push(RegisterSyncOp::SetValue {
+            inferior_num,
+            thread_num,
+            frame_level,
+            register,
+        });
+    }
+
+    /// Add a clear-all-registers operation.
+    pub fn clear_registers(
+        &mut self,
+        inferior_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    ) {
+        self.register_ops.push(RegisterSyncOp::ClearAll {
+            inferior_num,
+            thread_num,
+            frame_level,
+        });
+    }
+
+    /// Get the total number of operations in this batch.
+    pub fn total_operations(&self) -> usize {
+        self.thread_ops.len() + self.frame_ops.len() + self.register_ops.len()
+    }
+
+    /// Check if the batch is empty.
+    pub fn is_empty(&self) -> bool {
+        self.thread_ops.is_empty()
+            && self.frame_ops.is_empty()
+            && self.register_ops.is_empty()
+    }
+
+    /// Clear all operations.
+    pub fn clear(&mut self) {
+        self.thread_ops.clear();
+        self.frame_ops.clear();
+        self.register_ops.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2134,5 +2524,195 @@ mod stepping_mode_tests {
     fn test_stepping_mode() {
         assert_ne!(SteppingMode::Instruction, SteppingMode::SourceLine);
         assert_eq!(SteppingMode::Instruction, SteppingMode::Instruction);
+    }
+}
+
+#[cfg(test)]
+mod frame_source_info_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_source_info_new() {
+        let info = GdbFrameSourceInfo::new();
+        assert!(info.file.is_none());
+        assert!(info.line.is_none());
+        assert!(!info.source_available);
+    }
+
+    #[test]
+    fn test_frame_source_info_builder() {
+        let info = GdbFrameSourceInfo::new()
+            .with_location("/path/to/main.c", 42)
+            .with_function("main")
+            .with_compilation_dir("/project/src");
+        assert_eq!(info.file.as_deref(), Some("/path/to/main.c"));
+        assert_eq!(info.line, Some(42));
+        assert!(info.source_available);
+        assert_eq!(info.full_function.as_deref(), Some("main"));
+        assert_eq!(info.compilation_dir.as_deref(), Some("/project/src"));
+    }
+
+    #[test]
+    fn test_frame_source_info_display() {
+        let info = GdbFrameSourceInfo::new()
+            .with_location("main.c", 10);
+        assert_eq!(info.build_display(), Some("main.c:10".to_string()));
+
+        let info_none = GdbFrameSourceInfo::new();
+        assert_eq!(info_none.build_display(), None);
+    }
+
+    #[test]
+    fn test_frame_source_info_full_path() {
+        let info = GdbFrameSourceInfo::new()
+            .with_location("main.c", 10)
+            .with_compilation_dir("/project");
+        assert_eq!(info.full_path(), Some("/project/main.c".to_string()));
+
+        let info_abs = GdbFrameSourceInfo::new()
+            .with_location("/absolute/path/main.c", 10)
+            .with_compilation_dir("/project");
+        assert_eq!(info_abs.full_path(), Some("/absolute/path/main.c".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod sync_tracker_tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_tracker_new() {
+        let tracker = GdbTraceSyncTracker::new();
+        assert_eq!(tracker.total_synced_threads(), 0);
+        assert_eq!(tracker.total_synced_frames(), 0);
+    }
+
+    #[test]
+    fn test_sync_tracker_threads() {
+        let mut tracker = GdbTraceSyncTracker::new();
+        tracker.mark_thread_synced(1, 1);
+        tracker.mark_thread_synced(1, 2);
+        tracker.mark_thread_synced(2, 1);
+        assert!(tracker.is_thread_synced(1, 1));
+        assert!(tracker.is_thread_synced(1, 2));
+        assert!(tracker.is_thread_synced(2, 1));
+        assert!(!tracker.is_thread_synced(1, 3));
+        assert_eq!(tracker.total_synced_threads(), 3);
+    }
+
+    #[test]
+    fn test_sync_tracker_frames() {
+        let mut tracker = GdbTraceSyncTracker::new();
+        tracker.mark_frame_synced(1, 1, 0);
+        tracker.mark_frame_synced(1, 1, 1);
+        assert!(tracker.is_frame_synced(1, 1, 0));
+        assert!(tracker.is_frame_synced(1, 1, 1));
+        assert!(!tracker.is_frame_synced(1, 1, 2));
+        assert_eq!(tracker.total_synced_frames(), 2);
+    }
+
+    #[test]
+    fn test_sync_tracker_registers() {
+        let mut tracker = GdbTraceSyncTracker::new();
+        tracker.mark_registers_synced(1, 1, 0, &["rax".to_string(), "rbx".to_string()]);
+        assert!(tracker.are_registers_synced(1, 1, 0));
+        assert!(!tracker.are_registers_synced(1, 1, 1));
+    }
+
+    #[test]
+    fn test_sync_tracker_clear() {
+        let mut tracker = GdbTraceSyncTracker::new();
+        tracker.mark_thread_synced(1, 1);
+        tracker.mark_frame_synced(1, 1, 0);
+        tracker.mark_registers_synced(1, 1, 0, &["rax".to_string()]);
+        tracker.clear();
+        assert!(!tracker.is_thread_synced(1, 1));
+        assert!(!tracker.is_frame_synced(1, 1, 0));
+        assert!(!tracker.are_registers_synced(1, 1, 0));
+    }
+
+    #[test]
+    fn test_sync_tracker_synced_numbers() {
+        let mut tracker = GdbTraceSyncTracker::new();
+        tracker.mark_thread_synced(1, 1);
+        tracker.mark_thread_synced(1, 3);
+        let nums = tracker.synced_thread_numbers(1);
+        assert_eq!(nums.len(), 2);
+        assert!(nums.contains(&1));
+        assert!(nums.contains(&3));
+    }
+
+    #[test]
+    fn test_sync_tracker_synced_frame_levels() {
+        let mut tracker = GdbTraceSyncTracker::new();
+        tracker.mark_frame_synced(1, 1, 0);
+        tracker.mark_frame_synced(1, 1, 2);
+        let levels = tracker.synced_frame_levels(1, 1);
+        assert_eq!(levels.len(), 2);
+        assert!(levels.contains(&0));
+        assert!(levels.contains(&2));
+    }
+}
+
+#[cfg(test)]
+mod sync_batch_tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_batch_new() {
+        let batch = GdbSyncBatch::new();
+        assert!(batch.is_empty());
+        assert_eq!(batch.total_operations(), 0);
+    }
+
+    #[test]
+    fn test_sync_batch_thread_ops() {
+        let mut batch = GdbSyncBatch::new();
+        batch.upsert_thread(1, GdbThread::new(1));
+        batch.upsert_thread(1, GdbThread::new(2));
+        batch.remove_thread(1, 3);
+        assert_eq!(batch.thread_ops.len(), 3);
+        assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn test_sync_batch_frame_ops() {
+        let mut batch = GdbSyncBatch::new();
+        batch.upsert_frame(1, 1, GdbStackFrame::new(0, 0x401000));
+        batch.remove_frame(1, 1, 1);
+        batch.clear_frames(1, 2);
+        assert_eq!(batch.frame_ops.len(), 3);
+    }
+
+    #[test]
+    fn test_sync_batch_register_ops() {
+        let mut batch = GdbSyncBatch::new();
+        batch.set_register(
+            1,
+            1,
+            0,
+            RegisterValue::from_u64("rax", 0x1234),
+        );
+        batch.clear_registers(1, 1, 1);
+        assert_eq!(batch.register_ops.len(), 2);
+    }
+
+    #[test]
+    fn test_sync_batch_total_operations() {
+        let mut batch = GdbSyncBatch::new();
+        batch.upsert_thread(1, GdbThread::new(1));
+        batch.upsert_frame(1, 1, GdbStackFrame::new(0, 0x401000));
+        batch.set_register(1, 1, 0, RegisterValue::from_u64("rax", 0x1234));
+        assert_eq!(batch.total_operations(), 3);
+    }
+
+    #[test]
+    fn test_sync_batch_clear() {
+        let mut batch = GdbSyncBatch::new();
+        batch.upsert_thread(1, GdbThread::new(1));
+        batch.upsert_frame(1, 1, GdbStackFrame::new(0, 0x401000));
+        assert!(!batch.is_empty());
+        batch.clear();
+        assert!(batch.is_empty());
     }
 }

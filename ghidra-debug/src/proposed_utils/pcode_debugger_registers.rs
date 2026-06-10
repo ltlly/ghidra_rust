@@ -160,6 +160,25 @@ impl PcodeRegisterBank {
         self.values.keys().cloned().collect()
     }
 
+    /// Iterate over all register definitions (name, definition).
+    pub fn definitions(&self) -> impl Iterator<Item = (&String, &RegisterDefinition)> {
+        self.definitions.iter()
+    }
+
+    /// Compute the nesting depth of a register (0 = top-level).
+    pub fn compute_depth(&self, name: &str) -> u32 {
+        let mut depth = 0u32;
+        let mut current = name.to_string();
+        while let Some(parent_name) = self.parent_of(&current) {
+            depth += 1;
+            current = parent_name.to_string();
+            if depth > 32 {
+                break; // safety limit
+            }
+        }
+        depth
+    }
+
     /// The number of register definitions.
     pub fn num_definitions(&self) -> usize {
         self.definitions.len()
@@ -513,6 +532,23 @@ impl RegisterMapping {
     pub fn is_empty(&self) -> bool {
         self.lang_to_conn.is_empty()
     }
+
+    /// Iterate over all mapping entries.
+    pub fn iter(&self) -> impl Iterator<Item = RegisterMappingEntry<'_>> {
+        self.lang_to_conn.iter().map(|(lang, conn)| RegisterMappingEntry {
+            lang_name: lang.as_str(),
+            connector_name: conn.as_str(),
+        })
+    }
+}
+
+/// A borrowed entry from a `RegisterMapping`.
+#[derive(Debug, Clone)]
+pub struct RegisterMappingEntry<'a> {
+    /// The language register name.
+    pub lang_name: &'a str,
+    /// The connector register name.
+    pub connector_name: &'a str,
 }
 
 // ============================================================================
@@ -3108,6 +3144,954 @@ impl RegisterSerializationUtils {
 }
 
 // ============================================================================
+// RegisterBankCompression -- compress/decompress register bank data
+// ============================================================================
+
+/// Compression format for register bank data.
+///
+/// Ported from Ghidra's register data serialization used for network
+/// transfer and trace persistence. Supports run-length encoding for
+/// sparse register banks and delta encoding for incremental updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompressionFormat {
+    /// No compression (raw bytes).
+    None,
+    /// Run-length encoding for sparse banks.
+    RunLength,
+    /// Delta encoding relative to a base bank.
+    Delta,
+}
+
+/// A compressed representation of register bank values.
+///
+/// Ported from Ghidra's proposed register data compression utilities
+/// used when transferring register state between the debugger target
+/// and the trace recording infrastructure.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompressedRegisterBank {
+    /// The compression format used.
+    pub format: CompressionFormat,
+    /// The register names included (in order).
+    pub names: Vec<String>,
+    /// The compressed data payload.
+    pub data: Vec<u8>,
+    /// Original total byte count (before compression).
+    pub original_size: usize,
+}
+
+impl CompressedRegisterBank {
+    /// Create a new compressed bank with raw format.
+    pub fn new(format: CompressionFormat) -> Self {
+        Self {
+            format,
+            names: Vec::new(),
+            data: Vec::new(),
+            original_size: 0,
+        }
+    }
+
+    /// The compression ratio (compressed / original).
+    pub fn compression_ratio(&self) -> f64 {
+        if self.original_size == 0 {
+            return 0.0;
+        }
+        self.data.len() as f64 / self.original_size as f64
+    }
+
+    /// The number of registers in the compressed bank.
+    pub fn num_registers(&self) -> usize {
+        self.names.len()
+    }
+
+    /// Whether the compressed bank is empty.
+    pub fn is_empty(&self) -> bool {
+        self.names.is_empty()
+    }
+}
+
+/// Utilities for compressing and decompressing register bank data.
+///
+/// Ported from Ghidra's proposed register data transfer utilities.
+pub struct RegisterBankCompression;
+
+impl RegisterBankCompression {
+    /// Compress a register bank using the specified format.
+    ///
+    /// For `CompressionFormat::None`, produces raw bytes.
+    /// For `CompressionFormat::RunLength`, uses run-length encoding
+    /// for sequences of identical bytes.
+    /// For `CompressionFormat::Delta`, stores only differences from
+    /// the given base bank.
+    pub fn compress(
+        bank: &PcodeRegisterBank,
+        format: CompressionFormat,
+    ) -> CompressedRegisterBank {
+        let mut names = Vec::new();
+        let mut raw_data = Vec::new();
+        for (name, value) in &bank.values {
+            names.push(name.clone());
+            // 4-byte little-endian length prefix + value bytes
+            let len = value.len() as u32;
+            raw_data.extend_from_slice(&len.to_le_bytes());
+            raw_data.extend_from_slice(value);
+        }
+        let original_size = raw_data.len();
+
+        let data = match format {
+            CompressionFormat::None => raw_data,
+            CompressionFormat::RunLength => Self::rle_encode(&raw_data),
+            CompressionFormat::Delta => raw_data, // Delta requires base; use raw for now
+        };
+
+        CompressedRegisterBank {
+            format,
+            names,
+            data,
+            original_size,
+        }
+    }
+
+    /// Decompress a compressed register bank into a `PcodeRegisterBank`.
+    pub fn decompress(
+        compressed: &CompressedRegisterBank,
+    ) -> Result<PcodeRegisterBank, String> {
+        let raw_data = match compressed.format {
+            CompressionFormat::None => compressed.data.clone(),
+            CompressionFormat::RunLength => Self::rle_decode(&compressed.data)?,
+            CompressionFormat::Delta => compressed.data.clone(),
+        };
+
+        let mut bank = PcodeRegisterBank::new();
+        let mut offset = 0;
+        for name in &compressed.names {
+            if offset + 4 > raw_data.len() {
+                return Err("truncated compressed data".into());
+            }
+            let len = u32::from_le_bytes([
+                raw_data[offset],
+                raw_data[offset + 1],
+                raw_data[offset + 2],
+                raw_data[offset + 3],
+            ]) as usize;
+            offset += 4;
+            if offset + len > raw_data.len() {
+                return Err("truncated compressed data".into());
+            }
+            bank.write_register(name, &raw_data[offset..offset + len]);
+            offset += len;
+        }
+        Ok(bank)
+    }
+
+    /// Compress using delta encoding relative to a base bank.
+    ///
+    /// Only stores registers that differ from the base.
+    pub fn compress_delta(
+        bank: &PcodeRegisterBank,
+        base: &PcodeRegisterBank,
+    ) -> CompressedRegisterBank {
+        let mut names = Vec::new();
+        let mut raw_data = Vec::new();
+
+        for (name, value) in &bank.values {
+            let base_val = base.values.get(name);
+            if base_val != Some(value) {
+                names.push(name.clone());
+                let len = value.len() as u32;
+                raw_data.extend_from_slice(&len.to_le_bytes());
+                raw_data.extend_from_slice(value);
+            }
+        }
+        let original_size = raw_data.len();
+
+        CompressedRegisterBank {
+            format: CompressionFormat::Delta,
+            names,
+            data: raw_data,
+            original_size,
+        }
+    }
+
+    /// Apply a delta-compressed bank on top of a base bank.
+    pub fn apply_delta(
+        base: &PcodeRegisterBank,
+        delta: &CompressedRegisterBank,
+    ) -> Result<PcodeRegisterBank, String> {
+        if delta.format != CompressionFormat::Delta {
+            return Err("expected delta format".into());
+        }
+        let mut result = base.clone();
+        let decompressed = Self::decompress(delta)?;
+        // Decompressed bank has values but no definitions, so iterate
+        // over the delta names directly
+        for name in &delta.names {
+            if let Some(val) = decompressed.read_register(name) {
+                result.write_register(name, &val);
+            }
+        }
+        Ok(result)
+    }
+
+    fn rle_encode(data: &[u8]) -> Vec<u8> {
+        if data.is_empty() {
+            return Vec::new();
+        }
+        let mut result = Vec::new();
+        let mut i = 0;
+        while i < data.len() {
+            let byte = data[i];
+            let mut count: u8 = 1;
+            while i + (count as usize) < data.len()
+                && data[i + count as usize] == byte
+                && count < 255
+            {
+                count += 1;
+            }
+            result.push(count);
+            result.push(byte);
+            i += count as usize;
+        }
+        result
+    }
+
+    fn rle_decode(data: &[u8]) -> Result<Vec<u8>, String> {
+        if data.len() % 2 != 0 {
+            return Err("invalid RLE data: odd length".into());
+        }
+        let mut result = Vec::new();
+        for chunk in data.chunks(2) {
+            let count = chunk[0];
+            let byte = chunk[1];
+            for _ in 0..count {
+                result.push(byte);
+            }
+        }
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// RegisterGroupLayout -- layout algorithm for register group display
+// ============================================================================
+
+/// Layout mode for register group display.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum GroupLayoutMode {
+    /// Display registers in a single column.
+    SingleColumn,
+    /// Display registers in a multi-column grid.
+    Grid { columns: usize },
+    /// Display registers in a tree hierarchy (parent/child).
+    Tree,
+}
+
+/// Describes the layout of a register group for display in a UI.
+///
+/// Ported from Ghidra's proposed register display layout utilities
+/// used by the Registers window to organize register groups.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterGroupLayout {
+    /// The group name.
+    pub group_name: String,
+    /// The layout mode.
+    pub mode: GroupLayoutMode,
+    /// The ordered list of register names to display.
+    pub entries: Vec<LayoutEntry>,
+    /// Whether the group is expanded by default.
+    pub expanded: bool,
+    /// Display order priority (lower = shown first).
+    pub display_order: u32,
+}
+
+/// A single entry in a register group layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutEntry {
+    /// The register name.
+    pub name: String,
+    /// Nesting depth (0 = top-level, 1 = child, etc.).
+    pub depth: u32,
+    /// Whether this entry has children.
+    pub has_children: bool,
+    /// The display label (may differ from register name for aliases).
+    pub label: String,
+}
+
+impl RegisterGroupLayout {
+    /// Create a new layout for a group.
+    pub fn new(group_name: impl Into<String>) -> Self {
+        Self {
+            group_name: group_name.into(),
+            mode: GroupLayoutMode::SingleColumn,
+            entries: Vec::new(),
+            expanded: true,
+            display_order: 0,
+        }
+    }
+
+    /// Set the layout mode.
+    pub fn with_mode(mut self, mode: GroupLayoutMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Set whether expanded by default.
+    pub fn with_expanded(mut self, expanded: bool) -> Self {
+        self.expanded = expanded;
+        self
+    }
+
+    /// Set the display order.
+    pub fn with_display_order(mut self, order: u32) -> Self {
+        self.display_order = order;
+        self
+    }
+
+    /// Build a layout from a register bank's group and parent/child info.
+    pub fn from_bank(bank: &PcodeRegisterBank, group_name: &str) -> Self {
+        let mut layout = Self::new(group_name);
+        let registers = bank.registers_in_group(group_name);
+
+        for name in &registers {
+            let depth = Self::compute_depth(bank, name);
+            let children = bank.children_of(name);
+            layout.entries.push(LayoutEntry {
+                name: name.clone(),
+                depth,
+                has_children: !children.is_empty(),
+                label: name.clone(),
+            });
+        }
+
+        // Sort: top-level first, then by name within each depth
+        layout.entries.sort_by(|a, b| {
+            a.depth.cmp(&b.depth).then_with(|| a.name.cmp(&b.name))
+        });
+
+        layout
+    }
+
+    fn compute_depth(bank: &PcodeRegisterBank, name: &str) -> u32 {
+        let mut depth = 0;
+        let mut current = name.to_string();
+        while let Some(parent) = bank.parent_of(&current) {
+            depth += 1;
+            current = parent.to_string();
+            if depth > 32 {
+                break; // safety limit
+            }
+        }
+        depth
+    }
+
+    /// The number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the layout has no entries.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Get only top-level entries (depth 0).
+    pub fn top_level_entries(&self) -> Vec<&LayoutEntry> {
+        self.entries.iter().filter(|e| e.depth == 0).collect()
+    }
+}
+
+// ============================================================================
+// RegisterAliasResolver -- resolve multi-level alias chains
+// ============================================================================
+
+/// Resolves register alias chains to their canonical form.
+///
+/// Ported from Ghidra's register alias resolution used by
+/// `PcodeDebuggerRegistersAccess` to map between target register
+/// names, language register names, and alias chains (e.g.,
+/// "EAX" -> "RAX" -> "a").
+///
+/// Unlike the simple alias map in `PcodeRegisterBank`, this supports
+/// multi-level chains, transitive resolution, and conflict detection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterAliasResolver {
+    /// alias -> canonical mapping (direct aliases).
+    aliases: BTreeMap<String, String>,
+    /// Reverse mapping: canonical -> all known aliases.
+    reverse: BTreeMap<String, Vec<String>>,
+}
+
+impl RegisterAliasResolver {
+    /// Create a new empty resolver.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an alias mapping. `alias` is an alternative name for `canonical`.
+    pub fn add_alias(&mut self, alias: impl Into<String>, canonical: impl Into<String>) {
+        let alias = alias.into();
+        let canonical = canonical.into();
+        self.reverse
+            .entry(canonical.clone())
+            .or_default()
+            .push(alias.clone());
+        self.aliases.insert(alias, canonical);
+    }
+
+    /// Add aliases from a register bank.
+    pub fn add_from_bank(&mut self, bank: &PcodeRegisterBank) {
+        for (alias, canonical) in &bank.aliases {
+            self.add_alias(alias, canonical);
+        }
+    }
+
+    /// Resolve a name to its canonical form, following the full chain.
+    ///
+    /// Returns the canonical name as a `String`, or `None` if a cycle
+    /// is detected.
+    pub fn resolve(&self, name: &str) -> Option<String> {
+        // Follow the chain until we reach a name with no further alias
+        let mut current = name.to_string();
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(name.to_string());
+        while let Some(next) = self.aliases.get(&current) {
+            if !visited.insert(next.clone()) {
+                // Cycle detected
+                return None;
+            }
+            current = next.clone();
+        }
+        Some(current)
+    }
+
+    /// Get all aliases for a canonical name.
+    pub fn aliases_of(&self, canonical: &str) -> &[String] {
+        self.reverse
+            .get(canonical)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Whether the given name is an alias (not a canonical name).
+    pub fn is_alias(&self, name: &str) -> bool {
+        self.aliases.contains_key(name)
+    }
+
+    /// Whether the given name is a canonical name (has aliases).
+    pub fn is_canonical(&self, name: &str) -> bool {
+        self.reverse.contains_key(name)
+    }
+
+    /// The total number of alias mappings.
+    pub fn num_aliases(&self) -> usize {
+        self.aliases.len()
+    }
+
+    /// Check for cycles in the alias graph.
+    pub fn has_cycle(&self) -> bool {
+        for name in self.aliases.keys() {
+            let mut visited = std::collections::HashSet::new();
+            visited.insert(name.clone());
+            let mut current = name.as_str();
+            while let Some(next) = self.aliases.get(current) {
+                if !visited.insert(next.clone()) {
+                    return true;
+                }
+                current = next;
+            }
+        }
+        false
+    }
+
+    /// Build an alias resolver from a `RegisterMapping`.
+    ///
+    /// Adds each mapping pair as an alias from the connector name
+    /// to the language register name.
+    pub fn from_mapping(mapping: &RegisterMapping) -> Self {
+        let mut resolver = Self::new();
+        for entry in mapping.iter() {
+            resolver.add_alias(entry.connector_name.to_string(), entry.lang_name.to_string());
+        }
+        resolver
+    }
+
+    /// Clear all aliases.
+    pub fn clear(&mut self) {
+        self.aliases.clear();
+        self.reverse.clear();
+    }
+}
+
+// ============================================================================
+// Saved Register Map (ported from SavedRegisterMap.java)
+// ============================================================================
+
+/// A range mapping from register space to a stack address.
+///
+/// Ported from Ghidra's `SavedRegisterMap.SavedEntry`. Used when a
+/// register's value was saved to the stack by a caller frame, so
+/// register reads must be redirected to stack reads during unwinding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedEntry {
+    /// The range in register space (start_offset, end_offset inclusive).
+    pub from: (u64, u64),
+    /// The target address in the stack segment.
+    pub to: u64,
+}
+
+impl SavedEntry {
+    /// Create a new saved entry.
+    pub fn new(from_min: u64, from_max: u64, to: u64) -> Self {
+        Self {
+            from: (from_min, from_max),
+            to,
+        }
+    }
+
+    /// The length of the mapped range.
+    pub fn size(&self) -> u64 {
+        self.from.1 - self.from.0 + 1
+    }
+
+    /// Check if an address falls within the "from" range.
+    pub fn contains(&self, addr: u64) -> bool {
+        addr >= self.from.0 && addr <= self.from.1
+    }
+
+    /// Truncate the entry to a sub-range (must be enclosed by current range).
+    pub fn truncate(&self, range_min: u64, range_max: u64) -> Self {
+        let left_offset = range_min - self.from.0;
+        Self {
+            from: (range_min, range_max),
+            to: self.to + left_offset,
+        }
+    }
+
+    /// Intersect with another range, returning None if no overlap.
+    pub fn intersect(&self, other_min: u64, other_max: u64) -> Option<Self> {
+        let int_min = self.from.0.max(other_min);
+        let int_max = self.from.1.min(other_max);
+        if int_min <= int_max {
+            Some(self.truncate(int_min, int_max))
+        } else {
+            None
+        }
+    }
+
+    /// Truncate to exclude addresses beyond the given max.
+    pub fn truncate_max(&self, max: u64) -> Option<Self> {
+        if self.from.1 <= max {
+            return Some(self.clone());
+        }
+        if self.from.0 <= max {
+            Some(self.truncate(self.from.0, max))
+        } else {
+            None
+        }
+    }
+
+    /// Truncate to exclude addresses before the given min.
+    pub fn truncate_min(&self, min: u64) -> Option<Self> {
+        if self.from.0 >= min {
+            return Some(self.clone());
+        }
+        if self.from.1 >= min {
+            Some(self.truncate(min, self.from.1))
+        } else {
+            None
+        }
+    }
+}
+
+/// A map from registers to physical stack addresses.
+///
+/// Ported from Ghidra's `SavedRegisterMap`. Used by an unwound frame
+/// to ensure that register reads are translated to stack reads when
+/// the register's value was saved to the stack by some inner frame.
+/// If a register is not saved to the stack, its value is read from
+/// the register bank directly.
+#[derive(Debug, Clone, Default)]
+pub struct SavedRegisterMap {
+    /// Mappings keyed by the minimum address of the "from" range.
+    entries: BTreeMap<u64, SavedEntry>,
+}
+
+impl SavedRegisterMap {
+    /// Create a new empty (identity) register map.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Map a register range to a stack address range.
+    ///
+    /// The `from` and `to` ranges must have equal lengths.
+    pub fn put_range(&mut self, from_min: u64, from_max: u64, to_min: u64) {
+        let entry = SavedEntry::new(from_min, from_max, to_min);
+        // Remove any overlapping entries first
+        self.remove_overlapping(from_min, from_max);
+        self.entries.insert(from_min, entry);
+    }
+
+    /// Map a register (by offset and size) to a stack varnode.
+    pub fn put_register(&mut self, reg_offset: u64, reg_size: u64, stack_offset: u64) {
+        self.put_range(reg_offset, reg_offset + reg_size - 1, stack_offset);
+    }
+
+    fn remove_overlapping(&mut self, min: u64, max: u64) {
+        let overlapping: Vec<u64> = self
+            .entries
+            .range(..=max)
+            .filter(|(_, e)| e.from.1 >= min)
+            .map(|(k, _)| *k)
+            .collect();
+        for key in overlapping {
+            self.entries.remove(&key);
+        }
+    }
+
+    /// Look up whether an address should be redirected and return
+    /// (stack_address, size) if so.
+    pub fn lookup(&self, addr: u64) -> Option<(u64, u64)> {
+        // Find the entry whose range contains addr
+        for (_, entry) in self.entries.range(..=addr).rev() {
+            if entry.contains(addr) {
+                let offset = addr - entry.from.0;
+                let remaining = entry.from.1 - addr + 1;
+                return Some((entry.to + offset, remaining));
+            }
+            break;
+        }
+        None
+    }
+
+    /// Check if a register address is saved to the stack.
+    pub fn is_saved(&self, addr: u64) -> bool {
+        self.lookup(addr).is_some()
+    }
+
+    /// Fork (copy) this register map.
+    pub fn fork(&self) -> Self {
+        Self {
+            entries: self.entries.clone(),
+        }
+    }
+
+    /// The number of entries in the map.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the map is empty (identity mapping).
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Iterate over all saved entries.
+    pub fn iter(&self) -> impl Iterator<Item = &SavedEntry> {
+        self.entries.values()
+    }
+}
+
+// ============================================================================
+// Register Mapper (ported from RegisterMapper.java / DefaultRegisterMapper)
+// ============================================================================
+
+/// A trait for mapping register names and values between language
+/// and connector conventions.
+///
+/// Ported from Ghidra's `RegisterMapper` interface. Implementations
+/// translate register names and values between the Ghidra language
+/// model and a target connector (e.g., GDB remote protocol).
+pub trait RegisterMapper {
+    /// Map a language register name to a connector register name.
+    fn map_name(&self, name: &str) -> String;
+
+    /// Map a connector register name back to a language register name.
+    fn map_name_back(&self, name: &str) -> String;
+
+    /// Map a register value from language format to connector format.
+    ///
+    /// The default implementation returns the value unchanged.
+    fn map_value(&self, _name: &str, value: &[u8]) -> Vec<u8> {
+        value.to_vec()
+    }
+
+    /// Map a register value from connector format back to language format.
+    ///
+    /// The default implementation returns the value unchanged.
+    fn map_value_back(&self, _name: &str, value: &[u8]) -> Vec<u8> {
+        value.to_vec()
+    }
+}
+
+/// The default (identity) register mapper.
+///
+/// Ported from Ghidra's `DefaultRegisterMapper`. Performs no
+/// translation -- names and values pass through unchanged.
+#[derive(Debug, Clone)]
+pub struct DefaultRegisterMapper {
+    /// The language ID for context (unused in identity mapping).
+    pub language_id: String,
+}
+
+impl DefaultRegisterMapper {
+    /// Create a new identity register mapper.
+    pub fn new(language_id: impl Into<String>) -> Self {
+        Self {
+            language_id: language_id.into(),
+        }
+    }
+}
+
+impl RegisterMapper for DefaultRegisterMapper {
+    fn map_name(&self, name: &str) -> String {
+        name.to_string()
+    }
+
+    fn map_name_back(&self, name: &str) -> String {
+        name.to_string()
+    }
+}
+
+// ============================================================================
+// Register Row (ported from RegisterRow.java)
+// ============================================================================
+
+/// A single row in a register display table.
+///
+/// Ported from Ghidra's `RegisterRow`. Represents one register
+/// for display in a debugger register panel, including its name,
+/// current value, and metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterRow {
+    /// The register name (canonical).
+    pub name: String,
+    /// The display name (may include alias or group prefix).
+    pub display_name: String,
+    /// The register bit length.
+    pub bit_length: u32,
+    /// The current value as raw bytes (big-endian).
+    pub value: Option<Vec<u8>>,
+    /// The group this register belongs to.
+    pub group: String,
+    /// The nesting depth (for sub-registers).
+    pub depth: u32,
+    /// Whether this register's value has changed since last stop.
+    pub changed: bool,
+    /// Whether this row is currently visible/expanded.
+    pub visible: bool,
+}
+
+impl RegisterRow {
+    /// Create a new register row.
+    pub fn new(
+        name: impl Into<String>,
+        display_name: impl Into<String>,
+        bit_length: u32,
+        group: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            display_name: display_name.into(),
+            bit_length,
+            value: None,
+            group: group.into(),
+            depth: 0,
+            changed: false,
+            visible: true,
+        }
+    }
+
+    /// Set the value.
+    pub fn with_value(mut self, value: Vec<u8>) -> Self {
+        self.value = Some(value);
+        self
+    }
+
+    /// Set the depth.
+    pub fn with_depth(mut self, depth: u32) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Mark this register as changed.
+    pub fn mark_changed(&mut self) {
+        self.changed = true;
+    }
+
+    /// Clear the changed flag.
+    pub fn clear_changed(&mut self) {
+        self.changed = false;
+    }
+
+    /// Get the value as a hex string.
+    pub fn value_hex(&self) -> String {
+        match &self.value {
+            Some(v) => v.iter().map(|b| format!("{:02x}", b)).collect(),
+            None => "??".to_string(),
+        }
+    }
+
+    /// The byte length of the register.
+    pub fn byte_length(&self) -> u32 {
+        (self.bit_length + 7) / 8
+    }
+}
+
+/// Build a set of `RegisterRow` entries from a `PcodeRegisterBank`.
+///
+/// This produces the display rows for a register panel, organized
+/// by group and respecting parent/child relationships.
+pub fn build_register_rows(bank: &PcodeRegisterBank, group_name: &str) -> Vec<RegisterRow> {
+    let mut rows = Vec::new();
+    for (name, def) in bank.definitions() {
+        if def.group != group_name {
+            continue;
+        }
+        let depth = bank.compute_depth(name);
+        let value = bank.read_register(name);
+        let display_name = if depth > 0 {
+            format!("{}{}", "  ".repeat(depth as usize), name)
+        } else {
+            name.clone()
+        };
+        let mut row = RegisterRow::new(name.as_str(), display_name, def.bit_length, def.group.as_str())
+            .with_depth(depth);
+        if let Some(v) = value {
+            row = row.with_value(v);
+        }
+        rows.push(row);
+    }
+    rows
+}
+
+/// A snapshot of all register values at a point in time.
+///
+/// Ported from Ghidra's register snapshot concept in the debug framework.
+/// Captures the complete register state for comparison or restoration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterStateSnapshot {
+    /// Register name -> value bytes.
+    pub values: BTreeMap<String, Vec<u8>>,
+    /// The snap (time) at which this snapshot was taken.
+    pub snap: i64,
+    /// The thread key this snapshot belongs to.
+    pub thread_key: Option<i64>,
+}
+
+impl RegisterStateSnapshot {
+    /// Create a new empty snapshot at the given snap.
+    pub fn new(snap: i64) -> Self {
+        Self {
+            snap,
+            ..Default::default()
+        }
+    }
+
+    /// Capture the current state of a register bank.
+    pub fn capture(bank: &PcodeRegisterBank, snap: i64) -> Self {
+        let mut snapshot = Self::new(snap);
+        for (name, _) in bank.definitions() {
+            if let Some(value) = bank.read_register(name) {
+                snapshot.values.insert(name.clone(), value);
+            }
+        }
+        snapshot
+    }
+
+    /// Set the thread key.
+    pub fn with_thread_key(mut self, key: i64) -> Self {
+        self.thread_key = Some(key);
+        self
+    }
+
+    /// Get a register value.
+    pub fn get(&self, name: &str) -> Option<&Vec<u8>> {
+        self.values.get(name)
+    }
+
+    /// Compute a diff between this snapshot and another.
+    pub fn diff(&self, other: &RegisterStateSnapshot) -> RegisterSnapshotDiff {
+        let mut changes = BTreeMap::new();
+        for (name, val) in &self.values {
+            match other.values.get(name) {
+                Some(other_val) if val != other_val => {
+                    changes.insert(
+                        name.clone(),
+                        RegisterDiffEntry {
+                            old_value: Some(val.clone()),
+                            new_value: Some(other_val.clone()),
+                        },
+                    );
+                }
+                None => {
+                    changes.insert(
+                        name.clone(),
+                        RegisterDiffEntry {
+                            old_value: Some(val.clone()),
+                            new_value: None,
+                        },
+                    );
+                }
+                _ => {}
+            }
+        }
+        for name in other.values.keys() {
+            if !self.values.contains_key(name) {
+                changes.insert(
+                    name.clone(),
+                    RegisterDiffEntry {
+                        old_value: None,
+                        new_value: other.values.get(name).cloned(),
+                    },
+                );
+            }
+        }
+        RegisterSnapshotDiff {
+            from_snap: self.snap,
+            to_snap: other.snap,
+            changes,
+        }
+    }
+}
+
+/// A single entry in a register snapshot diff.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDiffEntry {
+    /// The old value (None if register didn't exist before).
+    pub old_value: Option<Vec<u8>>,
+    /// The new value (None if register was removed).
+    pub new_value: Option<Vec<u8>>,
+}
+
+/// A diff between two register state snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterSnapshotDiff {
+    /// The snap of the "from" snapshot.
+    pub from_snap: i64,
+    /// The snap of the "to" snapshot.
+    pub to_snap: i64,
+    /// Map of register name -> changed entry.
+    pub changes: BTreeMap<String, RegisterDiffEntry>,
+}
+
+impl RegisterSnapshotDiff {
+    /// Whether there are any changes.
+    pub fn has_changes(&self) -> bool {
+        !self.changes.is_empty()
+    }
+
+    /// The number of changed registers.
+    pub fn len(&self) -> usize {
+        self.changes.len()
+    }
+
+    /// Whether the diff is empty (no changes).
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -4462,5 +5446,375 @@ mod tests {
         assert_eq!(encoded.get("name").unwrap(), "RAX");
         assert_eq!(encoded.get("bit_length").unwrap(), "64");
         assert_eq!(encoded.get("connector_name").unwrap(), "rax");
+    }
+
+    // -- RegisterBankCompression --
+
+    #[test]
+    fn test_compression_none_round_trip() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+
+        let compressed = RegisterBankCompression::compress(&bank, CompressionFormat::None);
+        assert_eq!(compressed.num_registers(), 2);
+        assert!(!compressed.is_empty());
+
+        let restored = RegisterBankCompression::decompress(&compressed).unwrap();
+        assert_eq!(restored.read_register("RAX"), Some(vec![0x42; 8]));
+        assert_eq!(restored.read_register("RBX"), Some(vec![0xAA; 8]));
+    }
+
+    #[test]
+    fn test_compression_rle_round_trip() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x00; 8]); // Repeated bytes compress well
+
+        let compressed = RegisterBankCompression::compress(&bank, CompressionFormat::RunLength);
+        assert_eq!(compressed.format, CompressionFormat::RunLength);
+
+        let restored = RegisterBankCompression::decompress(&compressed).unwrap();
+        assert_eq!(restored.read_register("RAX"), Some(vec![0x00; 8]));
+    }
+
+    #[test]
+    fn test_compression_delta() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.define("RBX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+        base.write_register("RBX", &[0xAA; 8]);
+
+        let mut modified = PcodeRegisterBank::new();
+        modified.define("RAX", 64, "GPR");
+        modified.define("RBX", 64, "GPR");
+        modified.write_register("RAX", &[0xFF; 8]); // Changed
+        modified.write_register("RBX", &[0xAA; 8]); // Same as base
+
+        let delta = RegisterBankCompression::compress_delta(&modified, &base);
+        assert_eq!(delta.format, CompressionFormat::Delta);
+        assert_eq!(delta.num_registers(), 1); // Only RAX changed
+        assert!(delta.names.contains(&"RAX".to_string()));
+
+        let restored = RegisterBankCompression::apply_delta(&base, &delta).unwrap();
+        assert_eq!(restored.read_register("RAX"), Some(vec![0xFF; 8]));
+    }
+
+    #[test]
+    fn test_compression_ratio() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x00; 8]);
+
+        let compressed = RegisterBankCompression::compress(&bank, CompressionFormat::RunLength);
+        // RLE on 8 zero bytes: 2 bytes (count + value) vs 12 bytes (4 len + 8 data)
+        assert!(compressed.compression_ratio() < 1.0);
+    }
+
+    // -- RegisterGroupLayout --
+
+    #[test]
+    fn test_group_layout_from_bank() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("EAX", 32, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.set_parent("EAX", "RAX");
+
+        let layout = RegisterGroupLayout::from_bank(&bank, "GPR");
+        assert_eq!(layout.len(), 3);
+        assert!(!layout.is_empty());
+        assert_eq!(layout.group_name, "GPR");
+    }
+
+    #[test]
+    fn test_group_layout_top_level() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("EAX", 32, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.set_parent("EAX", "RAX");
+
+        let layout = RegisterGroupLayout::from_bank(&bank, "GPR");
+        let top = layout.top_level_entries();
+        // RAX (depth 0) and RBX (depth 0) are top-level; EAX (depth 1) is not
+        assert_eq!(top.len(), 2);
+        // RAX has EAX as a child
+        let rax_entry = top.iter().find(|e| e.name == "RAX").unwrap();
+        assert!(rax_entry.has_children);
+        // RBX has no children
+        let rbx_entry = top.iter().find(|e| e.name == "RBX").unwrap();
+        assert!(!rbx_entry.has_children);
+    }
+
+    #[test]
+    fn test_group_layout_builder() {
+        let layout = RegisterGroupLayout::new("Vector")
+            .with_mode(GroupLayoutMode::Grid { columns: 4 })
+            .with_expanded(false)
+            .with_display_order(5);
+
+        assert_eq!(layout.group_name, "Vector");
+        assert!(!layout.expanded);
+        assert_eq!(layout.display_order, 5);
+    }
+
+    // -- RegisterAliasResolver --
+
+    #[test]
+    fn test_alias_resolver_basic() {
+        let mut resolver = RegisterAliasResolver::new();
+        resolver.add_alias("EAX", "RAX");
+        resolver.add_alias("a", "RAX");
+
+        assert_eq!(resolver.resolve("EAX"), Some("RAX".to_string()));
+        assert_eq!(resolver.resolve("a"), Some("RAX".to_string()));
+        assert_eq!(resolver.resolve("RAX"), Some("RAX".to_string()));
+        assert_eq!(resolver.resolve("MISSING"), Some("MISSING".to_string()));
+    }
+
+    #[test]
+    fn test_alias_resolver_chain() {
+        let mut resolver = RegisterAliasResolver::new();
+        resolver.add_alias("EAX", "RAX");
+        resolver.add_alias("a", "EAX");
+
+        // "a" -> "EAX" -> "RAX" (transitive resolution)
+        assert_eq!(resolver.resolve("a"), Some("RAX".to_string()));
+    }
+
+    #[test]
+    fn test_alias_resolver_reverse() {
+        let mut resolver = RegisterAliasResolver::new();
+        resolver.add_alias("EAX", "RAX");
+        resolver.add_alias("a", "RAX");
+
+        let aliases = resolver.aliases_of("RAX");
+        assert_eq!(aliases.len(), 2);
+        assert!(aliases.contains(&"EAX".to_string()));
+        assert!(aliases.contains(&"a".to_string()));
+    }
+
+    #[test]
+    fn test_alias_resolver_from_bank() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.add_alias("EAX", "RAX");
+
+        let mut resolver = RegisterAliasResolver::new();
+        resolver.add_from_bank(&bank);
+        assert_eq!(resolver.resolve("EAX"), Some("RAX".to_string()));
+    }
+
+    #[test]
+    fn test_alias_resolver_cycle_detection() {
+        let mut resolver = RegisterAliasResolver::new();
+        resolver.add_alias("A", "B");
+        resolver.add_alias("B", "A");
+        assert!(resolver.has_cycle());
+    }
+
+    #[test]
+    fn test_alias_resolver_no_cycle() {
+        let mut resolver = RegisterAliasResolver::new();
+        resolver.add_alias("EAX", "RAX");
+        assert!(!resolver.has_cycle());
+    }
+
+    // -- SavedRegisterMap --
+
+    #[test]
+    fn test_saved_entry_basic() {
+        let entry = SavedEntry::new(0x100, 0x107, 0x7FFF_0000);
+        assert_eq!(entry.size(), 8);
+        assert!(entry.contains(0x100));
+        assert!(entry.contains(0x107));
+        assert!(!entry.contains(0x108));
+    }
+
+    #[test]
+    fn test_saved_entry_truncate() {
+        let entry = SavedEntry::new(0x100, 0x107, 0x7FFF_0000);
+        let truncated = entry.truncate(0x102, 0x105);
+        assert_eq!(truncated.from, (0x102, 0x105));
+        assert_eq!(truncated.to, 0x7FFF_0002);
+    }
+
+    #[test]
+    fn test_saved_entry_intersect() {
+        let entry = SavedEntry::new(0x100, 0x107, 0x7FFF_0000);
+        let inter = entry.intersect(0x105, 0x110).unwrap();
+        assert_eq!(inter.from, (0x105, 0x107));
+        assert_eq!(inter.to, 0x7FFF_0005);
+
+        assert!(entry.intersect(0x200, 0x300).is_none());
+    }
+
+    #[test]
+    fn test_saved_entry_truncate_max() {
+        let entry = SavedEntry::new(0x100, 0x107, 0x7FFF_0000);
+        let truncated = entry.truncate_max(0x103).unwrap();
+        assert_eq!(truncated.from, (0x100, 0x103));
+        assert!(entry.truncate_max(0x107).is_some());
+    }
+
+    #[test]
+    fn test_saved_entry_truncate_min() {
+        let entry = SavedEntry::new(0x100, 0x107, 0x7FFF_0000);
+        let truncated = entry.truncate_min(0x104).unwrap();
+        assert_eq!(truncated.from, (0x104, 0x107));
+        assert!(entry.truncate_min(0x100).is_some());
+    }
+
+    #[test]
+    fn test_saved_register_map() {
+        let mut map = SavedRegisterMap::new();
+        assert!(map.is_empty());
+
+        map.put_register(0x100, 8, 0x7FFF_0000);
+        assert_eq!(map.len(), 1);
+        assert!(map.is_saved(0x100));
+        assert!(map.is_saved(0x107));
+        assert!(!map.is_saved(0x108));
+
+        let (stack_addr, size) = map.lookup(0x102).unwrap();
+        assert_eq!(stack_addr, 0x7FFF_0002);
+        assert_eq!(size, 6);
+    }
+
+    #[test]
+    fn test_saved_register_map_overwrite() {
+        let mut map = SavedRegisterMap::new();
+        map.put_register(0x100, 8, 0x7FFF_0000);
+        // Overwrite with a smaller range
+        map.put_register(0x100, 4, 0x7FFF_1000);
+        assert!(map.is_saved(0x100));
+        assert!(!map.is_saved(0x104));
+    }
+
+    #[test]
+    fn test_saved_register_map_fork() {
+        let mut map = SavedRegisterMap::new();
+        map.put_register(0x100, 8, 0x7FFF_0000);
+        let forked = map.fork();
+        assert!(forked.is_saved(0x100));
+        assert_eq!(forked.len(), 1);
+    }
+
+    // -- RegisterMapper / DefaultRegisterMapper --
+
+    #[test]
+    fn test_default_register_mapper() {
+        let mapper = DefaultRegisterMapper::new("x86:LE:64:default");
+        assert_eq!(mapper.map_name("RAX"), "RAX");
+        assert_eq!(mapper.map_name_back("RAX"), "RAX");
+        assert_eq!(mapper.map_value("RAX", &[1, 2, 3]), vec![1, 2, 3]);
+        assert_eq!(mapper.map_value_back("RAX", &[1, 2, 3]), vec![1, 2, 3]);
+    }
+
+    // -- RegisterRow --
+
+    #[test]
+    fn test_register_row() {
+        let row = RegisterRow::new("RAX", "RAX", 64, "GPR")
+            .with_value(vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]);
+        assert_eq!(row.name, "RAX");
+        assert_eq!(row.bit_length, 64);
+        assert_eq!(row.byte_length(), 8);
+        assert_eq!(row.value_hex(), "0102030405060708");
+    }
+
+    #[test]
+    fn test_register_row_changed() {
+        let mut row = RegisterRow::new("RAX", "RAX", 64, "GPR");
+        assert!(!row.changed);
+        row.mark_changed();
+        assert!(row.changed);
+        row.clear_changed();
+        assert!(!row.changed);
+    }
+
+    #[test]
+    fn test_register_row_no_value() {
+        let row = RegisterRow::new("RAX", "RAX", 64, "GPR");
+        assert_eq!(row.value_hex(), "??");
+    }
+
+    #[test]
+    fn test_build_register_rows() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0xAA; 8]);
+
+        let rows = build_register_rows(&bank, "GPR");
+        assert_eq!(rows.len(), 2);
+        let rax_row = rows.iter().find(|r| r.name == "RAX").unwrap();
+        assert!(rax_row.value.is_some());
+    }
+
+    // -- RegisterStateSnapshot / diff --
+
+    #[test]
+    fn test_register_state_snapshot() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x01; 8]);
+        bank.write_register("RBX", &[0x02; 8]);
+
+        let snapshot = RegisterStateSnapshot::capture(&bank, 0);
+        assert_eq!(snapshot.snap, 0);
+        assert_eq!(snapshot.get("RAX"), Some(&vec![0x01; 8]));
+        assert_eq!(snapshot.get("RBX"), Some(&vec![0x02; 8]));
+    }
+
+    #[test]
+    fn test_register_state_snapshot_diff() {
+        let mut snap1 = RegisterStateSnapshot::new(0);
+        snap1.values.insert("RAX".to_string(), vec![0x01; 8]);
+        snap1.values.insert("RBX".to_string(), vec![0x02; 8]);
+
+        let mut snap2 = RegisterStateSnapshot::new(1);
+        snap2.values.insert("RAX".to_string(), vec![0xFF; 8]);
+        snap2.values.insert("RBX".to_string(), vec![0x02; 8]);
+        snap2.values.insert("RCX".to_string(), vec![0x03; 8]);
+
+        let diff = snap1.diff(&snap2);
+        assert!(diff.has_changes());
+        assert_eq!(diff.len(), 2); // RAX changed, RCX added
+
+        let rax_change = diff.changes.get("RAX").unwrap();
+        assert_eq!(rax_change.old_value, Some(vec![0x01; 8]));
+        assert_eq!(rax_change.new_value, Some(vec![0xFF; 8]));
+
+        let rcx_change = diff.changes.get("RCX").unwrap();
+        assert!(rcx_change.old_value.is_none());
+        assert_eq!(rcx_change.new_value, Some(vec![0x03; 8]));
+    }
+
+    #[test]
+    fn test_register_state_snapshot_no_diff() {
+        let snap1 = RegisterStateSnapshot::new(0);
+        let snap2 = RegisterStateSnapshot::new(1);
+        let diff = snap1.diff(&snap2);
+        assert!(diff.is_empty());
+    }
+
+    #[test]
+    fn test_compute_depth() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("EAX", 32, "GPR");
+        bank.define("AX", 16, "GPR");
+        bank.set_parent("EAX", "RAX");
+        bank.set_parent("AX", "EAX");
+
+        assert_eq!(bank.compute_depth("RAX"), 0);
+        assert_eq!(bank.compute_depth("EAX"), 1);
+        assert_eq!(bank.compute_depth("AX"), 2);
     }
 }

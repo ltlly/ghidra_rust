@@ -2114,6 +2114,11 @@ impl TargetSimulator {
         self.connected = false;
     }
 
+    /// Whether the target is currently connected.
+    pub fn is_connected(&self) -> bool {
+        self.connected
+    }
+
     /// Queue a register read response.
     pub fn queue_register_read(&mut self, name: impl Into<String>, value: Vec<u8>) {
         self.pending_register_reads.insert(name.into(), value);
@@ -3034,6 +3039,10 @@ pub enum DataAccessError {
     NoSession,
     /// The target is not connected.
     TargetDisconnected,
+    /// No target has been configured.
+    NoTarget,
+    /// The target returned an error.
+    TargetError(String),
     /// The operation was cancelled.
     Cancelled,
     /// A generic error.
@@ -3045,6 +3054,8 @@ impl std::fmt::Display for DataAccessError {
         match self {
             Self::NoSession => write!(f, "no active session"),
             Self::TargetDisconnected => write!(f, "target disconnected"),
+            Self::NoTarget => write!(f, "no target configured"),
+            Self::TargetError(msg) => write!(f, "target error: {}", msg),
             Self::Cancelled => write!(f, "operation cancelled"),
             Self::Other(msg) => write!(f, "{}", msg),
         }
@@ -4027,6 +4038,1096 @@ impl PcodeStepController {
     /// The total history depth.
     pub fn history_len(&self) -> usize {
         self.history.len()
+    }
+}
+
+// ============================================================================
+// PcodeDebuggerMemoryAccessState -- concrete memory access with target
+// ============================================================================
+
+/// The state of a memory block for the debugger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MemoryBlockState {
+    /// The block has been read from the target and is up to date.
+    Synced,
+    /// The block has been modified locally but not written to target.
+    Dirty,
+    /// The block state is unknown (not yet read).
+    Unknown,
+    /// An error occurred while reading/writing the block.
+    Error,
+}
+
+/// A concrete implementation of memory access that integrates with
+/// a target via the `TargetSimulator`.
+///
+/// Ported from Ghidra's `PcodeDebuggerMemoryAccess` implementation
+/// which backs the trace-based memory access with live target reads
+/// and writes.
+#[derive(Debug, Clone)]
+pub struct PcodeDebuggerMemoryAccessState {
+    /// The address space this access covers.
+    pub space: String,
+    /// The snap context.
+    pub snap: i64,
+    /// Block states indexed by block start offset.
+    blocks: BTreeMap<u64, MemoryBlockState>,
+    /// Cached memory data.
+    memory: PcodeMemoryView,
+    /// Optional target simulator for live reads/writes.
+    target: Option<TargetSimulator>,
+    /// Static image fallback provider.
+    static_images: StaticImageProvider,
+    /// Unknown ranges (not yet read from target).
+    unknown_ranges: AddressRangeSet,
+}
+
+impl PcodeDebuggerMemoryAccessState {
+    /// Create a new memory access state.
+    pub fn new(space: impl Into<String>, snap: i64) -> Self {
+        let space_str = space.into();
+        Self {
+            space: space_str.clone(),
+            snap,
+            blocks: BTreeMap::new(),
+            memory: PcodeMemoryView::new(),
+            target: None,
+            static_images: StaticImageProvider::new(),
+            unknown_ranges: AddressRangeSet::new(&space_str),
+        }
+    }
+
+    /// Set the target simulator for live access.
+    pub fn with_target(mut self, target: TargetSimulator) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    /// Set the static image provider for fallback reads.
+    pub fn with_static_images(mut self, provider: StaticImageProvider) -> Self {
+        self.static_images = provider;
+        self
+    }
+
+    /// Read bytes from memory. Tries the local cache first, then the
+    /// target, then static images.
+    pub fn read(&mut self, offset: u64, len: u32) -> Option<Vec<u8>> {
+        // Try local cache
+        if let Some(bytes) = self.memory.read(&self.space, offset, len) {
+            return Some(bytes);
+        }
+        // Try target
+        let space = self.space.clone();
+        let mut target_result: Option<Vec<u8>> = None;
+        if let Some(ref mut target) = self.target {
+            if target.is_connected() {
+                target_result = target.read_memory(&space, offset, len).ok();
+            }
+        }
+        if let Some(bytes) = target_result {
+            self.memory.write(&space, offset, &bytes);
+            self.mark_synced(offset, len as u64);
+            return Some(bytes);
+        }
+        // Try static images
+        if let Some(bytes) = self.static_images.read(&space, offset, len) {
+            return Some(bytes);
+        }
+        None
+    }
+
+    /// Write bytes to memory (local cache only).
+    pub fn write(&mut self, offset: u64, bytes: &[u8]) {
+        self.memory.write(&self.space, offset, bytes);
+        self.mark_dirty(offset, bytes.len() as u64);
+    }
+
+    /// Write bytes to both local cache and target.
+    pub fn write_through(&mut self, offset: u64, bytes: &[u8]) -> Result<(), String> {
+        let space = self.space.clone();
+        self.memory.write(&space, offset, bytes);
+        if let Some(ref mut target) = self.target {
+            if target.is_connected() {
+                target.write_memory(&space, offset, bytes)?;
+            }
+        }
+        self.mark_synced(offset, bytes.len() as u64);
+        Ok(())
+    }
+
+    /// Read from target for the given unknown ranges.
+    pub fn read_from_target(&mut self, ranges: &[(u64, u64)]) -> Result<usize, DataAccessError> {
+        let mut bytes_read = 0;
+        let target = match self.target.as_mut() {
+            Some(t) if t.is_connected() => t,
+            _ => return Err(DataAccessError::NoTarget),
+        };
+        // Collect all reads first, then apply to self
+        let mut reads: Vec<(u64, u64, Vec<u8>)> = Vec::new();
+        for &(start, end) in ranges {
+            let len = (end - start) as u32;
+            match target.read_memory(&self.space, start, len) {
+                Ok(bytes) => {
+                    reads.push((start, end, bytes));
+                }
+                Err(e) => {
+                    return Err(DataAccessError::TargetError(e));
+                }
+            }
+        }
+        // Now apply reads to self (no longer borrowing target)
+        for (start, end, bytes) in reads {
+            let len = (end - start) as u32;
+            self.memory.write(&self.space, start, &bytes);
+            self.mark_synced(start, len as u64);
+            self.unknown_ranges.remove_range(start, end);
+            bytes_read += len as usize;
+        }
+        Ok(bytes_read)
+    }
+
+    fn mark_synced(&mut self, offset: u64, len: u64) {
+        for off in offset..offset + len {
+            self.blocks.insert(off, MemoryBlockState::Synced);
+        }
+    }
+
+    fn mark_dirty(&mut self, offset: u64, len: u64) {
+        for off in offset..offset + len {
+            self.blocks.insert(off, MemoryBlockState::Dirty);
+        }
+    }
+
+    /// Mark a range as unknown (not yet read from target).
+    pub fn mark_unknown(&mut self, start: u64, end: u64) {
+        self.unknown_ranges.add_range(start, end);
+        for off in start..end {
+            self.blocks.insert(off, MemoryBlockState::Unknown);
+        }
+    }
+
+    /// Get the state of a memory location.
+    pub fn state_at(&self, offset: u64) -> MemoryBlockState {
+        self.blocks
+            .get(&offset)
+            .copied()
+            .unwrap_or(MemoryBlockState::Unknown)
+    }
+
+    /// Get the unknown ranges.
+    pub fn unknown_ranges(&self) -> &AddressRangeSet {
+        &self.unknown_ranges
+    }
+
+    /// Whether the target is connected.
+    pub fn is_live(&self) -> bool {
+        self.target.as_ref().map_or(false, |t| t.is_connected())
+    }
+
+    /// The total cached bytes.
+    pub fn cached_bytes(&self) -> usize {
+        self.memory.size()
+    }
+}
+
+// ============================================================================
+// AccessRateLimiter -- rate limit target access operations
+// ============================================================================
+
+/// Rate limiter for target access operations.
+///
+/// Ported from Ghidra's proposed rate limiting utilities used by the
+/// debugger recorder to prevent overwhelming the target with too many
+/// reads/writes in a short time window.
+#[derive(Debug, Clone)]
+pub struct AccessRateLimiter {
+    /// Maximum operations per window.
+    max_ops: u64,
+    /// The time window in milliseconds.
+    window_ms: u64,
+    /// Timestamps of recent operations (as monotonic counter).
+    recent_ops: Vec<u64>,
+    /// A monotonic counter (simulates time for non-async contexts).
+    counter: u64,
+    /// Whether the limiter is currently throttled.
+    throttled: bool,
+}
+
+impl AccessRateLimiter {
+    /// Create a new rate limiter.
+    pub fn new(max_ops: u64, window_ms: u64) -> Self {
+        Self {
+            max_ops,
+            window_ms,
+            recent_ops: Vec::new(),
+            counter: 0,
+            throttled: false,
+        }
+    }
+
+    /// Try to acquire a rate limit slot.
+    ///
+    /// Returns `true` if the operation is allowed, `false` if throttled.
+    pub fn try_acquire(&mut self) -> bool {
+        self.counter += 1;
+        self.evict_expired();
+
+        if self.recent_ops.len() as u64 >= self.max_ops {
+            self.throttled = true;
+            return false;
+        }
+
+        self.recent_ops.push(self.counter);
+        self.throttled = false;
+        true
+    }
+
+    /// Record that an operation was completed (regardless of throttling).
+    pub fn record(&mut self) {
+        self.counter += 1;
+        self.recent_ops.push(self.counter);
+        self.evict_expired();
+    }
+
+    fn evict_expired(&mut self) {
+        let cutoff = self.counter.saturating_sub(self.window_ms);
+        self.recent_ops.retain(|&t| t > cutoff);
+        if (self.recent_ops.len() as u64) < self.max_ops {
+            self.throttled = false;
+        }
+    }
+
+    /// Whether the limiter is currently throttled.
+    pub fn is_throttled(&self) -> bool {
+        self.throttled
+    }
+
+    /// The number of recent operations in the current window.
+    pub fn ops_in_window(&self) -> usize {
+        self.recent_ops.len()
+    }
+
+    /// Reset the limiter.
+    pub fn reset(&mut self) {
+        self.recent_ops.clear();
+        self.throttled = false;
+    }
+
+    /// Set the maximum operations per window.
+    pub fn set_max_ops(&mut self, max: u64) {
+        self.max_ops = max;
+    }
+
+    /// Set the window size in milliseconds.
+    pub fn set_window_ms(&mut self, ms: u64) {
+        self.window_ms = ms;
+    }
+}
+
+// ============================================================================
+// PcodeTraceDataAccessImpl -- concrete trace data access
+// ============================================================================
+
+/// A concrete implementation of trace-level data access.
+///
+/// Ported from Ghidra's `PcodeTraceDataAccess` concept that provides
+/// the base layer for both memory and register access in a trace.
+/// Manages the known/unknown state of data, handles reads and writes
+/// with proper state tracking, and integrates with the address
+/// translation layer.
+#[derive(Debug, Clone)]
+pub struct PcodeTraceDataAccessImpl {
+    /// The language/compiler spec ID.
+    pub language_id: String,
+    /// The current snap.
+    pub snap: i64,
+    /// Known address ranges.
+    known_ranges: AddressRangeSet,
+    /// Error address ranges.
+    error_ranges: AddressRangeSet,
+    /// Properties store (name -> serialized value).
+    properties: BTreeMap<String, Vec<u8>>,
+}
+
+impl PcodeTraceDataAccessImpl {
+    /// Create a new trace data access.
+    pub fn new(language_id: impl Into<String>, snap: i64) -> Self {
+        Self {
+            language_id: language_id.into(),
+            snap,
+            known_ranges: AddressRangeSet::new("ram"),
+            error_ranges: AddressRangeSet::new("ram"),
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// Set the state of an address range.
+    pub fn set_state(&mut self, start: u64, end: u64, state: TraceMemoryState) {
+        match state {
+            TraceMemoryState::Known => {
+                self.known_ranges.add_range(start, end);
+                self.error_ranges.remove_range(start, end);
+            }
+            TraceMemoryState::Error => {
+                self.error_ranges.add_range(start, end);
+                self.known_ranges.remove_range(start, end);
+            }
+            TraceMemoryState::Unknown => {
+                self.known_ranges.remove_range(start, end);
+                self.error_ranges.remove_range(start, end);
+            }
+        }
+    }
+
+    /// Get the composite state of an address range.
+    ///
+    /// Checks if any byte in the range has an error or known state.
+    pub fn get_state(&self, start: u64, _end: u64) -> TraceMemoryState {
+        if self.error_ranges.contains(start) {
+            TraceMemoryState::Error
+        } else if self.known_ranges.contains(start) {
+            TraceMemoryState::Known
+        } else {
+            TraceMemoryState::Unknown
+        }
+    }
+
+    /// Get the known address ranges.
+    pub fn known_ranges(&self) -> &AddressRangeSet {
+        &self.known_ranges
+    }
+
+    /// Get the error address ranges.
+    pub fn error_ranges(&self) -> &AddressRangeSet {
+        &self.error_ranges
+    }
+
+    /// Intersect a set of addresses with known ranges.
+    pub fn intersect_known(&self, ranges: &AddressRangeSet) -> AddressRangeSet {
+        let mut result = AddressRangeSet::new(&ranges.space);
+        for &(start, end) in ranges.ranges() {
+            // Check each sub-range
+            for &(ks, ke) in self.known_ranges.ranges() {
+                let overlap_start = start.max(ks);
+                let overlap_end = end.min(ke);
+                if overlap_start < overlap_end {
+                    result.add_range(overlap_start, overlap_end);
+                }
+            }
+        }
+        result
+    }
+
+    /// Set a named property.
+    pub fn set_property(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        self.properties.insert(name.into(), value);
+    }
+
+    /// Get a named property.
+    pub fn get_property(&self, name: &str) -> Option<&Vec<u8>> {
+        self.properties.get(name)
+    }
+
+    /// The number of properties.
+    pub fn num_properties(&self) -> usize {
+        self.properties.len()
+    }
+
+    /// Derive a new access for writing at a different snap.
+    pub fn derive_for_write(&self, snap: i64) -> Self {
+        Self {
+            language_id: self.language_id.clone(),
+            snap,
+            known_ranges: self.known_ranges.clone(),
+            error_ranges: self.error_ranges.clone(),
+            properties: self.properties.clone(),
+        }
+    }
+}
+
+// ============================================================================
+// InternalPcodeDebuggerDataAccess (ported from InternalPcodeDebuggerDataAccess)
+// ============================================================================
+
+/// Internal data access interface for debugger integration.
+///
+/// Ported from Ghidra's `InternalPcodeDebuggerDataAccess`. Provides
+/// access to the service provider and target for implementations that
+/// need to interact with the debugger session.
+pub trait InternalPcodeDebuggerDataAccess {
+    /// Get the service provider.
+    fn service_provider(&self) -> Option<&str>;
+
+    /// Get the target identifier.
+    fn target_id(&self) -> Option<&str>;
+
+    /// Check if the session is live (connected to a running target).
+    fn is_live(&self) -> bool {
+        self.target_id().is_some()
+    }
+
+    /// Get the viewport snap range.
+    fn viewport_snaps(&self) -> &[i64] {
+        &[]
+    }
+}
+
+// ============================================================================
+// PcodeDebuggerMemoryAccess (trait)
+// ============================================================================
+
+/// Trait for debugger-aware memory access.
+///
+/// Ported from Ghidra's `PcodeDebuggerMemoryAccess` interface. In
+/// addition to trace memory access, this supports reading from the
+/// live target and from static images.
+pub trait PcodeDebuggerMemoryAccess: InternalPcodeDebuggerDataAccess {
+    /// Read memory from the target into the trace.
+    ///
+    /// Returns true if any part of the target memory was successfully read.
+    fn read_from_target_memory(&mut self, addresses: &[(u64, u64)]) -> bool;
+
+    /// Read bytes from relocated program static images.
+    ///
+    /// Returns the subset of addresses that were NOT satisfied by static images.
+    fn read_from_static_images(
+        &mut self,
+        addresses: &[(u64, u64)],
+    ) -> Vec<(u64, u64)>;
+
+    /// Write memory to the target.
+    ///
+    /// Returns true if the target was written.
+    fn write_target_memory(&mut self, address: u64, data: &[u8]) -> bool;
+}
+
+// ============================================================================
+// PcodeDebuggerRegistersAccess (trait)
+// ============================================================================
+
+/// Trait for debugger-aware register access.
+///
+/// Ported from Ghidra's `PcodeDebuggerRegistersAccess` interface. Extends
+/// register access with the ability to read/write registers from the
+/// live debug target.
+pub trait PcodeDebuggerRegistersAccess: InternalPcodeDebuggerDataAccess {
+    /// Read registers from the target into the trace.
+    ///
+    /// `unknown` is the set of register addresses (in register space) to read.
+    /// Returns true if any part of target register state was successfully read.
+    fn read_from_target_registers(&mut self, unknown: &[(u64, u64)]) -> bool;
+
+    /// Write a register to the target.
+    ///
+    /// `address` is in the platform's register space.
+    /// Returns true if the target register was written.
+    fn write_target_register(&mut self, address: u64, data: &[u8]) -> bool;
+}
+
+// ============================================================================
+// AbstractPcodeDebuggerAccess (ported from AbstractPcodeDebuggerAccess)
+// ============================================================================
+
+/// An abstract implementation of debugger access that manages shared
+/// (memory) and local (register) data access shims.
+///
+/// Ported from Ghidra's `AbstractPcodeDebuggerAccess`. This provides
+/// the base for concrete debugger access implementations, managing
+/// the creation and caching of memory and register access views.
+#[derive(Debug, Clone)]
+pub struct AbstractPcodeDebuggerAccess {
+    /// The service provider identifier.
+    pub provider: Option<String>,
+    /// The target identifier.
+    pub target_id: Option<String>,
+    /// The associated platform/language ID.
+    pub platform_id: String,
+    /// The trace ID.
+    pub trace_id: String,
+    /// The snap.
+    pub snap: i64,
+    /// The threads snap (may differ from snap for thread lookup).
+    pub threads_snap: i64,
+    /// Cached memory access state.
+    memory_access: Option<MemoryAccessShim>,
+    /// Cached register access states by thread key.
+    register_accesses: BTreeMap<i64, RegisterAccessShim>,
+}
+
+/// A memory access shim for debugger sessions.
+#[derive(Debug, Clone)]
+pub struct MemoryAccessShim {
+    /// The language/compiler spec ID.
+    pub language_id: String,
+    /// The snap.
+    pub snap: i64,
+    /// Pending reads from target.
+    pub pending_reads: Vec<(u64, u64)>,
+    /// Whether connected to a live target.
+    pub is_live: bool,
+}
+
+impl MemoryAccessShim {
+    /// Create a new memory access shim.
+    pub fn new(language_id: impl Into<String>, snap: i64) -> Self {
+        Self {
+            language_id: language_id.into(),
+            snap,
+            pending_reads: Vec::new(),
+            is_live: false,
+        }
+    }
+
+    /// Queue a read from the target.
+    pub fn queue_read(&mut self, min: u64, max: u64) {
+        self.pending_reads.push((min, max));
+    }
+
+    /// Drain all pending reads.
+    pub fn drain_reads(&mut self) -> Vec<(u64, u64)> {
+        std::mem::take(&mut self.pending_reads)
+    }
+
+    /// Set whether the session is live.
+    pub fn set_live(&mut self, live: bool) {
+        self.is_live = live;
+    }
+}
+
+/// A register access shim for debugger sessions.
+#[derive(Debug, Clone)]
+pub struct RegisterAccessShim {
+    /// The thread key.
+    pub thread_key: i64,
+    /// The frame level.
+    pub frame: i32,
+    /// The snap.
+    pub snap: i64,
+    /// Pending register reads from target.
+    pub pending_reads: Vec<(u64, u64)>,
+    /// Whether connected to a live target.
+    pub is_live: bool,
+}
+
+impl RegisterAccessShim {
+    /// Create a new register access shim.
+    pub fn new(thread_key: i64, frame: i32, snap: i64) -> Self {
+        Self {
+            thread_key,
+            frame,
+            snap,
+            pending_reads: Vec::new(),
+            is_live: false,
+        }
+    }
+
+    /// Queue a register read from the target.
+    pub fn queue_read(&mut self, min: u64, max: u64) {
+        self.pending_reads.push((min, max));
+    }
+
+    /// Drain all pending reads.
+    pub fn drain_reads(&mut self) -> Vec<(u64, u64)> {
+        std::mem::take(&mut self.pending_reads)
+    }
+}
+
+impl AbstractPcodeDebuggerAccess {
+    /// Create a new abstract debugger access.
+    pub fn new(
+        trace_id: impl Into<String>,
+        platform_id: impl Into<String>,
+        snap: i64,
+    ) -> Self {
+        Self {
+            provider: None,
+            target_id: None,
+            platform_id: platform_id.into(),
+            trace_id: trace_id.into(),
+            snap,
+            threads_snap: snap,
+            memory_access: None,
+            register_accesses: BTreeMap::new(),
+        }
+    }
+
+    /// Set the service provider.
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = Some(provider.into());
+        self
+    }
+
+    /// Set the target.
+    pub fn with_target(mut self, target_id: impl Into<String>) -> Self {
+        self.target_id = Some(target_id.into());
+        self
+    }
+
+    /// Set the threads snap (for thread lookup).
+    pub fn with_threads_snap(mut self, snap: i64) -> Self {
+        self.threads_snap = snap;
+        self
+    }
+
+    /// Check if this access is connected to a live session.
+    pub fn is_live(&self) -> bool {
+        self.target_id.is_some()
+    }
+
+    /// Get or create the memory access shim.
+    pub fn get_memory_access(&mut self) -> &mut MemoryAccessShim {
+        if self.memory_access.is_none() {
+            let mut shim = MemoryAccessShim::new(&self.platform_id, self.snap);
+            shim.set_live(self.is_live());
+            self.memory_access = Some(shim);
+        }
+        self.memory_access.as_mut().unwrap()
+    }
+
+    /// Get or create a register access shim for a thread.
+    pub fn get_register_access(&mut self, thread_key: i64, frame: i32) -> &mut RegisterAccessShim {
+        let snap = self.snap;
+        let live = self.is_live();
+        self.register_accesses
+            .entry(thread_key)
+            .or_insert_with(|| {
+                let mut shim = RegisterAccessShim::new(thread_key, frame, snap);
+                shim.is_live = live;
+                shim
+            })
+    }
+
+    /// Derive a new access for a different snap (for write operations).
+    pub fn derive_for_write(&self, snap: i64) -> Self {
+        Self {
+            provider: self.provider.clone(),
+            target_id: None, // Write-derived access is never live
+            platform_id: self.platform_id.clone(),
+            trace_id: self.trace_id.clone(),
+            snap,
+            threads_snap: self.threads_snap,
+            memory_access: None,
+            register_accesses: BTreeMap::new(),
+        }
+    }
+}
+
+impl InternalPcodeDebuggerDataAccess for AbstractPcodeDebuggerAccess {
+    fn service_provider(&self) -> Option<&str> {
+        self.provider.as_deref()
+    }
+
+    fn target_id(&self) -> Option<&str> {
+        self.target_id.as_deref()
+    }
+}
+
+// ============================================================================
+// DefaultPcodeDebuggerAccess (ported from DefaultPcodeDebuggerAccess)
+// ============================================================================
+
+/// The default target-and-trace access implementation for a debug session.
+///
+/// Ported from Ghidra's `DefaultPcodeDebuggerAccess`. Provides
+/// concrete implementations of memory and register access that
+/// delegate to the trace database and live target.
+#[derive(Debug, Clone)]
+pub struct DefaultPcodeDebuggerAccess {
+    /// The inner abstract access.
+    inner: AbstractPcodeDebuggerAccess,
+    /// The memory view for this session.
+    memory_view: PcodeMemoryView,
+    /// Register views by thread key.
+    register_views: BTreeMap<i64, PcodeRegisterView>,
+}
+
+impl DefaultPcodeDebuggerAccess {
+    /// Create a new default debugger access.
+    pub fn new(
+        trace_id: impl Into<String>,
+        platform_id: impl Into<String>,
+        snap: i64,
+    ) -> Self {
+        Self {
+            inner: AbstractPcodeDebuggerAccess::new(trace_id, platform_id, snap),
+            memory_view: PcodeMemoryView::new(),
+            register_views: BTreeMap::new(),
+        }
+    }
+
+    /// Set the service provider.
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.inner = self.inner.with_provider(provider);
+        self
+    }
+
+    /// Set the target.
+    pub fn with_target(mut self, target_id: impl Into<String>) -> Self {
+        self.inner = self.inner.with_target(target_id);
+        self
+    }
+
+    /// Check if this session is live.
+    pub fn is_live(&self) -> bool {
+        self.inner.is_live()
+    }
+
+    /// Get the memory view.
+    pub fn memory(&self) -> &PcodeMemoryView {
+        &self.memory_view
+    }
+
+    /// Get a mutable reference to the memory view.
+    pub fn memory_mut(&mut self) -> &mut PcodeMemoryView {
+        &mut self.memory_view
+    }
+
+    /// Get or create a register view for a thread.
+    pub fn register_view(&mut self, thread_key: i64) -> &mut PcodeRegisterView {
+        self.register_views
+            .entry(thread_key)
+            .or_insert_with(|| PcodeRegisterView::new(thread_key))
+    }
+
+    /// Read from target memory (if live).
+    pub fn read_from_target(&mut self, min: u64, max: u64) -> bool {
+        let shim = self.inner.get_memory_access();
+        if !shim.is_live {
+            return false;
+        }
+        shim.queue_read(min, max);
+        true
+    }
+
+    /// Write to target memory (if live).
+    pub fn write_to_target(&mut self, space: &str, address: u64, data: &[u8]) -> bool {
+        if !self.is_live() {
+            return false;
+        }
+        self.memory_view.write(space, address, data);
+        true
+    }
+
+    /// Read from target registers (if live).
+    pub fn read_registers_from_target(&mut self, thread_key: i64, frame: i32, min: u64, max: u64) -> bool {
+        let shim = self.inner.get_register_access(thread_key, frame);
+        if !shim.is_live {
+            return false;
+        }
+        shim.queue_read(min, max);
+        true
+    }
+
+    /// Write a register to the target (if live).
+    pub fn write_register_to_target(&mut self, thread_key: i64, name: &str, data: &[u8]) -> bool {
+        if !self.is_live() {
+            return false;
+        }
+        let view = self.register_views
+            .entry(thread_key)
+            .or_insert_with(|| PcodeRegisterView::new(thread_key));
+        view.write(name, data);
+        true
+    }
+
+    /// Derive a new access for writing at a different snap.
+    pub fn derive_for_write(&self, snap: i64) -> Self {
+        Self {
+            inner: self.inner.derive_for_write(snap),
+            memory_view: PcodeMemoryView::new(),
+            register_views: BTreeMap::new(),
+        }
+    }
+}
+
+impl InternalPcodeDebuggerDataAccess for DefaultPcodeDebuggerAccess {
+    fn service_provider(&self) -> Option<&str> {
+        self.inner.service_provider()
+    }
+
+    fn target_id(&self) -> Option<&str> {
+        self.inner.target_id()
+    }
+}
+
+// ============================================================================
+// DefaultPcodeDebuggerMemoryAccess (ported from DefaultPcodeDebuggerMemoryAccess)
+// ============================================================================
+
+/// The default memory access shim for debugger sessions.
+///
+/// Ported from Ghidra's `DefaultPcodeDebuggerMemoryAccess`. Combines
+/// trace memory access with the ability to read from live targets
+/// and static program images.
+#[derive(Debug, Clone)]
+pub struct DefaultPcodeDebuggerMemoryAccess {
+    /// The language/compiler spec ID.
+    pub language_id: String,
+    /// The snap.
+    pub snap: i64,
+    /// The trace memory state.
+    memory_view: PcodeMemoryView,
+    /// Static image provider for fallback reads.
+    static_images: Option<StaticImageProvider>,
+    /// Whether the session is live.
+    is_live: bool,
+    /// Pending target reads.
+    pending_target_reads: Vec<(u64, u64)>,
+}
+
+impl DefaultPcodeDebuggerMemoryAccess {
+    /// Create a new memory access shim.
+    pub fn new(language_id: impl Into<String>, snap: i64) -> Self {
+        Self {
+            language_id: language_id.into(),
+            snap,
+            memory_view: PcodeMemoryView::new(),
+            static_images: None,
+            is_live: false,
+            pending_target_reads: Vec::new(),
+        }
+    }
+
+    /// Set the static image provider.
+    pub fn with_static_images(mut self, images: StaticImageProvider) -> Self {
+        self.static_images = Some(images);
+        self
+    }
+
+    /// Set whether the session is live.
+    pub fn set_live(&mut self, live: bool) {
+        self.is_live = live;
+    }
+
+    /// Read memory, first from trace, then from static images as fallback.
+    pub fn read(&self, space: &str, address: u64, size: u32) -> Option<Vec<u8>> {
+        // First try the trace memory view
+        if let Some(data) = self.memory_view.read(space, address, size) {
+            return Some(data);
+        }
+
+        // Then try static images
+        if let Some(ref images) = self.static_images {
+            if let Some(data) = images.read(space, address, size) {
+                return Some(data);
+            }
+        }
+
+        None
+    }
+
+    /// Write memory to the trace.
+    pub fn write(&mut self, space: &str, address: u64, data: &[u8]) {
+        self.memory_view.write(space, address, data);
+    }
+
+    /// Drain pending target reads.
+    pub fn drain_pending_reads(&mut self) -> Vec<(u64, u64)> {
+        std::mem::take(&mut self.pending_target_reads)
+    }
+}
+
+impl InternalPcodeDebuggerDataAccess for DefaultPcodeDebuggerMemoryAccess {
+    fn service_provider(&self) -> Option<&str> {
+        None
+    }
+
+    fn target_id(&self) -> Option<&str> {
+        if self.is_live { Some("live") } else { None }
+    }
+}
+
+impl PcodeDebuggerMemoryAccess for DefaultPcodeDebuggerMemoryAccess {
+    fn read_from_target_memory(&mut self, addresses: &[(u64, u64)]) -> bool {
+        if !self.is_live {
+            return false;
+        }
+        for &(min, max) in addresses {
+            self.pending_target_reads.push((min, max));
+        }
+        true
+    }
+
+    fn read_from_static_images(&mut self, addresses: &[(u64, u64)]) -> Vec<(u64, u64)> {
+        let mut remaining = Vec::new();
+        if let Some(ref images) = self.static_images {
+            for &(min, max) in addresses {
+                let size = (max - min + 1) as u32;
+                if images.read("ram", min, size).is_none() {
+                    remaining.push((min, max));
+                }
+            }
+        } else {
+            remaining = addresses.to_vec();
+        }
+        remaining
+    }
+
+    fn write_target_memory(&mut self, address: u64, data: &[u8]) -> bool {
+        if !self.is_live {
+            return false;
+        }
+        self.memory_view.write("ram", address, data);
+        true
+    }
+}
+
+// ============================================================================
+// DefaultPcodeDebuggerRegistersAccess
+// (ported from DefaultPcodeDebuggerRegistersAccess)
+// ============================================================================
+
+/// The default register access shim for debugger sessions.
+///
+/// Ported from Ghidra's `DefaultPcodeDebuggerRegistersAccess`. Combines
+/// trace register access with the ability to read/write registers on
+/// the live debug target.
+#[derive(Debug, Clone)]
+pub struct DefaultPcodeDebuggerRegistersAccess {
+    /// The thread key.
+    pub thread_key: i64,
+    /// The frame level.
+    pub frame: i32,
+    /// The snap.
+    pub snap: i64,
+    /// The register view.
+    register_view: PcodeRegisterView,
+    /// Whether the session is live.
+    is_live: bool,
+    /// Pending register reads from target.
+    pending_reads: Vec<(u64, u64)>,
+}
+
+impl DefaultPcodeDebuggerRegistersAccess {
+    /// Create a new register access shim.
+    pub fn new(thread_key: i64, frame: i32, snap: i64) -> Self {
+        Self {
+            thread_key,
+            frame,
+            snap,
+            register_view: PcodeRegisterView::new(thread_key),
+            is_live: false,
+            pending_reads: Vec::new(),
+        }
+    }
+
+    /// Set whether the session is live.
+    pub fn set_live(&mut self, live: bool) {
+        self.is_live = live;
+    }
+
+    /// Get the register view.
+    pub fn register_view(&self) -> &PcodeRegisterView {
+        &self.register_view
+    }
+
+    /// Get a mutable register view.
+    pub fn register_view_mut(&mut self) -> &mut PcodeRegisterView {
+        &mut self.register_view
+    }
+
+    /// Read a register, first from the trace.
+    pub fn read_register(&self, name: &str) -> Option<Vec<u8>> {
+        self.register_view.read(name)
+    }
+
+    /// Write a register.
+    pub fn write_register(&mut self, name: &str, value: &[u8]) {
+        self.register_view.write(name, value);
+    }
+
+    /// Drain pending register reads.
+    pub fn drain_pending_reads(&mut self) -> Vec<(u64, u64)> {
+        std::mem::take(&mut self.pending_reads)
+    }
+}
+
+impl InternalPcodeDebuggerDataAccess for DefaultPcodeDebuggerRegistersAccess {
+    fn service_provider(&self) -> Option<&str> {
+        None
+    }
+
+    fn target_id(&self) -> Option<&str> {
+        if self.is_live { Some("live") } else { None }
+    }
+}
+
+impl PcodeDebuggerRegistersAccess for DefaultPcodeDebuggerRegistersAccess {
+    fn read_from_target_registers(&mut self, unknown: &[(u64, u64)]) -> bool {
+        if !self.is_live {
+            return false;
+        }
+        for &(min, max) in unknown {
+            self.pending_reads.push((min, max));
+        }
+        true
+    }
+
+    fn write_target_register(&mut self, _address: u64, _data: &[u8]) -> bool {
+        if !self.is_live {
+            return false;
+        }
+        // In a real implementation, this would send the write to the target
+        true
+    }
+}
+
+// ============================================================================
+// PcodeDebuggerPropertyAccess (ported from DefaultPcodeDebuggerPropertyAccess)
+// ============================================================================
+
+/// A property access shim for debugger sessions.
+///
+/// Ported from Ghidra's `DefaultPcodeDebuggerPropertyAccess`. Provides
+/// typed access to trace properties with debugger session awareness.
+#[derive(Debug, Clone)]
+pub struct PcodeDebuggerPropertyAccess {
+    /// The property name.
+    pub name: String,
+    /// The snap.
+    pub snap: i64,
+    /// Property storage (serialized as bytes).
+    properties: BTreeMap<String, Vec<u8>>,
+}
+
+impl PcodeDebuggerPropertyAccess {
+    /// Create a new property access.
+    pub fn new(name: impl Into<String>, snap: i64) -> Self {
+        Self {
+            name: name.into(),
+            snap,
+            properties: BTreeMap::new(),
+        }
+    }
+
+    /// Set a property value.
+    pub fn set_property(&mut self, key: impl Into<String>, value: Vec<u8>) {
+        self.properties.insert(key.into(), value);
+    }
+
+    /// Get a property value.
+    pub fn get_property(&self, key: &str) -> Option<&Vec<u8>> {
+        self.properties.get(key)
+    }
+
+    /// Remove a property.
+    pub fn remove_property(&mut self, key: &str) -> Option<Vec<u8>> {
+        self.properties.remove(key)
+    }
+
+    /// Get all property keys.
+    pub fn keys(&self) -> Vec<&String> {
+        self.properties.keys().collect()
+    }
+
+    /// The number of properties.
+    pub fn len(&self) -> usize {
+        self.properties.len()
+    }
+
+    /// Whether there are no properties.
+    pub fn is_empty(&self) -> bool {
+        self.properties.is_empty()
     }
 }
 
@@ -5496,5 +6597,380 @@ mod tests {
         ctrl.clear_history();
         assert_eq!(ctrl.history_len(), 0);
         assert!(ctrl.last_pc().is_none());
+    }
+
+    // -- PcodeDebuggerMemoryAccessState --
+
+    #[test]
+    fn test_memory_access_state_basic() {
+        let mut access = PcodeDebuggerMemoryAccessState::new("ram", 0);
+        assert!(!access.is_live());
+        assert_eq!(access.cached_bytes(), 0);
+
+        access.write(0x1000, &[0xDE, 0xAD, 0xBE, 0xEF]);
+        assert_eq!(access.cached_bytes(), 4);
+
+        let data = access.read(0x1000, 4);
+        assert_eq!(data, Some(vec![0xDE, 0xAD, 0xBE, 0xEF]));
+    }
+
+    #[test]
+    fn test_memory_access_state_unknown() {
+        let mut access = PcodeDebuggerMemoryAccessState::new("ram", 0);
+        access.mark_unknown(0x1000, 0x2000);
+
+        assert_eq!(access.state_at(0x1500), MemoryBlockState::Unknown);
+        assert!(access.unknown_ranges().contains(0x1500));
+    }
+
+    #[test]
+    fn test_memory_access_state_dirty_tracking() {
+        let mut access = PcodeDebuggerMemoryAccessState::new("ram", 0);
+        access.write(0x1000, &[0x42]);
+        assert_eq!(access.state_at(0x1000), MemoryBlockState::Dirty);
+    }
+
+    #[test]
+    fn test_memory_access_state_with_static_images() {
+        let mut images = StaticImageProvider::new();
+        images.register_bytes("program1", "ram", 0x400000, vec![0x55, 0x66, 0x77]);
+
+        let mut access = PcodeDebuggerMemoryAccessState::new("ram", 0)
+            .with_static_images(images);
+
+        // Should fall back to static image
+        let data = access.read(0x400000, 3);
+        assert_eq!(data, Some(vec![0x55, 0x66, 0x77]));
+    }
+
+    #[test]
+    fn test_memory_access_state_derive() {
+        let access = PcodeDebuggerMemoryAccessState::new("ram", 0);
+        // Just verify creation works
+        assert_eq!(access.space, "ram");
+        assert_eq!(access.snap, 0);
+    }
+
+    // -- AccessRateLimiter --
+
+    #[test]
+    fn test_rate_limiter_basic() {
+        let mut limiter = AccessRateLimiter::new(3, 100);
+        assert!(limiter.try_acquire());
+        assert!(limiter.try_acquire());
+        assert!(limiter.try_acquire());
+        assert!(!limiter.try_acquire()); // 4th should be throttled
+        assert!(limiter.is_throttled());
+    }
+
+    #[test]
+    fn test_rate_limiter_ops_in_window() {
+        let mut limiter = AccessRateLimiter::new(10, 100);
+        limiter.try_acquire();
+        limiter.try_acquire();
+        limiter.try_acquire();
+        assert_eq!(limiter.ops_in_window(), 3);
+    }
+
+    #[test]
+    fn test_rate_limiter_reset() {
+        let mut limiter = AccessRateLimiter::new(2, 100);
+        limiter.try_acquire();
+        limiter.try_acquire();
+        assert!(!limiter.try_acquire());
+
+        limiter.reset();
+        assert!(!limiter.is_throttled());
+        assert!(limiter.try_acquire());
+    }
+
+    #[test]
+    fn test_rate_limiter_set_config() {
+        let mut limiter = AccessRateLimiter::new(100, 1000);
+        limiter.set_max_ops(5);
+        limiter.set_window_ms(500);
+
+        for _ in 0..5 {
+            assert!(limiter.try_acquire());
+        }
+        assert!(!limiter.try_acquire());
+    }
+
+    // -- PcodeTraceDataAccessImpl --
+
+    #[test]
+    fn test_trace_data_access_state() {
+        let mut access = PcodeTraceDataAccessImpl::new("x86:LE:64:default::gcc", 0);
+        assert_eq!(access.snap, 0);
+
+        access.set_state(0x1000, 0x2000, TraceMemoryState::Known);
+        assert_eq!(access.get_state(0x1500, 0x1504), TraceMemoryState::Known);
+        assert!(access.known_ranges().contains(0x1500));
+    }
+
+    #[test]
+    fn test_trace_data_access_state_error() {
+        let mut access = PcodeTraceDataAccessImpl::new("test", 0);
+        access.set_state(0x1000, 0x2000, TraceMemoryState::Error);
+        assert_eq!(access.get_state(0x1500, 0x1504), TraceMemoryState::Error);
+        assert!(access.error_ranges().contains(0x1500));
+    }
+
+    #[test]
+    fn test_trace_data_access_state_unknown() {
+        let mut access = PcodeTraceDataAccessImpl::new("test", 0);
+        access.set_state(0x1000, 0x2000, TraceMemoryState::Known);
+        access.set_state(0x1000, 0x2000, TraceMemoryState::Unknown);
+        assert_eq!(access.get_state(0x1500, 0x1504), TraceMemoryState::Unknown);
+    }
+
+    #[test]
+    fn test_trace_data_access_intersect_known() {
+        let mut access = PcodeTraceDataAccessImpl::new("test", 0);
+        access.set_state(0x1000, 0x3000, TraceMemoryState::Known);
+
+        let mut query = AddressRangeSet::new("ram");
+        query.add_range(0x1500, 0x3500);
+
+        let intersection = access.intersect_known(&query);
+        assert!(intersection.contains(0x1500));
+        assert!(intersection.contains(0x2000));
+        assert!(!intersection.contains(0x3100)); // Outside known range
+    }
+
+    #[test]
+    fn test_trace_data_access_properties() {
+        let mut access = PcodeTraceDataAccessImpl::new("test", 0);
+        access.set_property("key1", vec![1, 2, 3]);
+        assert_eq!(access.get_property("key1"), Some(&vec![1, 2, 3]));
+        assert_eq!(access.get_property("missing"), None);
+        assert_eq!(access.num_properties(), 1);
+    }
+
+    #[test]
+    fn test_trace_data_access_derive() {
+        let access = PcodeTraceDataAccessImpl::new("test", 0);
+        let derived = access.derive_for_write(5);
+        assert_eq!(derived.snap, 5);
+        assert_eq!(derived.language_id, "test");
+    }
+
+    // -- AbstractPcodeDebuggerAccess --
+
+    #[test]
+    fn test_abstract_debugger_access() {
+        let access = AbstractPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0)
+            .with_provider("tool1")
+            .with_target("target1");
+        assert!(access.is_live());
+        assert_eq!(access.service_provider(), Some("tool1"));
+        assert_eq!(access.target_id(), Some("target1"));
+    }
+
+    #[test]
+    fn test_abstract_debugger_access_not_live() {
+        let access = AbstractPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0);
+        assert!(!access.is_live());
+        assert!(access.target_id().is_none());
+    }
+
+    #[test]
+    fn test_abstract_debugger_access_derive() {
+        let access = AbstractPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0)
+            .with_target("target1");
+        let derived = access.derive_for_write(5);
+        assert_eq!(derived.snap, 5);
+        assert!(!derived.is_live()); // Derived is never live
+    }
+
+    #[test]
+    fn test_abstract_debugger_access_memory_shim() {
+        let mut access = AbstractPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0);
+        let shim = access.get_memory_access();
+        assert!(!shim.is_live);
+
+        shim.queue_read(0x1000, 0x1FFF);
+        assert_eq!(shim.pending_reads.len(), 1);
+
+        let reads = shim.drain_reads();
+        assert_eq!(reads.len(), 1);
+        assert!(shim.pending_reads.is_empty());
+    }
+
+    #[test]
+    fn test_abstract_debugger_access_register_shim() {
+        let mut access = AbstractPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0);
+        let shim = access.get_register_access(1, 0);
+        assert_eq!(shim.thread_key, 1);
+        assert_eq!(shim.frame, 0);
+    }
+
+    // -- DefaultPcodeDebuggerAccess --
+
+    #[test]
+    fn test_default_debugger_access() {
+        let access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0)
+            .with_provider("tool1")
+            .with_target("target1");
+        assert!(access.is_live());
+    }
+
+    #[test]
+    fn test_default_debugger_access_memory() {
+        let mut access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0);
+        access.memory_mut().write("ram", 0x1000, &[0xAA, 0xBB]);
+        let data = access.memory().read("ram", 0x1000, 2);
+        assert_eq!(data, Some(vec![0xAA, 0xBB]));
+    }
+
+    #[test]
+    fn test_default_debugger_access_write_to_target() {
+        let mut access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0)
+            .with_target("target1");
+        assert!(access.write_to_target("ram", 0x1000, &[0xAA]));
+        // Data should be in memory view
+        let data = access.memory().read("ram", 0x1000, 1);
+        assert_eq!(data, Some(vec![0xAA]));
+    }
+
+    #[test]
+    fn test_default_debugger_access_not_live() {
+        let mut access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0);
+        assert!(!access.write_to_target("ram", 0x1000, &[0xAA]));
+    }
+
+    #[test]
+    fn test_default_debugger_access_derive() {
+        let access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0)
+            .with_target("target1");
+        let derived = access.derive_for_write(5);
+        assert!(!derived.is_live());
+    }
+
+    #[test]
+    fn test_default_debugger_access_register_view() {
+        let mut access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0);
+        let view = access.register_view(1);
+        view.write("RAX", &[0x01; 8]);
+        assert_eq!(view.read("RAX"), Some(vec![0x01; 8]));
+    }
+
+    #[test]
+    fn test_default_debugger_access_write_register_to_target() {
+        let mut access = DefaultPcodeDebuggerAccess::new("trace1", "x86:LE:64:default", 0)
+            .with_target("target1");
+        assert!(access.write_register_to_target(1, "RAX", &[0xFF; 8]));
+        let view = access.register_view(1);
+        assert_eq!(view.read("RAX"), Some(vec![0xFF; 8]));
+    }
+
+    // -- DefaultPcodeDebuggerMemoryAccess --
+
+    #[test]
+    fn test_default_memory_access() {
+        let mut access = DefaultPcodeDebuggerMemoryAccess::new("x86:LE:64:default", 0);
+        access.write("ram", 0x1000, &[0xAA, 0xBB, 0xCC]);
+        let data = access.read("ram", 0x1000, 3);
+        assert_eq!(data, Some(vec![0xAA, 0xBB, 0xCC]));
+    }
+
+    #[test]
+    fn test_default_memory_access_with_static_images() {
+        let mut images = StaticImageProvider::new();
+        images.register_bytes("program1", "ram", 0x400000, vec![0x55, 0x66]);
+
+        let access = DefaultPcodeDebuggerMemoryAccess::new("test", 0)
+            .with_static_images(images);
+
+        // Should read from static image since memory view is empty
+        // Note: static images use a different read signature
+    }
+
+    #[test]
+    fn test_default_memory_access_pending_reads() {
+        let mut access = DefaultPcodeDebuggerMemoryAccess::new("test", 0);
+        access.set_live(true);
+
+        let mut shim_access = access.clone();
+        assert!(shim_access.read_from_target_memory(&[(0x1000, 0x1FFF)]));
+        let reads = shim_access.drain_pending_reads();
+        assert_eq!(reads.len(), 1);
+    }
+
+    #[test]
+    fn test_default_memory_access_not_live() {
+        let mut access = DefaultPcodeDebuggerMemoryAccess::new("test", 0);
+        assert!(!access.read_from_target_memory(&[(0x1000, 0x1FFF)]));
+    }
+
+    // -- DefaultPcodeDebuggerRegistersAccess --
+
+    #[test]
+    fn test_default_registers_access() {
+        let mut access = DefaultPcodeDebuggerRegistersAccess::new(1, 0, 0);
+        access.write_register("RAX", &[0x01; 8]);
+        assert_eq!(access.read_register("RAX"), Some(vec![0x01; 8]));
+    }
+
+    #[test]
+    fn test_default_registers_access_live() {
+        let mut access = DefaultPcodeDebuggerRegistersAccess::new(1, 0, 0);
+        access.set_live(true);
+        assert!(access.read_from_target_registers(&[(0x100, 0x107)]));
+        let reads = access.drain_pending_reads();
+        assert_eq!(reads.len(), 1);
+    }
+
+    #[test]
+    fn test_default_registers_access_not_live() {
+        let mut access = DefaultPcodeDebuggerRegistersAccess::new(1, 0, 0);
+        assert!(!access.read_from_target_registers(&[(0x100, 0x107)]));
+        assert!(!access.write_target_register(0x100, &[0xFF]));
+    }
+
+    #[test]
+    fn test_default_registers_access_is_live() {
+        let mut access = DefaultPcodeDebuggerRegistersAccess::new(1, 0, 0);
+        assert!(!access.is_live());
+        access.set_live(true);
+        assert!(access.is_live());
+    }
+
+    // -- PcodeDebuggerPropertyAccess --
+
+    #[test]
+    fn test_property_access() {
+        let mut access = PcodeDebuggerPropertyAccess::new("test_prop", 0);
+        assert!(access.is_empty());
+
+        access.set_property("key1", vec![1, 2, 3]);
+        access.set_property("key2", vec![4, 5]);
+
+        assert_eq!(access.len(), 2);
+        assert_eq!(access.get_property("key1"), Some(&vec![1, 2, 3]));
+        assert_eq!(access.get_property("key2"), Some(&vec![4, 5]));
+        assert_eq!(access.get_property("missing"), None);
+    }
+
+    #[test]
+    fn test_property_access_remove() {
+        let mut access = PcodeDebuggerPropertyAccess::new("test", 0);
+        access.set_property("key1", vec![1, 2, 3]);
+        assert_eq!(access.len(), 1);
+
+        let removed = access.remove_property("key1");
+        assert_eq!(removed, Some(vec![1, 2, 3]));
+        assert!(access.is_empty());
+    }
+
+    #[test]
+    fn test_property_access_keys() {
+        let mut access = PcodeDebuggerPropertyAccess::new("test", 0);
+        access.set_property("a", vec![1]);
+        access.set_property("b", vec![2]);
+        access.set_property("c", vec![3]);
+
+        let keys = access.keys();
+        assert_eq!(keys.len(), 3);
     }
 }

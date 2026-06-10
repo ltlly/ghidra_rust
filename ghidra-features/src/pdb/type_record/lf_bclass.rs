@@ -172,6 +172,14 @@ impl LfBclass {
         self.offset
     }
 
+    /// Get the byte offset of the base within the derived class (u64).
+    ///
+    /// Mirrors Java `AbstractBaseClassMsType.getOffset()` which returns
+    /// `BigInteger`. Returns as u64 for convenience with large offsets.
+    pub fn offset_value(&self) -> u64 {
+        self.offset as u64
+    }
+
     /// Get the member attributes.
     pub fn attribute(&self) -> &MemberAttributes {
         &self.attributes
@@ -540,5 +548,45 @@ mod tests {
         let data = [0u8; 4];
         let mut reader = PdbByteReader::new(&data);
         assert!(LfBclass::parse_from_reader(&mut reader).is_err());
+    }
+
+    #[test]
+    fn test_bclass_offset_value() {
+        let bc = LfBclass::from_parsed(0x0003, 0x1000, 32);
+        assert_eq!(bc.offset_value(), 32u64);
+        assert_eq!(bc.offset_value(), bc.byte_offset() as u64);
+    }
+
+    #[test]
+    fn test_bclass_clone() {
+        let bc = make_test_bclass();
+        let bc2 = bc.clone();
+        assert_eq!(bc, bc2);
+    }
+
+    #[test]
+    fn test_bclass_parse_large_offset_numeric() {
+        // Offset encoded as 0x8000 tag + u32 variant (0x02) + value
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // access
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // baseClass
+        data.extend_from_slice(&0x8000u16.to_le_bytes()); // numeric tag
+        data.push(0x02);                                   // variant = u32
+        data.extend_from_slice(&0x00010000u32.to_le_bytes()); // value = 65536
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.byte_offset(), 0x00010000);
+    }
+
+    #[test]
+    fn test_bclass_parse_protected_offset() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0002u16.to_le_bytes()); // protected
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // baseClass
+        data.extend_from_slice(&12u16.to_le_bytes());     // offset
+
+        let bc = LfBclass::parse(&data).unwrap();
+        assert_eq!(bc.access(), AccessProtection::Protected);
+        assert_eq!(bc.byte_offset(), 12);
     }
 }

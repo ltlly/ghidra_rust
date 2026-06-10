@@ -11,12 +11,25 @@
 //! thread/process lookup by path, emulator cache versioning, breakpoint
 //! associations on threads, `delete_thread` for full removal, snapshot
 //! time management, and the `TraceTimeSnapshot` helper.
+//!
+//! **Latest additions** (ported from `DBTrace` / `TraceTimeManager`):
+//! - Schedule-aware snapshots with fork detection (`TraceSnapshotEntry.schedule`,
+//!   `is_fork`, `TraceSchedule`).
+//! - Scratch snapshot management (negative snap keys for emulation cache).
+//! - `get_most_recent_snapshot`, `get_most_recent_fork`, `find_scratch_snapshot`.
+//! - `delete_snapshot` with automatic fork cleanup.
+//! - Time radix (`TimeRadix`: dec / hex) for time display formatting.
+//! - Program views (`ProgramViewKind`: fixed / variable snap).
+//! - Time viewports (`TraceTimeViewport`) with live-snap tracking.
+//! - Simulated read/write lock (`LockKind`) for future concurrency support.
+//! - Change set tracking (`TraceChangeSet`) with dirty-snap recording.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
 use crate::model::TraceMemoryState;
+use crate::model::time_schedule::ScheduleSequence;
 
 use super::trace_process::TraceProcess;
 use super::trace_thread::TraceThread;
@@ -38,6 +51,263 @@ pub struct TraceStatistics {
     pub alive_process_count: usize,
     /// Number of currently alive threads.
     pub alive_thread_count: usize,
+}
+
+// ---------------------------------------------------------------------------
+// TimeRadix
+// ---------------------------------------------------------------------------
+
+/// The radix used to display snap values in the UI.
+///
+/// Ported from Ghidra's `TraceSchedule.TimeRadix`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TimeRadix {
+    /// Decimal display (default).
+    Dec,
+    /// Upper-case hexadecimal display.
+    HexUpper,
+    /// Lower-case hexadecimal display.
+    HexLower,
+}
+
+impl TimeRadix {
+    /// The default radix.
+    pub const DEFAULT: Self = Self::Dec;
+
+    /// Parse from the Ghidra string representation ("dec", "HEX", "hex").
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "HEX" => Self::HexUpper,
+            "hex" => Self::HexLower,
+            _ => Self::Dec,
+        }
+    }
+
+    /// Convert to the Ghidra string representation.
+    pub fn to_ghidra_str(&self) -> &'static str {
+        match self {
+            Self::Dec => "dec",
+            Self::HexUpper => "HEX",
+            Self::HexLower => "hex",
+        }
+    }
+}
+
+impl Default for TimeRadix {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl std::fmt::Display for TimeRadix {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.to_ghidra_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProgramViewKind
+// ---------------------------------------------------------------------------
+
+/// The kind of program view.
+///
+/// Ported from Ghidra's `TraceProgramView` / `TraceVariableSnapProgramView`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProgramViewKind {
+    /// A fixed-snap view that always reads from one specific snapshot.
+    Fixed,
+    /// A variable-snap view whose active snap can change at runtime.
+    Variable,
+}
+
+// ---------------------------------------------------------------------------
+// ProgramViewEntry
+// ---------------------------------------------------------------------------
+
+/// Metadata for a program view created on this trace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgramViewEntry {
+    /// An opaque identifier for this view.
+    pub id: u64,
+    /// Whether this is a fixed or variable snap view.
+    pub kind: ProgramViewKind,
+    /// The snap this view is currently pointing at.
+    pub snap: i64,
+    /// An optional human-readable label.
+    pub label: Option<String>,
+}
+
+impl ProgramViewEntry {
+    /// Create a new program view entry.
+    pub fn new(id: u64, kind: ProgramViewKind, snap: i64) -> Self {
+        Self {
+            id,
+            kind,
+            snap,
+            label: None,
+        }
+    }
+
+    /// Set the label.
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceTimeViewport (trace-level)
+// ---------------------------------------------------------------------------
+
+/// A time viewport restricting which snaps are visible to a particular view.
+///
+/// Ported from Ghidra's `DBTraceTimeViewport`. Supports a live-snap mode
+/// where the viewport automatically follows the newest snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceTimeViewport {
+    /// Unique id for this viewport.
+    pub id: u64,
+    /// The minimum visible snap (inclusive).
+    pub min_snap: i64,
+    /// The maximum visible snap (inclusive).
+    pub max_snap: i64,
+    /// Whether to automatically follow the "live" snap.
+    pub live: bool,
+}
+
+impl TraceTimeViewport {
+    /// Create a viewport showing all time.
+    pub fn all(id: u64) -> Self {
+        Self {
+            id,
+            min_snap: i64::MIN,
+            max_snap: i64::MAX,
+            live: true,
+        }
+    }
+
+    /// Create a viewport for a specific range.
+    pub fn range(id: u64, min_snap: i64, max_snap: i64) -> Self {
+        Self {
+            id,
+            min_snap,
+            max_snap,
+            live: false,
+        }
+    }
+
+    /// Create a viewport for a single snap.
+    pub fn at(id: u64, snap: i64) -> Self {
+        Self {
+            id,
+            min_snap: snap,
+            max_snap: snap,
+            live: false,
+        }
+    }
+
+    /// Whether the viewport contains the given snap.
+    pub fn contains(&self, snap: i64) -> bool {
+        snap >= self.min_snap && snap <= self.max_snap
+    }
+
+    /// Update the viewport to follow a new snap (only in live mode).
+    pub fn set_snap(&mut self, snap: i64) {
+        if self.live {
+            self.min_snap = snap;
+            self.max_snap = snap;
+        }
+    }
+
+    /// Force the viewport to a specific range regardless of live mode.
+    pub fn set_range(&mut self, min_snap: i64, max_snap: i64) {
+        self.min_snap = min_snap;
+        self.max_snap = max_snap;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceChangeSet
+// ---------------------------------------------------------------------------
+
+/// A set of snaps that have been modified.
+///
+/// Ported from Ghidra's `DBTraceChangeSet`. Tracks dirty snapshots
+/// so that consumers can determine which snaps need to be refreshed.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TraceChangeSet {
+    /// Set of snap keys whose data has been modified.
+    dirty_snaps: BTreeMap<i64, bool>,
+    /// Whether the trace structure itself has changed (e.g., new manager).
+    pub structure_changed: bool,
+}
+
+impl TraceChangeSet {
+    /// Create an empty change set.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark a snap as dirty.
+    pub fn mark_dirty(&mut self, snap: i64) {
+        self.dirty_snaps.insert(snap, true);
+    }
+
+    /// Mark the trace structure as changed.
+    pub fn mark_structure_changed(&mut self) {
+        self.structure_changed = true;
+    }
+
+    /// Whether the given snap is dirty.
+    pub fn is_dirty(&self, snap: i64) -> bool {
+        self.dirty_snaps.contains_key(&snap)
+    }
+
+    /// All dirty snap keys.
+    pub fn dirty_snap_keys(&self) -> Vec<i64> {
+        self.dirty_snaps.keys().copied().collect()
+    }
+
+    /// The number of dirty snaps.
+    pub fn dirty_count(&self) -> usize {
+        self.dirty_snaps.len()
+    }
+
+    /// Whether the change set has any pending changes.
+    pub fn has_changes(&self) -> bool {
+        !self.dirty_snaps.is_empty() || self.structure_changed
+    }
+
+    /// Clear all dirty flags.
+    pub fn clear(&mut self) {
+        self.dirty_snaps.clear();
+        self.structure_changed = false;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LockKind
+// ---------------------------------------------------------------------------
+
+/// The kind of lock currently held.
+///
+/// Ported from Ghidra's `LockHold` pattern. In the Rust port this is
+/// advisory -- it does not enforce mutual exclusion at the type level,
+/// but records which lock is active for debugging and assertion purposes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LockKind {
+    /// No lock is held.
+    None,
+    /// A read lock is held (shared).
+    Read,
+    /// A write lock is held (exclusive).
+    Write,
+}
+
+impl Default for LockKind {
+    fn default() -> Self {
+        Self::None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +450,22 @@ pub struct TraceData {
     next_breakpoint_key: i64,
     /// Saved views (snap -> view name).
     saved_views: BTreeMap<i64, String>,
+    /// Fork tracking: snap -> true if that snap is a known fork point.
+    forks: BTreeMap<i64, bool>,
+    /// The time radix for display formatting.
+    time_radix: TimeRadix,
+    /// Program views created on this trace.
+    program_views: Vec<ProgramViewEntry>,
+    /// Next program view id.
+    next_view_id: u64,
+    /// Time viewports.
+    time_viewports: Vec<TraceTimeViewport>,
+    /// Next viewport id.
+    next_viewport_id: u64,
+    /// Change set tracking.
+    change_set: TraceChangeSet,
+    /// The currently held lock kind (advisory).
+    lock_kind: LockKind,
 }
 
 /// A breakpoint entry tracked within a trace.
@@ -242,6 +528,9 @@ pub struct MemoryKey {
 }
 
 /// Metadata for a single snapshot.
+///
+/// Extended with schedule and fork tracking ported from Ghidra's
+/// `DBTraceSnapshot` / `TraceSnapshot` interface.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraceSnapshotEntry {
     /// The snapshot key (snap value).
@@ -254,6 +543,20 @@ pub struct TraceSnapshotEntry {
     pub alive_threads: Vec<i64>,
     /// Which processes were alive at this snapshot.
     pub alive_processes: Vec<i64>,
+    /// The schedule relating this snapshot to a previous one (e.g. "5:1").
+    ///
+    /// When present, this encodes the previous snap and the number of
+    /// emulation steps taken. For a purely "snap-only" marker this is `None`.
+    pub schedule: Option<String>,
+    /// The key of the thread that caused this snapshot (event thread).
+    pub event_thread_key: Option<i64>,
+    /// Version for emulator cache staleness detection.
+    ///
+    /// When this snapshot was produced by emulation, `version` records
+    /// the emulator cache version at the time of creation. If
+    /// `version < trace.emulator_cache_version`, the snapshot is stale
+    /// and needs re-emulation.
+    pub version: i64,
 }
 
 impl TraceSnapshotEntry {
@@ -265,6 +568,9 @@ impl TraceSnapshotEntry {
             timestamp: None,
             alive_threads: Vec::new(),
             alive_processes: Vec::new(),
+            schedule: None,
+            event_thread_key: None,
+            version: 0,
         }
     }
 
@@ -278,6 +584,78 @@ impl TraceSnapshotEntry {
     pub fn with_timestamp(mut self, ts: i64) -> Self {
         self.timestamp = Some(ts);
         self
+    }
+
+    /// Set the schedule string (e.g. "5:1" for snap 5 + 1 step).
+    pub fn with_schedule(mut self, sched: impl Into<String>) -> Self {
+        self.schedule = Some(sched.into());
+        self
+    }
+
+    /// Set the event thread key.
+    pub fn with_event_thread(mut self, thread_key: i64) -> Self {
+        self.event_thread_key = Some(thread_key);
+        self
+    }
+
+    /// Set the emulator cache version.
+    pub fn with_version(mut self, version: i64) -> Self {
+        self.version = version;
+        self
+    }
+
+    /// Whether this snapshot is in scratch space (negative key).
+    pub fn is_scratch(&self) -> bool {
+        self.key < 0
+    }
+
+    /// Whether this snapshot represents a fork.
+    ///
+    /// A snapshot is a fork if its schedule's initial snap is not `key - 1`.
+    /// This indicates that the snapshot's state was derived from a non-adjacent
+    /// predecessor, typically because of emulation branching.
+    pub fn is_fork(&self) -> bool {
+        if self.key == i64::MIN {
+            return false;
+        }
+        if let Some(ref sched) = self.schedule {
+            if let Some(colon) = sched.find(':') {
+                if let Ok(prev) = sched[..colon].parse::<i64>() {
+                    return prev != self.key - 1;
+                }
+            }
+        }
+        false
+    }
+
+    /// Whether this snapshot involves only a snap (no emulation steps).
+    ///
+    /// A scratch snapshot without a schedule is considered inconsistent
+    /// and returns `when_inconsistent`.
+    pub fn is_snap_only(&self, when_inconsistent: bool) -> bool {
+        if self.is_scratch() && self.schedule.is_none() {
+            return when_inconsistent;
+        }
+        match &self.schedule {
+            None => true,
+            Some(s) => !s.contains(':') || s.ends_with(":0"),
+        }
+    }
+
+    /// Whether this emulated snapshot needs re-emulation.
+    ///
+    /// Returns `true` if the snapshot was produced by emulation and its
+    /// version is older than the trace's current emulator cache version.
+    pub fn is_stale(&self, cache_version: i64, when_inconsistent: bool) -> bool {
+        if self.is_snap_only(when_inconsistent) {
+            return false;
+        }
+        self.version < cache_version
+    }
+
+    /// Parse the schedule into a `ScheduleSequence`, if present and valid.
+    pub fn parse_schedule(&self) -> Option<ScheduleSequence> {
+        self.schedule.as_deref().and_then(ScheduleSequence::parse)
     }
 }
 
@@ -306,6 +684,14 @@ impl TraceData {
             breakpoints: BTreeMap::new(),
             next_breakpoint_key: 1,
             saved_views: BTreeMap::new(),
+            forks: BTreeMap::new(),
+            time_radix: TimeRadix::default(),
+            program_views: Vec::new(),
+            next_view_id: 0,
+            time_viewports: Vec::new(),
+            next_viewport_id: 0,
+            change_set: TraceChangeSet::new(),
+            lock_kind: LockKind::None,
         }
     }
 
@@ -822,6 +1208,328 @@ impl TraceData {
             alive_thread_count: self.threads.values().filter(|t| t.is_alive_now()).count(),
         }
     }
+
+    // -- Schedule-aware snapshots --
+
+    /// Create a snapshot with a schedule relating it to a previous snap.
+    ///
+    /// The schedule string encodes the previous snap and step count,
+    /// e.g., `"5:1"` means snap 5 + 1 emulation step.
+    pub fn create_snapshot_with_schedule(
+        &mut self,
+        schedule: impl Into<String>,
+    ) -> i64 {
+        let key = self.next_snap_key;
+        self.next_snap_key += 1;
+        let mut entry = TraceSnapshotEntry::new(key);
+        entry.schedule = Some(schedule.into());
+        if key == 0 {
+            // Convention for first snap
+            entry.schedule = Some(format!("{key}:0"));
+        }
+        self.snapshots.insert(key, entry);
+        key
+    }
+
+    /// Create a scratch snapshot (negative key) for emulation cache.
+    ///
+    /// Scratch snapshots live in negative key space and are used to cache
+    /// intermediate emulation state. Returns the assigned key.
+    pub fn create_scratch_snapshot(&mut self, schedule: impl Into<String>) -> i64 {
+        // Find the lowest existing scratch key
+        let key = self
+            .snapshots
+            .keys()
+            .filter(|k| **k < 0)
+            .min()
+            .map(|k| k - 1)
+            .unwrap_or(-1);
+        let mut entry = TraceSnapshotEntry::new(key);
+        entry.schedule = Some(schedule.into());
+        self.snapshots.insert(key, entry);
+        key
+    }
+
+    /// Get the snapshot at or before the given snap.
+    ///
+    /// This is the "floor" lookup used by the time manager when
+    /// resolving which snapshot to use for a given time point.
+    pub fn get_most_recent_snapshot(&self, snap: i64) -> Option<&TraceSnapshotEntry> {
+        self.snapshots.range(..=snap).next_back().map(|(_, v)| v)
+    }
+
+    /// Get the snap of the most recent fork at or before `snap`.
+    ///
+    /// A fork is a snapshot whose schedule's initial snap is not `key - 1`.
+    /// Returns `None` if no fork exists at or before `snap` (excluding
+    /// scratch-to-non-scratch boundaries).
+    pub fn get_most_recent_fork(&self, snap: i64) -> Option<i64> {
+        for (key, _entry) in self.snapshots.range(..=snap).rev() {
+            // If we're searching a non-negative snap and hit scratch space, stop
+            if *key < 0 && snap >= 0 {
+                break;
+            }
+            if self.forks.contains_key(key) {
+                return Some(*key);
+            }
+        }
+        if snap >= 0 {
+            Some(0) // Convention: snap 0 is always the implicit fork base
+        } else {
+            None
+        }
+    }
+
+    /// Find or create a scratch snapshot matching the given schedule.
+    ///
+    /// Ported from `DBTraceTimeManager.findScratchSnapshot`.
+    pub fn find_scratch_snapshot(&mut self, schedule: &str) -> i64 {
+        // Check if a snapshot with this schedule already exists
+        if let Some((&key, _)) = self
+            .snapshots
+            .iter()
+            .find(|(_, e)| e.schedule.as_deref() == Some(schedule))
+        {
+            return key;
+        }
+        self.create_scratch_snapshot(schedule)
+    }
+
+    /// Find the snapshot whose schedule shares the longest prefix with `schedule`.
+    ///
+    /// Ported from `DBTraceTimeManager.findSnapshotWithNearestPrefix`.
+    /// Returns `None` if no matching snapshot is found.
+    pub fn find_snapshot_with_nearest_prefix(&self, schedule: &str) -> Option<&TraceSnapshotEntry> {
+        let version = self.emulator_cache_version;
+
+        // First check for an exact match with a valid version
+        if let Some(entry) = self
+            .snapshots
+            .values()
+            .find(|e| e.schedule.as_deref() == Some(schedule) && e.version >= version)
+        {
+            return Some(entry);
+        }
+
+        // Try prefix matching -- find the longest prefix
+        let mut best: Option<&TraceSnapshotEntry> = None;
+        for entry in self.snapshots.values() {
+            if let Some(ref sched) = entry.schedule {
+                if schedule.starts_with(sched.as_str())
+                    && entry.version >= version
+                    && best.map_or(true, |b| {
+                        sched.len()
+                            > b.schedule
+                                .as_ref()
+                                .map_or(0, |s| s.len())
+                    })
+                {
+                    best = Some(entry);
+                }
+            }
+        }
+        best
+    }
+
+    /// Delete a snapshot and clean up associated fork entries.
+    ///
+    /// Returns the deleted entry, if any.
+    pub fn delete_snapshot(&mut self, key: i64) -> Option<TraceSnapshotEntry> {
+        self.forks.remove(&key);
+        self.snapshots.remove(&key)
+    }
+
+    /// Register a fork at the given snap.
+    ///
+    /// Call this when a snapshot's schedule points to a non-adjacent predecessor.
+    pub fn register_fork(&mut self, snap: i64) {
+        self.forks.insert(snap, true);
+    }
+
+    /// Whether the given snap is a registered fork point.
+    pub fn is_fork(&self, snap: i64) -> bool {
+        self.forks.contains_key(&snap)
+    }
+
+    // -- Time radix --
+
+    /// The time radix for snap display.
+    pub fn time_radix(&self) -> TimeRadix {
+        self.time_radix
+    }
+
+    /// Set the time radix.
+    pub fn set_time_radix(&mut self, radix: TimeRadix) {
+        self.time_radix = radix;
+    }
+
+    // -- Program views --
+
+    /// Create a fixed-snap program view at the given snap.
+    ///
+    /// Returns the view id.
+    pub fn create_fixed_program_view(&mut self, snap: i64) -> u64 {
+        let id = self.next_view_id;
+        self.next_view_id += 1;
+        self.program_views
+            .push(ProgramViewEntry::new(id, ProgramViewKind::Fixed, snap));
+        id
+    }
+
+    /// Create a variable-snap program view starting at the given snap.
+    ///
+    /// Returns the view id.
+    pub fn create_variable_program_view(&mut self, snap: i64) -> u64 {
+        let id = self.next_view_id;
+        self.next_view_id += 1;
+        self.program_views
+            .push(ProgramViewEntry::new(id, ProgramViewKind::Variable, snap));
+        id
+    }
+
+    /// Get a program view by id.
+    pub fn program_view(&self, id: u64) -> Option<&ProgramViewEntry> {
+        self.program_views.iter().find(|v| v.id == id)
+    }
+
+    /// Get a mutable program view by id.
+    pub fn program_view_mut(&mut self, id: u64) -> Option<&mut ProgramViewEntry> {
+        self.program_views.iter_mut().find(|v| v.id == id)
+    }
+
+    /// All program views.
+    pub fn all_program_views(&self) -> &[ProgramViewEntry] {
+        &self.program_views
+    }
+
+    /// Remove a program view by id. Returns `true` if it existed.
+    pub fn remove_program_view(&mut self, id: u64) -> bool {
+        let before = self.program_views.len();
+        self.program_views.retain(|v| v.id != id);
+        self.program_views.len() < before
+    }
+
+    // -- Time viewports --
+
+    /// Create a new time viewport showing all time.
+    pub fn create_time_viewport(&mut self) -> u64 {
+        let id = self.next_viewport_id;
+        self.next_viewport_id += 1;
+        self.time_viewports.push(TraceTimeViewport::all(id));
+        id
+    }
+
+    /// Get a time viewport by id.
+    pub fn time_viewport(&self, id: u64) -> Option<&TraceTimeViewport> {
+        self.time_viewports.iter().find(|v| v.id == id)
+    }
+
+    /// Get a mutable time viewport by id.
+    pub fn time_viewport_mut(&mut self, id: u64) -> Option<&mut TraceTimeViewport> {
+        self.time_viewports.iter_mut().find(|v| v.id == id)
+    }
+
+    /// All time viewports.
+    pub fn all_time_viewports(&self) -> &[TraceTimeViewport] {
+        &self.time_viewports
+    }
+
+    /// Remove a time viewport by id. Returns `true` if it existed.
+    pub fn remove_time_viewport(&mut self, id: u64) -> bool {
+        let before = self.time_viewports.len();
+        self.time_viewports.retain(|v| v.id != id);
+        self.time_viewports.len() < before
+    }
+
+    /// Update all live viewports to follow a new snap.
+    pub fn update_viewports_snapshot_added(&mut self, snap: i64) {
+        for vp in &mut self.time_viewports {
+            if vp.live {
+                vp.min_snap = snap;
+                vp.max_snap = snap;
+            }
+        }
+    }
+
+    // -- Change set --
+
+    /// Get the change set.
+    pub fn change_set(&self) -> &TraceChangeSet {
+        &self.change_set
+    }
+
+    /// Get the mutable change set.
+    pub fn change_set_mut(&mut self) -> &mut TraceChangeSet {
+        &mut self.change_set
+    }
+
+    /// Mark a snap as dirty in the change set.
+    pub fn mark_snap_dirty(&mut self, snap: i64) {
+        self.change_set.mark_dirty(snap);
+    }
+
+    /// Mark the trace structure as changed.
+    pub fn mark_structure_changed(&mut self) {
+        self.change_set.mark_structure_changed();
+    }
+
+    // -- Lock (advisory) --
+
+    /// Acquire a simulated read lock.
+    ///
+    /// In a single-threaded context this is advisory only.
+    /// Returns `true` if the lock was acquired (always in this implementation).
+    pub fn lock_read(&mut self) -> bool {
+        self.lock_kind = LockKind::Read;
+        true
+    }
+
+    /// Acquire a simulated write lock.
+    pub fn lock_write(&mut self) -> bool {
+        self.lock_kind = LockKind::Write;
+        true
+    }
+
+    /// Release the current lock.
+    pub fn unlock(&mut self) {
+        self.lock_kind = LockKind::None;
+    }
+
+    /// The currently held lock kind.
+    pub fn current_lock(&self) -> LockKind {
+        self.lock_kind
+    }
+
+    // -- Snapshot with event thread --
+
+    /// Create a snapshot caused by a specific thread event.
+    pub fn create_snapshot_for_event(
+        &mut self,
+        event_thread_key: i64,
+        desc: impl Into<String>,
+    ) -> i64 {
+        let key = self.next_snap_key;
+        self.next_snap_key += 1;
+        let mut entry = TraceSnapshotEntry::new(key);
+        entry.description = Some(desc.into());
+        entry.event_thread_key = Some(event_thread_key);
+        entry.timestamp = Some(chrono_now_millis());
+        self.snapshots.insert(key, entry);
+        key
+    }
+}
+
+/// Return the current time in milliseconds since epoch.
+///
+/// This is a helper used for snapshot timestamps. In a `no_std` or
+/// WASM environment you would replace this with a platform-specific
+/// implementation.
+fn chrono_now_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 // ---------------------------------------------------------------------------
@@ -1181,5 +1889,335 @@ mod tests {
         assert_eq!(bp.expression, "main");
         assert!(bp.enabled);
         assert_eq!(bp.hit_count, 0);
+    }
+
+    // -- Schedule-aware snapshot tests --
+
+    #[test]
+    fn test_snapshot_entry_schedule() {
+        let entry = TraceSnapshotEntry::new(6)
+            .with_schedule("5:1")
+            .with_event_thread(42)
+            .with_version(3);
+        assert_eq!(entry.schedule.as_deref(), Some("5:1"));
+        assert_eq!(entry.event_thread_key, Some(42));
+        assert_eq!(entry.version, 3);
+        assert!(!entry.is_scratch());
+        assert!(!entry.is_fork()); // 5 == 6 - 1, so not a fork
+    }
+
+    #[test]
+    fn test_snapshot_entry_is_fork() {
+        let entry = TraceSnapshotEntry::new(6).with_schedule("4:1");
+        assert!(entry.is_fork()); // 4 != 6 - 1
+
+        let entry2 = TraceSnapshotEntry::new(6).with_schedule("5:1");
+        assert!(!entry2.is_fork()); // 5 == 6 - 1
+    }
+
+    #[test]
+    fn test_snapshot_entry_is_snap_only() {
+        let entry = TraceSnapshotEntry::new(0);
+        assert!(entry.is_snap_only(false));
+
+        let entry = TraceSnapshotEntry::new(5).with_schedule("5:0");
+        assert!(entry.is_snap_only(false));
+
+        let entry = TraceSnapshotEntry::new(6).with_schedule("5:1");
+        assert!(!entry.is_snap_only(false));
+
+        // Scratch without schedule
+        let entry = TraceSnapshotEntry::new(-1);
+        assert!(!entry.is_snap_only(false));
+        assert!(entry.is_snap_only(true));
+    }
+
+    #[test]
+    fn test_snapshot_entry_is_stale() {
+        let entry = TraceSnapshotEntry::new(6)
+            .with_schedule("5:1")
+            .with_version(2);
+        assert!(entry.is_stale(3, false));
+        assert!(!entry.is_stale(2, false));
+        assert!(!entry.is_stale(1, false));
+
+        // Snap-only is never stale
+        let entry = TraceSnapshotEntry::new(5);
+        assert!(!entry.is_stale(100, false));
+    }
+
+    #[test]
+    fn test_snapshot_entry_parse_schedule() {
+        let entry = TraceSnapshotEntry::new(6).with_schedule("5:3i1p");
+        let seq = entry.parse_schedule().unwrap();
+        assert_eq!(seq.initial_snap, 5);
+        assert_eq!(seq.steps.len(), 2);
+    }
+
+    #[test]
+    fn test_create_snapshot_with_schedule() {
+        let mut t = TraceData::new("t1");
+        let s0 = t.create_snapshot_with_schedule("0:0");
+        assert_eq!(s0, 0);
+        let entry = t.snapshot(s0).unwrap();
+        assert_eq!(entry.schedule.as_deref(), Some("0:0"));
+    }
+
+    #[test]
+    fn test_scratch_snapshots() {
+        let mut t = TraceData::new("t1");
+        let s1 = t.create_scratch_snapshot("0:1i");
+        assert_eq!(s1, -1);
+        let s2 = t.create_scratch_snapshot("0:2i");
+        assert_eq!(s2, -2);
+        assert!(t.snapshot(s1).unwrap().is_scratch());
+        assert!(t.snapshot(s2).unwrap().is_scratch());
+    }
+
+    #[test]
+    fn test_get_most_recent_snapshot() {
+        let mut t = TraceData::new("t1");
+        t.create_snapshot(); // 0
+        t.create_snapshot(); // 1
+        t.create_snapshot(); // 2
+
+        let s = t.get_most_recent_snapshot(2).unwrap();
+        assert_eq!(s.key, 2);
+        let s = t.get_most_recent_snapshot(1).unwrap();
+        assert_eq!(s.key, 1);
+        let s = t.get_most_recent_snapshot(100).unwrap();
+        assert_eq!(s.key, 2);
+        assert!(t.get_most_recent_snapshot(-1).is_none());
+    }
+
+    #[test]
+    fn test_fork_tracking() {
+        let mut t = TraceData::new("t1");
+        t.register_fork(5);
+        t.register_fork(10);
+        assert!(t.is_fork(5));
+        assert!(t.is_fork(10));
+        assert!(!t.is_fork(3));
+
+        let fork = t.get_most_recent_fork(7);
+        assert_eq!(fork, Some(5));
+
+        let fork = t.get_most_recent_fork(100);
+        assert_eq!(fork, Some(10));
+    }
+
+    #[test]
+    fn test_delete_snapshot() {
+        let mut t = TraceData::new("t1");
+        t.create_snapshot(); // 0
+        t.create_snapshot(); // 1
+        t.register_fork(1);
+        assert_eq!(t.snapshot_count(), 2);
+        assert!(t.is_fork(1));
+
+        let deleted = t.delete_snapshot(1);
+        assert!(deleted.is_some());
+        assert_eq!(deleted.unwrap().key, 1);
+        assert_eq!(t.snapshot_count(), 1);
+        assert!(!t.is_fork(1)); // Fork should be cleaned up
+    }
+
+    #[test]
+    fn test_find_scratch_snapshot() {
+        let mut t = TraceData::new("t1");
+        let s1 = t.find_scratch_snapshot("0:1i");
+        assert_eq!(s1, -1);
+        // Finding same schedule again should return same key
+        let s1_again = t.find_scratch_snapshot("0:1i");
+        assert_eq!(s1_again, -1);
+        // Different schedule gets new key
+        let s2 = t.find_scratch_snapshot("0:2i");
+        assert_eq!(s2, -2);
+    }
+
+    // -- Time radix tests --
+
+    #[test]
+    fn test_time_radix() {
+        assert_eq!(TimeRadix::from_str("dec"), TimeRadix::Dec);
+        assert_eq!(TimeRadix::from_str("HEX"), TimeRadix::HexUpper);
+        assert_eq!(TimeRadix::from_str("hex"), TimeRadix::HexLower);
+        assert_eq!(TimeRadix::Dec.to_ghidra_str(), "dec");
+        assert_eq!(TimeRadix::HexUpper.to_ghidra_str(), "HEX");
+        assert_eq!(TimeRadix::DEFAULT, TimeRadix::Dec);
+    }
+
+    #[test]
+    fn test_trace_time_radix() {
+        let mut t = TraceData::new("t1");
+        assert_eq!(t.time_radix(), TimeRadix::Dec);
+        t.set_time_radix(TimeRadix::HexUpper);
+        assert_eq!(t.time_radix(), TimeRadix::HexUpper);
+    }
+
+    // -- Program views tests --
+
+    #[test]
+    fn test_program_views() {
+        let mut t = TraceData::new("t1");
+        let v1 = t.create_fixed_program_view(0);
+        let v2 = t.create_variable_program_view(5);
+
+        assert_eq!(t.all_program_views().len(), 2);
+
+        let view = t.program_view(v1).unwrap();
+        assert_eq!(view.kind, ProgramViewKind::Fixed);
+        assert_eq!(view.snap, 0);
+
+        let view = t.program_view(v2).unwrap();
+        assert_eq!(view.kind, ProgramViewKind::Variable);
+        assert_eq!(view.snap, 5);
+
+        t.remove_program_view(v1);
+        assert_eq!(t.all_program_views().len(), 1);
+        assert!(t.program_view(v1).is_none());
+    }
+
+    #[test]
+    fn test_program_view_entry_builder() {
+        let v = ProgramViewEntry::new(1, ProgramViewKind::Fixed, 0)
+            .with_label("Initial state");
+        assert_eq!(v.id, 1);
+        assert_eq!(v.label.as_deref(), Some("Initial state"));
+    }
+
+    // -- Time viewport tests --
+
+    #[test]
+    fn test_time_viewports() {
+        let mut t = TraceData::new("t1");
+        let vp = t.create_time_viewport();
+        assert_eq!(t.all_time_viewports().len(), 1);
+
+        let viewport = t.time_viewport(vp).unwrap();
+        assert!(viewport.live);
+        assert!(viewport.contains(0));
+
+        t.remove_time_viewport(vp);
+        assert_eq!(t.all_time_viewports().len(), 0);
+    }
+
+    #[test]
+    fn test_time_viewport_follows_live() {
+        let vp = &mut TraceTimeViewport::all(0);
+        vp.set_snap(42);
+        assert_eq!(vp.min_snap, 42);
+        assert_eq!(vp.max_snap, 42);
+    }
+
+    #[test]
+    fn test_update_viewports_snapshot_added() {
+        let mut t = TraceData::new("t1");
+        let _vp = t.create_time_viewport();
+        t.update_viewports_snapshot_added(5);
+        let viewport = t.time_viewport(0).unwrap();
+        assert_eq!(viewport.min_snap, 5);
+        assert_eq!(viewport.max_snap, 5);
+    }
+
+    // -- Change set tests --
+
+    #[test]
+    fn test_change_set() {
+        let mut cs = TraceChangeSet::new();
+        assert!(!cs.has_changes());
+
+        cs.mark_dirty(5);
+        cs.mark_dirty(10);
+        assert!(cs.is_dirty(5));
+        assert!(cs.is_dirty(10));
+        assert!(!cs.is_dirty(3));
+        assert_eq!(cs.dirty_count(), 2);
+        assert!(cs.has_changes());
+
+        cs.mark_structure_changed();
+        assert!(cs.structure_changed);
+
+        cs.clear();
+        assert!(!cs.has_changes());
+        assert_eq!(cs.dirty_count(), 0);
+    }
+
+    #[test]
+    fn test_trace_change_set_integration() {
+        let mut t = TraceData::new("t1");
+        assert!(!t.change_set().has_changes());
+
+        t.mark_snap_dirty(5);
+        assert!(t.change_set().is_dirty(5));
+
+        t.mark_structure_changed();
+        assert!(t.change_set().structure_changed);
+    }
+
+    // -- Lock tests --
+
+    #[test]
+    fn test_advisory_lock() {
+        let mut t = TraceData::new("t1");
+        assert_eq!(t.current_lock(), LockKind::None);
+
+        t.lock_read();
+        assert_eq!(t.current_lock(), LockKind::Read);
+        t.unlock();
+        assert_eq!(t.current_lock(), LockKind::None);
+
+        t.lock_write();
+        assert_eq!(t.current_lock(), LockKind::Write);
+        t.unlock();
+    }
+
+    // -- Snapshot for event tests --
+
+    #[test]
+    fn test_snapshot_for_event() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        let th = t.add_thread(p, "main", 0).unwrap();
+
+        let snap = t.create_snapshot_for_event(th, "breakpoint hit");
+        let entry = t.snapshot(snap).unwrap();
+        assert_eq!(entry.event_thread_key, Some(th));
+        assert_eq!(entry.description.as_deref(), Some("breakpoint hit"));
+        assert!(entry.timestamp.is_some());
+    }
+
+    // -- Serde for new types --
+
+    #[test]
+    fn test_time_radix_serde() {
+        let r = TimeRadix::HexUpper;
+        let json = serde_json::to_string(&r).unwrap();
+        let back: TimeRadix = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, TimeRadix::HexUpper);
+    }
+
+    #[test]
+    fn test_trace_change_set_serde() {
+        let mut cs = TraceChangeSet::new();
+        cs.mark_dirty(5);
+        cs.mark_structure_changed();
+        let json = serde_json::to_string(&cs).unwrap();
+        let back: TraceChangeSet = serde_json::from_str(&json).unwrap();
+        assert!(back.is_dirty(5));
+        assert!(back.structure_changed);
+    }
+
+    #[test]
+    fn test_trace_snapshot_entry_serde_with_schedule() {
+        let entry = TraceSnapshotEntry::new(6)
+            .with_schedule("5:1")
+            .with_event_thread(42)
+            .with_version(3);
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: TraceSnapshotEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.schedule.as_deref(), Some("5:1"));
+        assert_eq!(back.event_thread_key, Some(42));
+        assert_eq!(back.version, 3);
     }
 }

@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::gdb_thread::GdbThread;
 use crate::agents::{
-    ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo,
+    ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo, RegisterValue,
 };
 
 /// A process available on the system (from `info os processes`).
@@ -1589,6 +1589,451 @@ pub fn parse_module_name_line(line: &str, has_exec_file: bool) -> Option<String>
     }
 }
 
+/// GDB convenience variable state.
+///
+/// GDB has "convenience variables" ($var) that can be used to track
+/// state. The agent uses `_ghidra_tracing` to indicate whether a trace
+/// session is active, and `_ghidra_tracing_snap` for the current snapshot.
+///
+/// Ported from the Python `commands.py` state management and
+/// `gdb.set_convenience_variable` / `gdb.convenience_variable` calls.
+#[derive(Debug, Clone, Default)]
+pub struct GdbConvenienceState {
+    /// Whether Ghidra tracing is active.
+    pub tracing_active: bool,
+    /// Current snapshot ID.
+    pub current_snapshot: Option<u64>,
+    /// Whether pagination is currently enabled.
+    pub pagination: bool,
+    /// Whether confirmation prompts are enabled.
+    pub confirm: bool,
+}
+
+impl GdbConvenienceState {
+    /// Create a new convenience state with defaults.
+    pub fn new() -> Self {
+        Self {
+            tracing_active: false,
+            current_snapshot: None,
+            pagination: true,
+            confirm: true,
+        }
+    }
+
+    /// Enable tracing mode.
+    pub fn enable_tracing(&mut self) {
+        self.tracing_active = true;
+    }
+
+    /// Disable tracing mode.
+    pub fn disable_tracing(&mut self) {
+        self.tracing_active = false;
+        self.current_snapshot = None;
+    }
+
+    /// Set the current snapshot.
+    pub fn set_snapshot(&mut self, snap: u64) {
+        self.current_snapshot = Some(snap);
+    }
+
+    /// Get the GDB command strings to configure pagination off.
+    ///
+    /// Returns the commands to save pagination state and disable it.
+    /// Ported from the `no_pagination` context manager in `methods.py`.
+    pub fn disable_pagination_commands(&self) -> Vec<String> {
+        vec![
+            "set pagination off".to_string(),
+        ]
+    }
+
+    /// Get the GDB command strings to restore pagination.
+    pub fn restore_pagination_commands(&self) -> Vec<String> {
+        let val = if self.pagination { "on" } else { "off" };
+        vec![format!("set pagination {}", val)]
+    }
+
+    /// Get the GDB command strings to disable confirmation.
+    ///
+    /// Ported from the `no_confirm` context manager in `methods.py`.
+    pub fn disable_confirm_commands(&self) -> Vec<String> {
+        vec![
+            "set confirm off".to_string(),
+        ]
+    }
+
+    /// Get the GDB command strings to restore confirmation.
+    pub fn restore_confirm_commands(&self) -> Vec<String> {
+        let val = if self.confirm { "on" } else { "off" };
+        vec![format!("set confirm {}", val)]
+    }
+}
+
+/// Address mapper for GDB traces.
+///
+/// Maps between Ghidra trace addresses and GDB addresses.
+/// In GDB, addresses may need adjustment based on the target's
+/// memory layout (e.g., PIE executables, ASLR).
+///
+/// Ported from `arch.DefaultMemoryMapper` in the Python agent.
+#[derive(Debug, Clone, Default)]
+pub struct GdbMemoryMapper {
+    /// Address offsets per inferior, keyed by inferior number.
+    /// Maps inferior_num -> offset to add to convert Ghidra address to GDB address.
+    offsets: BTreeMap<u32, i64>,
+    /// The default pointer size in bytes.
+    pub pointer_size: usize,
+}
+
+impl GdbMemoryMapper {
+    /// Create a new memory mapper.
+    pub fn new(pointer_size: usize) -> Self {
+        Self {
+            offsets: BTreeMap::new(),
+            pointer_size,
+        }
+    }
+
+    /// Set the address offset for an inferior.
+    pub fn set_offset(&mut self, inferior_num: u32, offset: i64) {
+        self.offsets.insert(inferior_num, offset);
+    }
+
+    /// Get the address offset for an inferior.
+    pub fn get_offset(&self, inferior_num: u32) -> i64 {
+        self.offsets.get(&inferior_num).copied().unwrap_or(0)
+    }
+
+    /// Map a Ghidra trace address to a GDB address.
+    ///
+    /// Applies the inferior's address offset.
+    pub fn map_to_gdb(&self, inferior_num: u32, ghidra_addr: u64) -> u64 {
+        let offset = self.get_offset(inferior_num);
+        (ghidra_addr as i64 + offset) as u64
+    }
+
+    /// Map a GDB address to a Ghidra trace address.
+    ///
+    /// Reverse of `map_to_gdb`.
+    pub fn map_from_gdb(&self, inferior_num: u32, gdb_addr: u64) -> u64 {
+        let offset = self.get_offset(inferior_num);
+        (gdb_addr as i64 - offset) as u64
+    }
+
+    /// Clear the offset for an inferior.
+    pub fn clear_offset(&mut self, inferior_num: u32) {
+        self.offsets.remove(&inferior_num);
+    }
+
+    /// Clear all offsets.
+    pub fn clear_all(&mut self) {
+        self.offsets.clear();
+    }
+
+    /// Get the maximum address for the current pointer size.
+    pub fn max_address(&self) -> u64 {
+        compute_max_addr(self.pointer_size)
+    }
+}
+
+/// Register mapper for GDB traces.
+///
+/// Maps between Ghidra register names/indices and GDB register names.
+/// GDB uses names like "rax", "rip", while Ghidra uses indices or
+/// different naming conventions.
+///
+/// Ported from `arch.DefaultRegisterMapper` in the Python agent.
+#[derive(Debug, Clone, Default)]
+pub struct GdbRegisterMapper {
+    /// Maps GDB register name -> Ghidra register name.
+    name_map: BTreeMap<String, String>,
+    /// Maps GDB register name -> register size in bytes.
+    size_map: BTreeMap<String, usize>,
+    /// Maps GDB register name -> register group.
+    group_map: BTreeMap<String, String>,
+}
+
+impl GdbRegisterMapper {
+    /// Create a new register mapper.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a register name mapping.
+    pub fn map_name(&mut self, gdb_name: impl Into<String>, ghidra_name: impl Into<String>) {
+        self.name_map.insert(gdb_name.into(), ghidra_name.into());
+    }
+
+    /// Set the size for a register.
+    pub fn set_size(&mut self, name: impl Into<String>, size: usize) {
+        self.size_map.insert(name.into(), size);
+    }
+
+    /// Set the group for a register.
+    pub fn set_group(&mut self, name: impl Into<String>, group: impl Into<String>) {
+        self.group_map.insert(name.into(), group.into());
+    }
+
+    /// Map a GDB register name to its Ghidra name.
+    ///
+    /// Returns the Ghidra name if mapped, or the original name.
+    pub fn map_register_name(&self, gdb_name: &str) -> String {
+        self.name_map
+            .get(gdb_name)
+            .cloned()
+            .unwrap_or_else(|| gdb_name.to_string())
+    }
+
+    /// Get the register size by GDB name.
+    pub fn get_size(&self, name: &str) -> Option<usize> {
+        self.size_map.get(name).copied()
+    }
+
+    /// Get the register group by GDB name.
+    pub fn get_group(&self, name: &str) -> Option<&str> {
+        self.group_map.get(name).map(|s| s.as_str())
+    }
+
+    /// Get the number of mapped registers.
+    pub fn len(&self) -> usize {
+        self.name_map.len()
+    }
+
+    /// Check if the mapper is empty.
+    pub fn is_empty(&self) -> bool {
+        self.name_map.is_empty()
+    }
+}
+
+/// Unified GDB process manager that ties together inferior management,
+/// memory mapping, register mapping, and sync state.
+///
+/// This is the top-level manager for a GDB debugging session.
+/// It corresponds to the Python agent's `commands.State` and the
+/// various `put_*` commands.
+///
+/// Ported from the overall agent architecture in `commands.py` and `hooks.py`.
+#[derive(Debug)]
+pub struct GdbProcessManager {
+    /// Managed inferiors.
+    pub inferiors: GdbInferiorManager,
+    /// Memory address mapper.
+    pub memory_mapper: GdbMemoryMapper,
+    /// Register name mapper.
+    pub register_mapper: GdbRegisterMapper,
+    /// Convenience variable state.
+    pub convenience: GdbConvenienceState,
+    /// Per-inferior sync states.
+    sync_states: BTreeMap<u32, InferiorSyncState>,
+    /// Signal table.
+    pub signal_table: GdbSignalTable,
+    /// Whether the manager is initialized (trace started).
+    pub initialized: bool,
+}
+
+impl GdbProcessManager {
+    /// Create a new process manager.
+    pub fn new() -> Self {
+        Self {
+            inferiors: GdbInferiorManager::new(),
+            memory_mapper: GdbMemoryMapper::new(8),
+            register_mapper: GdbRegisterMapper::new(),
+            convenience: GdbConvenienceState::new(),
+            sync_states: BTreeMap::new(),
+            signal_table: GdbSignalTable::new(),
+            initialized: false,
+        }
+    }
+
+    /// Create a process manager with a specific pointer size.
+    pub fn with_pointer_size(mut self, size: usize) -> Self {
+        self.memory_mapper = GdbMemoryMapper::new(size);
+        self
+    }
+
+    /// Initialize the manager (called when trace starts).
+    pub fn initialize(&mut self) {
+        self.signal_table.populate_defaults();
+        self.convenience.enable_tracing();
+        self.initialized = true;
+    }
+
+    /// Shut down the manager (called when trace stops).
+    pub fn shutdown(&mut self) {
+        self.convenience.disable_tracing();
+        self.initialized = false;
+    }
+
+    /// Get or create the sync state for an inferior.
+    pub fn get_or_create_sync_state(&mut self, inferior_num: u32) -> &mut InferiorSyncState {
+        self.sync_states
+            .entry(inferior_num)
+            .or_insert_with(InferiorSyncState::new)
+    }
+
+    /// Get the sync state for an inferior, if it exists.
+    pub fn get_sync_state(&self, inferior_num: u32) -> Option<&InferiorSyncState> {
+        self.sync_states.get(&inferior_num)
+    }
+
+    /// Add an inferior to the manager.
+    pub fn add_inferior(&mut self, inferior: GdbInferiorProcess) {
+        let num = inferior.num;
+        self.sync_states.entry(num).or_insert_with(InferiorSyncState::new);
+        self.inferiors.add(inferior);
+    }
+
+    /// Remove an inferior from the manager.
+    pub fn remove_inferior(&mut self, num: u32) -> Option<GdbInferiorProcess> {
+        self.sync_states.remove(&num);
+        self.inferiors.remove(num)
+    }
+
+    /// Get the active inferior's sync state.
+    pub fn active_sync_state(&mut self) -> Option<&mut InferiorSyncState> {
+        let num = self.inferiors.active_num()?;
+        Some(self.get_or_create_sync_state(num))
+    }
+
+    /// Compute environment values for the current session.
+    ///
+    /// Ported from `put_environment` in `commands.py`.
+    pub fn build_environment(
+        &self,
+        os: &str,
+        arch: &str,
+        endian: &str,
+    ) -> Vec<(String, String)> {
+        vec![
+            ("Debugger".to_string(), "gdb".to_string()),
+            ("Arch".to_string(), arch.to_string()),
+            ("OS".to_string(), os.to_string()),
+            ("Endian".to_string(), endian.to_string()),
+        ]
+    }
+
+    /// Map a Ghidra address to GDB for the active inferior.
+    pub fn map_address_to_gdb(&self, address: u64) -> u64 {
+        if let Some(num) = self.inferiors.active_num() {
+            self.memory_mapper.map_to_gdb(num, address)
+        } else {
+            address
+        }
+    }
+
+    /// Map a GDB address to Ghidra for the active inferior.
+    pub fn map_address_from_gdb(&self, address: u64) -> u64 {
+        if let Some(num) = self.inferiors.active_num() {
+            self.memory_mapper.map_from_gdb(num, address)
+        } else {
+            address
+        }
+    }
+
+    /// Map a register value from GDB to Ghidra.
+    pub fn map_register_value(
+        &self,
+        name: &str,
+        bytes: &[u8],
+    ) -> RegisterValue {
+        let mapped_name = self.register_mapper.map_register_name(name);
+        RegisterValue::new(mapped_name, bytes.to_vec())
+    }
+
+    /// Build the full trace snapshot description for a stop event.
+    ///
+    /// Ported from `InferiorState.record()` in `hooks.py`.
+    pub fn build_stop_snapshot_description(&self, stop_reason: &str) -> String {
+        match stop_reason {
+            "breakpoint-hit" => "Stopped at breakpoint".to_string(),
+            "signal-received" => "Stopped on signal".to_string(),
+            "end-stepping-range" => "Stepped".to_string(),
+            "function-finished" => "Function finished".to_string(),
+            "exited-normally" => "Exited normally".to_string(),
+            "exited-signalled" => "Exited with signal".to_string(),
+            other => format!("Stopped: {}", other),
+        }
+    }
+
+    /// Get the total number of threads across all inferiors.
+    pub fn total_threads(&self) -> usize {
+        self.inferiors.total_thread_count()
+    }
+
+    /// Get the total number of modules across all inferiors.
+    pub fn total_modules(&self) -> usize {
+        self.inferiors
+            .all()
+            .values()
+            .map(|p| p.modules.len())
+            .sum()
+    }
+
+    /// Get the total number of memory regions across all inferiors.
+    pub fn total_memory_regions(&self) -> usize {
+        self.inferiors
+            .all()
+            .values()
+            .map(|p| p.memory_regions.len())
+            .sum()
+    }
+
+    /// Check if the manager has any active (non-exited) inferiors.
+    pub fn has_active_inferiors(&self) -> bool {
+        !self.inferiors.alive().is_empty()
+    }
+
+    /// Build a summary of the current debugging session.
+    pub fn build_session_summary(&self) -> Vec<(String, String)> {
+        let mut summary = Vec::new();
+        summary.push(("Inferiors".to_string(), self.inferiors.len().to_string()));
+        summary.push(("Threads".to_string(), self.total_threads().to_string()));
+        summary.push(("Modules".to_string(), self.total_modules().to_string()));
+        summary.push((
+            "MemoryRegions".to_string(),
+            self.total_memory_regions().to_string(),
+        ));
+        summary.push((
+            "Signals".to_string(),
+            self.signal_table.len().to_string(),
+        ));
+        summary
+    }
+}
+
+impl Default for GdbProcessManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// GNU Debugdata prefix used to filter out `.gnu_debugdata` modules.
+///
+/// GDB's `maintenance info sections` can include sections from
+/// `.gnu_debugdata` (mini debuginfo) which we skip.
+pub const GNU_DEBUGDATA_PREFIX: &str = ".gnu_debugdata for ";
+
+/// Check if a module name should be skipped (gnu_debugdata).
+pub fn should_skip_module(name: &str) -> bool {
+    name.starts_with(GNU_DEBUGDATA_PREFIX)
+}
+
+/// Quantize an address range to page boundaries.
+///
+/// Ported from `quantize_pages` in `commands.py`.
+pub fn quantize_pages(start: u64, end: u64, page_size: u64) -> (u64, u64) {
+    let page_start = start / page_size * page_size;
+    let page_end = (end + page_size - 1) / page_size * page_size;
+    (page_start, page_end)
+}
+
+/// Default page size (4096 bytes).
+pub const PAGE_SIZE: u64 = 4096;
+
+/// Quantize an address range to default page boundaries.
+pub fn quantize_to_pages(start: u64, end: u64) -> (u64, u64) {
+    quantize_pages(start, end, PAGE_SIZE)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2565,5 +3010,300 @@ mod manager_tests {
         let list = mgr.build_process_info_list();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, 1);
+    }
+}
+
+#[cfg(test)]
+mod convenience_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_convenience_state_new() {
+        let state = GdbConvenienceState::new();
+        assert!(!state.tracing_active);
+        assert!(state.current_snapshot.is_none());
+        assert!(state.pagination);
+        assert!(state.confirm);
+    }
+
+    #[test]
+    fn test_convenience_state_tracing() {
+        let mut state = GdbConvenienceState::new();
+        state.enable_tracing();
+        assert!(state.tracing_active);
+        state.disable_tracing();
+        assert!(!state.tracing_active);
+        assert!(state.current_snapshot.is_none());
+    }
+
+    #[test]
+    fn test_convenience_state_snapshot() {
+        let mut state = GdbConvenienceState::new();
+        state.enable_tracing();
+        state.set_snapshot(5);
+        assert_eq!(state.current_snapshot, Some(5));
+    }
+
+    #[test]
+    fn test_convenience_state_commands() {
+        let state = GdbConvenienceState::new();
+        let cmds = state.disable_pagination_commands();
+        assert!(cmds.iter().any(|c| c.contains("pagination")));
+        let restore = state.restore_pagination_commands();
+        assert!(restore.iter().any(|c| c.contains("on")));
+    }
+}
+
+#[cfg(test)]
+mod memory_mapper_tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_mapper_new() {
+        let mapper = GdbMemoryMapper::new(8);
+        assert_eq!(mapper.pointer_size, 8);
+        assert_eq!(mapper.get_offset(1), 0);
+    }
+
+    #[test]
+    fn test_memory_mapper_offset() {
+        let mut mapper = GdbMemoryMapper::new(8);
+        mapper.set_offset(1, 0x1000);
+        assert_eq!(mapper.get_offset(1), 0x1000);
+        assert_eq!(mapper.get_offset(2), 0);
+    }
+
+    #[test]
+    fn test_memory_mapper_map() {
+        let mut mapper = GdbMemoryMapper::new(8);
+        mapper.set_offset(1, 0x1000);
+        assert_eq!(mapper.map_to_gdb(1, 0x5000), 0x6000);
+        assert_eq!(mapper.map_from_gdb(1, 0x6000), 0x5000);
+    }
+
+    #[test]
+    fn test_memory_mapper_no_offset() {
+        let mapper = GdbMemoryMapper::new(8);
+        assert_eq!(mapper.map_to_gdb(1, 0x5000), 0x5000);
+        assert_eq!(mapper.map_from_gdb(1, 0x5000), 0x5000);
+    }
+
+    #[test]
+    fn test_memory_mapper_max_address() {
+        let mapper_64 = GdbMemoryMapper::new(8);
+        assert_eq!(mapper_64.max_address(), u64::MAX);
+        let mapper_32 = GdbMemoryMapper::new(4);
+        assert_eq!(mapper_32.max_address(), 0xFFFFFFFF);
+    }
+
+    #[test]
+    fn test_memory_mapper_clear() {
+        let mut mapper = GdbMemoryMapper::new(8);
+        mapper.set_offset(1, 0x1000);
+        mapper.set_offset(2, 0x2000);
+        mapper.clear_offset(1);
+        assert_eq!(mapper.get_offset(1), 0);
+        assert_eq!(mapper.get_offset(2), 0x2000);
+        mapper.clear_all();
+        assert_eq!(mapper.get_offset(2), 0);
+    }
+}
+
+#[cfg(test)]
+mod register_mapper_tests {
+    use super::*;
+
+    #[test]
+    fn test_register_mapper_new() {
+        let mapper = GdbRegisterMapper::new();
+        assert!(mapper.is_empty());
+    }
+
+    #[test]
+    fn test_register_mapper_name_mapping() {
+        let mut mapper = GdbRegisterMapper::new();
+        mapper.map_name("rax", "RAX");
+        mapper.map_name("rip", "RIP");
+        assert_eq!(mapper.map_register_name("rax"), "RAX");
+        assert_eq!(mapper.map_register_name("rip"), "RIP");
+        assert_eq!(mapper.map_register_name("unknown"), "unknown");
+    }
+
+    #[test]
+    fn test_register_mapper_size() {
+        let mut mapper = GdbRegisterMapper::new();
+        mapper.set_size("rax", 8);
+        mapper.set_size("xmm0", 16);
+        assert_eq!(mapper.get_size("rax"), Some(8));
+        assert_eq!(mapper.get_size("xmm0"), Some(16));
+        assert_eq!(mapper.get_size("unknown"), None);
+    }
+
+    #[test]
+    fn test_register_mapper_group() {
+        let mut mapper = GdbRegisterMapper::new();
+        mapper.set_group("rax", "general");
+        mapper.set_group("xmm0", "vector");
+        assert_eq!(mapper.get_group("rax"), Some("general"));
+        assert_eq!(mapper.get_group("xmm0"), Some("vector"));
+        assert_eq!(mapper.get_group("unknown"), None);
+    }
+
+    #[test]
+    fn test_register_mapper_len() {
+        let mut mapper = GdbRegisterMapper::new();
+        assert_eq!(mapper.len(), 0);
+        mapper.map_name("rax", "RAX");
+        mapper.map_name("rbx", "RBX");
+        assert_eq!(mapper.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod process_manager_tests {
+    use super::*;
+
+    #[test]
+    fn test_process_manager_new() {
+        let mgr = GdbProcessManager::new();
+        assert!(!mgr.initialized);
+        assert!(mgr.inferiors.is_empty());
+    }
+
+    #[test]
+    fn test_process_manager_initialize() {
+        let mut mgr = GdbProcessManager::new();
+        mgr.initialize();
+        assert!(mgr.initialized);
+        assert!(mgr.convenience.tracing_active);
+        assert!(!mgr.signal_table.is_empty());
+    }
+
+    #[test]
+    fn test_process_manager_shutdown() {
+        let mut mgr = GdbProcessManager::new();
+        mgr.initialize();
+        mgr.shutdown();
+        assert!(!mgr.initialized);
+        assert!(!mgr.convenience.tracing_active);
+    }
+
+    #[test]
+    fn test_process_manager_add_inferior() {
+        let mut mgr = GdbProcessManager::new();
+        mgr.add_inferior(GdbInferiorProcess::new(1));
+        assert_eq!(mgr.inferiors.len(), 1);
+        assert!(mgr.get_sync_state(1).is_some());
+    }
+
+    #[test]
+    fn test_process_manager_remove_inferior() {
+        let mut mgr = GdbProcessManager::new();
+        mgr.add_inferior(GdbInferiorProcess::new(1));
+        mgr.remove_inferior(1);
+        assert!(mgr.inferiors.is_empty());
+        assert!(mgr.get_sync_state(1).is_none());
+    }
+
+    #[test]
+    fn test_process_manager_pointer_size() {
+        let mgr = GdbProcessManager::new().with_pointer_size(4);
+        assert_eq!(mgr.memory_mapper.pointer_size, 4);
+    }
+
+    #[test]
+    fn test_process_manager_map_address() {
+        let mut mgr = GdbProcessManager::new();
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.state = ExecutionState::Stopped;
+        mgr.add_inferior(inf);
+        mgr.memory_mapper.set_offset(1, 0x1000);
+        assert_eq!(mgr.map_address_to_gdb(0x5000), 0x6000);
+        assert_eq!(mgr.map_address_from_gdb(0x6000), 0x5000);
+    }
+
+    #[test]
+    fn test_process_manager_map_register() {
+        let mut mgr = GdbProcessManager::new();
+        mgr.register_mapper.map_name("rax", "RAX");
+        let rv = mgr.map_register_value("rax", &0x1234u64.to_le_bytes());
+        assert_eq!(rv.name, "RAX");
+        assert_eq!(rv.as_u64(), Some(0x1234));
+    }
+
+    #[test]
+    fn test_process_manager_stop_snapshot() {
+        let mgr = GdbProcessManager::new();
+        assert_eq!(
+            mgr.build_stop_snapshot_description("breakpoint-hit"),
+            "Stopped at breakpoint"
+        );
+        assert_eq!(
+            mgr.build_stop_snapshot_description("end-stepping-range"),
+            "Stepped"
+        );
+    }
+
+    #[test]
+    fn test_process_manager_summary() {
+        let mut mgr = GdbProcessManager::new();
+        mgr.initialize();
+        mgr.add_inferior(GdbInferiorProcess::new(1));
+        let summary = mgr.build_session_summary();
+        assert!(summary.iter().any(|(k, v)| k == "Inferiors" && v == "1"));
+        assert!(summary.iter().any(|(k, v)| k == "Threads" && v == "0"));
+    }
+
+    #[test]
+    fn test_process_manager_has_active() {
+        let mut mgr = GdbProcessManager::new();
+        assert!(!mgr.has_active_inferiors());
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.state = ExecutionState::Stopped;
+        mgr.add_inferior(inf);
+        assert!(mgr.has_active_inferiors());
+    }
+}
+
+#[cfg(test)]
+mod utility_tests {
+    use super::*;
+
+    #[test]
+    fn test_should_skip_module() {
+        assert!(should_skip_module(".gnu_debugdata for /usr/lib/libc.so.6"));
+        assert!(!should_skip_module("/usr/lib/libc.so.6"));
+        assert!(!should_skip_module("test.so"));
+    }
+
+    #[test]
+    fn test_quantize_pages() {
+        let (start, end) = quantize_pages(0x1500, 0x3500, 0x1000);
+        assert_eq!(start, 0x1000);
+        assert_eq!(end, 0x4000);
+    }
+
+    #[test]
+    fn test_quantize_pages_aligned() {
+        let (start, end) = quantize_pages(0x1000, 0x3000, 0x1000);
+        assert_eq!(start, 0x1000);
+        assert_eq!(end, 0x3000);
+    }
+
+    #[test]
+    fn test_quantize_to_pages() {
+        let (start, end) = quantize_to_pages(0x401234, 0x402500);
+        assert_eq!(start, 0x401000);
+        assert_eq!(end, 0x403000);
+    }
+
+    #[test]
+    fn test_gnu_debugdata_prefix() {
+        assert_eq!(GNU_DEBUGDATA_PREFIX, ".gnu_debugdata for ");
+    }
+
+    #[test]
+    fn test_page_size() {
+        assert_eq!(PAGE_SIZE, 4096);
     }
 }

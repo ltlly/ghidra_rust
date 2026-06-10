@@ -214,6 +214,14 @@ impl LfOnemethod {
         self.vftable_offset
     }
 
+    /// Get the VFTable offset if this is an introducing virtual method.
+    ///
+    /// Alias for [`offset_in_vftable()`](Self::offset_in_vftable) using the
+    /// Java method name `getOffsetInVFTableIfIntroVirtual()`.
+    pub fn offset_in_vftable_if_intro_virtual(&self) -> i32 {
+        self.vftable_offset
+    }
+
     /// Get the method attributes.
     pub fn attribute(&self) -> &MemberAttributes {
         &self.attributes
@@ -695,5 +703,62 @@ mod tests {
         let data = [0u8; 4];
         let mut reader = PdbByteReader::new(&data);
         assert!(LfOnemethod::parse_from_reader(&mut reader).is_err());
+    }
+
+    #[test]
+    fn test_onemethod_offset_in_vftable_if_intro_virtual_alias() {
+        let m = LfOnemethod::from_parsed(0x0013, 0x2000, 16, "intro".to_string());
+        assert_eq!(m.offset_in_vftable_if_intro_virtual(), 16);
+        assert_eq!(
+            m.offset_in_vftable_if_intro_virtual(),
+            m.offset_in_vftable()
+        );
+    }
+
+    #[test]
+    fn test_onemethod_offset_alias_non_intro() {
+        let m = make_test_onemethod();
+        assert_eq!(m.offset_in_vftable_if_intro_virtual(), -1);
+    }
+
+    #[test]
+    fn test_onemethod_clone() {
+        let m = make_test_onemethod();
+        let m2 = m.clone();
+        assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn test_onemethod_parse_all_properties() {
+        // Test that we can parse each valid property value
+        for prop_val in 0u16..=6u16 {
+            let attr = (prop_val << 2) | 0x0003; // public + property
+            let mut data = Vec::new();
+            data.extend_from_slice(&attr.to_le_bytes());
+            data.extend_from_slice(&0x1000u32.to_le_bytes());
+            // Intro/IntroPure need vftable offset
+            if prop_val == 4 || prop_val == 6 {
+                data.extend_from_slice(&8u32.to_le_bytes());
+            }
+            data.extend_from_slice(b"f\0");
+
+            let m = LfOnemethod::parse(&data).unwrap();
+            assert_eq!(m.name(), "f");
+            assert_eq!(m.pdb_id(), 0x1511);
+        }
+    }
+
+    #[test]
+    fn test_onemethod_parse_intro_from_reader_with_offset() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0013u16.to_le_bytes());   // public + intro
+        data.extend_from_slice(&0x2000u32.to_le_bytes());   // procedureType
+        data.extend_from_slice(&32u32.to_le_bytes());       // vftableOffset
+        data.extend_from_slice(b"vfunc\0");
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfOnemethod::parse_from_reader(&mut reader).unwrap();
+        assert!(m.is_intro_virtual());
+        assert_eq!(m.offset_in_vftable_if_intro_virtual(), 32);
     }
 }

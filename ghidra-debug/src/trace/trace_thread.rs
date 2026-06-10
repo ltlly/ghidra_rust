@@ -10,6 +10,15 @@
 //! (`set_name`, `name_at`, `set_comment`, `comment_at`), `delete()` for full
 //! removal, breakpoint association tracking, thread priority and group,
 //! and the `ThreadSnapshot` point-in-time summary.
+//!
+//! **Latest additions** (ported from `DBTraceThread` / `TraceThreadManager`):
+//! - `ThreadChangeEvent` enum for structured change notification.
+//! - `TraceChangeRecord` for typed change records with thread context.
+//! - `ThreadManager` for CRUD operations on threads within a trace.
+//! - `register_context` field for per-thread register context data.
+//! - `display_name` for the UI-visible thread name (separate from object path).
+//! - `is_valid_at` for multi-lifespan validity (object mode).
+//! - `remove_tree` for cascading removal of child objects.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +26,86 @@ use serde::{Deserialize, Serialize};
 
 use crate::model::Lifespan;
 use crate::model::TraceExecutionState;
+
+// ---------------------------------------------------------------------------
+// ThreadChangeEvent
+// ---------------------------------------------------------------------------
+
+/// The kind of change event that occurred on a thread.
+///
+/// Ported from Ghidra's `TraceEvents.THREAD_ADDED`, `THREAD_CHANGED`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThreadChangeEvent {
+    /// A new thread was added.
+    Added,
+    /// The thread's lifespan changed (creation or destruction snap moved).
+    LifespanChanged,
+    /// The thread's properties changed (name, comment, etc.).
+    Changed,
+    /// The thread was deleted.
+    Deleted,
+}
+
+impl ThreadChangeEvent {
+    /// Human-readable name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Added => "THREAD_ADDED",
+            Self::LifespanChanged => "THREAD_LIFESPAN_CHANGED",
+            Self::Changed => "THREAD_CHANGED",
+            Self::Deleted => "THREAD_DELETED",
+        }
+    }
+}
+
+impl std::fmt::Display for ThreadChangeEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TraceChangeRecord
+// ---------------------------------------------------------------------------
+
+/// A typed change record carrying the thread key and event kind.
+///
+/// Ported from Ghidra's `TraceChangeRecord<TraceThread, ?>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceChangeRecord {
+    /// The kind of change event.
+    pub event: ThreadChangeEvent,
+    /// The key of the thread that changed.
+    pub thread_key: i64,
+    /// The snap at which the change occurred, if applicable.
+    pub snap: Option<i64>,
+    /// An optional key name that was affected (e.g. "DisplayName", "Comment").
+    pub affected_key: Option<String>,
+}
+
+impl TraceChangeRecord {
+    /// Create a new change record.
+    pub fn new(event: ThreadChangeEvent, thread_key: i64) -> Self {
+        Self {
+            event,
+            thread_key,
+            snap: None,
+            affected_key: None,
+        }
+    }
+
+    /// Attach a snap.
+    pub fn with_snap(mut self, snap: i64) -> Self {
+        self.snap = Some(snap);
+        self
+    }
+
+    /// Attach an affected key name.
+    pub fn with_key(mut self, key: impl Into<String>) -> Self {
+        self.affected_key = Some(key.into());
+        self
+    }
+}
 
 // ---------------------------------------------------------------------------
 // RegisterSnapshot
@@ -230,8 +319,13 @@ pub struct TraceThread {
     pub path: String,
     /// The OS-assigned thread ID.
     pub tid: Option<i64>,
-    /// The thread name.
+    /// The thread name (object-path-derived "short name").
     pub name: String,
+    /// The display name shown in the UI.
+    ///
+    /// In Ghidra's Java, this is stored as the `KEY_DISPLAY` attribute on
+    /// the trace object. It may differ from the object path.
+    pub display_name: Option<String>,
     /// User comment.
     pub comment: Option<String>,
     /// The lifespan during which this thread exists.
@@ -261,6 +355,12 @@ pub struct TraceThread {
     pub group: Option<String>,
     /// Whether this thread has been fully deleted (not just removed at a snap).
     pub deleted: bool,
+    /// Per-thread register context data (register name -> value bytes).
+    ///
+    /// Ported from `DBTraceRegisterContextManager`. This stores context
+    /// register values that are not part of a general register snapshot
+    /// but rather define execution context (e.g., TMode for ARM Thumb).
+    register_context: BTreeMap<String, Vec<u8>>,
 }
 
 impl TraceThread {
@@ -277,6 +377,7 @@ impl TraceThread {
             path: path.into(),
             tid: None,
             name: name.into(),
+            display_name: None,
             comment: None,
             lifespan: Lifespan::now_on(snap),
             execution_state: TraceExecutionState::Unknown,
@@ -290,6 +391,7 @@ impl TraceThread {
             priority: None,
             group: None,
             deleted: false,
+            register_context: BTreeMap::new(),
         }
     }
 
@@ -614,6 +716,313 @@ impl TraceThread {
                 .find(|f| f.level == 0)
                 .and_then(|f| f.function_name.as_deref())
         })
+    }
+
+    // -- Display name --
+
+    /// Set the display name for this thread.
+    ///
+    /// In Ghidra's Java, this maps to `KEY_DISPLAY` on the trace object.
+    pub fn set_display_name(&mut self, name: impl Into<String>) {
+        self.display_name = Some(name.into());
+    }
+
+    /// Get the display name, falling back to the base `name`.
+    pub fn display_name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
+
+    /// Get the display name at a specific snap.
+    ///
+    /// Checks lifespan-bound name history first, then display name, then base name.
+    pub fn display_name_at(&self, snap: i64) -> &str {
+        // First check name history
+        if let Some(entry) = self
+            .name_history
+            .iter()
+            .rev()
+            .find(|e| e.lifespan.contains(snap))
+        {
+            return entry.name.as_str();
+        }
+        // Then display name, then base name
+        self.display_name.as_deref().unwrap_or(&self.name)
+    }
+
+    // -- Register context --
+
+    /// Set a context register value.
+    ///
+    /// Context registers define execution mode (e.g., ARM TMode) rather
+    /// than holding general-purpose data.
+    pub fn set_context_register(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        self.register_context.insert(name.into(), value);
+    }
+
+    /// Get a context register value.
+    pub fn context_register(&self, name: &str) -> Option<&Vec<u8>> {
+        self.register_context.get(name)
+    }
+
+    /// Remove a context register.
+    pub fn remove_context_register(&mut self, name: &str) -> Option<Vec<u8>> {
+        self.register_context.remove(name)
+    }
+
+    /// All context register names.
+    pub fn context_register_names(&self) -> Vec<&str> {
+        self.register_context.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// The number of context registers.
+    pub fn context_register_count(&self) -> usize {
+        self.register_context.len()
+    }
+
+    // -- Multi-lifespan validity --
+
+    /// Check if this thread is valid at the given snap, considering multiple lifespans.
+    ///
+    /// In object mode, a thread's life may be disjoint. This method checks
+    /// the primary lifespan. For table mode, this is equivalent to `is_valid`.
+    pub fn is_valid_at(&self, snap: i64) -> bool {
+        // Currently only checks primary lifespan.
+        // In a full implementation, this would check canonical parent
+        // presence in object mode.
+        self.lifespan.contains(snap) && !self.deleted
+    }
+
+    // -- remove_tree --
+
+    /// Remove this thread and all its children from the given snap onward.
+    ///
+    /// Ported from `DBTraceThread.remove(snap)` which calls
+    /// `object.removeTree(Lifespan.nowOn(snap))`.
+    pub fn remove_tree(&mut self, snap: i64) {
+        self.remove(snap);
+        // In a full implementation this would cascade to child objects
+        // (registers, stack frames, etc.) via the object manager.
+    }
+
+    /// Delete this thread and all its children.
+    ///
+    /// Ported from `DBTraceThread.delete()` which calls
+    /// `object.removeTree(Lifespan.ALL)`.
+    pub fn delete_tree(&mut self) {
+        self.delete();
+        // In a full implementation this would cascade to child objects.
+    }
+
+    // -- Change record helpers --
+
+    /// Create an `Added` change record for this thread.
+    pub fn change_record_added(&self) -> TraceChangeRecord {
+        TraceChangeRecord::new(ThreadChangeEvent::Added, self.key)
+    }
+
+    /// Create a `Changed` change record for this thread.
+    pub fn change_record_changed(&self, affected_key: impl Into<String>) -> TraceChangeRecord {
+        TraceChangeRecord::new(ThreadChangeEvent::Changed, self.key)
+            .with_key(affected_key)
+    }
+
+    /// Create a `LifespanChanged` change record for this thread.
+    pub fn change_record_lifespan_changed(&self) -> TraceChangeRecord {
+        TraceChangeRecord::new(ThreadChangeEvent::LifespanChanged, self.key)
+    }
+
+    /// Create a `Deleted` change record for this thread.
+    pub fn change_record_deleted(&self) -> TraceChangeRecord {
+        TraceChangeRecord::new(ThreadChangeEvent::Deleted, self.key)
+    }
+
+    // -- Snapshot with context --
+
+    /// Capture a point-in-time snapshot including context registers.
+    pub fn snapshot_with_context_at(&self, snap: i64) -> ThreadSnapshot {
+        let mut ts = self.snapshot_at(snap);
+        // Merge context registers into the snapshot's register map
+        for (name, value) in &self.register_context {
+            ts.registers
+                .entry(name.clone())
+                .or_insert_with(|| value.clone());
+        }
+        ts
+    }
+
+    // -- Register snapshot management --
+
+    /// Remove the register snapshot at the given snap.
+    pub fn remove_register_snapshot(&mut self, snap: i64) -> Option<RegisterSnapshot> {
+        self.register_snapshots.remove(&snap)
+    }
+
+    /// Remove the stack frame snapshot at the given snap.
+    pub fn remove_stack_frames(&mut self, snap: i64) -> Option<Vec<StackFrameInfo>> {
+        self.stack_snapshots.remove(&snap)
+    }
+
+    /// Clear all register snapshots.
+    pub fn clear_register_snapshots(&mut self) {
+        self.register_snapshots.clear();
+    }
+
+    /// Clear all stack frame snapshots.
+    pub fn clear_stack_snapshots(&mut self) {
+        self.stack_snapshots.clear();
+    }
+
+    /// Clear all history (state, name, comment, register, stack).
+    pub fn clear_all_history(&mut self) {
+        self.state_history.clear();
+        self.name_history.clear();
+        self.comment_history.clear();
+        self.register_snapshots.clear();
+        self.stack_snapshots.clear();
+        self.register_context.clear();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ThreadManager
+// ---------------------------------------------------------------------------
+
+/// A manager for threads within a trace.
+///
+/// Ported from Ghidra's `TraceThreadManager` / `DBTraceThreadManager`.
+/// Provides CRUD operations for threads with path-based lookup and
+/// duplicate-name detection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ThreadManager {
+    /// Threads indexed by key.
+    threads: BTreeMap<i64, TraceThread>,
+    /// Next available thread key.
+    next_key: i64,
+    /// Change log: recent change records.
+    change_log: Vec<TraceChangeRecord>,
+}
+
+impl ThreadManager {
+    /// Create a new empty thread manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a thread with the given path and lifespan.
+    ///
+    /// Returns `Err` if a thread with the same path already exists at an
+    /// overlapping snap (duplicate name detection).
+    pub fn add_thread(
+        &mut self,
+        path: impl Into<String>,
+        display: impl Into<String>,
+        lifespan: Lifespan,
+    ) -> Result<i64, String> {
+        let path = path.into();
+        let display = display.into();
+
+        // Check for duplicate path at overlapping snaps
+        for existing in self.threads.values() {
+            if existing.path == path && existing.lifespan.intersects(&lifespan) {
+                return Err(format!(
+                    "Duplicate thread path '{}' at overlapping lifespan",
+                    path
+                ));
+            }
+        }
+
+        let key = self.next_key;
+        self.next_key += 1;
+        let mut thread = TraceThread::new(key, path, display, lifespan.lmin());
+        thread.lifespan = lifespan;
+        self.threads.insert(key, thread);
+
+        self.change_log
+            .push(TraceChangeRecord::new(ThreadChangeEvent::Added, key));
+        Ok(key)
+    }
+
+    /// Create a thread starting at the given snap (open-ended lifespan).
+    pub fn create_thread(
+        &mut self,
+        path: impl Into<String>,
+        display: impl Into<String>,
+        creation_snap: i64,
+    ) -> Result<i64, String> {
+        self.add_thread(path, display, Lifespan::now_on(creation_snap))
+    }
+
+    /// Get a thread by key.
+    pub fn get_thread(&self, key: i64) -> Option<&TraceThread> {
+        self.threads.get(&key)
+    }
+
+    /// Get a mutable thread by key.
+    pub fn get_thread_mut(&mut self, key: i64) -> Option<&mut TraceThread> {
+        self.threads.get_mut(&key)
+    }
+
+    /// Get all threads, ordered by key (eldest first).
+    pub fn all_threads(&self) -> impl Iterator<Item = &TraceThread> {
+        self.threads.values()
+    }
+
+    /// Get all threads with the given path.
+    pub fn threads_by_path(&self, path: &str) -> Vec<&TraceThread> {
+        self.threads
+            .values()
+            .filter(|t| t.path == path)
+            .collect()
+    }
+
+    /// Get the live thread at the given snap by path.
+    pub fn get_live_thread_by_path(&self, snap: i64, path: &str) -> Option<&TraceThread> {
+        self.threads
+            .values()
+            .find(|t| t.path == path && t.is_valid(snap))
+    }
+
+    /// Get live threads at the given snap.
+    pub fn get_live_threads(&self, snap: i64) -> Vec<&TraceThread> {
+        self.threads
+            .values()
+            .filter(|t| t.is_valid(snap))
+            .collect()
+    }
+
+    /// Delete a thread by key. Returns the deleted thread, if any.
+    pub fn delete_thread(&mut self, key: i64) -> Option<TraceThread> {
+        let thread = self.threads.remove(&key);
+        if thread.is_some() {
+            self.change_log
+                .push(TraceChangeRecord::new(ThreadChangeEvent::Deleted, key));
+        }
+        thread
+    }
+
+    /// The number of threads (including dead ones).
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Whether there are no threads.
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
+
+    /// The change log.
+    pub fn change_log(&self) -> &[TraceChangeRecord] {
+        &self.change_log
+    }
+
+    /// Clear the change log.
+    pub fn clear_change_log(&mut self) {
+        self.change_log.clear();
+    }
+
+    /// Emit a change record for a thread.
+    pub fn emit_change(&mut self, record: TraceChangeRecord) {
+        self.change_log.push(record);
     }
 }
 
@@ -1021,5 +1430,290 @@ mod tests {
         let back: ThreadSnapshot = serde_json::from_str(&json).unwrap();
         assert_eq!(back.snap, 5);
         assert_eq!(back.execution_state, TraceExecutionState::Stopped);
+    }
+
+    // -- Display name tests --
+
+    #[test]
+    fn test_display_name() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert_eq!(t.display_name(), "main"); // falls back to name
+
+        t.set_display_name("Main Thread");
+        assert_eq!(t.display_name(), "Main Thread");
+    }
+
+    #[test]
+    fn test_display_name_at() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert_eq!(t.display_name_at(0), "main");
+
+        t.set_display_name("Worker");
+        assert_eq!(t.display_name_at(0), "Worker");
+
+        t.set_name_at(5, "Renamed");
+        assert_eq!(t.display_name_at(0), "Worker"); // no name history at 0
+        assert_eq!(t.display_name_at(5), "Renamed"); // name history takes precedence
+    }
+
+    // -- Register context tests --
+
+    #[test]
+    fn test_register_context() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert_eq!(t.context_register_count(), 0);
+
+        t.set_context_register("TMode", vec![1]);
+        t.set_context_register("CPSR", vec![0x10, 0x00, 0x00, 0x60]);
+
+        assert_eq!(t.context_register_count(), 2);
+        assert_eq!(t.context_register("TMode"), Some(&vec![1]));
+        assert_eq!(t.context_register("CPSR").unwrap().len(), 4);
+        assert!(t.context_register("missing").is_none());
+
+        let names = t.context_register_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"TMode"));
+
+        t.remove_context_register("TMode");
+        assert_eq!(t.context_register_count(), 1);
+        assert!(t.context_register("TMode").is_none());
+    }
+
+    // -- is_valid_at test --
+
+    #[test]
+    fn test_is_valid_at() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert!(t.is_valid_at(0));
+        assert!(t.is_valid_at(100));
+        assert!(!t.is_valid_at(-1));
+
+        t.delete();
+        assert!(!t.is_valid_at(0)); // deleted
+    }
+
+    // -- remove_tree / delete_tree --
+
+    #[test]
+    fn test_remove_tree() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.remove_tree(10);
+        assert!(t.is_valid(10));
+        assert!(!t.is_valid(11));
+    }
+
+    #[test]
+    fn test_delete_tree() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.delete_tree();
+        assert!(t.is_deleted());
+        assert!(t.lifespan.is_empty());
+    }
+
+    // -- Change record tests --
+
+    #[test]
+    fn test_change_event() {
+        assert_eq!(ThreadChangeEvent::Added.name(), "THREAD_ADDED");
+        assert_eq!(ThreadChangeEvent::Deleted.to_string(), "THREAD_DELETED");
+    }
+
+    #[test]
+    fn test_change_record() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        let rec = t.change_record_added();
+        assert_eq!(rec.event, ThreadChangeEvent::Added);
+        assert_eq!(rec.thread_key, 1);
+
+        let rec = t.change_record_changed("DisplayName");
+        assert_eq!(rec.event, ThreadChangeEvent::Changed);
+        assert_eq!(rec.affected_key.as_deref(), Some("DisplayName"));
+
+        let rec = t.change_record_lifespan_changed();
+        assert_eq!(rec.event, ThreadChangeEvent::LifespanChanged);
+
+        let rec = t.change_record_deleted();
+        assert_eq!(rec.event, ThreadChangeEvent::Deleted);
+    }
+
+    #[test]
+    fn test_change_record_serde() {
+        let rec = TraceChangeRecord::new(ThreadChangeEvent::Added, 1)
+            .with_snap(5)
+            .with_key("test");
+        let json = serde_json::to_string(&rec).unwrap();
+        let back: TraceChangeRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.event, ThreadChangeEvent::Added);
+        assert_eq!(back.thread_key, 1);
+        assert_eq!(back.snap, Some(5));
+        assert_eq!(back.affected_key.as_deref(), Some("test"));
+    }
+
+    // -- snapshot_with_context_at --
+
+    #[test]
+    fn test_snapshot_with_context() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_execution_state(TraceExecutionState::Stopped, 0);
+        t.set_context_register("TMode", vec![1]);
+
+        let mut reg_snap = RegisterSnapshot::new(0);
+        reg_snap.set("RIP", vec![0x00, 0x10, 0x40, 0, 0, 0, 0, 0]);
+        t.set_register_snapshot(0, reg_snap);
+
+        let ts = t.snapshot_with_context_at(0);
+        assert!(ts.registers.contains_key("RIP"));
+        assert!(ts.registers.contains_key("TMode"));
+    }
+
+    // -- Register snapshot management --
+
+    #[test]
+    fn test_remove_register_snapshot() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        let snap = RegisterSnapshot::new(0);
+        t.set_register_snapshot(0, snap);
+        assert!(t.register_snapshot_exact(0).is_some());
+
+        t.remove_register_snapshot(0);
+        assert!(t.register_snapshot_exact(0).is_none());
+    }
+
+    #[test]
+    fn test_clear_register_snapshots() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_register_snapshot(0, RegisterSnapshot::new(0));
+        t.set_register_snapshot(5, RegisterSnapshot::new(5));
+        assert_eq!(t.register_snapshot_snaps().len(), 2);
+
+        t.clear_register_snapshots();
+        assert_eq!(t.register_snapshot_snaps().len(), 0);
+    }
+
+    #[test]
+    fn test_clear_stack_snapshots() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_stack_frames(0, vec![StackFrameInfo::new(0, 0x401000, 0x7FFF0000)]);
+        assert_eq!(t.stack_snapshot_count(), 1);
+
+        t.clear_stack_snapshots();
+        assert_eq!(t.stack_snapshot_count(), 0);
+    }
+
+    #[test]
+    fn test_clear_all_history() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_execution_state(TraceExecutionState::Running, 1);
+        t.set_name_at(5, "worker");
+        t.set_comment_at(3, "note");
+        t.set_register_snapshot(0, RegisterSnapshot::new(0));
+        t.set_stack_frames(0, vec![]);
+        t.set_context_register("TMode", vec![1]);
+
+        t.clear_all_history();
+        assert_eq!(t.state_history_len(), 0);
+        assert_eq!(t.name_history().len(), 0);
+        assert_eq!(t.comment_history().len(), 0);
+        assert_eq!(t.register_snapshot_snaps().len(), 0);
+        assert_eq!(t.stack_snapshot_count(), 0);
+        assert_eq!(t.context_register_count(), 0);
+    }
+
+    // -- ThreadManager tests --
+
+    #[test]
+    fn test_thread_manager_add() {
+        let mut mgr = ThreadManager::new();
+        let key = mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        assert_eq!(key, 0);
+        assert_eq!(mgr.len(), 1);
+
+        let thread = mgr.get_thread(key).unwrap();
+        assert_eq!(thread.name, "main");
+    }
+
+    #[test]
+    fn test_thread_manager_duplicate() {
+        let mut mgr = ThreadManager::new();
+        mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        let result = mgr.create_thread("P.Threads[0]", "main2", 0);
+        assert!(result.is_err()); // Duplicate path at overlapping lifespan
+    }
+
+    #[test]
+    fn test_thread_manager_by_path() {
+        let mut mgr = ThreadManager::new();
+        mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        mgr.create_thread("P.Threads[1]", "worker", 0).unwrap();
+
+        let found = mgr.threads_by_path("P.Threads[0]");
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].name, "main");
+    }
+
+    #[test]
+    fn test_thread_manager_live() {
+        let mut mgr = ThreadManager::new();
+        let k1 = mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        let k2 = mgr.create_thread("P.Threads[1]", "worker", 5).unwrap();
+
+        assert_eq!(mgr.get_live_threads(0).len(), 1);
+        assert_eq!(mgr.get_live_threads(5).len(), 2);
+
+        // Kill thread 1
+        mgr.get_thread_mut(k1).unwrap().remove(3);
+        assert_eq!(mgr.get_live_threads(5).len(), 1);
+
+        // Live by path
+        let t = mgr.get_live_thread_by_path(5, "P.Threads[1]");
+        assert!(t.is_some());
+        assert_eq!(t.unwrap().key, k2);
+    }
+
+    #[test]
+    fn test_thread_manager_delete() {
+        let mut mgr = ThreadManager::new();
+        let k = mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        assert_eq!(mgr.len(), 1);
+
+        let deleted = mgr.delete_thread(k);
+        assert!(deleted.is_some());
+        assert_eq!(deleted.unwrap().name, "main");
+        assert_eq!(mgr.len(), 0);
+    }
+
+    #[test]
+    fn test_thread_manager_change_log() {
+        let mut mgr = ThreadManager::new();
+        mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        assert_eq!(mgr.change_log().len(), 1);
+        assert_eq!(mgr.change_log()[0].event, ThreadChangeEvent::Added);
+
+        mgr.delete_thread(0);
+        assert_eq!(mgr.change_log().len(), 2);
+        assert_eq!(mgr.change_log()[1].event, ThreadChangeEvent::Deleted);
+
+        mgr.clear_change_log();
+        assert_eq!(mgr.change_log().len(), 0);
+    }
+
+    #[test]
+    fn test_thread_manager_emit_change() {
+        let mut mgr = ThreadManager::new();
+        let rec = TraceChangeRecord::new(ThreadChangeEvent::Changed, 42)
+            .with_key("DisplayName");
+        mgr.emit_change(rec);
+        assert_eq!(mgr.change_log().len(), 1);
+        assert_eq!(mgr.change_log()[0].thread_key, 42);
+    }
+
+    #[test]
+    fn test_thread_manager_serde() {
+        let mut mgr = ThreadManager::new();
+        mgr.create_thread("P.Threads[0]", "main", 0).unwrap();
+        let json = serde_json::to_string(&mgr).unwrap();
+        let back: ThreadManager = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.len(), 1);
     }
 }

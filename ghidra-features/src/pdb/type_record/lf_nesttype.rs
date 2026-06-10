@@ -121,6 +121,13 @@ impl LfNesttype {
         self.nested_type_record_number
     }
 
+    /// Get the name of this nested type.
+    ///
+    /// Mirrors Java `AbstractNestedTypeMsType.getName()`.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Whether the nested type record number references a valid type.
     pub fn has_valid_nested_type(&self) -> bool {
         !self.nested_type_record_number.is_no_type()
@@ -408,5 +415,52 @@ mod tests {
         let data = [0u8; 4];
         let mut reader = PdbByteReader::new(&data);
         assert!(LfNesttype::parse_from_reader(&mut reader).is_err());
+    }
+
+    #[test]
+    fn test_nesttype_get_name() {
+        let nt = make_test_nesttype();
+        assert_eq!(nt.get_name(), "InnerClass");
+    }
+
+    #[test]
+    fn test_nesttype_get_name_empty() {
+        let nt = LfNesttype::default();
+        assert_eq!(nt.get_name(), "");
+    }
+
+    #[test]
+    fn test_nesttype_clone() {
+        let nt = make_test_nesttype();
+        let nt2 = nt.clone();
+        assert_eq!(nt, nt2);
+    }
+
+    #[test]
+    fn test_nesttype_parse_long_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x5000u32.to_le_bytes()); // nestedType
+        data.extend_from_slice(b"std::vector<int>::iterator\0");
+
+        let nt = LfNesttype::parse(&data).unwrap();
+        assert_eq!(nt.name(), "std::vector<int>::iterator");
+        assert_eq!(
+            nt.nested_type_record_number,
+            RecordNumber::type_record(0x5000)
+        );
+    }
+
+    #[test]
+    fn test_nesttype_parse_from_reader_long_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x5000u32.to_le_bytes()); // nestedType
+        data.extend_from_slice(b"MyNamespace::MyClass\0");
+
+        let mut reader = PdbByteReader::new(&data);
+        let nt = LfNesttype::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(nt.get_name(), "MyNamespace::MyClass");
+        assert!(reader.position() > 0);
     }
 }

@@ -105,6 +105,13 @@ impl LfVfunctab {
         self.vftable_type_record_number
     }
 
+    /// Get the record number of the vftable pointer type (alias).
+    ///
+    /// Alias for [`pointer_type_record_number()`](Self::pointer_type_record_number).
+    pub fn get_pointer_type_record_number(&self) -> RecordNumber {
+        self.vftable_type_record_number
+    }
+
     /// Get the pointer offset.
     ///
     /// Mirrors Java `AbstractVirtualFunctionTablePointerMsType.getOffset()`.
@@ -248,6 +255,13 @@ impl LfVfuncoff {
 
     /// Get the record number of the vftable type.
     pub fn pointer_type_record_number(&self) -> RecordNumber {
+        self.vftable_type_record_number
+    }
+
+    /// Get the record number of the vftable type (alias).
+    ///
+    /// Alias for [`pointer_type_record_number()`](Self::pointer_type_record_number).
+    pub fn get_pointer_type_record_number(&self) -> RecordNumber {
         self.vftable_type_record_number
     }
 
@@ -651,5 +665,78 @@ mod tests {
         let data = [0u8; 6];
         let mut reader = PdbByteReader::new(&data);
         assert!(LfVfuncoff::parse_from_reader(&mut reader).is_err());
+    }
+
+    // =========================================================================
+    // Alias and clone tests
+    // =========================================================================
+
+    #[test]
+    fn test_vfunctab_get_pointer_type_record_number_alias() {
+        let vt = make_test_vfunctab();
+        assert_eq!(
+            vt.get_pointer_type_record_number(),
+            vt.pointer_type_record_number()
+        );
+        assert_eq!(
+            vt.get_pointer_type_record_number(),
+            RecordNumber::type_record(0x3001)
+        );
+    }
+
+    #[test]
+    fn test_vfunctab_clone() {
+        let vt = make_test_vfunctab();
+        let vt2 = vt.clone();
+        assert_eq!(vt, vt2);
+    }
+
+    #[test]
+    fn test_vfuncoff_get_pointer_type_record_number_alias() {
+        let vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert_eq!(
+            vo.get_pointer_type_record_number(),
+            vo.pointer_type_record_number()
+        );
+    }
+
+    #[test]
+    fn test_vfuncoff_clone() {
+        let vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        let vo2 = vo.clone();
+        assert_eq!(vo, vo2);
+    }
+
+    #[test]
+    fn test_vfuncoff_default() {
+        let vo = LfVfuncoff {
+            record_number: RecordNumber::NO_TYPE,
+            vftable_type_record_number: RecordNumber::NO_TYPE,
+            offset_in_vftable: 0,
+        };
+        assert!(!vo.has_valid_vftable_type());
+        assert_eq!(vo.offset(), 0);
+        assert_eq!(vo.name(), "");
+    }
+
+    #[test]
+    fn test_vfunctab_emit_with_different_ids() {
+        // Test emit with various type record IDs
+        for id in [0x1000u32, 0x2000, 0x7FFF, 0x8000, 0xFFFF] {
+            let vt = LfVfunctab::from_parsed(id);
+            let emitted = vt.emit(Bind::NONE);
+            assert!(emitted.contains("VFTablePtr:"));
+            assert!(emitted.contains(&format!("0x{:04X}", id)));
+        }
+    }
+
+    #[test]
+    fn test_vfuncoff_emit_with_various_offsets() {
+        for offset in [0u32, 4, 8, 16, 100, 0xFFFF] {
+            let vo = LfVfuncoff::from_parsed(0x3001, offset);
+            let emitted = vo.emit(Bind::NONE);
+            assert!(emitted.contains(&format!("off={}", offset)));
+            assert!(emitted.contains("0x3001"));
+        }
     }
 }

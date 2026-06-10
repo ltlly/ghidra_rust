@@ -136,6 +136,36 @@ impl LfStmember {
         )
     }
 
+    /// Create a simple private static member.
+    pub fn private_static_member(
+        type_index: u32,
+        name: String,
+    ) -> Self {
+        Self::new(
+            RecordNumber::type_record(type_index),
+            MemberAttributes {
+                access: super::lf_member::AccessProtection::Private,
+                ..MemberAttributes::public_member()
+            },
+            name,
+        )
+    }
+
+    /// Create a simple protected static member.
+    pub fn protected_static_member(
+        type_index: u32,
+        name: String,
+    ) -> Self {
+        Self::new(
+            RecordNumber::type_record(type_index),
+            MemberAttributes {
+                access: super::lf_member::AccessProtection::Protected,
+                ..MemberAttributes::public_member()
+            },
+            name,
+        )
+    }
+
     /// Get the record number of the member's data type.
     ///
     /// Mirrors Java `AbstractStaticMemberMsType.getFieldTypeRecordNumber()`.
@@ -204,23 +234,21 @@ impl AbstractMsType for LfStmember {
         // Mirrors Java AbstractStaticMemberMsType.emit():
         //   builder.append(name);
         //   pdb.getTypeRecord(fieldTypeRecordNumber).emit(builder, Bind.NONE);
-        //   // then insert attributes prefix:
-        //   myBuilder.append(attributes); myBuilder.append(": ");
+        //   StringBuilder myBuilder = new StringBuilder();
+        //   myBuilder.append(attributes);
+        //   myBuilder.append(": ");
         //   builder.insert(0, myBuilder);
-        let mut result = String::new();
+        let mut body = String::new();
+        body.push_str(&self.name);
+        body.push(' ');
+        body.push_str(&self.type_record_number.to_string());
 
-        // Emit attributes (access + property + modifiers).
-        result.push_str(&self.attributes.emit_string());
-        result.push_str(": ");
+        let mut prefix = String::new();
+        prefix.push_str(&self.attributes.emit_string());
+        prefix.push_str(": ");
 
-        // Emit the member name.
-        result.push_str(&self.name);
-
-        // Emit the type reference.
-        result.push(' ');
-        result.push_str(&self.type_record_number.to_string());
-
-        result
+        prefix.push_str(&body);
+        prefix
     }
 }
 
@@ -511,5 +539,66 @@ mod tests {
         let data = [0u8; 4];
         let mut reader = PdbByteReader::new(&data);
         assert!(LfStmember::parse_from_reader(&mut reader).is_err());
+    }
+
+    #[test]
+    fn test_stmember_private_static_member() {
+        let m = LfStmember::private_static_member(0x0074, "secret".to_string());
+        assert_eq!(m.name(), "secret");
+        assert_eq!(m.access(), AccessProtection::Private);
+        assert_eq!(m.type_record_number, RecordNumber::type_record(0x0074));
+        assert!(m.is_static());
+    }
+
+    #[test]
+    fn test_stmember_protected_static_member() {
+        let m = LfStmember::protected_static_member(0x0074, "guarded".to_string());
+        assert_eq!(m.name(), "guarded");
+        assert_eq!(m.access(), AccessProtection::Protected);
+    }
+
+    #[test]
+    fn test_stmember_emit_private_static() {
+        // Use from_parsed with static property (bits 2-4 = 2 for static, bits 0-1 = 1 for private)
+        // 0x0009 = private (1) | static (2 << 2) = 1 + 8 = 9
+        let m = LfStmember::from_parsed(0x0009, 0x0074, "secret".to_string());
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.starts_with("private static: "));
+        assert!(emitted.contains("secret"));
+        assert!(emitted.contains("0x0074"));
+    }
+
+    #[test]
+    fn test_stmember_emit_protected_static() {
+        // 0x000A = protected (2) | static (2 << 2) = 2 + 8 = 10
+        let m = LfStmember::from_parsed(0x000A, 0x0074, "guarded".to_string());
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.starts_with("protected static: "));
+        assert!(emitted.contains("guarded"));
+    }
+
+    #[test]
+    fn test_stmember_private_static_member_access() {
+        let m = LfStmember::private_static_member(0x0074, "secret".to_string());
+        assert_eq!(m.access(), AccessProtection::Private);
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.starts_with("private: "));
+        assert!(emitted.contains("secret"));
+    }
+
+    #[test]
+    fn test_stmember_protected_static_member_access() {
+        let m = LfStmember::protected_static_member(0x0074, "guarded".to_string());
+        assert_eq!(m.access(), AccessProtection::Protected);
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.starts_with("protected: "));
+        assert!(emitted.contains("guarded"));
+    }
+
+    #[test]
+    fn test_stmember_clone() {
+        let m = make_test_stmember();
+        let m2 = m.clone();
+        assert_eq!(m, m2);
     }
 }

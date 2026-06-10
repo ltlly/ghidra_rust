@@ -133,6 +133,14 @@ impl LfMethod {
         self.method_list_record_number
     }
 
+    /// Get the record number of the method list (alias).
+    ///
+    /// This is an alias for [`method_list_record_number()`](Self::method_list_record_number)
+    /// that matches the Java method name `getTypeMethodListRecordNumber()`.
+    pub fn type_method_list_record_number(&self) -> RecordNumber {
+        self.method_list_record_number
+    }
+
     /// Whether the method list record number references a valid type.
     pub fn has_valid_method_list(&self) -> bool {
         !self.method_list_record_number.is_no_type()
@@ -480,5 +488,50 @@ mod tests {
         let data = [0u8; 4];
         let mut reader = PdbByteReader::new(&data);
         assert!(LfMethod::parse_from_reader(&mut reader).is_err());
+    }
+
+    #[test]
+    fn test_method_type_method_list_record_number_alias() {
+        let m = make_test_method();
+        assert_eq!(
+            m.type_method_list_record_number(),
+            m.method_list_record_number()
+        );
+        assert_eq!(
+            m.type_method_list_record_number(),
+            RecordNumber::type_record(0x1010)
+        );
+    }
+
+    #[test]
+    fn test_method_clone() {
+        let m = make_test_method();
+        let m2 = m.clone();
+        assert_eq!(m, m2);
+    }
+
+    #[test]
+    fn test_method_parse_many_overloads() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&100u16.to_le_bytes());
+        data.extend_from_slice(&0x3000u32.to_le_bytes());
+        data.extend_from_slice(b"operator+\0");
+
+        let m = LfMethod::parse(&data).unwrap();
+        assert_eq!(m.count(), 100);
+        assert_eq!(m.name(), "operator+");
+        assert!(m.is_overloaded());
+    }
+
+    #[test]
+    fn test_method_parse_zero_overloads() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(b"f\0");
+
+        let m = LfMethod::parse(&data).unwrap();
+        assert_eq!(m.count(), 0);
+        assert!(!m.is_overloaded());
     }
 }
