@@ -52,6 +52,12 @@ pub mod lf_stmember;
 pub mod lf_structure;
 pub mod lf_union;
 pub mod lf_vfunctab;
+pub mod lf_vtshape;
+pub mod lf_oem;
+pub mod lf_skip;
+pub mod lf_index;
+pub mod lf_func_id;
+pub mod lf_mfunc_id;
 
 // Re-export key types for convenience.
 pub use bind::Bind;
@@ -84,6 +90,12 @@ pub use lf_stmember::LfStmember;
 pub use lf_structure::LfStructure;
 pub use lf_union::LfUnion;
 pub use lf_vfunctab::LfVfunctab;
+pub use lf_vtshape::{LfVtshape, VtShapeDescriptor};
+pub use lf_oem::LfOem;
+pub use lf_skip::LfSkip;
+pub use lf_index::LfIndex;
+pub use lf_func_id::LfFuncId;
+pub use lf_mfunc_id::LfMfuncId;
 
 use std::fmt;
 

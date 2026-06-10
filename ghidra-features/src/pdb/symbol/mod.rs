@@ -72,6 +72,14 @@ pub mod s_defrange_register_rel;
 pub mod s_local;
 pub mod s_inlinesite;
 
+// Additional symbol types ported from Ghidra Java
+pub mod s_envblock;
+pub mod s_buildinfo;
+pub mod s_filestatic;
+pub mod s_manframerel;
+pub mod s_regframe;
+pub mod s_defrange_framepointer_rel;
+
 pub use abstract_base_pointer_relative::AbstractBasePointerRelative;
 pub use abstract_block::AbstractBlock;
 pub use abstract_compile2::AbstractCompile2;
@@ -109,3 +117,10 @@ pub use s_defrange_subfield::SDefRangeSubfield;
 pub use s_defrange_register_rel::SDefRangeRegisterRel;
 pub use s_local::{SLocal, LocalFlags};
 pub use s_inlinesite::SInlineSite;
+
+pub use s_envblock::SEnvBlock;
+pub use s_buildinfo::SBuildInfo;
+pub use s_filestatic::SFileStatic;
+pub use s_manframerel::SManFrameRel;
+pub use s_regframe::SRegFrame;
+pub use s_defrange_framepointer_rel::SDefRangeFramePointerRelFullScope;

@@ -12,6 +12,9 @@ pub mod address_translator;
 pub mod breakpoint;
 pub mod control_mode;
 pub mod coordinates_enhanced;
+pub mod debugger_console_service;
+pub mod debugger_logical_breakpoint_service;
+pub mod debugger_watches_service;
 pub mod emulation;
 pub mod emulator_factory;
 pub mod flat_api;
@@ -90,6 +93,17 @@ pub use tracermi_connection::{
 pub use platform_mapper_api::{
     AddressSpaceDesc, DisassemblyResult, Endianness, FlowType, PlatformMapperConfig,
     PlatformOffer, PlatformOpinionConfig, RegisterMappingEntry,
+};
+
+// Console, watches, and breakpoint services
+pub use debugger_console_service::{
+    ConsoleListener, ConsoleMessage, ConsoleMessageType, DebuggerConsoleService,
+};
+pub use debugger_logical_breakpoint_service::{
+    BreakpointId, BreakpointServiceListener, DebuggerLogicalBreakpointService, TrackedBreakpoint,
+};
+pub use debugger_watches_service::{
+    DebuggerWatchesService, WatchEntry, WatchId, WatchesListener,
 };
 
 // Factory modules from remaining Debugger-api port
