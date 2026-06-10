@@ -215,6 +215,19 @@ impl LfOnemethod {
     pub fn has_valid_procedure_type(&self) -> bool {
         !self.procedure_type_record_number.is_no_type()
     }
+
+    /// Convert this single method into a [`FieldListEntry::OneMethod`].
+    ///
+    /// This is useful when constructing or manipulating field lists
+    /// programmatically.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::OneMethod {
+            type_record: self.procedure_type_record_number,
+            vftable_offset: self.vftable_offset,
+            access: self.attributes.access as u16,
+            name: self.name.clone(),
+        }
+    }
 }
 
 impl AbstractMsType for LfOnemethod {
@@ -256,6 +269,17 @@ impl AbstractMsType for LfOnemethod {
         }
         result.push('>');
         result
+    }
+}
+
+impl Default for LfOnemethod {
+    fn default() -> Self {
+        Self::new(
+            RecordNumber::NO_TYPE,
+            -1,
+            super::lf_member::MemberAttributes::public_member(),
+            String::new(),
+        )
     }
 }
 
@@ -530,5 +554,50 @@ mod tests {
 
         let m3 = LfOnemethod::public_method(0x1011, "different".to_string());
         assert_ne!(m1, m3);
+    }
+
+    #[test]
+    fn test_onemethod_to_field_list_entry() {
+        let m = make_test_onemethod();
+        let entry = m.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::OneMethod {
+                type_record,
+                vftable_offset,
+                access,
+                name,
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x1011));
+                assert_eq!(vftable_offset, -1);
+                assert_eq!(access, 3); // public
+                assert_eq!(name, "bar");
+            }
+            _ => panic!("Expected OneMethod variant"),
+        }
+    }
+
+    #[test]
+    fn test_onemethod_to_field_list_entry_intro() {
+        let m = LfOnemethod::from_parsed(0x0013, 0x2000, 16, "intro".to_string());
+        let entry = m.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::OneMethod {
+                type_record,
+                vftable_offset,
+                ..
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x2000));
+                assert_eq!(vftable_offset, 16);
+            }
+            _ => panic!("Expected OneMethod variant"),
+        }
+    }
+
+    #[test]
+    fn test_onemethod_default() {
+        let m = LfOnemethod::default();
+        assert!(m.name().is_empty());
+        assert!(m.record_number().is_no_type());
+        assert_eq!(m.vftable_offset, -1);
     }
 }

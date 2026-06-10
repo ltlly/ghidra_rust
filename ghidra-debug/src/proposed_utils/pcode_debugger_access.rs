@@ -2298,6 +2298,646 @@ impl AddressRangeSet {
 }
 
 // ============================================================================
+// PcodeDebuggerAccessBuilder -- builder pattern for constructing access
+// ============================================================================
+
+/// A builder for constructing `PcodeDebuggerAccess` instances with a
+/// fluent API.
+///
+/// Ported from Ghidra's pattern of constructing access shims through
+/// a series of configuration steps. Provides sensible defaults and
+/// validation before constructing the final access object.
+#[derive(Debug, Clone)]
+pub struct PcodeDebuggerAccessBuilder {
+    trace_id: String,
+    snap: i64,
+    language_id: String,
+    active_thread: Option<i64>,
+    memory_regions: Vec<(String, u64, u64)>,
+    register_defs: Vec<(String, u32)>,
+    breakpoints: Vec<(String, u64)>,
+}
+
+impl PcodeDebuggerAccessBuilder {
+    /// Create a new builder for the given trace and snap.
+    pub fn new(trace_id: impl Into<String>, snap: i64) -> Self {
+        Self {
+            trace_id: trace_id.into(),
+            snap,
+            language_id: String::new(),
+            active_thread: None,
+            memory_regions: Vec::new(),
+            register_defs: Vec::new(),
+            breakpoints: Vec::new(),
+        }
+    }
+
+    /// Set the language/compiler spec ID.
+    pub fn language_id(mut self, id: impl Into<String>) -> Self {
+        self.language_id = id.into();
+        self
+    }
+
+    /// Set the active thread.
+    pub fn active_thread(mut self, thread_key: i64) -> Self {
+        self.active_thread = Some(thread_key);
+        self
+    }
+
+    /// Add a memory region to pre-populate.
+    pub fn with_memory_region(
+        mut self,
+        space: impl Into<String>,
+        start: u64,
+        end: u64,
+    ) -> Self {
+        self.memory_regions.push((space.into(), start, end));
+        self
+    }
+
+    /// Add a register definition.
+    pub fn with_register(mut self, name: impl Into<String>, bit_length: u32) -> Self {
+        self.register_defs.push((name.into(), bit_length));
+        self
+    }
+
+    /// Add a breakpoint.
+    pub fn with_breakpoint(mut self, space: impl Into<String>, offset: u64) -> Self {
+        self.breakpoints.push((space.into(), offset));
+        self
+    }
+
+    /// Build the `PcodeDebuggerAccess` instance.
+    ///
+    /// Returns `Err` if validation fails (e.g., empty trace ID).
+    pub fn build(self) -> Result<PcodeDebuggerAccess, String> {
+        if self.trace_id.is_empty() {
+            return Err("trace_id must not be empty".into());
+        }
+
+        let mut access = PcodeDebuggerAccess::new(&self.trace_id, self.snap);
+
+        if !self.language_id.is_empty() {
+            access = access.with_language_id(&self.language_id);
+        }
+
+        if let Some(thread_key) = self.active_thread {
+            access.set_active_thread(thread_key);
+        }
+
+        // Pre-populate memory regions
+        for (space, start, end) in &self.memory_regions {
+            for offset in *start..*end {
+                access.write_memory(space, offset, &[0]);
+            }
+        }
+
+        // Register breakpoints
+        for (space, offset) in &self.breakpoints {
+            access.breakpoints_mut().add_breakpoint(space, *offset);
+        }
+
+        Ok(access)
+    }
+
+    /// Validate the configuration without building.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.trace_id.is_empty() {
+            return Err("trace_id must not be empty".into());
+        }
+        if self.snap < 0 {
+            return Err("snap must be non-negative".into());
+        }
+        Ok(())
+    }
+}
+
+// ============================================================================
+// AsyncAccessQueue -- queue for async target operations
+// ============================================================================
+
+/// The kind of async operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AsyncOpKind {
+    /// Read registers from target.
+    ReadRegisters,
+    /// Write registers to target.
+    WriteRegister,
+    /// Read memory from target.
+    ReadMemory,
+    /// Write memory to target.
+    WriteMemory,
+}
+
+/// The status of an async operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AsyncOpStatus {
+    /// Operation is pending.
+    Pending,
+    /// Operation completed successfully.
+    Completed,
+    /// Operation failed.
+    Failed,
+    /// Operation was cancelled.
+    Cancelled,
+}
+
+/// A queued async operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AsyncOperation {
+    /// Unique operation ID.
+    pub id: u64,
+    /// The kind of operation.
+    pub kind: AsyncOpKind,
+    /// The address space or register name.
+    pub space: String,
+    /// The offset (0 for registers).
+    pub offset: u64,
+    /// The data (for writes).
+    pub data: Vec<u8>,
+    /// Current status.
+    pub status: AsyncOpStatus,
+    /// Error message (if failed).
+    pub error: Option<String>,
+    /// The result data (for reads, after completion).
+    pub result: Option<Vec<u8>>,
+}
+
+/// A queue for async target operations, modeled after Ghidra's
+/// `CompletableFuture<Boolean>` pattern for target reads/writes.
+///
+/// Ported from Ghidra's async read/write pattern where
+/// `readFromTargetMemory`, `writeTargetMemory`, `readFromTargetRegisters`,
+/// and `writeTargetRegister` return futures that complete when the
+/// operation finishes.
+#[derive(Debug, Clone, Default)]
+pub struct AsyncAccessQueue {
+    /// Pending operations.
+    operations: Vec<AsyncOperation>,
+    /// Next operation ID.
+    next_id: u64,
+}
+
+impl AsyncAccessQueue {
+    /// Create a new empty queue.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enqueue a register read operation.
+    pub fn enqueue_register_read(&mut self, name: impl Into<String>) -> u64 {
+        self.enqueue(AsyncOpKind::ReadRegisters, name.into(), 0, Vec::new())
+    }
+
+    /// Enqueue a register write operation.
+    pub fn enqueue_register_write(
+        &mut self,
+        name: impl Into<String>,
+        data: Vec<u8>,
+    ) -> u64 {
+        self.enqueue(AsyncOpKind::WriteRegister, name.into(), 0, data)
+    }
+
+    /// Enqueue a memory read operation.
+    pub fn enqueue_memory_read(
+        &mut self,
+        space: impl Into<String>,
+        offset: u64,
+        len: u32,
+    ) -> u64 {
+        self.enqueue(
+            AsyncOpKind::ReadMemory,
+            space.into(),
+            offset,
+            vec![0; len as usize],
+        )
+    }
+
+    /// Enqueue a memory write operation.
+    pub fn enqueue_memory_write(
+        &mut self,
+        space: impl Into<String>,
+        offset: u64,
+        data: Vec<u8>,
+    ) -> u64 {
+        self.enqueue(AsyncOpKind::WriteMemory, space.into(), offset, data)
+    }
+
+    fn enqueue(
+        &mut self,
+        kind: AsyncOpKind,
+        space: String,
+        offset: u64,
+        data: Vec<u8>,
+    ) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.operations.push(AsyncOperation {
+            id,
+            kind,
+            space,
+            offset,
+            data,
+            status: AsyncOpStatus::Pending,
+            error: None,
+            result: None,
+        });
+        id
+    }
+
+    /// Complete an operation successfully, setting its result data.
+    pub fn complete(&mut self, id: u64, result: Vec<u8>) -> bool {
+        if let Some(op) = self.operations.iter_mut().find(|o| o.id == id) {
+            op.status = AsyncOpStatus::Completed;
+            op.result = Some(result);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Fail an operation with an error message.
+    pub fn fail(&mut self, id: u64, error: impl Into<String>) -> bool {
+        if let Some(op) = self.operations.iter_mut().find(|o| o.id == id) {
+            op.status = AsyncOpStatus::Failed;
+            op.error = Some(error.into());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Cancel a pending operation.
+    pub fn cancel(&mut self, id: u64) -> bool {
+        if let Some(op) = self.operations.iter_mut().find(|o| o.id == id && o.status == AsyncOpStatus::Pending) {
+            op.status = AsyncOpStatus::Cancelled;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get an operation by ID.
+    pub fn get(&self, id: u64) -> Option<&AsyncOperation> {
+        self.operations.iter().find(|o| o.id == id)
+    }
+
+    /// Check if an operation is completed.
+    pub fn is_completed(&self, id: u64) -> bool {
+        self.get(id)
+            .map(|o| o.status == AsyncOpStatus::Completed)
+            .unwrap_or(false)
+    }
+
+    /// Get all pending operations.
+    pub fn pending(&self) -> Vec<&AsyncOperation> {
+        self.operations
+            .iter()
+            .filter(|o| o.status == AsyncOpStatus::Pending)
+            .collect()
+    }
+
+    /// Get all completed operations.
+    pub fn completed(&self) -> Vec<&AsyncOperation> {
+        self.operations
+            .iter()
+            .filter(|o| o.status == AsyncOpStatus::Completed)
+            .collect()
+    }
+
+    /// Drain all finished (completed/failed/cancelled) operations.
+    pub fn drain_finished(&mut self) -> Vec<AsyncOperation> {
+        let (finished, remaining): (Vec<_>, Vec<_>) =
+            self.operations.drain(..).partition(|o| o.status != AsyncOpStatus::Pending);
+        self.operations = remaining;
+        finished
+    }
+
+    /// The total number of operations (all statuses).
+    pub fn len(&self) -> usize {
+        self.operations.len()
+    }
+
+    /// Whether the queue is empty.
+    pub fn is_empty(&self) -> bool {
+        self.operations.is_empty()
+    }
+
+    /// The number of pending operations.
+    pub fn num_pending(&self) -> usize {
+        self.operations
+            .iter()
+            .filter(|o| o.status == AsyncOpStatus::Pending)
+            .count()
+    }
+
+    /// Clear all operations.
+    pub fn clear(&mut self) {
+        self.operations.clear();
+    }
+}
+
+// ============================================================================
+// AccessAuditLog -- audit trail for all access operations
+// ============================================================================
+
+/// The kind of access operation logged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum AuditLogKind {
+    /// Memory read.
+    MemoryRead,
+    /// Memory write.
+    MemoryWrite,
+    /// Register read.
+    RegisterRead,
+    /// Register write.
+    RegisterWrite,
+    /// Breakpoint set.
+    BreakpointSet,
+    /// Breakpoint removed.
+    BreakpointRemoved,
+    /// Thread context changed.
+    ThreadContextChanged,
+    /// Snap advanced.
+    SnapAdvanced,
+}
+
+/// A single audit log entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuditLogEntry {
+    /// Monotonic sequence number.
+    pub seq: u64,
+    /// The kind of operation.
+    pub kind: AuditLogKind,
+    /// The address space or register name.
+    pub target: String,
+    /// The offset (0 for registers).
+    pub offset: u64,
+    /// The data size in bytes.
+    pub size: u32,
+    /// Whether the operation succeeded.
+    pub success: bool,
+    /// Optional detail message.
+    pub detail: Option<String>,
+}
+
+/// An audit log that records all access operations for debugging and
+/// analysis.
+///
+/// Ported from Ghidra's access logging used to trace pcode emulation
+/// behavior. Useful for diagnosing emulation issues and understanding
+/// the sequence of operations.
+#[derive(Debug, Clone, Default)]
+pub struct AccessAuditLog {
+    entries: Vec<AuditLogEntry>,
+    next_seq: u64,
+    /// Maximum entries (0 = unlimited).
+    max_entries: usize,
+    /// Whether the log is enabled.
+    enabled: bool,
+}
+
+impl AccessAuditLog {
+    /// Create a new audit log.
+    pub fn new() -> Self {
+        Self {
+            enabled: true,
+            ..Default::default()
+        }
+    }
+
+    /// Set the maximum number of entries.
+    pub fn with_max_entries(mut self, max: usize) -> Self {
+        self.max_entries = max;
+        self
+    }
+
+    /// Enable or disable the log.
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    /// Whether the log is enabled.
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
+
+    fn push(&mut self, entry: AuditLogEntry) {
+        if !self.enabled {
+            return;
+        }
+        if self.max_entries > 0 && self.entries.len() >= self.max_entries {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+
+    /// Log a memory read.
+    pub fn log_memory_read(&mut self, space: &str, offset: u64, size: u32, success: bool) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.push(AuditLogEntry {
+            seq,
+            kind: AuditLogKind::MemoryRead,
+            target: space.to_string(),
+            offset,
+            size,
+            success,
+            detail: None,
+        });
+    }
+
+    /// Log a memory write.
+    pub fn log_memory_write(&mut self, space: &str, offset: u64, size: u32, success: bool) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.push(AuditLogEntry {
+            seq,
+            kind: AuditLogKind::MemoryWrite,
+            target: space.to_string(),
+            offset,
+            size,
+            success,
+            detail: None,
+        });
+    }
+
+    /// Log a register read.
+    pub fn log_register_read(&mut self, name: &str, size: u32, success: bool) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.push(AuditLogEntry {
+            seq,
+            kind: AuditLogKind::RegisterRead,
+            target: name.to_string(),
+            offset: 0,
+            size,
+            success,
+            detail: None,
+        });
+    }
+
+    /// Log a register write.
+    pub fn log_register_write(&mut self, name: &str, size: u32, success: bool) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.push(AuditLogEntry {
+            seq,
+            kind: AuditLogKind::RegisterWrite,
+            target: name.to_string(),
+            offset: 0,
+            size,
+            success,
+            detail: None,
+        });
+    }
+
+    /// Log a generic entry.
+    pub fn log(&mut self, kind: AuditLogKind, target: &str, offset: u64, size: u32, success: bool) {
+        let seq = self.next_seq;
+        self.next_seq += 1;
+        self.push(AuditLogEntry {
+            seq,
+            kind,
+            target: target.to_string(),
+            offset,
+            size,
+            success,
+            detail: None,
+        });
+    }
+
+    /// Get all entries.
+    pub fn entries(&self) -> &[AuditLogEntry] {
+        &self.entries
+    }
+
+    /// Get entries of a specific kind.
+    pub fn entries_of_kind(&self, kind: AuditLogKind) -> Vec<&AuditLogEntry> {
+        self.entries.iter().filter(|e| e.kind == kind).collect()
+    }
+
+    /// Get entries for a specific target.
+    pub fn entries_for(&self, target: &str) -> Vec<&AuditLogEntry> {
+        self.entries.iter().filter(|e| e.target == target).collect()
+    }
+
+    /// Get failed entries.
+    pub fn failures(&self) -> Vec<&AuditLogEntry> {
+        self.entries.iter().filter(|e| !e.success).collect()
+    }
+
+    /// The number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Whether the log is empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+        self.next_seq = 0;
+    }
+
+    /// Get the last entry.
+    pub fn last(&self) -> Option<&AuditLogEntry> {
+        self.entries.last()
+    }
+}
+
+// ============================================================================
+// TraceMemoryStateMap -- track memory state across address ranges
+// ============================================================================
+
+/// Tracks the state of memory across an address space, mapping ranges
+/// to their current trace memory state.
+///
+/// Ported from Ghidra's `TraceMemoryState` tracking used to determine
+/// which memory regions are known, unknown, or error in the trace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TraceMemoryStateMap {
+    /// The address space name.
+    pub space: String,
+    /// Ranges and their states: (start, end, state).
+    ranges: Vec<(u64, u64, TraceMemoryState)>,
+}
+
+impl TraceMemoryStateMap {
+    /// Create a new empty state map.
+    pub fn new(space: impl Into<String>) -> Self {
+        Self {
+            space: space.into(),
+            ranges: Vec::new(),
+        }
+    }
+
+    /// Set the state for a range.
+    pub fn set_state(&mut self, start: u64, end: u64, state: TraceMemoryState) {
+        self.ranges.push((start, end, state));
+        self.ranges.sort_by_key(|r| r.0);
+    }
+
+    /// Mark a range as known.
+    pub fn mark_known(&mut self, start: u64, end: u64) {
+        self.set_state(start, end, TraceMemoryState::Known);
+    }
+
+    /// Mark a range as unknown.
+    pub fn mark_unknown(&mut self, start: u64, end: u64) {
+        self.set_state(start, end, TraceMemoryState::Unknown);
+    }
+
+    /// Get the state at a specific address.
+    /// Returns the state of the most recent range that contains the address.
+    pub fn state_at(&self, offset: u64) -> TraceMemoryState {
+        self.ranges
+            .iter()
+            .rev()
+            .find(|(start, end, _)| offset >= *start && offset < *end)
+            .map(|(_, _, s)| *s)
+            .unwrap_or(TraceMemoryState::Unknown)
+    }
+
+    /// Get all ranges with a specific state.
+    pub fn ranges_with_state(&self, state: TraceMemoryState) -> Vec<(u64, u64)> {
+        self.ranges
+            .iter()
+            .filter(|(_, _, s)| *s == state)
+            .map(|&(start, end, _)| (start, end))
+            .collect()
+    }
+
+    /// Get the unknown ranges (convenience for readFromTarget* patterns).
+    pub fn unknown_ranges(&self) -> Vec<(u64, u64)> {
+        self.ranges_with_state(TraceMemoryState::Unknown)
+    }
+
+    /// Get the known ranges.
+    pub fn known_ranges(&self) -> Vec<(u64, u64)> {
+        self.ranges_with_state(TraceMemoryState::Known)
+    }
+
+    /// The total number of ranges tracked.
+    pub fn num_ranges(&self) -> usize {
+        self.ranges.len()
+    }
+
+    /// Whether the map is empty.
+    pub fn is_empty(&self) -> bool {
+        self.ranges.is_empty()
+    }
+
+    /// Clear all ranges.
+    pub fn clear(&mut self) {
+        self.ranges.clear();
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -3099,5 +3739,193 @@ mod tests {
         set.add_range(0x10, 0x13);
         let addrs: Vec<u64> = set.iter_addresses().collect();
         assert_eq!(addrs, vec![0x10, 0x11, 0x12]);
+    }
+
+    // -- PcodeDebuggerAccessBuilder --
+
+    #[test]
+    fn test_access_builder_basic() {
+        let access = PcodeDebuggerAccessBuilder::new("trace1", 0)
+            .language_id("x86:LE:64:default::gcc")
+            .active_thread(42)
+            .build()
+            .unwrap();
+
+        assert_eq!(access.trace_id, "trace1");
+        assert_eq!(access.snap, 0);
+        assert_eq!(access.language_id, "x86:LE:64:default::gcc");
+        assert_eq!(access.active_thread(), Some(42));
+    }
+
+    #[test]
+    fn test_access_builder_with_breakpoints() {
+        let access = PcodeDebuggerAccessBuilder::new("trace1", 0)
+            .with_breakpoint("ram", 0x400000)
+            .with_breakpoint("ram", 0x400100)
+            .build()
+            .unwrap();
+
+        assert_eq!(access.breakpoints().len(), 2);
+    }
+
+    #[test]
+    fn test_access_builder_empty_trace_id() {
+        let result = PcodeDebuggerAccessBuilder::new("", 0).build();
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_access_builder_validate() {
+        let builder = PcodeDebuggerAccessBuilder::new("trace1", 0);
+        assert!(builder.validate().is_ok());
+
+        let builder = PcodeDebuggerAccessBuilder::new("", 0);
+        assert!(builder.validate().is_err());
+    }
+
+    // -- AsyncAccessQueue --
+
+    #[test]
+    fn test_async_queue_register_ops() {
+        let mut queue = AsyncAccessQueue::new();
+        let id1 = queue.enqueue_register_read("RAX");
+        let id2 = queue.enqueue_register_write("RBX", vec![0x42; 8]);
+
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue.num_pending(), 2);
+
+        queue.complete(id1, vec![0xFF; 8]);
+        assert!(queue.is_completed(id1));
+        assert_eq!(queue.get(id1).unwrap().result, Some(vec![0xFF; 8]));
+
+        queue.fail(id2, "write failed");
+        assert_eq!(queue.get(id2).unwrap().status, AsyncOpStatus::Failed);
+    }
+
+    #[test]
+    fn test_async_queue_memory_ops() {
+        let mut queue = AsyncAccessQueue::new();
+        let id = queue.enqueue_memory_read("ram", 0x400000, 4);
+        assert_eq!(queue.num_pending(), 1);
+
+        queue.complete(id, vec![0xEB, 0xFE, 0x90, 0xCC]);
+        assert!(queue.is_completed(id));
+    }
+
+    #[test]
+    fn test_async_queue_cancel() {
+        let mut queue = AsyncAccessQueue::new();
+        let id = queue.enqueue_register_read("RAX");
+        assert!(queue.cancel(id));
+        assert_eq!(queue.get(id).unwrap().status, AsyncOpStatus::Cancelled);
+    }
+
+    #[test]
+    fn test_async_queue_drain_finished() {
+        let mut queue = AsyncAccessQueue::new();
+        let id1 = queue.enqueue_register_read("RAX");
+        let _id2 = queue.enqueue_register_read("RBX");
+        queue.complete(id1, vec![0x42; 8]);
+
+        let finished = queue.drain_finished();
+        assert_eq!(finished.len(), 1);
+        assert_eq!(queue.len(), 1);
+    }
+
+    #[test]
+    fn test_async_queue_pending_completed() {
+        let mut queue = AsyncAccessQueue::new();
+        let id = queue.enqueue_memory_write("ram", 0x1000, vec![0xCC]);
+        assert_eq!(queue.pending().len(), 1);
+        assert_eq!(queue.completed().len(), 0);
+
+        queue.complete(id, vec![]);
+        assert_eq!(queue.pending().len(), 0);
+        assert_eq!(queue.completed().len(), 1);
+    }
+
+    // -- AccessAuditLog --
+
+    #[test]
+    fn test_audit_log_basic() {
+        let mut log = AccessAuditLog::new();
+        log.log_memory_read("ram", 0x400000, 4, true);
+        log.log_register_write("RAX", 8, true);
+        log.log_memory_write("ram", 0x400004, 2, false);
+
+        assert_eq!(log.len(), 3);
+        assert_eq!(log.failures().len(), 1);
+        assert_eq!(log.entries_of_kind(AuditLogKind::MemoryRead).len(), 1);
+    }
+
+    #[test]
+    fn test_audit_log_entries_for() {
+        let mut log = AccessAuditLog::new();
+        log.log_memory_read("ram", 0x1000, 1, true);
+        log.log_memory_read("ram", 0x2000, 1, true);
+        log.log_register_read("RAX", 8, true);
+
+        assert_eq!(log.entries_for("ram").len(), 2);
+        assert_eq!(log.entries_for("RAX").len(), 1);
+    }
+
+    #[test]
+    fn test_audit_log_max_entries() {
+        let mut log = AccessAuditLog::new().with_max_entries(2);
+        log.log_memory_read("ram", 0x1000, 1, true);
+        log.log_memory_read("ram", 0x2000, 1, true);
+        log.log_memory_read("ram", 0x3000, 1, true);
+
+        assert_eq!(log.len(), 2);
+        // First entry was evicted
+        assert_eq!(log.entries()[0].offset, 0x2000);
+    }
+
+    #[test]
+    fn test_audit_log_disabled() {
+        let mut log = AccessAuditLog::new();
+        log.set_enabled(false);
+        log.log_memory_read("ram", 0x1000, 1, true);
+        assert_eq!(log.len(), 0);
+    }
+
+    #[test]
+    fn test_audit_log_last() {
+        let mut log = AccessAuditLog::new();
+        assert!(log.last().is_none());
+        log.log_memory_read("ram", 0x1000, 1, true);
+        assert!(log.last().is_some());
+        assert_eq!(log.last().unwrap().offset, 0x1000);
+    }
+
+    // -- TraceMemoryStateMap --
+
+    #[test]
+    fn test_state_map_basic() {
+        let mut map = TraceMemoryStateMap::new("ram");
+        map.mark_known(0x1000, 0x2000);
+        map.mark_unknown(0x3000, 0x4000);
+
+        assert_eq!(map.state_at(0x1500), TraceMemoryState::Known);
+        assert_eq!(map.state_at(0x3500), TraceMemoryState::Unknown);
+        assert_eq!(map.state_at(0x5000), TraceMemoryState::Unknown); // default
+    }
+
+    #[test]
+    fn test_state_map_ranges() {
+        let mut map = TraceMemoryStateMap::new("ram");
+        map.mark_known(0x1000, 0x2000);
+        map.mark_known(0x3000, 0x4000);
+        map.mark_unknown(0x5000, 0x6000);
+
+        assert_eq!(map.known_ranges().len(), 2);
+        assert_eq!(map.unknown_ranges().len(), 1);
+    }
+
+    #[test]
+    fn test_state_map_empty() {
+        let map = TraceMemoryStateMap::new("ram");
+        assert!(map.is_empty());
+        assert_eq!(map.state_at(0), TraceMemoryState::Unknown);
     }
 }

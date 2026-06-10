@@ -143,6 +143,25 @@ impl LfStmember {
     pub fn has_valid_type(&self) -> bool {
         !self.type_record_number.is_no_type()
     }
+
+    /// Whether this is a static member (always `true` for `LF_STMEMBER`).
+    ///
+    /// Provided for API symmetry with [`LfMember`](super::lf_member::LfMember).
+    pub fn is_static(&self) -> bool {
+        true
+    }
+
+    /// Convert this static member into a [`FieldListEntry::StaticMember`].
+    ///
+    /// This is useful when constructing or manipulating field lists
+    /// programmatically.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::StaticMember {
+            type_record: self.type_record_number,
+            access: self.attributes.access as u16,
+            name: self.name.clone(),
+        }
+    }
 }
 
 impl AbstractMsType for LfStmember {
@@ -183,6 +202,16 @@ impl AbstractMsType for LfStmember {
         result.push_str(&self.type_record_number.to_string());
 
         result
+    }
+}
+
+impl Default for LfStmember {
+    fn default() -> Self {
+        Self::new(
+            RecordNumber::NO_TYPE,
+            super::lf_member::MemberAttributes::public_member(),
+            String::new(),
+        )
     }
 }
 
@@ -391,5 +420,37 @@ mod tests {
         let emitted = m.emit(Bind::NONE);
         assert!(emitted.starts_with("private: "));
         assert!(emitted.contains("secret"));
+    }
+
+    #[test]
+    fn test_stmember_is_static() {
+        let m = make_test_stmember();
+        assert!(m.is_static());
+    }
+
+    #[test]
+    fn test_stmember_to_field_list_entry() {
+        let m = make_test_stmember();
+        let entry = m.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::StaticMember {
+                type_record,
+                access,
+                name,
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x0074));
+                assert_eq!(access, 3); // public
+                assert_eq!(name, "count");
+            }
+            _ => panic!("Expected StaticMember variant"),
+        }
+    }
+
+    #[test]
+    fn test_stmember_default() {
+        let m = LfStmember::default();
+        assert!(m.name().is_empty());
+        assert!(m.record_number().is_no_type());
+        assert!(m.is_static());
     }
 }

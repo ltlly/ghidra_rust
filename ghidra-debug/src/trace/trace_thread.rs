@@ -5,6 +5,11 @@
 //!
 //! This module provides a richer thread type than the basic `model::thread::TraceThread`,
 //! with support for execution state history, register snapshots, and stack frames.
+//!
+//! New in this update: lifespan-aware name and comment management
+//! (`set_name`, `name_at`, `set_comment`, `comment_at`), `delete()` for full
+//! removal, breakpoint association tracking, thread priority and group,
+//! and the `ThreadSnapshot` point-in-time summary.
 
 use std::collections::BTreeMap;
 
@@ -145,6 +150,69 @@ impl ExecutionStateRecord {
 }
 
 // ---------------------------------------------------------------------------
+// NameEntry / CommentEntry
+// ---------------------------------------------------------------------------
+
+/// A lifespan-bound name entry, allowing names to change over time.
+///
+/// Mirrors the Java pattern where `setName(Lifespan, String)` can record
+/// a name that applies for a specific span of snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NameEntry {
+    /// The lifespan during which this name applies.
+    pub lifespan: Lifespan,
+    /// The name value.
+    pub name: String,
+}
+
+/// A lifespan-bound comment entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentEntry {
+    /// The lifespan during which this comment applies.
+    pub lifespan: Lifespan,
+    /// The comment text.
+    pub comment: String,
+}
+
+// ---------------------------------------------------------------------------
+// ThreadSnapshot
+// ---------------------------------------------------------------------------
+
+/// A point-in-time summary of a thread's state.
+///
+/// Captures the thread's execution state, register values, and stack
+/// at a particular snapshot for quick comparison and serialization.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadSnapshot {
+    /// The snap at which this summary was captured.
+    pub snap: i64,
+    /// The execution state at this snap.
+    pub execution_state: TraceExecutionState,
+    /// The program counter, if known.
+    pub pc: Option<u64>,
+    /// The stack pointer, if known.
+    pub sp: Option<u64>,
+    /// Register name -> byte value, if captured.
+    pub registers: BTreeMap<String, Vec<u8>>,
+    /// Stack frame count.
+    pub frame_count: usize,
+}
+
+impl ThreadSnapshot {
+    /// Create a new thread snapshot.
+    pub fn new(snap: i64, execution_state: TraceExecutionState) -> Self {
+        Self {
+            snap,
+            execution_state,
+            pc: None,
+            sp: None,
+            registers: BTreeMap::new(),
+            frame_count: 0,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // TraceThread
 // ---------------------------------------------------------------------------
 
@@ -178,6 +246,21 @@ pub struct TraceThread {
     register_snapshots: BTreeMap<i64, RegisterSnapshot>,
     /// Stack frame snapshots indexed by snap.
     stack_snapshots: BTreeMap<i64, Vec<StackFrameInfo>>,
+    /// Lifespan-bound name entries (most recent last).
+    ///
+    /// When non-empty, `name_at(snap)` returns the most recent name
+    /// whose lifespan contains `snap`. Falls back to `name` if empty.
+    name_history: Vec<NameEntry>,
+    /// Lifespan-bound comment entries (most recent last).
+    comment_history: Vec<CommentEntry>,
+    /// Breakpoint keys associated with this thread.
+    pub breakpoint_keys: Vec<i64>,
+    /// Thread priority (OS-assigned), if known.
+    pub priority: Option<i32>,
+    /// Thread group name (e.g. "main", "signal"), if known.
+    pub group: Option<String>,
+    /// Whether this thread has been fully deleted (not just removed at a snap).
+    pub deleted: bool,
 }
 
 impl TraceThread {
@@ -201,6 +284,12 @@ impl TraceThread {
             state_history: Vec::new(),
             register_snapshots: BTreeMap::new(),
             stack_snapshots: BTreeMap::new(),
+            name_history: Vec::new(),
+            comment_history: Vec::new(),
+            breakpoint_keys: Vec::new(),
+            priority: None,
+            group: None,
+            deleted: false,
         }
     }
 
@@ -336,6 +425,195 @@ impl TraceThread {
     /// has not been terminated).
     pub fn is_alive_now(&self) -> bool {
         self.lifespan.lmax() == Lifespan::MAX
+    }
+
+    // -- Lifespan-aware names --
+
+    /// Set a name that applies for the given lifespan.
+    ///
+    /// Mirrors the Java `TraceThread.setName(Lifespan, String)`.
+    pub fn set_name(&mut self, lifespan: Lifespan, name: impl Into<String>) {
+        self.name_history.push(NameEntry {
+            lifespan,
+            name: name.into(),
+        });
+    }
+
+    /// Set the name starting at the given snap (applies until changed).
+    pub fn set_name_at(&mut self, snap: i64, name: impl Into<String>) {
+        self.set_name(Lifespan::now_on(snap), name);
+    }
+
+    /// Get the thread name at a given snap.
+    ///
+    /// Returns the most recent name whose lifespan contains `snap`,
+    /// falling back to the base `name` field.
+    pub fn name_at(&self, snap: i64) -> &str {
+        self.name_history
+            .iter()
+            .rev()
+            .find(|entry| entry.lifespan.contains(snap))
+            .map(|entry| entry.name.as_str())
+            .unwrap_or(self.name.as_str())
+    }
+
+    /// The name history.
+    pub fn name_history(&self) -> &[NameEntry] {
+        &self.name_history
+    }
+
+    /// Clear name history and set the base name.
+    pub fn reset_name(&mut self, name: impl Into<String>) {
+        self.name = name.into();
+        self.name_history.clear();
+    }
+
+    // -- Lifespan-aware comments --
+
+    /// Set a comment that applies for the given lifespan.
+    pub fn set_comment(&mut self, lifespan: Lifespan, comment: impl Into<String>) {
+        self.comment_history.push(CommentEntry {
+            lifespan,
+            comment: comment.into(),
+        });
+    }
+
+    /// Set the comment starting at the given snap.
+    pub fn set_comment_at(&mut self, snap: i64, comment: impl Into<String>) {
+        self.set_comment(Lifespan::now_on(snap), comment);
+    }
+
+    /// Get the comment at a given snap.
+    ///
+    /// Returns the most recent comment whose lifespan contains `snap`,
+    /// falling back to the base `comment` field.
+    pub fn comment_at(&self, snap: i64) -> Option<&str> {
+        self.comment_history
+            .iter()
+            .rev()
+            .find(|entry| entry.lifespan.contains(snap))
+            .map(|entry| entry.comment.as_str())
+            .or(self.comment.as_deref())
+    }
+
+    /// The comment history.
+    pub fn comment_history(&self) -> &[CommentEntry] {
+        &self.comment_history
+    }
+
+    // -- Deletion --
+
+    /// Mark this thread as fully deleted.
+    ///
+    /// Unlike `remove(snap)` which ends the lifespan at a snap, `delete()`
+    /// marks the thread as completely removed from the trace.
+    pub fn delete(&mut self) {
+        self.deleted = true;
+        self.lifespan = Lifespan::EMPTY;
+    }
+
+    /// Whether this thread has been fully deleted.
+    pub fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+
+    // -- Breakpoints --
+
+    /// Associate a breakpoint with this thread.
+    pub fn add_breakpoint(&mut self, bp_key: i64) {
+        if !self.breakpoint_keys.contains(&bp_key) {
+            self.breakpoint_keys.push(bp_key);
+        }
+    }
+
+    /// Remove a breakpoint association.
+    pub fn remove_breakpoint(&mut self, bp_key: i64) {
+        self.breakpoint_keys.retain(|&k| k != bp_key);
+    }
+
+    /// Whether this thread has the given breakpoint.
+    pub fn has_breakpoint(&self, bp_key: i64) -> bool {
+        self.breakpoint_keys.contains(&bp_key)
+    }
+
+    // -- Priority / group --
+
+    /// Set the thread priority.
+    pub fn set_priority(&mut self, priority: i32) {
+        self.priority = Some(priority);
+    }
+
+    /// Set the thread group.
+    pub fn set_group(&mut self, group: impl Into<String>) {
+        self.group = Some(group.into());
+    }
+
+    // -- ThreadSnapshot --
+
+    /// Capture a point-in-time snapshot of this thread's state.
+    pub fn snapshot_at(&self, snap: i64) -> ThreadSnapshot {
+        let mut ts = ThreadSnapshot::new(snap, self.execution_state);
+
+        // Capture PC and SP from stack frames.
+        if let Some(frames) = self.stack_frames_at(snap) {
+            ts.frame_count = frames.len();
+            if let Some(innermost) = frames.iter().find(|f| f.level == 0) {
+                ts.pc = Some(innermost.pc);
+                ts.sp = Some(innermost.sp);
+            }
+        }
+
+        // Capture registers from the latest register snapshot.
+        if let Some(reg_snap) = self.register_snapshot_at(snap) {
+            ts.registers = reg_snap.values.clone();
+            // Also derive PC from RIP if no stack frame info.
+            if ts.pc.is_none() {
+                ts.pc = reg_snap.get_u64_le("RIP").or_else(|| reg_snap.get_u64_le("PC"));
+            }
+            if ts.sp.is_none() {
+                ts.sp = reg_snap.get_u64_le("RSP").or_else(|| reg_snap.get_u64_le("SP"));
+            }
+        }
+
+        ts
+    }
+
+    // -- Query helpers --
+
+    /// The latest execution state transition, if any.
+    pub fn latest_state_transition(&self) -> Option<&ExecutionStateRecord> {
+        self.state_history.last()
+    }
+
+    /// The snap at which this thread was created.
+    pub fn creation_snap(&self) -> i64 {
+        self.lifespan.lmin()
+    }
+
+    /// The snap at which this thread was destroyed, if it has been.
+    pub fn destruction_snap(&self) -> Option<i64> {
+        if self.lifespan.lmax() == Lifespan::MAX {
+            None
+        } else {
+            Some(self.lifespan.lmax())
+        }
+    }
+
+    /// Get the SP (stack pointer) from the innermost frame at `snap`.
+    pub fn sp_at(&self, snap: i64) -> Option<u64> {
+        self.stack_frames_at(snap).and_then(|frames| {
+            frames.iter().find(|f| f.level == 0).map(|f| f.sp)
+        })
+    }
+
+    /// Get the function name from the innermost frame at `snap`.
+    pub fn function_name_at(&self, snap: i64) -> Option<&str> {
+        self.stack_frames_at(snap).and_then(|frames| {
+            frames
+                .iter()
+                .find(|f| f.level == 0)
+                .and_then(|f| f.function_name.as_deref())
+        })
     }
 }
 
@@ -514,5 +792,234 @@ mod tests {
         assert_eq!(r.state, TraceExecutionState::Stopped);
         assert_eq!(r.snap, 5);
         assert_eq!(r.reason.as_deref(), Some("signal 11"));
+    }
+
+    // -- New tests for lifespan-aware names --
+
+    #[test]
+    fn test_name_at() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert_eq!(t.name_at(0), "main");
+        assert_eq!(t.name_at(100), "main");
+
+        t.set_name_at(5, "worker");
+        assert_eq!(t.name_at(0), "main");
+        assert_eq!(t.name_at(5), "worker");
+        assert_eq!(t.name_at(100), "worker");
+
+        t.set_name_at(10, "idle");
+        assert_eq!(t.name_at(5), "worker");
+        assert_eq!(t.name_at(10), "idle");
+        assert_eq!(t.name_at(100), "idle");
+    }
+
+    #[test]
+    fn test_name_with_lifespan() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_name(Lifespan::span(5, 10), "temp_name");
+        assert_eq!(t.name_at(0), "main");
+        assert_eq!(t.name_at(5), "temp_name");
+        assert_eq!(t.name_at(10), "temp_name");
+        assert_eq!(t.name_at(11), "main"); // falls back to base name
+    }
+
+    #[test]
+    fn test_reset_name() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_name_at(5, "worker");
+        t.reset_name("new_main");
+        assert_eq!(t.name, "new_main");
+        assert_eq!(t.name_history().len(), 0);
+        assert_eq!(t.name_at(5), "new_main");
+    }
+
+    // -- New tests for lifespan-aware comments --
+
+    #[test]
+    fn test_comment_at() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert!(t.comment_at(0).is_none());
+
+        t.set_comment_at(5, "paused here");
+        assert!(t.comment_at(0).is_none());
+        assert_eq!(t.comment_at(5), Some("paused here"));
+        assert_eq!(t.comment_at(100), Some("paused here"));
+    }
+
+    #[test]
+    fn test_comment_with_lifespan() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_comment(Lifespan::span(5, 10), "temporary note");
+        assert!(t.comment_at(0).is_none());
+        assert_eq!(t.comment_at(5), Some("temporary note"));
+        assert_eq!(t.comment_at(10), Some("temporary note"));
+        assert!(t.comment_at(11).is_none());
+    }
+
+    // -- New tests for deletion --
+
+    #[test]
+    fn test_delete() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert!(!t.is_deleted());
+        assert!(t.is_alive_now());
+        t.delete();
+        assert!(t.is_deleted());
+        assert!(!t.is_alive_now());
+        assert!(t.lifespan.is_empty());
+    }
+
+    // -- New tests for breakpoints --
+
+    #[test]
+    fn test_breakpoints() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert!(t.breakpoint_keys.is_empty());
+
+        t.add_breakpoint(10);
+        t.add_breakpoint(20);
+        assert_eq!(t.breakpoint_keys.len(), 2);
+        assert!(t.has_breakpoint(10));
+        assert!(t.has_breakpoint(20));
+        assert!(!t.has_breakpoint(30));
+
+        // No duplicates
+        t.add_breakpoint(10);
+        assert_eq!(t.breakpoint_keys.len(), 2);
+
+        t.remove_breakpoint(10);
+        assert!(!t.has_breakpoint(10));
+        assert_eq!(t.breakpoint_keys.len(), 1);
+    }
+
+    // -- New tests for priority/group --
+
+    #[test]
+    fn test_priority_and_group() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert!(t.priority.is_none());
+        assert!(t.group.is_none());
+
+        t.set_priority(10);
+        t.set_group("main");
+        assert_eq!(t.priority, Some(10));
+        assert_eq!(t.group.as_deref(), Some("main"));
+    }
+
+    // -- New tests for ThreadSnapshot --
+
+    #[test]
+    fn test_thread_snapshot() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        t.set_execution_state(TraceExecutionState::Stopped, 5);
+
+        let mut snap = RegisterSnapshot::new(5);
+        snap.set("RIP", vec![0x00, 0x10, 0x40, 0, 0, 0, 0, 0]);
+        snap.set("RSP", vec![0x00, 0xF0, 0xFF, 0x7F, 0, 0, 0, 0]);
+        t.set_register_snapshot(5, snap);
+
+        let frames = vec![
+            StackFrameInfo::new(0, 0x401000, 0x7FFF0000).with_function("main"),
+            StackFrameInfo::new(1, 0x402000, 0x7FFF0020).with_function("start"),
+        ];
+        t.set_stack_frames(5, frames);
+
+        let ts = t.snapshot_at(5);
+        assert_eq!(ts.snap, 5);
+        assert_eq!(ts.execution_state, TraceExecutionState::Stopped);
+        assert_eq!(ts.pc, Some(0x401000));
+        assert_eq!(ts.sp, Some(0x7FFF0000));
+        assert_eq!(ts.frame_count, 2);
+        assert_eq!(ts.registers.len(), 2);
+    }
+
+    #[test]
+    fn test_thread_snapshot_no_stack() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        let mut snap = RegisterSnapshot::new(0);
+        snap.set("RIP", vec![0x00, 0x10, 0x40, 0, 0, 0, 0, 0]);
+        t.set_register_snapshot(0, snap);
+
+        let ts = t.snapshot_at(0);
+        assert_eq!(ts.pc, Some(0x401000));
+        assert_eq!(ts.frame_count, 0);
+    }
+
+    // -- New tests for query helpers --
+
+    #[test]
+    fn test_creation_and_destruction_snap() {
+        let mut t = TraceThread::new(1, "T", "main", 5);
+        assert_eq!(t.creation_snap(), 5);
+        assert!(t.destruction_snap().is_none());
+
+        t.remove(20);
+        assert_eq!(t.destruction_snap(), Some(20));
+    }
+
+    #[test]
+    fn test_latest_state_transition() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        assert!(t.latest_state_transition().is_none());
+
+        t.set_execution_state(TraceExecutionState::Running, 1);
+        let tr = t.latest_state_transition().unwrap();
+        assert_eq!(tr.state, TraceExecutionState::Running);
+    }
+
+    #[test]
+    fn test_sp_at() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        let frames = vec![
+            StackFrameInfo::new(0, 0x401000, 0x7FFF0000),
+            StackFrameInfo::new(1, 0x402000, 0x7FFF0020),
+        ];
+        t.set_stack_frames(0, frames);
+        assert_eq!(t.sp_at(0), Some(0x7FFF0000));
+        assert!(t.sp_at(-1).is_none());
+    }
+
+    #[test]
+    fn test_function_name_at() {
+        let mut t = TraceThread::new(1, "T", "main", 0);
+        let frames = vec![
+            StackFrameInfo::new(0, 0x401000, 0x7FFF0000).with_function("main"),
+            StackFrameInfo::new(1, 0x402000, 0x7FFF0020).with_function("start"),
+        ];
+        t.set_stack_frames(0, frames);
+        assert_eq!(t.function_name_at(0), Some("main"));
+        assert!(t.function_name_at(-1).is_none());
+    }
+
+    #[test]
+    fn test_name_entry_serde() {
+        let entry = NameEntry {
+            lifespan: Lifespan::span(0, 10),
+            name: "test".to_string(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: NameEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.name, "test");
+        assert_eq!(back.lifespan, Lifespan::span(0, 10));
+    }
+
+    #[test]
+    fn test_comment_entry_serde() {
+        let entry = CommentEntry {
+            lifespan: Lifespan::at(5),
+            comment: "note".to_string(),
+        };
+        let json = serde_json::to_string(&entry).unwrap();
+        let back: CommentEntry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.comment, "note");
+    }
+
+    #[test]
+    fn test_thread_snapshot_serde() {
+        let ts = ThreadSnapshot::new(5, TraceExecutionState::Stopped);
+        let json = serde_json::to_string(&ts).unwrap();
+        let back: ThreadSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.snap, 5);
+        assert_eq!(back.execution_state, TraceExecutionState::Stopped);
     }
 }

@@ -100,6 +100,16 @@ impl LfVfunctab {
     pub fn has_valid_vftable_type(&self) -> bool {
         !self.vftable_type_record_number.is_no_type()
     }
+
+    /// Convert this vftable pointer into a [`FieldListEntry::VfTablePointer`].
+    ///
+    /// This is useful when constructing or manipulating field lists
+    /// programmatically.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::VfTablePointer {
+            type_record: self.vftable_type_record_number,
+        }
+    }
 }
 
 impl AbstractMsType for LfVfunctab {
@@ -130,7 +140,131 @@ impl AbstractMsType for LfVfunctab {
     }
 }
 
+impl Default for LfVfunctab {
+    fn default() -> Self {
+        Self::new(RecordNumber::NO_TYPE)
+    }
+}
+
 impl fmt::Display for LfVfunctab {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.emit(Bind::NONE))
+    }
+}
+
+/// LF_VFUNCOFF -- concrete Virtual Function Offset type record.
+///
+/// Ports Ghidra's `VirtualFunctionTablePointerWithOffsetMsType`
+/// (PDB_ID = 0x140C) Java class.
+///
+/// Represents a virtual function table pointer with an explicit byte offset
+/// within the composite. Unlike [`LfVfunctab`], this record carries an
+/// offset field that indicates where the vftable pointer lives in the
+/// object layout.
+///
+/// # Binary Layout (LF_VFUNCOFF / 0x140C)
+///
+/// ```text
+/// +0  u32   vftableType       Type index of the vftable type
+/// +4  u32   offsetInVFTable   Byte offset in the vftable
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LfVfuncoff {
+    /// Record number of this type (set during TPI/IPI registration).
+    record_number: RecordNumber,
+    /// Record number of the vftable type.
+    pub vftable_type_record_number: RecordNumber,
+    /// Byte offset of the virtual function in the vftable.
+    pub offset_in_vftable: u32,
+}
+
+impl LfVfuncoff {
+    /// Create a new vfuncoff type record.
+    pub fn new(vftable_type_record_number: RecordNumber, offset_in_vftable: u32) -> Self {
+        Self {
+            record_number: RecordNumber::NO_TYPE,
+            vftable_type_record_number,
+            offset_in_vftable,
+        }
+    }
+
+    /// Create from raw parsed field values.
+    pub fn from_parsed(vftable_type_index: u32, offset_in_vftable: u32) -> Self {
+        Self::new(RecordNumber::type_record(vftable_type_index), offset_in_vftable)
+    }
+
+    /// Parse an `LF_VFUNCOFF` record from raw bytes (payload after leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u32   vftableType       Type index of the vftable type
+    /// +4  u32   offsetInVFTable   Byte offset in the vftable
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 8 {
+            return Err(format!(
+                "LF_VFUNCOFF payload too short: need >= 8 bytes, got {}",
+                data.len()
+            ));
+        }
+        let vftable_ti = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let offset = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        Ok(Self::from_parsed(vftable_ti, offset))
+    }
+
+    /// Get the record number of the vftable type.
+    pub fn pointer_type_record_number(&self) -> RecordNumber {
+        self.vftable_type_record_number
+    }
+
+    /// Get the byte offset in the vftable.
+    pub fn offset(&self) -> u32 {
+        self.offset_in_vftable
+    }
+
+    /// Whether the vftable type record number references a valid type.
+    pub fn has_valid_vftable_type(&self) -> bool {
+        !self.vftable_type_record_number.is_no_type()
+    }
+
+    /// Convert this vfuncoff into a [`FieldListEntry::VfFuncOffset`].
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::VfFuncOffset {
+            type_record: self.vftable_type_record_number,
+            vftable_offset: self.offset_in_vftable,
+        }
+    }
+}
+
+impl AbstractMsType for LfVfuncoff {
+    fn name(&self) -> &str {
+        ""
+    }
+
+    fn pdb_id(&self) -> u32 {
+        0x140C // LF_VFUNCOFF
+    }
+
+    fn record_number(&self) -> RecordNumber {
+        self.record_number
+    }
+
+    fn set_record_number(&mut self, record_number: RecordNumber) {
+        self.record_number = record_number;
+    }
+
+    fn emit(&self, _bind: Bind) -> String {
+        let mut result = String::new();
+        result.push_str("VFuncOff: ");
+        result.push_str(&self.vftable_type_record_number.to_string());
+        result.push_str(", ");
+        result.push_str(&self.offset_in_vftable.to_string());
+        result
+    }
+}
+
+impl fmt::Display for LfVfuncoff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.emit(Bind::NONE))
     }
@@ -278,5 +412,155 @@ mod tests {
 
         let vt3 = LfVfunctab::new(RecordNumber::type_record(0x4000));
         assert_ne!(vt1, vt3);
+    }
+
+    #[test]
+    fn test_vfunctab_to_field_list_entry() {
+        let vt = make_test_vfunctab();
+        let entry = vt.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::VfTablePointer {
+                type_record,
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x3001));
+            }
+            _ => panic!("Expected VfTablePointer variant"),
+        }
+    }
+
+    #[test]
+    fn test_vfunctab_default() {
+        let vt = LfVfunctab::default();
+        assert!(vt.record_number().is_no_type());
+        assert!(!vt.has_valid_vftable_type());
+    }
+
+    // =========================================================================
+    // LfVfuncoff tests
+    // =========================================================================
+
+    #[test]
+    fn test_vfuncoff_basic() {
+        let vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert_eq!(vo.pdb_id(), 0x140C);
+        assert_eq!(
+            vo.vftable_type_record_number,
+            RecordNumber::type_record(0x3001)
+        );
+        assert_eq!(vo.offset_in_vftable, 16);
+    }
+
+    #[test]
+    fn test_vfuncoff_from_parsed() {
+        let vo = LfVfuncoff::from_parsed(0x4001, 24);
+        assert_eq!(
+            vo.vftable_type_record_number,
+            RecordNumber::type_record(0x4001)
+        );
+        assert_eq!(vo.offset(), 24);
+    }
+
+    #[test]
+    fn test_vfuncoff_parse() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x3001u32.to_le_bytes()); // vftableType
+        data.extend_from_slice(&16u32.to_le_bytes());     // offsetInVFTable
+
+        let vo = LfVfuncoff::parse(&data).unwrap();
+        assert_eq!(vo.pdb_id(), 0x140C);
+        assert_eq!(
+            vo.vftable_type_record_number,
+            RecordNumber::type_record(0x3001)
+        );
+        assert_eq!(vo.offset(), 16);
+    }
+
+    #[test]
+    fn test_vfuncoff_parse_too_short() {
+        let data = [0u8; 6];
+        assert!(LfVfuncoff::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_vfuncoff_emit() {
+        let vo = LfVfuncoff::from_parsed(0x3001, 16);
+        let emitted = vo.emit(Bind::NONE);
+        assert!(emitted.contains("VFuncOff:"));
+        assert!(emitted.contains("0x3001"));
+        assert!(emitted.contains("16"));
+    }
+
+    #[test]
+    fn test_vfuncoff_emit_format() {
+        let vo = LfVfuncoff::from_parsed(0x4001, 24);
+        let emitted = vo.emit(Bind::NONE);
+        assert!(emitted.starts_with("VFuncOff: "));
+        assert!(emitted.contains(", "));
+    }
+
+    #[test]
+    fn test_vfuncoff_record_number() {
+        let mut vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert!(vo.record_number().is_no_type());
+        vo.set_record_number(RecordNumber::type_record(0x5000));
+        assert_eq!(vo.record_number().index(), 0x5000);
+    }
+
+    #[test]
+    fn test_vfuncoff_pointer_type_record_number() {
+        let vo = LfVfuncoff::new(RecordNumber::type_record(0x6000), 0);
+        assert_eq!(
+            vo.pointer_type_record_number(),
+            RecordNumber::type_record(0x6000)
+        );
+    }
+
+    #[test]
+    fn test_vfuncoff_has_valid_vftable_type() {
+        let vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert!(vo.has_valid_vftable_type());
+
+        let vo2 = LfVfuncoff::new(RecordNumber::NO_TYPE, 0);
+        assert!(!vo2.has_valid_vftable_type());
+    }
+
+    #[test]
+    fn test_vfuncoff_to_field_list_entry() {
+        let vo = LfVfuncoff::from_parsed(0x3001, 16);
+        let entry = vo.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::VfFuncOffset {
+                type_record,
+                vftable_offset,
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x3001));
+                assert_eq!(vftable_offset, 16);
+            }
+            _ => panic!("Expected VfFuncOffset variant"),
+        }
+    }
+
+    #[test]
+    fn test_vfuncoff_name_is_empty() {
+        let vo = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert_eq!(vo.name(), "");
+    }
+
+    #[test]
+    fn test_vfuncoff_display() {
+        let vo = LfVfuncoff::from_parsed(0x3001, 16);
+        let display = format!("{}", vo);
+        assert!(display.contains("VFuncOff"));
+        assert!(display.contains("0x3001"));
+    }
+
+    #[test]
+    fn test_vfuncoff_eq() {
+        let vo1 = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        let vo2 = LfVfuncoff::new(RecordNumber::type_record(0x3001), 16);
+        assert_eq!(vo1, vo2);
+
+        let vo3 = LfVfuncoff::new(RecordNumber::type_record(0x3001), 24);
+        assert_ne!(vo1, vo3);
     }
 }

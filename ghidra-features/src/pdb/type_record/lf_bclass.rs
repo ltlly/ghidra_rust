@@ -146,6 +146,40 @@ impl LfBclass {
     pub fn has_valid_base_class(&self) -> bool {
         !self.base_class_record_number.is_no_type()
     }
+
+    /// Whether this is a direct (non-virtual) base class.
+    ///
+    /// Always returns `true` for `LF_BCLASS`. Virtual base classes use
+    /// `LF_VBCLASS` or `LF_IVBCLASS` instead.
+    pub fn is_direct(&self) -> bool {
+        true
+    }
+
+    /// Whether this is a virtual base class.
+    ///
+    /// Always returns `false` for `LF_BCLASS`.
+    pub fn is_virtual_base(&self) -> bool {
+        false
+    }
+
+    /// Whether this is an indirect virtual base class.
+    ///
+    /// Always returns `false` for `LF_BCLASS`.
+    pub fn is_indirect_virtual_base(&self) -> bool {
+        false
+    }
+
+    /// Convert this base class into a [`FieldListEntry::BaseClass`].
+    ///
+    /// This is useful when constructing or manipulating field lists
+    /// programmatically.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::BaseClass {
+            type_record: self.base_class_record_number,
+            offset: self.offset,
+            access: self.attributes.access as u16,
+        }
+    }
 }
 
 impl AbstractMsType for LfBclass {
@@ -181,6 +215,16 @@ impl AbstractMsType for LfBclass {
         result.push_str(&self.base_class_record_number.to_string());
         result.push_str(&format!("<@{}>", self.offset));
         result
+    }
+}
+
+impl Default for LfBclass {
+    fn default() -> Self {
+        Self::new(
+            RecordNumber::NO_TYPE,
+            0,
+            super::lf_member::MemberAttributes::public_member(),
+        )
     }
 }
 
@@ -381,5 +425,39 @@ mod tests {
 
         let bc3 = LfBclass::public_base(0x2000, 0);
         assert_ne!(bc1, bc3);
+    }
+
+    #[test]
+    fn test_bclass_is_direct() {
+        let bc = make_test_bclass();
+        assert!(bc.is_direct());
+        assert!(!bc.is_virtual_base());
+        assert!(!bc.is_indirect_virtual_base());
+    }
+
+    #[test]
+    fn test_bclass_to_field_list_entry() {
+        let bc = LfBclass::from_parsed(0x0003, 0x1000, 8);
+        let entry = bc.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::BaseClass {
+                type_record,
+                offset,
+                access,
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x1000));
+                assert_eq!(offset, 8);
+                assert_eq!(access, 3); // public
+            }
+            _ => panic!("Expected BaseClass variant"),
+        }
+    }
+
+    #[test]
+    fn test_bclass_default() {
+        let bc = LfBclass::default();
+        assert!(bc.record_number().is_no_type());
+        assert!(bc.is_direct());
+        assert_eq!(bc.byte_offset(), 0);
     }
 }

@@ -106,6 +106,17 @@ impl LfNesttype {
     pub fn has_valid_nested_type(&self) -> bool {
         !self.nested_type_record_number.is_no_type()
     }
+
+    /// Convert this nested type into a [`FieldListEntry::NestedType`].
+    ///
+    /// This is useful when constructing or manipulating field lists
+    /// programmatically.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::NestedType {
+            type_record: self.nested_type_record_number,
+            name: self.name.clone(),
+        }
+    }
 }
 
 impl AbstractMsType for LfNesttype {
@@ -134,6 +145,12 @@ impl AbstractMsType for LfNesttype {
         result.push(' ');
         result.push_str(&self.nested_type_record_number.to_string());
         result
+    }
+}
+
+impl Default for LfNesttype {
+    fn default() -> Self {
+        Self::new(RecordNumber::NO_TYPE, String::new())
     }
 }
 
@@ -311,5 +328,28 @@ mod tests {
         let emitted = nt.emit(Bind::NONE);
         // Format: "InnerClass 0x1001"
         assert!(emitted.starts_with("InnerClass "));
+    }
+
+    #[test]
+    fn test_nesttype_to_field_list_entry() {
+        let nt = make_test_nesttype();
+        let entry = nt.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::NestedType {
+                type_record,
+                name,
+            } => {
+                assert_eq!(type_record, RecordNumber::type_record(0x1001));
+                assert_eq!(name, "InnerClass");
+            }
+            _ => panic!("Expected NestedType variant"),
+        }
+    }
+
+    #[test]
+    fn test_nesttype_default() {
+        let nt = LfNesttype::default();
+        assert!(nt.name().is_empty());
+        assert!(nt.record_number().is_no_type());
     }
 }

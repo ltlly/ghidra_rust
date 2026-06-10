@@ -6,6 +6,11 @@
 //! This module provides a richer trace container than the basic `model::trace::Trace`,
 //! adding direct management of processes, threads, snapshots, and memory regions
 //! with full lifecycle support.
+//!
+//! New in this update: lifespan-aware names and comments for threads,
+//! thread/process lookup by path, emulator cache versioning, breakpoint
+//! associations on threads, `delete_thread` for full removal, snapshot
+//! time management, and the `TraceTimeSnapshot` helper.
 
 use std::collections::BTreeMap;
 
@@ -33,6 +38,47 @@ pub struct TraceStatistics {
     pub alive_process_count: usize,
     /// Number of currently alive threads.
     pub alive_thread_count: usize,
+}
+
+// ---------------------------------------------------------------------------
+// TraceTimeSnapshot
+// ---------------------------------------------------------------------------
+
+/// Point-in-time snapshot metadata, mirroring `TraceSnapshot` in Java.
+///
+/// Each snapshot records a description, an optional wall-clock timestamp,
+/// and the sets of processes and threads alive at that point.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceTimeSnapshot {
+    /// The snapshot key (snap value).
+    pub key: i64,
+    /// An optional human-readable description.
+    pub description: Option<String>,
+    /// Wall-clock timestamp (epoch milliseconds), if known.
+    pub timestamp: Option<i64>,
+}
+
+impl TraceTimeSnapshot {
+    /// Create a new time snapshot.
+    pub fn new(key: i64) -> Self {
+        Self {
+            key,
+            description: None,
+            timestamp: None,
+        }
+    }
+
+    /// Set a description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    /// Set a wall-clock timestamp.
+    pub fn with_timestamp(mut self, ts: i64) -> Self {
+        self.timestamp = Some(ts);
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +166,68 @@ pub struct TraceData {
     next_snap_key: i64,
     /// Custom properties.
     properties: BTreeMap<String, String>,
+    /// Emulator cache version for invalidation.
+    emulator_cache_version: i64,
+    /// Base language ID (e.g. "x86:LE:64:default").
+    base_language_id: Option<String>,
+    /// Base compiler spec ID.
+    base_compiler_spec_id: Option<String>,
+    /// Time snapshots indexed by key.
+    time_snapshots: BTreeMap<i64, TraceTimeSnapshot>,
+    /// Breakpoint specs: id -> (name, expression, enabled, snap, thread_keys, process_key).
+    breakpoints: BTreeMap<i64, TraceBreakpointEntry>,
+    /// Next available breakpoint key.
+    next_breakpoint_key: i64,
+    /// Saved views (snap -> view name).
+    saved_views: BTreeMap<i64, String>,
+}
+
+/// A breakpoint entry tracked within a trace.
+///
+/// Ported from Ghidra's `TraceBreakpointSpec` / `TraceBreakpointLocation`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceBreakpointEntry {
+    /// Unique key.
+    pub key: i64,
+    /// Human-readable name (e.g. "Breakpoint #1").
+    pub name: String,
+    /// Expression or address string (e.g. "0x401000").
+    pub expression: String,
+    /// Whether the breakpoint is currently enabled.
+    pub enabled: bool,
+    /// The snap at which this breakpoint was created.
+    pub creation_snap: i64,
+    /// Thread keys this breakpoint applies to (empty = all threads).
+    pub thread_keys: Vec<i64>,
+    /// Process key this breakpoint belongs to (0 = global).
+    pub process_key: i64,
+    /// Number of times this breakpoint has been hit.
+    pub hit_count: u64,
+    /// The snap at which the breakpoint was last hit, if ever.
+    pub last_hit_snap: Option<i64>,
+}
+
+impl TraceBreakpointEntry {
+    /// Create a new breakpoint entry.
+    pub fn new(key: i64, name: impl Into<String>, expression: impl Into<String>, snap: i64) -> Self {
+        Self {
+            key,
+            name: name.into(),
+            expression: expression.into(),
+            enabled: true,
+            creation_snap: snap,
+            thread_keys: Vec::new(),
+            process_key: 0,
+            hit_count: 0,
+            last_hit_snap: None,
+        }
+    }
+
+    /// Record a hit.
+    pub fn record_hit(&mut self, snap: i64) {
+        self.hit_count += 1;
+        self.last_hit_snap = Some(snap);
+    }
 }
 
 /// A composite key for memory state lookups.
@@ -191,6 +299,13 @@ impl TraceData {
             next_thread_key: 1,
             next_snap_key: 0,
             properties: BTreeMap::new(),
+            emulator_cache_version: 0,
+            base_language_id: None,
+            base_compiler_spec_id: None,
+            time_snapshots: BTreeMap::new(),
+            breakpoints: BTreeMap::new(),
+            next_breakpoint_key: 1,
+            saved_views: BTreeMap::new(),
         }
     }
 
@@ -220,6 +335,41 @@ impl TraceData {
     /// Set whether this trace is writable.
     pub fn set_writable(&mut self, writable: bool) {
         self.writable = writable;
+    }
+
+    // -- Language / Compiler --
+
+    /// Set the base language ID for this trace.
+    pub fn set_base_language(&mut self, lang_id: impl Into<String>) {
+        self.base_language_id = Some(lang_id.into());
+    }
+
+    /// The base language ID, if set.
+    pub fn base_language(&self) -> Option<&str> {
+        self.base_language_id.as_deref()
+    }
+
+    /// Set the base compiler spec ID for this trace.
+    pub fn set_base_compiler_spec(&mut self, spec_id: impl Into<String>) {
+        self.base_compiler_spec_id = Some(spec_id.into());
+    }
+
+    /// The base compiler spec ID, if set.
+    pub fn base_compiler_spec(&self) -> Option<&str> {
+        self.base_compiler_spec_id.as_deref()
+    }
+
+    // -- Emulator cache --
+
+    /// Set the emulator cache version. Incrementing this invalidates
+    /// any cached emulation results.
+    pub fn set_emulator_cache_version(&mut self, version: i64) {
+        self.emulator_cache_version = version;
+    }
+
+    /// The current emulator cache version.
+    pub fn emulator_cache_version(&self) -> i64 {
+        self.emulator_cache_version
     }
 
     // -- Properties --
@@ -418,6 +568,172 @@ impl TraceData {
     /// The number of threads (including dead ones).
     pub fn thread_count(&self) -> usize {
         self.threads.len()
+    }
+
+    /// Delete a thread entirely from the trace (not just mark as removed).
+    ///
+    /// Returns the removed thread, if any.
+    pub fn delete_thread(&mut self, key: i64) -> Option<TraceThread> {
+        let thread = self.threads.remove(&key);
+        if thread.is_some() {
+            self.events.push(TraceEvent {
+                snap: 0,
+                description: format!("Thread {key} deleted"),
+                kind: TraceEventKind::ThreadDestroyed,
+            });
+        }
+        thread
+    }
+
+    /// Get a thread by its path (e.g. "Processes[1].Threads[2]").
+    pub fn get_thread_by_path(&self, path: &str) -> Option<&TraceThread> {
+        self.threads.values().find(|t| t.path == path)
+    }
+
+    /// Get a live thread by path at a given snap.
+    ///
+    /// A thread is "live" at `snap` if its lifespan contains `snap`.
+    pub fn get_live_thread_by_path(&self, snap: i64, path: &str) -> Option<&TraceThread> {
+        self.threads
+            .values()
+            .find(|t| t.path == path && t.is_valid(snap))
+    }
+
+    /// Get a process by its path (e.g. "Processes[1]").
+    pub fn get_process_by_path(&self, path: &str) -> Option<&TraceProcess> {
+        self.processes.values().find(|p| p.path == path)
+    }
+
+    /// Get a live process by path at a given snap.
+    pub fn get_live_process_by_path(&self, snap: i64, path: &str) -> Option<&TraceProcess> {
+        self.processes
+            .values()
+            .find(|p| p.path == path && p.is_valid(snap))
+    }
+
+    /// Iterate over all threads (including dead ones).
+    pub fn all_threads(&self) -> impl Iterator<Item = &TraceThread> {
+        self.threads.values()
+    }
+
+    /// Iterate over all processes (including dead ones).
+    pub fn all_processes(&self) -> impl Iterator<Item = &TraceProcess> {
+        self.processes.values()
+    }
+
+    /// Delete a process entirely from the trace (not just mark as removed).
+    ///
+    /// Returns the removed process, if any.
+    pub fn delete_process(&mut self, key: i64) -> Option<TraceProcess> {
+        let process = self.processes.remove(&key);
+        if process.is_some() {
+            self.events.push(TraceEvent {
+                snap: 0,
+                description: format!("Process {key} deleted"),
+                kind: TraceEventKind::ProcessDestroyed,
+            });
+        }
+        process
+    }
+
+    // -- Breakpoints --
+
+    /// Add a breakpoint and return its key.
+    pub fn add_breakpoint(
+        &mut self,
+        name: impl Into<String>,
+        expression: impl Into<String>,
+        snap: i64,
+    ) -> i64 {
+        let key = self.next_breakpoint_key;
+        self.next_breakpoint_key += 1;
+        let bp = TraceBreakpointEntry::new(key, name, expression, snap);
+        self.breakpoints.insert(key, bp);
+        key
+    }
+
+    /// Get a breakpoint by key.
+    pub fn breakpoint(&self, key: i64) -> Option<&TraceBreakpointEntry> {
+        self.breakpoints.get(&key)
+    }
+
+    /// Get a mutable breakpoint by key.
+    pub fn breakpoint_mut(&mut self, key: i64) -> Option<&mut TraceBreakpointEntry> {
+        self.breakpoints.get_mut(&key)
+    }
+
+    /// Remove a breakpoint by key. Returns the removed entry, if any.
+    pub fn remove_breakpoint(&mut self, key: i64) -> Option<TraceBreakpointEntry> {
+        self.breakpoints.remove(&key)
+    }
+
+    /// All breakpoint keys.
+    pub fn breakpoint_keys(&self) -> Vec<i64> {
+        self.breakpoints.keys().copied().collect()
+    }
+
+    /// The number of breakpoints.
+    pub fn breakpoint_count(&self) -> usize {
+        self.breakpoints.len()
+    }
+
+    /// All enabled breakpoints.
+    pub fn enabled_breakpoints(&self) -> impl Iterator<Item = &TraceBreakpointEntry> {
+        self.breakpoints.values().filter(|bp| bp.enabled)
+    }
+
+    // -- Time snapshots --
+
+    /// Get or create a time snapshot at the given snap.
+    pub fn get_or_create_time_snapshot(&mut self, snap: i64) -> &mut TraceTimeSnapshot {
+        self.time_snapshots
+            .entry(snap)
+            .or_insert_with(|| TraceTimeSnapshot::new(snap))
+    }
+
+    /// Get a time snapshot at a given snap.
+    pub fn time_snapshot(&self, snap: i64) -> Option<&TraceTimeSnapshot> {
+        self.time_snapshots.get(&snap)
+    }
+
+    /// Set a time snapshot description.
+    pub fn set_snapshot_description(&mut self, snap: i64, desc: impl Into<String>) {
+        let entry = self
+            .time_snapshots
+            .entry(snap)
+            .or_insert_with(|| TraceTimeSnapshot::new(snap));
+        entry.description = Some(desc.into());
+    }
+
+    /// Set a time snapshot timestamp.
+    pub fn set_snapshot_timestamp(&mut self, snap: i64, ts: i64) {
+        let entry = self
+            .time_snapshots
+            .entry(snap)
+            .or_insert_with(|| TraceTimeSnapshot::new(snap));
+        entry.timestamp = Some(ts);
+    }
+
+    // -- Saved views --
+
+    /// Save a named view at a snap.
+    pub fn save_view(&mut self, snap: i64, name: impl Into<String>) {
+        self.saved_views.insert(snap, name.into());
+    }
+
+    /// Get the name of a saved view at a snap.
+    pub fn saved_view(&self, snap: i64) -> Option<&str> {
+        self.saved_views.get(&snap).map(|s| s.as_str())
+    }
+
+    /// Remove a saved view at a snap.
+    pub fn remove_saved_view(&mut self, snap: i64) -> Option<String> {
+        self.saved_views.remove(&snap)
+    }
+
+    /// All saved view snaps.
+    pub fn saved_view_snaps(&self) -> Vec<i64> {
+        self.saved_views.keys().copied().collect()
     }
 
     // -- Memory state --
@@ -706,5 +1022,164 @@ mod tests {
         assert_eq!(back.process_count(), 1);
         assert_eq!(back.thread_count(), 1);
         assert_eq!(back.snapshot_count(), 1);
+    }
+
+    #[test]
+    fn test_language_and_compiler() {
+        let mut t = TraceData::new("t1");
+        assert!(t.base_language().is_none());
+        t.set_base_language("x86:LE:64:default");
+        assert_eq!(t.base_language(), Some("x86:LE:64:default"));
+        t.set_base_compiler_spec("default");
+        assert_eq!(t.base_compiler_spec(), Some("default"));
+    }
+
+    #[test]
+    fn test_emulator_cache_version() {
+        let mut t = TraceData::new("t1");
+        assert_eq!(t.emulator_cache_version(), 0);
+        t.set_emulator_cache_version(3);
+        assert_eq!(t.emulator_cache_version(), 3);
+    }
+
+    #[test]
+    fn test_delete_thread() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        let th = t.add_thread(p, "main", 0).unwrap();
+        assert_eq!(t.thread_count(), 1);
+        let removed = t.delete_thread(th);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().name, "main");
+        assert_eq!(t.thread_count(), 0);
+    }
+
+    #[test]
+    fn test_delete_process() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        assert_eq!(t.process_count(), 1);
+        let removed = t.delete_process(p);
+        assert!(removed.is_some());
+        assert_eq!(t.process_count(), 0);
+    }
+
+    #[test]
+    fn test_thread_by_path() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        let th = t.add_thread(p, "main", 0).unwrap();
+        let thread = t.thread(th).unwrap();
+        let path = thread.path.clone();
+
+        assert!(t.get_thread_by_path(&path).is_some());
+        assert!(t.get_thread_by_path("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_live_thread_by_path() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        let th = t.add_thread(p, "main", 0).unwrap();
+        let thread = t.thread(th).unwrap();
+        let path = thread.path.clone();
+
+        assert!(t.get_live_thread_by_path(0, &path).is_some());
+        t.remove_thread(th, 5);
+        assert!(t.get_live_thread_by_path(0, &path).is_some());
+        assert!(t.get_live_thread_by_path(10, &path).is_none());
+    }
+
+    #[test]
+    fn test_process_by_path() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        let process = t.process(p).unwrap();
+        let path = process.path.clone();
+
+        assert!(t.get_process_by_path(&path).is_some());
+        assert!(t.get_process_by_path("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_breakpoints() {
+        let mut t = TraceData::new("t1");
+        let bp1 = t.add_breakpoint("bp1", "0x401000", 0);
+        let bp2 = t.add_breakpoint("bp2", "0x402000", 0);
+        assert_eq!(t.breakpoint_count(), 2);
+
+        let bp = t.breakpoint(bp1).unwrap();
+        assert_eq!(bp.name, "bp1");
+        assert!(bp.enabled);
+
+        t.breakpoint_mut(bp2).unwrap().enabled = false;
+        assert_eq!(t.enabled_breakpoints().count(), 1);
+
+        t.remove_breakpoint(bp1);
+        assert_eq!(t.breakpoint_count(), 1);
+        assert!(t.breakpoint(bp1).is_none());
+    }
+
+    #[test]
+    fn test_breakpoint_hit() {
+        let mut t = TraceData::new("t1");
+        let bp = t.add_breakpoint("bp1", "0x401000", 0);
+        t.breakpoint_mut(bp).unwrap().record_hit(5);
+        t.breakpoint_mut(bp).unwrap().record_hit(10);
+        let bp = t.breakpoint(bp).unwrap();
+        assert_eq!(bp.hit_count, 2);
+        assert_eq!(bp.last_hit_snap, Some(10));
+    }
+
+    #[test]
+    fn test_time_snapshots() {
+        let mut t = TraceData::new("t1");
+        t.set_snapshot_description(0, "initial");
+        t.set_snapshot_timestamp(0, 1000);
+        let ts = t.time_snapshot(0).unwrap();
+        assert_eq!(ts.description.as_deref(), Some("initial"));
+        assert_eq!(ts.timestamp, Some(1000));
+    }
+
+    #[test]
+    fn test_saved_views() {
+        let mut t = TraceData::new("t1");
+        t.save_view(0, "main");
+        t.save_view(5, "detail");
+        assert_eq!(t.saved_view(0), Some("main"));
+        assert_eq!(t.saved_view(5), Some("detail"));
+        assert_eq!(t.saved_view_snaps().len(), 2);
+        t.remove_saved_view(0);
+        assert!(t.saved_view(0).is_none());
+    }
+
+    #[test]
+    fn test_all_threads_and_processes() {
+        let mut t = TraceData::new("t1");
+        let p = t.add_process("app", 0);
+        t.add_thread(p, "main", 0);
+        t.add_thread(p, "worker", 1);
+        assert_eq!(t.all_threads().count(), 2);
+        assert_eq!(t.all_processes().count(), 1);
+    }
+
+    #[test]
+    fn test_time_snapshot_builder() {
+        let ts = TraceTimeSnapshot::new(5)
+            .with_description("step")
+            .with_timestamp(5000);
+        assert_eq!(ts.key, 5);
+        assert_eq!(ts.description.as_deref(), Some("step"));
+        assert_eq!(ts.timestamp, Some(5000));
+    }
+
+    #[test]
+    fn test_breakpoint_entry_builder() {
+        let bp = TraceBreakpointEntry::new(1, "main_bp", "main", 0);
+        assert_eq!(bp.key, 1);
+        assert_eq!(bp.name, "main_bp");
+        assert_eq!(bp.expression, "main");
+        assert!(bp.enabled);
+        assert_eq!(bp.hit_count, 0);
     }
 }

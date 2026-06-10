@@ -115,7 +115,7 @@ pub use s_frameproc::SFrameProc;
 pub use s_gdata32::SGData32;
 pub use s_gproc32::SGProc32;
 pub use s_heapalloca::SHeapAlloca;
-pub use s_label32::SLabel32;
+pub use s_label32::{SLabel32, ProcedureFlags};
 pub use s_ldata32::SLData32;
 pub use s_lproc32::SLProc32;
 pub use s_lthread32::SLThread32;
@@ -165,7 +165,7 @@ pub mod s_const;
 
 pub use s_block32::SBlock32;
 pub use s_with32::SWith32;
-pub use s_return::SReturn;
+pub use s_return::{SReturn, ReturnStyle};
 pub use s_entrythis::SEntryThis;
 
 // Variant types for symbols that share binary format across multiple S_* kinds

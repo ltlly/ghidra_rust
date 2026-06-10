@@ -1986,6 +1986,405 @@ impl RegisterReadPolicy {
 }
 
 // ============================================================================
+// RegisterContextTracker -- track context register changes over time
+// ============================================================================
+
+/// Tracks changes to context registers over a sequence of snaps.
+///
+/// Ported from Ghidra's context register tracking used in pcode emulation
+/// where the processor context (e.g., ARM Thumb mode, x86 address size)
+/// changes as execution progresses. Maintains a history of context values
+/// so that emulators can rewind or diff context state.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RegisterContextTracker {
+    /// History entries: (snap, context_field_name, value).
+    history: Vec<(i64, String, u64)>,
+    /// Current context values by field name.
+    current: BTreeMap<String, u64>,
+    /// Maximum history depth (0 = unlimited).
+    max_depth: usize,
+}
+
+impl RegisterContextTracker {
+    /// Create a new context tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the maximum history depth.
+    pub fn with_max_depth(mut self, max: usize) -> Self {
+        self.max_depth = max;
+        self
+    }
+
+    /// Record a context register change at the given snap.
+    pub fn record(&mut self, snap: i64, field: impl Into<String>, value: u64) {
+        let field = field.into();
+        self.current.insert(field.clone(), value);
+        if self.max_depth > 0 && self.history.len() >= self.max_depth {
+            self.history.remove(0);
+        }
+        self.history.push((snap, field, value));
+    }
+
+    /// Get the current value of a context field.
+    pub fn get(&self, field: &str) -> Option<u64> {
+        self.current.get(field).copied()
+    }
+
+    /// Get the value of a context field at a specific snap.
+    /// Returns the most recent value at or before the given snap.
+    pub fn get_at_snap(&self, field: &str, snap: i64) -> Option<u64> {
+        self.history
+            .iter()
+            .rev()
+            .find(|(s, f, _)| *s <= snap && f == field)
+            .map(|(_, _, v)| *v)
+    }
+
+    /// Get the full history for a context field.
+    pub fn history_for(&self, field: &str) -> Vec<(i64, u64)> {
+        self.history
+            .iter()
+            .filter(|(_, f, _)| f == field)
+            .map(|(s, _, v)| (*s, *v))
+            .collect()
+    }
+
+    /// Get all context field names currently tracked.
+    pub fn fields(&self) -> Vec<&str> {
+        self.current.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// The total number of history entries.
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
+    /// Clear all history and current values.
+    pub fn clear(&mut self) {
+        self.history.clear();
+        self.current.clear();
+    }
+
+    /// Diff the current context against a previous snap, returning fields
+    /// that have changed.
+    pub fn diff_since_snap(&self, snap: i64) -> BTreeMap<String, (Option<u64>, Option<u64>)> {
+        let mut diffs = BTreeMap::new();
+        for (field, &current_val) in &self.current {
+            let old_val = self.get_at_snap(field, snap);
+            if old_val != Some(current_val) {
+                diffs.insert(field.clone(), (old_val, Some(current_val)));
+            }
+        }
+        diffs
+    }
+
+    /// Restore context state to the values at a given snap.
+    pub fn restore_to_snap(&mut self, snap: i64) {
+        for (field, _) in self.current.clone().iter() {
+            if let Some(old_val) = self.get_at_snap(field, snap) {
+                self.current.insert(field.clone(), old_val);
+            }
+        }
+    }
+}
+
+// ============================================================================
+// RegisterBankValidator -- validate register values against constraints
+// ============================================================================
+
+/// A validation rule for register values.
+///
+/// Ported from Ghidra's register validation used to check register
+/// invariants during emulation (e.g., alignment constraints, range
+/// checks, or value-invariant relationships).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum RegisterValidationRule {
+    /// The register value must be within [min, max] as unsigned.
+    Range { min: u128, max: u128 },
+    /// The register value must be aligned to the given byte boundary.
+    Alignment { bytes: u32 },
+    /// The register value must not be zero.
+    NonZero,
+    /// The register value must equal one of the given values.
+    OneOf { values: Vec<Vec<u8>> },
+    /// A custom rule with a description and a check function result.
+    Custom { description: String },
+}
+
+/// A validation result for a single register.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterValidationResult {
+    /// The register name.
+    pub name: String,
+    /// Whether the validation passed.
+    pub valid: bool,
+    /// The rule that failed (if any).
+    pub failed_rule: Option<String>,
+    /// The actual value (if available).
+    pub actual_value: Option<Vec<u8>>,
+}
+
+/// Validates register values against a set of rules.
+///
+/// Ported from Ghidra's register validation framework used during
+/// emulation to ensure register state invariants are maintained.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterBankValidator {
+    /// Validation rules keyed by register name.
+    rules: BTreeMap<String, Vec<RegisterValidationRule>>,
+}
+
+impl RegisterBankValidator {
+    /// Create a new empty validator.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a validation rule for a register.
+    pub fn add_rule(&mut self, name: impl Into<String>, rule: RegisterValidationRule) {
+        self.rules.entry(name.into()).or_default().push(rule);
+    }
+
+    /// Add a range rule for a register.
+    pub fn add_range_rule(&mut self, name: impl Into<String>, min: u128, max: u128) {
+        self.add_rule(name, RegisterValidationRule::Range { min, max });
+    }
+
+    /// Add an alignment rule for a register.
+    pub fn add_alignment_rule(&mut self, name: impl Into<String>, bytes: u32) {
+        self.add_rule(name, RegisterValidationRule::Alignment { bytes });
+    }
+
+    /// Add a non-zero rule for a register.
+    pub fn add_nonzero_rule(&mut self, name: impl Into<String>) {
+        self.add_rule(name, RegisterValidationRule::NonZero);
+    }
+
+    /// Validate all registers that have rules against the given bank.
+    pub fn validate(&self, bank: &PcodeRegisterBank) -> Vec<RegisterValidationResult> {
+        let mut results = Vec::new();
+        for (name, rules) in &self.rules {
+            let value = bank.read_register(name);
+            for rule in rules {
+                let result = Self::check_rule(name, rule, value.as_deref());
+                if !result.valid {
+                    results.push(result);
+                }
+            }
+        }
+        results
+    }
+
+    /// Validate a single register.
+    pub fn validate_register(
+        &self,
+        bank: &PcodeRegisterBank,
+        name: &str,
+    ) -> Vec<RegisterValidationResult> {
+        let value = bank.read_register(name);
+        self.rules
+            .get(name)
+            .map(|rules| {
+                rules
+                    .iter()
+                    .map(|rule| Self::check_rule(name, rule, value.as_deref()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Check if all registers pass validation.
+    pub fn is_valid(&self, bank: &PcodeRegisterBank) -> bool {
+        self.validate(bank).is_empty()
+    }
+
+    fn check_rule(
+        name: &str,
+        rule: &RegisterValidationRule,
+        value: Option<&[u8]>,
+    ) -> RegisterValidationResult {
+        let valid = match (rule, value) {
+            (_, None) => false,
+            (RegisterValidationRule::Range { min, max }, Some(bytes)) => {
+                let val = bytes_to_u128(bytes);
+                val >= *min && val <= *max
+            }
+            (RegisterValidationRule::Alignment { bytes }, Some(bv)) => {
+                let val = bytes_to_u128(bv);
+                val % (*bytes as u128) == 0
+            }
+            (RegisterValidationRule::NonZero, Some(bytes)) => bytes.iter().any(|&b| b != 0),
+            (RegisterValidationRule::OneOf { values }, Some(bytes)) => {
+                values.iter().any(|v| v.as_slice() == bytes)
+            }
+            (RegisterValidationRule::Custom { .. }, _) => true, // Custom rules need external eval
+        };
+        RegisterValidationResult {
+            name: name.to_string(),
+            valid,
+            failed_rule: if valid {
+                None
+            } else {
+                Some(format!("{:?}", rule))
+            },
+            actual_value: value.map(|v| v.to_vec()),
+        }
+    }
+
+    /// Remove all rules for a register.
+    pub fn clear_rules(&mut self, name: &str) {
+        self.rules.remove(name);
+    }
+
+    /// Remove all rules.
+    pub fn clear_all(&mut self) {
+        self.rules.clear();
+    }
+
+    /// The number of registers with rules.
+    pub fn num_registers(&self) -> usize {
+        self.rules.len()
+    }
+
+    /// The total number of rules across all registers.
+    pub fn num_rules(&self) -> usize {
+        self.rules.values().map(|v| v.len()).sum()
+    }
+}
+
+/// Helper to convert a byte slice to a u128 value (little-endian).
+fn bytes_to_u128(bytes: &[u8]) -> u128 {
+    let mut val: u128 = 0;
+    for (i, &b) in bytes.iter().enumerate() {
+        val |= (b as u128) << (i * 8);
+    }
+    val
+}
+
+// ============================================================================
+// RegisterValueCache -- caching layer for register reads
+// ============================================================================
+
+/// A cache for register values that avoids repeated reads from the bank.
+///
+/// Ported from Ghidra's register caching used in pcode emulation where
+/// the same registers are read multiple times within a single step.
+/// Provides dirty tracking so that only modified registers need to be
+/// written back.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterValueCache {
+    /// Cached values by register name.
+    cache: BTreeMap<String, Vec<u8>>,
+    /// Registers that have been modified since last sync.
+    dirty: BTreeSet<String>,
+    /// Registers that are pinned (always fetched fresh from bank).
+    pinned: BTreeSet<String>,
+}
+
+impl RegisterValueCache {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Read a register, using cache if available.
+    pub fn read(&mut self, bank: &PcodeRegisterBank, name: &str) -> Option<Vec<u8>> {
+        if self.pinned.contains(name) {
+            return bank.read_register(name);
+        }
+        if let Some(val) = self.cache.get(name) {
+            return Some(val.clone());
+        }
+        let val = bank.read_register(name);
+        if let Some(ref v) = val {
+            self.cache.insert(name.to_string(), v.clone());
+        }
+        val
+    }
+
+    /// Write a register value into the cache (not written to bank yet).
+    pub fn write(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        let name = name.into();
+        self.cache.insert(name.clone(), value);
+        self.dirty.insert(name);
+    }
+
+    /// Flush all dirty values back to the bank.
+    pub fn flush(&mut self, bank: &mut PcodeRegisterBank) {
+        for name in &self.dirty {
+            if let Some(val) = self.cache.get(name) {
+                bank.write_register(name, val);
+            }
+        }
+        self.dirty.clear();
+    }
+
+    /// Flush a specific register back to the bank.
+    pub fn flush_register(&mut self, bank: &mut PcodeRegisterBank, name: &str) {
+        if let Some(val) = self.cache.get(name) {
+            bank.write_register(name, val);
+            self.dirty.remove(name);
+        }
+    }
+
+    /// Invalidate a specific cache entry.
+    pub fn invalidate(&mut self, name: &str) {
+        self.cache.remove(name);
+        self.dirty.remove(name);
+    }
+
+    /// Invalidate all cache entries.
+    pub fn invalidate_all(&mut self) {
+        self.cache.clear();
+        self.dirty.clear();
+    }
+
+    /// Pin a register (always fetch fresh from bank, bypass cache).
+    pub fn pin(&mut self, name: impl Into<String>) {
+        self.pinned.insert(name.into());
+    }
+
+    /// Unpin a register.
+    pub fn unpin(&mut self, name: &str) {
+        self.pinned.remove(name);
+    }
+
+    /// Get the set of dirty register names.
+    pub fn dirty_registers(&self) -> &BTreeSet<String> {
+        &self.dirty
+    }
+
+    /// Whether the cache has any dirty entries.
+    pub fn has_dirty(&self) -> bool {
+        !self.dirty.is_empty()
+    }
+
+    /// The number of cached entries.
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Whether the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+
+    /// Sync the cache with the bank: update cached values for registers
+    /// that have changed in the bank but are not dirty in the cache.
+    pub fn sync_from_bank(&mut self, bank: &PcodeRegisterBank) {
+        for name in bank.register_names() {
+            if !self.dirty.contains(name) {
+                if let Some(val) = bank.read_register(name) {
+                    self.cache.insert(name.to_string(), val);
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -2754,5 +3153,208 @@ mod tests {
             let val = policy.read_with_policy(&bank, "RAX").unwrap().unwrap();
             assert_eq!(val, vec![0x42; 8]);
         }
+    }
+
+    // -- RegisterContextTracker --
+
+    #[test]
+    fn test_context_tracker_basic() {
+        let mut tracker = RegisterContextTracker::new();
+        tracker.record(0, "TMode", 0);
+        tracker.record(10, "TMode", 1);
+        tracker.record(20, "TMode", 0);
+
+        assert_eq!(tracker.get("TMode"), Some(0));
+        assert_eq!(tracker.get_at_snap("TMode", 5), Some(0));
+        assert_eq!(tracker.get_at_snap("TMode", 15), Some(1));
+        assert_eq!(tracker.get_at_snap("TMode", 25), Some(0));
+    }
+
+    #[test]
+    fn test_context_tracker_history() {
+        let mut tracker = RegisterContextTracker::new();
+        tracker.record(0, "TMode", 0);
+        tracker.record(10, "TMode", 1);
+        tracker.record(20, "AddrSize", 32);
+
+        assert_eq!(tracker.history_for("TMode").len(), 2);
+        assert_eq!(tracker.fields().len(), 2);
+    }
+
+    #[test]
+    fn test_context_tracker_diff() {
+        let mut tracker = RegisterContextTracker::new();
+        tracker.record(0, "TMode", 0);
+        tracker.record(10, "TMode", 1);
+
+        let diffs = tracker.diff_since_snap(0);
+        assert!(diffs.contains_key("TMode"));
+        assert_eq!(diffs["TMode"], (Some(0), Some(1)));
+    }
+
+    #[test]
+    fn test_context_tracker_max_depth() {
+        let mut tracker = RegisterContextTracker::new().with_max_depth(2);
+        tracker.record(0, "X", 1);
+        tracker.record(1, "X", 2);
+        tracker.record(2, "X", 3);
+
+        assert_eq!(tracker.history_len(), 2);
+        // Snap 0 was evicted
+        assert_eq!(tracker.get_at_snap("X", 0), None);
+        assert_eq!(tracker.get_at_snap("X", 1), Some(2));
+    }
+
+    // -- RegisterBankValidator --
+
+    #[test]
+    fn test_validator_range() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &100u64.to_le_bytes());
+
+        let mut validator = RegisterBankValidator::new();
+        validator.add_range_rule("RAX", 0, 200);
+        assert!(validator.is_valid(&bank));
+
+        validator.add_range_rule("RAX", 0, 50);
+        assert!(!validator.is_valid(&bank));
+    }
+
+    #[test]
+    fn test_validator_alignment() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RSP", 64, "GPR");
+        bank.write_register("RSP", &0x1000u64.to_le_bytes());
+
+        let mut validator = RegisterBankValidator::new();
+        validator.add_alignment_rule("RSP", 16);
+        assert!(validator.is_valid(&bank));
+
+        bank.write_register("RSP", &0x1001u64.to_le_bytes());
+        assert!(!validator.is_valid(&bank));
+    }
+
+    #[test]
+    fn test_validator_nonzero() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RCX", 64, "GPR");
+
+        let mut validator = RegisterBankValidator::new();
+        validator.add_nonzero_rule("RCX");
+
+        // No value = not valid
+        assert!(!validator.is_valid(&bank));
+
+        bank.write_register("RCX", &[0; 8]);
+        assert!(!validator.is_valid(&bank));
+
+        bank.write_register("RCX", &1u64.to_le_bytes());
+        assert!(validator.is_valid(&bank));
+    }
+
+    #[test]
+    fn test_validator_one_of() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("FLAGS", 32, "GPR");
+        bank.write_register("FLAGS", &0x200u32.to_le_bytes());
+
+        let mut validator = RegisterBankValidator::new();
+        validator.add_rule(
+            "FLAGS",
+            RegisterValidationRule::OneOf {
+                values: vec![0x200u32.to_le_bytes().to_vec(), 0x202u32.to_le_bytes().to_vec()],
+            },
+        );
+        assert!(validator.is_valid(&bank));
+
+        bank.write_register("FLAGS", &0x100u32.to_le_bytes());
+        assert!(!validator.is_valid(&bank));
+    }
+
+    // -- RegisterValueCache --
+
+    #[test]
+    fn test_cache_basic() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut cache = RegisterValueCache::new();
+        assert_eq!(cache.read(&bank, "RAX"), Some(vec![0x42; 8]));
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn test_cache_write_flush() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut cache = RegisterValueCache::new();
+        cache.read(&bank, "RAX"); // prime cache
+
+        cache.write("RAX", vec![0xFF; 8]);
+        assert!(cache.has_dirty());
+        assert_eq!(cache.dirty_registers().len(), 1);
+
+        // Bank still has old value
+        assert_eq!(bank.read_register("RAX"), Some(vec![0x42; 8]));
+
+        cache.flush(&mut bank);
+        assert_eq!(bank.read_register("RAX"), Some(vec![0xFF; 8]));
+        assert!(!cache.has_dirty());
+    }
+
+    #[test]
+    fn test_cache_pin() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut cache = RegisterValueCache::new();
+        cache.pin("RAX");
+
+        // Pinned registers are always fetched fresh
+        cache.read(&bank, "RAX");
+        assert_eq!(cache.len(), 0); // not cached
+    }
+
+    #[test]
+    fn test_cache_invalidate() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut cache = RegisterValueCache::new();
+        cache.read(&bank, "RAX");
+        assert_eq!(cache.len(), 1);
+
+        cache.invalidate("RAX");
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_cache_sync_from_bank() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+
+        let mut cache = RegisterValueCache::new();
+        cache.read(&bank, "RAX"); // cache RAX
+
+        // Modify bank directly
+        bank.write_register("RAX", &[0xFF; 8]);
+
+        // Dirty cache entries should not be overwritten
+        cache.write("RAX", vec![0x99; 8]);
+        cache.sync_from_bank(&bank);
+
+        // RAX is dirty, so sync shouldn't overwrite it
+        assert_eq!(cache.read(&bank, "RAX"), Some(vec![0x99; 8]));
+        // RBX should be synced from bank
+        assert_eq!(cache.read(&bank, "RBX"), Some(vec![0xAA; 8]));
     }
 }

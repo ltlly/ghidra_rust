@@ -45,7 +45,8 @@ use super::record_number::RecordNumber;
 /// name         : NT string
 /// ```
 ///
-/// This corresponds to `S_BPREL32` (0x0200) in the CodeView symbol set.
+/// This corresponds to `S_BPREL32` (0x110B) in the CodeView symbol set.
+/// After the name the stream is 4-byte aligned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SBpRel32 {
     /// The underlying base-pointer-relative data.
@@ -64,10 +65,27 @@ impl SBpRel32 {
     ///
     /// Expects the layout: `offset(i32) + type_record(u32) + name(NT)`.
     /// The stream should be 4-byte aligned after the name (handled by the
-    /// caller).
+    /// caller or via [`parse_aligned`](Self::parse_aligned)).
     pub fn parse(data: &[u8]) -> Option<Self> {
         let inner = AbstractBasePointerRelative::parse(data)?;
         Some(Self { inner })
+    }
+
+    /// Parse an S_BPREL32 symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    ///
+    /// This matches the Java `reader.align4()` call in
+    /// `BasePointerRelative32MsSymbol`.
+    pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse(data)?;
+        // Compute aligned consumed length:
+        // offset(4) + type_record(4) + name_len + null terminator, aligned to 4
+        let name_data = &data[8..];
+        let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        let name_len = end + 1; // include null terminator
+        let total = 8 + name_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
     }
 
     /// Return the signed offset from the base pointer.
@@ -168,6 +186,25 @@ mod tests {
         let sym = SBpRel32::parse(&data).unwrap();
         assert_eq!(sym.offset(), 8);
         assert_eq!(sym.name(), "");
+    }
+
+    #[test]
+    fn test_parse_aligned() {
+        // name "ab" = 2 chars + 1 null = 3 bytes, 8+3=11, aligned to 12
+        let data = make_bprel32_bytes(-4, 0x1020, b"ab");
+        let (sym, consumed) = SBpRel32::parse_aligned(&data).unwrap();
+        assert_eq!(sym.offset(), -4);
+        assert_eq!(sym.name(), "ab");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_aligned_already_aligned() {
+        // name "abc" = 3 chars + 1 null = 4 bytes, 8+4=12, aligned to 12
+        let data = make_bprel32_bytes(-4, 0x1020, b"abc");
+        let (sym, consumed) = SBpRel32::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name(), "abc");
+        assert_eq!(consumed, 12);
     }
 
     #[test]

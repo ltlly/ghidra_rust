@@ -411,6 +411,342 @@ impl GdbThread {
             .map(|level| format!("[{}]", level))
             .collect()
     }
+
+    /// Get all frames sorted by level (innermost first).
+    pub fn frames_sorted(&self) -> Vec<&GdbStackFrame> {
+        let mut frames: Vec<_> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames
+    }
+
+    /// Build the backtrace as a list of display strings.
+    pub fn build_backtrace(&self) -> Vec<String> {
+        let mut frames: Vec<_> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames.iter().map(|f| f.build_display()).collect()
+    }
+
+    /// Build trace object key-value pairs for the stack container.
+    pub fn build_stack_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.frames.len().to_string())]
+    }
+
+    /// Collect all register names across all frames.
+    pub fn all_register_names(&self) -> Vec<String> {
+        let mut names = std::collections::BTreeSet::new();
+        for frame in self.frames.values() {
+            for reg in &frame.registers {
+                names.insert(reg.name.clone());
+            }
+        }
+        names.into_iter().collect()
+    }
+
+    /// Find the frame containing the given PC address.
+    pub fn frame_at_pc(&self, pc: u64) -> Option<&GdbStackFrame> {
+        self.frames.values().find(|f| f.pc == pc)
+    }
+
+    /// Get the return address for the innermost frame.
+    pub fn return_address(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.return_address).filter(|&ra| ra != 0)
+    }
+
+    /// Whether the thread was stopped by a breakpoint.
+    pub fn stopped_at_breakpoint(&self) -> bool {
+        matches!(
+            self.stop_reason,
+            Some(ThreadStopReason::Breakpoint { .. })
+        )
+    }
+
+    /// Whether the thread was stopped by a signal.
+    pub fn stopped_by_signal(&self) -> bool {
+        matches!(
+            self.stop_reason,
+            Some(ThreadStopReason::Signal { .. })
+        )
+    }
+
+    /// Whether the thread finished a step operation.
+    pub fn stopped_at_step(&self) -> bool {
+        self.stop_reason == Some(ThreadStopReason::StepComplete)
+    }
+
+    /// Whether the thread finished a function call.
+    pub fn stopped_at_function_return(&self) -> bool {
+        matches!(
+            self.stop_reason,
+            Some(ThreadStopReason::FunctionFinished { .. })
+        )
+    }
+}
+
+/// Stepping type for GDB thread operations.
+///
+/// Maps to GDB's `next`, `step`, `finish`, `nexti`, `stepi` commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GdbStepType {
+    /// Step over (next source line / `next` command).
+    Over,
+    /// Step into (step into function calls / `step` command).
+    Into,
+    /// Step out (run until current function returns / `finish` command).
+    Out,
+    /// Step over one instruction (`nexti` command).
+    InstructionOver,
+    /// Step into one instruction (`stepi` command).
+    InstructionInto,
+}
+
+impl GdbStepType {
+    /// Convert to the GDB command string.
+    pub fn as_gdb_command(&self) -> &'static str {
+        match self {
+            Self::Over => "next",
+            Self::Into => "step",
+            Self::Out => "finish",
+            Self::InstructionOver => "nexti",
+            Self::InstructionInto => "stepi",
+        }
+    }
+
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Over => "Step Over",
+            Self::Into => "Step Into",
+            Self::Out => "Step Out",
+            Self::InstructionOver => "Step Instruction Over",
+            Self::InstructionInto => "Step Instruction Into",
+        }
+    }
+}
+
+/// Thread plan tracking for GDB.
+///
+/// GDB uses stepping commands that define what a thread should do before
+/// stopping again. This struct tracks the active stepping plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GdbThreadPlan {
+    /// Plan description (e.g. "step over", "finish", "until 0x401000").
+    pub description: String,
+    /// The step type, if this is a standard stepping plan.
+    pub step_type: Option<GdbStepType>,
+    /// Target stop address (for `until <address>` plans).
+    pub stop_address: Option<u64>,
+    /// Whether the plan is complete.
+    pub completed: bool,
+}
+
+impl GdbThreadPlan {
+    /// Create a plan for a standard step.
+    pub fn step(step_type: GdbStepType) -> Self {
+        Self {
+            description: step_type.description().to_string(),
+            step_type: Some(step_type),
+            stop_address: None,
+            completed: false,
+        }
+    }
+
+    /// Create a plan to run to an address (GDB `until <address>`).
+    pub fn run_to_address(addr: u64) -> Self {
+        Self {
+            description: format!("until 0x{:x}", addr),
+            step_type: None,
+            stop_address: Some(addr),
+            completed: false,
+        }
+    }
+
+    /// Create a plan to step out of the current function.
+    pub fn step_out() -> Self {
+        Self::step(GdbStepType::Out)
+    }
+
+    /// Mark the plan as complete.
+    pub fn mark_complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+/// Extended stack frame information for GDB.
+///
+/// Contains additional GDB-specific frame metadata beyond the basic
+/// `GdbStackFrame`, including source information and language info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GdbFrameDetails {
+    /// Frame level.
+    pub level: u32,
+    /// Whether this frame is an artificial/thunk frame.
+    pub is_artificial: bool,
+    /// Source file path, if known.
+    pub source_file: Option<String>,
+    /// Source line number, if known.
+    pub source_line: Option<u32>,
+    /// Language of the function (e.g. "c", "c++", "rust").
+    pub language: Option<String>,
+    /// Whether the frame corresponds to a signal handler.
+    pub is_signal_frame: bool,
+    /// Whether this is an inline frame.
+    pub is_inline: bool,
+}
+
+impl GdbFrameDetails {
+    /// Create frame details for a given level.
+    pub fn new(level: u32) -> Self {
+        Self {
+            level,
+            is_artificial: false,
+            source_file: None,
+            source_line: None,
+            language: None,
+            is_signal_frame: false,
+            is_inline: false,
+        }
+    }
+
+    /// Mark as artificial frame.
+    pub fn with_artificial(mut self, artificial: bool) -> Self {
+        self.is_artificial = artificial;
+        self
+    }
+
+    /// Set source location.
+    pub fn with_source(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.source_file = Some(file.into());
+        self.source_line = Some(line);
+        self
+    }
+
+    /// Set language.
+    pub fn with_language(mut self, lang: impl Into<String>) -> Self {
+        self.language = Some(lang.into());
+        self
+    }
+
+    /// Mark as signal frame.
+    pub fn with_signal_frame(mut self, signal: bool) -> Self {
+        self.is_signal_frame = signal;
+        self
+    }
+
+    /// Mark as inline frame.
+    pub fn with_inline(mut self, inline: bool) -> Self {
+        self.is_inline = inline;
+        self
+    }
+
+    /// Build a display string including source location.
+    pub fn build_display(&self, pc: u64, function_name: Option<&str>) -> String {
+        let mut display = format!("#{} 0x{:x}", self.level, pc);
+        if let Some(name) = function_name {
+            display += &format!(" {}", name);
+        }
+        if let (Some(file), Some(line)) = (&self.source_file, self.source_line) {
+            display += &format!(" at {}:{}", file, line);
+        }
+        display
+    }
+}
+
+/// A thread collection manager for a GDB inferior.
+///
+/// Manages thread lifecycle events (creation, exit) and provides
+/// bulk operations on the thread set.
+#[derive(Debug, Default)]
+pub struct GdbThreadCollection {
+    threads: BTreeMap<u32, GdbThread>,
+    inferior_num: u32,
+}
+
+impl GdbThreadCollection {
+    /// Create a new thread collection for an inferior.
+    pub fn new(inferior_num: u32) -> Self {
+        Self {
+            threads: BTreeMap::new(),
+            inferior_num,
+        }
+    }
+
+    /// Add or replace a thread.
+    pub fn insert(&mut self, thread: GdbThread) {
+        self.threads.insert(thread.num, thread);
+    }
+
+    /// Remove a thread by number.
+    pub fn remove(&mut self, num: u32) -> Option<GdbThread> {
+        self.threads.remove(&num)
+    }
+
+    /// Get a thread by number.
+    pub fn get(&self, num: u32) -> Option<&GdbThread> {
+        self.threads.get(&num)
+    }
+
+    /// Get a mutable thread by number.
+    pub fn get_mut(&mut self, num: u32) -> Option<&mut GdbThread> {
+        self.threads.get_mut(&num)
+    }
+
+    /// Get the number of threads.
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
+
+    /// Get all thread numbers.
+    pub fn numbers(&self) -> Vec<u32> {
+        self.threads.keys().copied().collect()
+    }
+
+    /// Iterate over threads.
+    pub fn iter(&self) -> impl Iterator<Item = &GdbThread> {
+        self.threads.values()
+    }
+
+    /// Mark all threads as synchronized.
+    pub fn mark_all_synced(&mut self) {
+        for t in self.threads.values_mut() {
+            t.mark_synced();
+        }
+    }
+
+    /// Remove all exited threads and return their numbers.
+    pub fn prune_exited(&mut self) -> Vec<u32> {
+        let exited: Vec<u32> = self
+            .threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Exited)
+            .map(|(&num, _)| num)
+            .collect();
+        for num in &exited {
+            self.threads.remove(num);
+        }
+        exited
+    }
+
+    /// Clear all frames from all threads (used before re-syncing).
+    pub fn clear_all_frames(&mut self) {
+        for t in self.threads.values_mut() {
+            t.clear_frames();
+        }
+    }
+
+    /// Get the inferior number this collection belongs to.
+    pub fn inferior_num(&self) -> u32 {
+        self.inferior_num
+    }
+
+    /// Build thread info list for the common agent interface.
+    pub fn build_thread_info_list(&self) -> Vec<ThreadInfo> {
+        self.threads.values().map(|t| t.to_thread_info()).collect()
+    }
 }
 
 /// A stack frame within a GDB thread.
@@ -1008,5 +1344,314 @@ mod tests {
 
         sel.clear();
         assert!(sel.frame_path().is_none());
+    }
+
+    #[test]
+    fn test_thread_frames_sorted() {
+        let mut t = GdbThread::new(1);
+        t.add_frame(GdbStackFrame::new(2, 0x403000));
+        t.add_frame(GdbStackFrame::new(0, 0x401000));
+        t.add_frame(GdbStackFrame::new(1, 0x402000));
+        let sorted = t.frames_sorted();
+        assert_eq!(sorted[0].level, 0);
+        assert_eq!(sorted[1].level, 1);
+        assert_eq!(sorted[2].level, 2);
+    }
+
+    #[test]
+    fn test_thread_outermost_frame() {
+        let mut t = GdbThread::new(1);
+        t.add_frame(GdbStackFrame::new(0, 0x401000));
+        t.add_frame(GdbStackFrame::new(1, 0x402000));
+        t.add_frame(GdbStackFrame::new(2, 0x403000));
+        let outer = t.outermost_frame();
+        assert!(outer.is_some());
+        assert_eq!(outer.unwrap().level, 2);
+        assert_eq!(outer.unwrap().pc, 0x403000);
+    }
+
+    #[test]
+    fn test_thread_build_backtrace() {
+        let mut t = GdbThread::new(1);
+        t.add_frame(GdbStackFrame::new(0, 0x401000).with_function("main"));
+        t.add_frame(GdbStackFrame::new(1, 0x402000).with_function("foo"));
+        let bt = t.build_backtrace();
+        assert_eq!(bt.len(), 2);
+        assert!(bt[0].contains("main"));
+        assert!(bt[1].contains("foo"));
+    }
+
+    #[test]
+    fn test_thread_build_stack_container_values() {
+        let mut t = GdbThread::new(1);
+        t.add_frame(GdbStackFrame::new(0, 0x401000));
+        t.add_frame(GdbStackFrame::new(1, 0x402000));
+        let values = t.build_stack_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "2"));
+    }
+
+    #[test]
+    fn test_thread_all_register_names() {
+        let mut t = GdbThread::new(1);
+        let mut f0 = GdbStackFrame::new(0, 0x401000);
+        f0.set_register(RegisterValue::from_u64("rax", 1));
+        f0.set_register(RegisterValue::from_u64("rbx", 2));
+        t.add_frame(f0);
+        let mut f1 = GdbStackFrame::new(1, 0x402000);
+        f1.set_register(RegisterValue::from_u64("rax", 3));
+        f1.set_register(RegisterValue::from_u64("rip", 4));
+        t.add_frame(f1);
+
+        let names = t.all_register_names();
+        assert_eq!(names.len(), 3); // rax, rbx, rip
+        assert!(names.contains(&"rax".to_string()));
+        assert!(names.contains(&"rbx".to_string()));
+        assert!(names.contains(&"rip".to_string()));
+    }
+
+    #[test]
+    fn test_thread_frame_at_pc() {
+        let mut t = GdbThread::new(1);
+        t.add_frame(GdbStackFrame::new(0, 0x401000));
+        t.add_frame(GdbStackFrame::new(1, 0x402000));
+        assert!(t.frame_at_pc(0x401000).is_some());
+        assert!(t.frame_at_pc(0x403000).is_none());
+    }
+
+    #[test]
+    fn test_thread_return_address() {
+        let mut t = GdbThread::new(1);
+        assert!(t.return_address().is_none());
+
+        t.add_frame(GdbStackFrame::new(0, 0x401000).with_return_address(0x401100));
+        assert_eq!(t.return_address(), Some(0x401100));
+    }
+
+    #[test]
+    fn test_thread_stopped_at_breakpoint() {
+        let t = GdbThread::new(1)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(ThreadStopReason::Breakpoint {
+                bp_number: 1,
+                address: 0x401000,
+            });
+        assert!(t.stopped_at_breakpoint());
+        assert!(!t.stopped_by_signal());
+        assert!(!t.stopped_at_step());
+    }
+
+    #[test]
+    fn test_thread_stopped_by_signal() {
+        let t = GdbThread::new(1)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(ThreadStopReason::Signal {
+                name: "SIGSEGV".to_string(),
+                number: 11,
+            });
+        assert!(t.stopped_by_signal());
+        assert!(!t.stopped_at_breakpoint());
+    }
+
+    #[test]
+    fn test_thread_stopped_at_step() {
+        let t = GdbThread::new(1)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(ThreadStopReason::StepComplete);
+        assert!(t.stopped_at_step());
+    }
+
+    #[test]
+    fn test_thread_stopped_at_function_return() {
+        let t = GdbThread::new(1)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(ThreadStopReason::FunctionFinished {
+                return_value: Some(42),
+            });
+        assert!(t.stopped_at_function_return());
+    }
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::*;
+
+    #[test]
+    fn test_step_type_commands() {
+        assert_eq!(GdbStepType::Over.as_gdb_command(), "next");
+        assert_eq!(GdbStepType::Into.as_gdb_command(), "step");
+        assert_eq!(GdbStepType::Out.as_gdb_command(), "finish");
+        assert_eq!(GdbStepType::InstructionOver.as_gdb_command(), "nexti");
+        assert_eq!(GdbStepType::InstructionInto.as_gdb_command(), "stepi");
+    }
+
+    #[test]
+    fn test_step_type_descriptions() {
+        assert_eq!(GdbStepType::Over.description(), "Step Over");
+        assert_eq!(GdbStepType::Into.description(), "Step Into");
+        assert_eq!(GdbStepType::Out.description(), "Step Out");
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_plan_step() {
+        let plan = GdbThreadPlan::step(GdbStepType::Over);
+        assert_eq!(plan.step_type, Some(GdbStepType::Over));
+        assert!(!plan.completed);
+        assert!(plan.stop_address.is_none());
+    }
+
+    #[test]
+    fn test_thread_plan_run_to_address() {
+        let plan = GdbThreadPlan::run_to_address(0x401000);
+        assert_eq!(plan.stop_address, Some(0x401000));
+        assert!(plan.step_type.is_none());
+        assert!(plan.description.contains("0x401000"));
+    }
+
+    #[test]
+    fn test_thread_plan_completion() {
+        let mut plan = GdbThreadPlan::step_out();
+        assert!(!plan.completed);
+        plan.mark_complete();
+        assert!(plan.completed);
+    }
+}
+
+#[cfg(test)]
+mod frame_details_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_details() {
+        let details = GdbFrameDetails::new(0)
+            .with_source("/path/to/main.c", 42)
+            .with_language("c")
+            .with_signal_frame(false);
+        assert_eq!(details.level, 0);
+        assert_eq!(details.source_file.as_deref(), Some("/path/to/main.c"));
+        assert_eq!(details.source_line, Some(42));
+        assert_eq!(details.language.as_deref(), Some("c"));
+        assert!(!details.is_signal_frame);
+    }
+
+    #[test]
+    fn test_frame_details_display() {
+        let details = GdbFrameDetails::new(0).with_source("main.c", 10);
+        let display = details.build_display(0x401000, Some("main"));
+        assert!(display.contains("#0"));
+        assert!(display.contains("0x401000"));
+        assert!(display.contains("main"));
+        assert!(display.contains("main.c:10"));
+    }
+
+    #[test]
+    fn test_frame_details_no_source() {
+        let details = GdbFrameDetails::new(1);
+        let display = details.build_display(0x402000, Some("foo"));
+        assert!(display.contains("#1"));
+        assert!(display.contains("foo"));
+        assert!(!display.contains("at"));
+    }
+
+    #[test]
+    fn test_frame_details_inline() {
+        let details = GdbFrameDetails::new(0)
+            .with_inline(true)
+            .with_artificial(false);
+        assert!(details.is_inline);
+        assert!(!details.is_artificial);
+    }
+
+    #[test]
+    fn test_frame_details_signal() {
+        let details = GdbFrameDetails::new(0)
+            .with_signal_frame(true);
+        assert!(details.is_signal_frame);
+    }
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_collection() {
+        let mut coll = GdbThreadCollection::new(1);
+        assert!(coll.is_empty());
+        assert_eq!(coll.inferior_num(), 1);
+
+        coll.insert(GdbThread::new(1).with_state(ExecutionState::Running));
+        coll.insert(GdbThread::new(2).with_state(ExecutionState::Stopped));
+        assert_eq!(coll.len(), 2);
+        assert_eq!(coll.numbers(), vec![1, 2]);
+    }
+
+    #[test]
+    fn test_thread_collection_prune() {
+        let mut coll = GdbThreadCollection::new(1);
+        coll.insert(GdbThread::new(1).with_state(ExecutionState::Running));
+        coll.insert(GdbThread::new(2).with_state(ExecutionState::Exited));
+        coll.insert(GdbThread::new(3).with_state(ExecutionState::Exited));
+
+        let pruned = coll.prune_exited();
+        assert_eq!(pruned.len(), 2);
+        assert!(pruned.contains(&2));
+        assert!(pruned.contains(&3));
+        assert_eq!(coll.len(), 1);
+        assert!(coll.get(1).is_some());
+    }
+
+    #[test]
+    fn test_thread_collection_clear_all_frames() {
+        let mut coll = GdbThreadCollection::new(1);
+        let mut t1 = GdbThread::new(1);
+        t1.add_frame(GdbStackFrame::new(0, 0x401000));
+        let mut t2 = GdbThread::new(2);
+        t2.add_frame(GdbStackFrame::new(0, 0x402000));
+        t2.add_frame(GdbStackFrame::new(1, 0x403000));
+        coll.insert(t1);
+        coll.insert(t2);
+
+        coll.clear_all_frames();
+        assert_eq!(coll.get(1).unwrap().frame_count(), 0);
+        assert_eq!(coll.get(2).unwrap().frame_count(), 0);
+    }
+
+    #[test]
+    fn test_thread_collection_mark_all_synced() {
+        let mut coll = GdbThreadCollection::new(1);
+        coll.insert(GdbThread::new(1));
+        coll.insert(GdbThread::new(2));
+        coll.mark_all_synced();
+        assert!(coll.get(1).unwrap().synced);
+        assert!(coll.get(2).unwrap().synced);
+    }
+
+    #[test]
+    fn test_thread_collection_iter() {
+        let mut coll = GdbThreadCollection::new(1);
+        coll.insert(GdbThread::new(1));
+        coll.insert(GdbThread::new(2));
+        let count = coll.iter().count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_thread_collection_build_info_list() {
+        let mut coll = GdbThreadCollection::new(1);
+        coll.insert(
+            GdbThread::new(1)
+                .with_tid(100)
+                .with_name("main")
+                .with_state(ExecutionState::Running),
+        );
+        let list = coll.build_thread_info_list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, 1); // GDB uses thread num as id
+        assert_eq!(list[0].name.as_deref(), Some("main"));
     }
 }

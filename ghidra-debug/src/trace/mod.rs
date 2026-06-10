@@ -16,10 +16,12 @@ pub mod trace_stack_frame;
 pub mod trace_dynamic_table;
 
 pub use trace::{
-    MemoryKey, TraceData, TraceEvent, TraceEventKind, TraceSnapshotEntry, TraceStatistics,
+    MemoryKey, TraceBreakpointEntry, TraceData, TraceEvent, TraceEventKind, TraceSnapshotEntry,
+    TraceStatistics, TraceTimeSnapshot,
 };
 pub use trace_thread::{
-    ExecutionStateRecord, RegisterSnapshot, StackFrameInfo, TraceThread,
+    CommentEntry, ExecutionStateRecord, NameEntry, RegisterSnapshot, StackFrameInfo,
+    ThreadSnapshot, TraceThread,
 };
 pub use trace_process::{
     LoadedModule, ProcessBuilder, ProcessEnvironment, ProcessExitInfo, ProcessIO,

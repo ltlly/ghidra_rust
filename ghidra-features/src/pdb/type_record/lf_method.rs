@@ -123,6 +123,25 @@ impl LfMethod {
     pub fn is_overloaded(&self) -> bool {
         self.count > 1
     }
+
+    /// Get the method count (alias for [`count()`](Self::count)).
+    ///
+    /// Mirrors Java `AbstractOverloadedMethodMsType.getCount()`.
+    pub fn method_count(&self) -> u16 {
+        self.count
+    }
+
+    /// Convert this overloaded method into a [`FieldListEntry::OverloadedMethod`].
+    ///
+    /// This is useful when constructing or manipulating field lists
+    /// programmatically.
+    pub fn to_field_list_entry(&self) -> super::abstract_field_list_ms_type::FieldListEntry {
+        super::abstract_field_list_ms_type::FieldListEntry::OverloadedMethod {
+            count: self.count,
+            method_list_record: self.method_list_record_number,
+            name: self.name.clone(),
+        }
+    }
 }
 
 impl AbstractMsType for LfMethod {
@@ -156,6 +175,12 @@ impl AbstractMsType for LfMethod {
         result.push_str(&self.name);
         result.push_str(&self.method_list_record_number.to_string());
         result
+    }
+}
+
+impl Default for LfMethod {
+    fn default() -> Self {
+        Self::new(0, RecordNumber::NO_TYPE, String::new())
     }
 }
 
@@ -364,5 +389,38 @@ mod tests {
         // Format: "overloaded[3]:foo0x1010"
         assert!(emitted.starts_with("overloaded["));
         assert!(emitted.contains("]:"));
+    }
+
+    #[test]
+    fn test_method_count_alias() {
+        let m = make_test_method();
+        assert_eq!(m.method_count(), 3);
+        assert_eq!(m.method_count(), m.count());
+    }
+
+    #[test]
+    fn test_method_to_field_list_entry() {
+        let m = make_test_method();
+        let entry = m.to_field_list_entry();
+        match entry {
+            super::super::abstract_field_list_ms_type::FieldListEntry::OverloadedMethod {
+                count,
+                method_list_record,
+                name,
+            } => {
+                assert_eq!(count, 3);
+                assert_eq!(method_list_record, RecordNumber::type_record(0x1010));
+                assert_eq!(name, "foo");
+            }
+            _ => panic!("Expected OverloadedMethod variant"),
+        }
+    }
+
+    #[test]
+    fn test_method_default() {
+        let m = LfMethod::default();
+        assert!(m.name().is_empty());
+        assert_eq!(m.count(), 0);
+        assert!(m.record_number().is_no_type());
     }
 }

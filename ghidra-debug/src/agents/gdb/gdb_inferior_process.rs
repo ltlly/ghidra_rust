@@ -644,6 +644,417 @@ impl GdbInferiorProcess {
             .map(|r| format!("[{:08x}]", r.base))
             .collect()
     }
+
+    /// Get threads sorted by number.
+    pub fn threads_sorted(&self) -> Vec<&GdbThread> {
+        let mut threads: Vec<_> = self.threads.values().collect();
+        threads.sort_by_key(|t| t.num);
+        threads
+    }
+
+    /// Get all running threads.
+    pub fn running_threads(&self) -> Vec<&GdbThread> {
+        self.threads
+            .values()
+            .filter(|t| t.state == ExecutionState::Running)
+            .collect()
+    }
+
+    /// Get all stopped threads.
+    pub fn stopped_threads(&self) -> Vec<&GdbThread> {
+        self.threads
+            .values()
+            .filter(|t| t.state == ExecutionState::Stopped)
+            .collect()
+    }
+
+    /// Count threads by execution state.
+    pub fn thread_state_counts(&self) -> BTreeMap<ExecutionState, usize> {
+        let mut counts = BTreeMap::new();
+        for t in self.threads.values() {
+            *counts.entry(t.state).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Build trace object key-value pairs for the threads container.
+    pub fn build_threads_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.threads.len().to_string())]
+    }
+
+    /// Find a module that contains the given address.
+    pub fn module_at_address(&self, addr: u64) -> Option<&ModuleWithSections> {
+        self.modules
+            .iter()
+            .find(|m| addr >= m.info.base && addr < m.info.base + m.info.size)
+    }
+
+    /// Get sorted modules by base address.
+    pub fn modules_sorted(&self) -> Vec<&ModuleWithSections> {
+        let mut mods: Vec<_> = self.modules.iter().collect();
+        mods.sort_by_key(|m| m.info.base);
+        mods
+    }
+
+    /// Build trace object key-value pairs for the modules container.
+    pub fn build_modules_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.modules.len().to_string())]
+    }
+
+    /// Find a memory region that contains the given address.
+    pub fn memory_region_at(&self, addr: u64) -> Option<&MemoryRegion> {
+        self.memory_regions
+            .iter()
+            .find(|r| addr >= r.base && addr < r.base + r.size)
+    }
+
+    /// Get total memory footprint (sum of all region sizes).
+    pub fn memory_footprint(&self) -> u64 {
+        self.memory_regions.iter().map(|r| r.size).sum()
+    }
+}
+
+/// Signal configuration for a GDB inferior.
+///
+/// GDB can intercept and handle Unix signals via the `handle` command.
+/// This tracks which signals are configured to stop, print, or pass
+/// through to the inferior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GdbSignalConfig {
+    /// Signal number.
+    pub number: i32,
+    /// Signal name (e.g. "SIGSEGV").
+    pub name: String,
+    /// Whether this signal stops the process.
+    pub stop: bool,
+    /// Whether this signal prints a message.
+    pub print: bool,
+    /// Whether this signal is passed to the process.
+    pub pass: bool,
+    /// Optional description.
+    pub description: Option<String>,
+}
+
+impl GdbSignalConfig {
+    /// Create a new signal config.
+    pub fn new(number: i32, name: impl Into<String>) -> Self {
+        Self {
+            number,
+            name: name.into(),
+            stop: true,
+            print: true,
+            pass: true,
+            description: None,
+        }
+    }
+
+    /// Set stop behavior.
+    pub fn with_stop(mut self, stop: bool) -> Self {
+        self.stop = stop;
+        self
+    }
+
+    /// Set print behavior.
+    pub fn with_print(mut self, print: bool) -> Self {
+        self.print = print;
+        self
+    }
+
+    /// Set pass behavior.
+    pub fn with_pass(mut self, pass: bool) -> Self {
+        self.pass = pass;
+        self
+    }
+
+    /// Set description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+}
+
+/// Tracks signal configurations for a GDB inferior.
+///
+/// Ported from GDB's `info signals` / `handle` command output.
+/// Maintains the table of how each signal is handled.
+#[derive(Debug, Clone, Default)]
+pub struct GdbSignalTable {
+    signals: BTreeMap<i32, GdbSignalConfig>,
+}
+
+impl GdbSignalTable {
+    /// Create an empty signal table.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add or replace a signal configuration.
+    pub fn set(&mut self, config: GdbSignalConfig) {
+        self.signals.insert(config.number, config);
+    }
+
+    /// Get a signal configuration by number.
+    pub fn get(&self, number: i32) -> Option<&GdbSignalConfig> {
+        self.signals.get(&number)
+    }
+
+    /// Get all signal configurations.
+    pub fn all(&self) -> &BTreeMap<i32, GdbSignalConfig> {
+        &self.signals
+    }
+
+    /// Get signals configured to stop the process.
+    pub fn stopping_signals(&self) -> Vec<&GdbSignalConfig> {
+        self.signals.values().filter(|s| s.stop).collect()
+    }
+
+    /// Populate with default Unix signal configurations.
+    pub fn populate_defaults(&mut self) {
+        let defaults: &[(i32, &str, &str)] = &[
+            (1, "SIGHUP", "Hangup"),
+            (2, "SIGINT", "Interrupt"),
+            (3, "SIGQUIT", "Quit"),
+            (4, "SIGILL", "Illegal instruction"),
+            (5, "SIGTRAP", "Trace/breakpoint trap"),
+            (6, "SIGABRT", "Abort"),
+            (7, "SIGBUS", "Bus error"),
+            (8, "SIGFPE", "Floating point exception"),
+            (9, "SIGKILL", "Kill"),
+            (11, "SIGSEGV", "Segmentation fault"),
+            (13, "SIGPIPE", "Broken pipe"),
+            (14, "SIGALRM", "Alarm clock"),
+            (15, "SIGTERM", "Terminated"),
+            (17, "SIGCHLD", "Child status changed"),
+            (18, "SIGCONT", "Continue"),
+            (19, "SIGSTOP", "Stop"),
+            (20, "SIGTSTP", "Terminal stop"),
+            (21, "SIGTTIN", "Background read"),
+            (22, "SIGTTOU", "Background write"),
+            (29, "SIGIO", "I/O possible"),
+            (31, "SIGSYS", "Bad system call"),
+        ];
+        for &(num, name, desc) in defaults {
+            let stop = matches!(num, 4 | 5 | 6 | 7 | 8 | 11 | 31);
+            self.set(
+                GdbSignalConfig::new(num, name)
+                    .with_stop(stop)
+                    .with_description(desc),
+            );
+        }
+    }
+
+    /// Count of configured signals.
+    pub fn len(&self) -> usize {
+        self.signals.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
+}
+
+/// Inferior-level breakpoint state.
+///
+/// GDB tracks breakpoints globally but they resolve per-inferior when
+/// debugging multiple processes. This struct tracks resolved breakpoints
+/// for a single inferior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GdbProcessBreakpoint {
+    /// Breakpoint number (GDB-internal).
+    pub number: u32,
+    /// Resolved address in this inferior.
+    pub resolved_address: Option<u64>,
+    /// Whether the breakpoint is enabled.
+    pub enabled: bool,
+    /// Number of times hit.
+    pub hit_count: u32,
+    /// Condition expression (if conditional).
+    pub condition: Option<String>,
+    /// Whether this is a hardware breakpoint.
+    pub hardware: bool,
+    /// Optional ignore count (skip first N hits).
+    pub ignore_count: u32,
+    /// Breakpoint type (breakpoint, watchpoint, etc.).
+    pub bp_type: GdbProcessBreakpointType,
+}
+
+/// Type of breakpoint within a GDB inferior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum GdbProcessBreakpointType {
+    /// Regular software breakpoint.
+    Breakpoint,
+    /// Hardware breakpoint.
+    HardwareBreakpoint,
+    /// Write watchpoint.
+    WriteWatchpoint,
+    /// Read watchpoint.
+    ReadWatchpoint,
+    /// Access watchpoint (read/write).
+    AccessWatchpoint,
+}
+
+impl GdbProcessBreakpoint {
+    /// Create a new breakpoint entry.
+    pub fn new(number: u32) -> Self {
+        Self {
+            number,
+            resolved_address: None,
+            enabled: true,
+            hit_count: 0,
+            condition: None,
+            hardware: false,
+            ignore_count: 0,
+            bp_type: GdbProcessBreakpointType::Breakpoint,
+        }
+    }
+
+    /// Set the resolved address.
+    pub fn with_address(mut self, addr: u64) -> Self {
+        self.resolved_address = Some(addr);
+        self
+    }
+
+    /// Set as hardware breakpoint.
+    pub fn with_hardware(mut self, hw: bool) -> Self {
+        self.hardware = hw;
+        if hw {
+            self.bp_type = GdbProcessBreakpointType::HardwareBreakpoint;
+        }
+        self
+    }
+
+    /// Set a condition expression.
+    pub fn with_condition(mut self, cond: impl Into<String>) -> Self {
+        self.condition = Some(cond.into());
+        self
+    }
+
+    /// Set the breakpoint type.
+    pub fn with_type(mut self, bp_type: GdbProcessBreakpointType) -> Self {
+        self.bp_type = bp_type;
+        self
+    }
+
+    /// Record a hit.
+    pub fn record_hit(&mut self) {
+        self.hit_count += 1;
+    }
+
+    /// Check if this breakpoint should stop execution.
+    pub fn should_stop(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        self.hit_count == 0 || self.hit_count > self.ignore_count
+    }
+}
+
+/// GDB inferior manager -- manages multiple inferiors within a single
+/// GDB debug session.
+///
+/// GDB can debug multiple inferiors (e.g. when following forks, or via
+/// `add-inferior`). This manager tracks all known inferiors and provides
+/// convenient access.
+#[derive(Debug, Default)]
+pub struct GdbInferiorManager {
+    inferiors: BTreeMap<u32, GdbInferiorProcess>,
+    active_num: Option<u32>,
+}
+
+impl GdbInferiorManager {
+    /// Create a new empty inferior manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add an inferior.
+    pub fn add(&mut self, inferior: GdbInferiorProcess) {
+        let num = inferior.num;
+        if self.active_num.is_none() {
+            self.active_num = Some(num);
+        }
+        self.inferiors.insert(num, inferior);
+    }
+
+    /// Remove an inferior by number.
+    pub fn remove(&mut self, num: u32) -> Option<GdbInferiorProcess> {
+        let removed = self.inferiors.remove(&num);
+        if self.active_num == Some(num) {
+            self.active_num = self.inferiors.keys().next().copied();
+        }
+        removed
+    }
+
+    /// Get an inferior by number.
+    pub fn get(&self, num: u32) -> Option<&GdbInferiorProcess> {
+        self.inferiors.get(&num)
+    }
+
+    /// Get a mutable inferior by number.
+    pub fn get_mut(&mut self, num: u32) -> Option<&mut GdbInferiorProcess> {
+        self.inferiors.get_mut(&num)
+    }
+
+    /// Get the currently active inferior.
+    pub fn active(&self) -> Option<&GdbInferiorProcess> {
+        self.active_num.and_then(|n| self.inferiors.get(&n))
+    }
+
+    /// Get a mutable reference to the active inferior.
+    pub fn active_mut(&mut self) -> Option<&mut GdbInferiorProcess> {
+        self.active_num.and_then(move |n| self.inferiors.get_mut(&n))
+    }
+
+    /// Set the active inferior by number.
+    pub fn set_active(&mut self, num: u32) {
+        if self.inferiors.contains_key(&num) {
+            self.active_num = Some(num);
+        }
+    }
+
+    /// Get the active inferior number.
+    pub fn active_num(&self) -> Option<u32> {
+        self.active_num
+    }
+
+    /// Get all inferior numbers.
+    pub fn numbers(&self) -> Vec<u32> {
+        self.inferiors.keys().copied().collect()
+    }
+
+    /// Count of managed inferiors.
+    pub fn len(&self) -> usize {
+        self.inferiors.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.inferiors.is_empty()
+    }
+
+    /// Get all inferiors.
+    pub fn all(&self) -> &BTreeMap<u32, GdbInferiorProcess> {
+        &self.inferiors
+    }
+
+    /// Get all alive (non-exited) inferiors.
+    pub fn alive(&self) -> Vec<&GdbInferiorProcess> {
+        self.inferiors.values().filter(|p| p.is_alive()).collect()
+    }
+
+    /// Get total thread count across all inferiors.
+    pub fn total_thread_count(&self) -> usize {
+        self.inferiors.values().map(|p| p.threads.len()).sum()
+    }
+
+    /// Build process info list for the common agent interface.
+    pub fn build_process_info_list(&self) -> Vec<ProcessInfo> {
+        self.inferiors
+            .values()
+            .map(|p| p.to_process_info())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -987,5 +1398,284 @@ mod tests {
         inf.add_thread(GdbThread::new(2).with_state(ExecutionState::Stopped));
         inf.refresh_state();
         assert_eq!(inf.state, ExecutionState::Running);
+    }
+
+    #[test]
+    fn test_inferior_threads_sorted() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_thread(GdbThread::new(3));
+        inf.add_thread(GdbThread::new(1));
+        inf.add_thread(GdbThread::new(2));
+        let sorted = inf.threads_sorted();
+        assert_eq!(sorted[0].num, 1);
+        assert_eq!(sorted[1].num, 2);
+        assert_eq!(sorted[2].num, 3);
+    }
+
+    #[test]
+    fn test_inferior_running_stopped_threads() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_thread(GdbThread::new(1).with_state(ExecutionState::Running));
+        inf.add_thread(GdbThread::new(2).with_state(ExecutionState::Stopped));
+        inf.add_thread(GdbThread::new(3).with_state(ExecutionState::Running));
+        assert_eq!(inf.running_threads().len(), 2);
+        assert_eq!(inf.stopped_threads().len(), 1);
+    }
+
+    #[test]
+    fn test_inferior_thread_state_counts() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_thread(GdbThread::new(1).with_state(ExecutionState::Running));
+        inf.add_thread(GdbThread::new(2).with_state(ExecutionState::Running));
+        inf.add_thread(GdbThread::new(3).with_state(ExecutionState::Stopped));
+        let counts = inf.thread_state_counts();
+        assert_eq!(counts.get(&ExecutionState::Running), Some(&2));
+        assert_eq!(counts.get(&ExecutionState::Stopped), Some(&1));
+    }
+
+    #[test]
+    fn test_inferior_build_threads_container_values() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_thread(GdbThread::new(1));
+        inf.add_thread(GdbThread::new(2));
+        let values = inf.build_threads_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "2"));
+    }
+
+    #[test]
+    fn test_inferior_module_at_address() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_module(ModuleInfo {
+            name: "libc.so.6".to_string(),
+            base: 0x7ffff7a00000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        assert!(inf.module_at_address(0x7ffff7a00000).is_some());
+        assert!(inf.module_at_address(0x7ffff7be5fff).is_some());
+        assert!(inf.module_at_address(0x7ffff7be6000).is_none());
+        assert!(inf.module_at_address(0x100000).is_none());
+    }
+
+    #[test]
+    fn test_inferior_modules_sorted() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_module(ModuleInfo {
+            name: "b.so".to_string(),
+            base: 0x2000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        inf.add_module(ModuleInfo {
+            name: "a.so".to_string(),
+            base: 0x1000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let sorted = inf.modules_sorted();
+        assert_eq!(sorted[0].info.name, "a.so");
+        assert_eq!(sorted[1].info.name, "b.so");
+    }
+
+    #[test]
+    fn test_inferior_build_modules_container_values() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_module(ModuleInfo {
+            name: "test.so".to_string(),
+            base: 0x1000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let values = inf.build_modules_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "1"));
+    }
+
+    #[test]
+    fn test_inferior_memory_region_at() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_memory_region(MemoryRegion {
+            base: 0x1000,
+            size: 0x2000,
+            offset: 0,
+            permissions: "r-xp".to_string(),
+            object_file: "a.out".to_string(),
+        });
+        assert!(inf.memory_region_at(0x1000).is_some());
+        assert!(inf.memory_region_at(0x2fff).is_some());
+        assert!(inf.memory_region_at(0x3000).is_none());
+    }
+
+    #[test]
+    fn test_inferior_memory_footprint() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_memory_region(MemoryRegion {
+            base: 0x1000,
+            size: 0x2000,
+            offset: 0,
+            permissions: "r-xp".to_string(),
+            object_file: "a.out".to_string(),
+        });
+        inf.add_memory_region(MemoryRegion {
+            base: 0x5000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "rw-p".to_string(),
+            object_file: "libc.so".to_string(),
+        });
+        assert_eq!(inf.memory_footprint(), 0x3000);
+    }
+}
+
+#[cfg(test)]
+mod signal_tests {
+    use super::*;
+
+    #[test]
+    fn test_signal_config() {
+        let sig = GdbSignalConfig::new(11, "SIGSEGV")
+            .with_stop(true)
+            .with_description("Segmentation fault");
+        assert_eq!(sig.number, 11);
+        assert_eq!(sig.name, "SIGSEGV");
+        assert!(sig.stop);
+        assert!(sig.description.is_some());
+    }
+
+    #[test]
+    fn test_signal_table() {
+        let mut table = GdbSignalTable::new();
+        assert!(table.is_empty());
+        table.populate_defaults();
+        assert!(!table.is_empty());
+        assert!(table.len() > 10);
+        assert!(table.get(11).is_some());
+        assert_eq!(table.get(11).unwrap().name, "SIGSEGV");
+        assert!(!table.stopping_signals().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod breakpoint_tests {
+    use super::*;
+
+    #[test]
+    fn test_process_breakpoint() {
+        let bp = GdbProcessBreakpoint::new(1)
+            .with_address(0x401000)
+            .with_hardware(true);
+        assert_eq!(bp.number, 1);
+        assert_eq!(bp.resolved_address, Some(0x401000));
+        assert!(bp.hardware);
+        assert_eq!(bp.hit_count, 0);
+        assert!(bp.should_stop());
+        assert_eq!(bp.bp_type, GdbProcessBreakpointType::HardwareBreakpoint);
+    }
+
+    #[test]
+    fn test_breakpoint_ignore_count() {
+        let mut bp = GdbProcessBreakpoint::new(1).with_address(0x401000);
+        bp.ignore_count = 2;
+        // Before any hits, should stop (hit_count == 0 always stops)
+        assert!(bp.should_stop());
+        // First two hits should not stop (still within ignore count)
+        bp.record_hit();
+        assert!(!bp.should_stop());
+        bp.record_hit();
+        assert!(!bp.should_stop());
+        // Third hit should stop (hit_count 3 > ignore_count 2)
+        bp.record_hit();
+        assert!(bp.should_stop());
+    }
+
+    #[test]
+    fn test_breakpoint_disabled() {
+        let mut bp = GdbProcessBreakpoint::new(1).with_address(0x401000);
+        bp.enabled = false;
+        assert!(!bp.should_stop());
+    }
+
+    #[test]
+    fn test_breakpoint_type() {
+        let bp = GdbProcessBreakpoint::new(1).with_type(GdbProcessBreakpointType::WriteWatchpoint);
+        assert_eq!(bp.bp_type, GdbProcessBreakpointType::WriteWatchpoint);
+    }
+}
+
+#[cfg(test)]
+mod manager_tests {
+    use super::*;
+
+    #[test]
+    fn test_inferior_manager() {
+        let mut mgr = GdbInferiorManager::new();
+        assert!(mgr.is_empty());
+
+        mgr.add(GdbInferiorProcess::new(1));
+        mgr.add(GdbInferiorProcess::new(2));
+        assert_eq!(mgr.len(), 2);
+        assert_eq!(mgr.active_num(), Some(1));
+
+        mgr.set_active(2);
+        assert_eq!(mgr.active_num(), Some(2));
+        assert!(mgr.active().is_some());
+        assert_eq!(mgr.active().unwrap().num, 2);
+    }
+
+    #[test]
+    fn test_inferior_manager_remove() {
+        let mut mgr = GdbInferiorManager::new();
+        mgr.add(GdbInferiorProcess::new(1));
+        mgr.add(GdbInferiorProcess::new(2));
+
+        let removed = mgr.remove(1);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().num, 1);
+        assert_eq!(mgr.len(), 1);
+        // Active should have shifted since we removed the active one
+        assert_eq!(mgr.active_num(), Some(2));
+    }
+
+    #[test]
+    fn test_inferior_manager_alive() {
+        let mut mgr = GdbInferiorManager::new();
+        let mut inf1 = GdbInferiorProcess::new(1);
+        inf1.state = ExecutionState::Stopped;
+        let mut inf2 = GdbInferiorProcess::new(2);
+        inf2.state = ExecutionState::Exited;
+        mgr.add(inf1);
+        mgr.add(inf2);
+        assert_eq!(mgr.alive().len(), 1);
+    }
+
+    #[test]
+    fn test_inferior_manager_total_threads() {
+        let mut mgr = GdbInferiorManager::new();
+        let mut inf1 = GdbInferiorProcess::new(1);
+        inf1.add_thread(GdbThread::new(1));
+        inf1.add_thread(GdbThread::new(2));
+        let mut inf2 = GdbInferiorProcess::new(2);
+        inf2.add_thread(GdbThread::new(1));
+        mgr.add(inf1);
+        mgr.add(inf2);
+        assert_eq!(mgr.total_thread_count(), 3);
+    }
+
+    #[test]
+    fn test_inferior_manager_build_info_list() {
+        let mut mgr = GdbInferiorManager::new();
+        let mut inf1 = GdbInferiorProcess::new(1);
+        inf1.state = ExecutionState::Stopped;
+        mgr.add(inf1);
+        let list = mgr.build_process_info_list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, 1);
     }
 }
