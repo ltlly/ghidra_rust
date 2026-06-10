@@ -534,6 +534,103 @@ impl LfPointer {
     pub fn is_unknown_attributes(&self) -> bool {
         self.is_unknown
     }
+
+    /// Get the pointer size in bytes.
+    ///
+    /// This is a convenience alias for [`get_size`] that returns `usize`.
+    pub fn pointer_size_bytes(&self) -> usize {
+        self.size as usize
+    }
+
+    /// Whether this pointer type is valid (recognized).
+    ///
+    /// Returns `false` if either the pointer type or pointer mode is invalid.
+    pub fn is_valid(&self) -> bool {
+        !self.pointer_type.is_invalid() && !self.pointer_mode.is_invalid()
+    }
+
+    /// Whether this pointer has any qualifiers (const, volatile, unaligned, restrict).
+    pub fn has_qualifiers(&self) -> bool {
+        self.is_const || self.is_volatile || self.is_unaligned || self.is_restrict
+    }
+
+    /// Build a qualifier string for this pointer.
+    ///
+    /// Returns a space-separated string of active qualifiers (e.g.,
+    /// `"const volatile "`). Returns an empty string if no qualifiers
+    /// are set.
+    pub fn qualifier_string(&self) -> String {
+        let mut result = String::new();
+        if self.is_const {
+            result.push_str("const ");
+        }
+        if self.is_volatile {
+            result.push_str("volatile ");
+        }
+        if self.is_unaligned {
+            result.push_str("__unaligned ");
+        }
+        if self.is_restrict {
+            result.push_str("restrict ");
+        }
+        result
+    }
+
+    /// Set the member pointer extended info.
+    ///
+    /// This corresponds to the Java `parseExtendedPointerInfo` method for
+    /// `MEMBER_DATA_POINTER` and `MEMBER_FUNCTION_POINTER` modes.
+    pub fn set_member_pointer_info(
+        &mut self,
+        containing_class_record_number: RecordNumber,
+        member_pointer_type: MemberPointerType,
+    ) {
+        self.member_pointer_containing_class_record_number = containing_class_record_number;
+        self.member_pointer_type = Some(member_pointer_type);
+    }
+
+    /// Set the segment-based pointer extended info.
+    ///
+    /// This corresponds to the Java `parseExtendedPointerInfo` method for
+    /// `SEGMENT_BASED` pointer type.
+    pub fn set_segment_info(&mut self, base_segment: u16) {
+        self.base_segment = base_segment;
+    }
+
+    /// Set the type-based pointer extended info.
+    ///
+    /// This corresponds to the Java `parseExtendedPointerInfo` method for
+    /// `TYPE_BASED` pointer type.
+    pub fn set_type_based_info(
+        &mut self,
+        pointer_base_type_record_number: RecordNumber,
+        name: String,
+    ) {
+        self.pointer_base_type_record_number = pointer_base_type_record_number;
+        self.pointer_name = name;
+    }
+
+    /// Set the base symbol for invalid pointer types.
+    ///
+    /// This corresponds to the Java `parseExtendedPointerInfo` method for
+    /// `INVALID` pointer type.
+    pub fn set_base_symbol(&mut self, base_symbol: String) {
+        self.base_symbol = base_symbol;
+    }
+
+    /// Whether this pointer is a reference (lvalue or rvalue).
+    pub fn is_reference(&self) -> bool {
+        self.pointer_mode == PointerMode::LValueReference
+            || self.pointer_mode == PointerMode::RValueReference
+    }
+
+    /// Whether this is a pointer to a function.
+    ///
+    /// Note: This is a syntactic check based on the pointer mode.
+    /// For a definitive check, the underlying type should be resolved.
+    pub fn is_function_pointer_mode(&self) -> bool {
+        self.pointer_mode == PointerMode::MemberFunctionPointer
+    }
 }
 
 impl AbstractMsType for LfPointer {
@@ -854,5 +951,198 @@ mod tests {
         p.base_symbol = "_some_symbol".to_string();
         assert!(p.pointer_type.is_invalid());
         assert_eq!(p.base_symbol, "_some_symbol");
+    }
+
+    #[test]
+    fn test_pointer_size_bytes() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert_eq!(p.pointer_size_bytes(), 4);
+
+        let p = LfPointer::simple(0x0074, 8);
+        assert_eq!(p.pointer_size_bytes(), 8);
+    }
+
+    #[test]
+    fn test_pointer_is_valid() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert!(p.is_valid());
+    }
+
+    #[test]
+    fn test_pointer_is_valid_invalid_type() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::Invalid;
+        assert!(!p.is_valid());
+    }
+
+    #[test]
+    fn test_pointer_is_valid_invalid_mode() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::Invalid;
+        assert!(!p.is_valid());
+    }
+
+    #[test]
+    fn test_pointer_has_qualifiers_false() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert!(!p.has_qualifiers());
+    }
+
+    #[test]
+    fn test_pointer_has_qualifiers_true_const() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_const = true;
+        assert!(p.has_qualifiers());
+    }
+
+    #[test]
+    fn test_pointer_has_qualifiers_true_restrict() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_restrict = true;
+        assert!(p.has_qualifiers());
+    }
+
+    #[test]
+    fn test_pointer_qualifier_string_empty() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert_eq!(p.qualifier_string(), "");
+    }
+
+    #[test]
+    fn test_pointer_qualifier_string_const() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_const = true;
+        assert_eq!(p.qualifier_string(), "const ");
+    }
+
+    #[test]
+    fn test_pointer_qualifier_string_volatile() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_volatile = true;
+        assert_eq!(p.qualifier_string(), "volatile ");
+    }
+
+    #[test]
+    fn test_pointer_qualifier_string_const_volatile() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_const = true;
+        p.is_volatile = true;
+        assert_eq!(p.qualifier_string(), "const volatile ");
+    }
+
+    #[test]
+    fn test_pointer_qualifier_string_all() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_const = true;
+        p.is_volatile = true;
+        p.is_unaligned = true;
+        p.is_restrict = true;
+        assert_eq!(p.qualifier_string(), "const volatile __unaligned restrict ");
+    }
+
+    #[test]
+    fn test_pointer_set_member_pointer_info() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::MemberDataPointer;
+        p.set_member_pointer_info(
+            RecordNumber::type_record(0x2000),
+            MemberPointerType::DataSingleInheritance,
+        );
+        assert_eq!(
+            p.member_pointer_containing_class_record_number,
+            RecordNumber::type_record(0x2000)
+        );
+        assert_eq!(
+            p.member_pointer_type,
+            Some(MemberPointerType::DataSingleInheritance)
+        );
+    }
+
+    #[test]
+    fn test_pointer_set_segment_info() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::SegmentBased;
+        p.set_segment_info(0x0001);
+        assert_eq!(p.base_segment, 0x0001);
+    }
+
+    #[test]
+    fn test_pointer_set_type_based_info() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::TypeBased;
+        p.set_type_based_info(
+            RecordNumber::type_record(0x3000),
+            "my_type_ptr".to_string(),
+        );
+        assert_eq!(
+            p.pointer_base_type_record_number,
+            RecordNumber::type_record(0x3000)
+        );
+        assert_eq!(p.pointer_name, "my_type_ptr");
+    }
+
+    #[test]
+    fn test_pointer_set_base_symbol() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::Invalid;
+        p.set_base_symbol("_extern_sym".to_string());
+        assert_eq!(p.base_symbol, "_extern_sym");
+    }
+
+    #[test]
+    fn test_pointer_is_reference_lvalue() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::LValueReference;
+        assert!(p.is_reference());
+    }
+
+    #[test]
+    fn test_pointer_is_reference_rvalue() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::RValueReference;
+        assert!(p.is_reference());
+    }
+
+    #[test]
+    fn test_pointer_is_reference_false() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_reference());
+    }
+
+    #[test]
+    fn test_pointer_is_function_pointer_mode_true() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::MemberFunctionPointer;
+        assert!(p.is_function_pointer_mode());
+    }
+
+    #[test]
+    fn test_pointer_is_function_pointer_mode_false() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_function_pointer_mode());
+    }
+
+    #[test]
+    fn test_pointer_emit_member_pointer() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::MemberDataPointer;
+        p.set_member_pointer_info(
+            RecordNumber::type_record(0x2000),
+            MemberPointerType::DataSingleInheritance,
+        );
+        let emitted = p.emit(Bind::NONE);
+        assert!(emitted.contains("::*"));
+        assert!(emitted.contains("0x2000"));
+        assert!(emitted.contains("pdm16_vfcn"));
+    }
+
+    #[test]
+    fn test_pointer_emit_const_ref() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_mode = PointerMode::LValueReference;
+        p.is_const = true;
+        let emitted = p.emit(Bind::NONE);
+        assert!(emitted.contains('&'));
+        assert!(emitted.contains("const "));
     }
 }

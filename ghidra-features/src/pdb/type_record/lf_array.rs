@@ -151,6 +151,51 @@ impl LfArray {
         }
         Some(self.array.size / self.array.stride as u64)
     }
+
+    /// Get the element size in bytes.
+    ///
+    /// Returns `None` if the stride is not specified (stride == -1).
+    /// When available, this is equivalent to the stride value.
+    pub fn element_size(&self) -> Option<u64> {
+        if self.array.stride <= 0 {
+            None
+        } else {
+            Some(self.array.stride as u64)
+        }
+    }
+
+    /// Whether this array has a specified stride.
+    ///
+    /// Returns `true` if the stride was parsed from the PDB (i.e., not -1).
+    pub fn has_stride(&self) -> bool {
+        self.array.stride > 0
+    }
+
+    /// Whether this is an empty array (zero size).
+    pub fn is_empty(&self) -> bool {
+        self.array.size == 0
+    }
+
+    /// Whether this array represents a variadic type.
+    ///
+    /// In some PDB contexts, a zero-length array with a void element type
+    /// is used to represent variadic arguments. This is a heuristic check.
+    pub fn is_variadic_heuristic(&self) -> bool {
+        self.array.size == 0
+            && self.array.element_type_record_number == RecordNumber::type_record(0x0003)
+    }
+
+    /// Get the raw size as a `u64`.
+    ///
+    /// Alias for [`get_size`] for consistency with other accessors.
+    pub fn raw_size(&self) -> u64 {
+        self.array.size
+    }
+
+    /// Get the name of the array type.
+    pub fn array_name(&self) -> &str {
+        self.array.name()
+    }
 }
 
 impl AbstractMsType for LfArray {
@@ -351,5 +396,101 @@ mod tests {
         assert_eq!(LfArray::PDB_ID_16, 0x0103);
         assert_eq!(LfArray::PDB_ID_ST, 0x1103);
         assert_eq!(LfArray::PDB_ID_32, 0x1503);
+    }
+
+    #[test]
+    fn test_array_element_size() {
+        let a = make_test_array(); // stride=4
+        assert_eq!(a.element_size(), Some(4));
+    }
+
+    #[test]
+    fn test_array_element_size_no_stride() {
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        assert_eq!(a.element_size(), None);
+    }
+
+    #[test]
+    fn test_array_has_stride_true() {
+        let a = make_test_array();
+        assert!(a.has_stride());
+    }
+
+    #[test]
+    fn test_array_has_stride_false() {
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        assert!(!a.has_stride());
+    }
+
+    #[test]
+    fn test_array_is_empty_true() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0075),
+            0,
+            "empty".to_string(),
+            0,
+        );
+        assert!(a.is_empty());
+    }
+
+    #[test]
+    fn test_array_is_empty_false() {
+        let a = make_test_array(); // size=40
+        assert!(!a.is_empty());
+    }
+
+    #[test]
+    fn test_array_is_variadic_heuristic_true() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0003), // void element
+            RecordNumber::type_record(0x0075),
+            0, // zero size
+            "".to_string(),
+            -1,
+        );
+        assert!(a.is_variadic_heuristic());
+    }
+
+    #[test]
+    fn test_array_is_variadic_heuristic_false_nonzero_size() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0003), // void element
+            RecordNumber::type_record(0x0075),
+            4, // non-zero size
+            "".to_string(),
+            4,
+        );
+        assert!(!a.is_variadic_heuristic());
+    }
+
+    #[test]
+    fn test_array_is_variadic_heuristic_false_non_void_element() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0074), // int element
+            RecordNumber::type_record(0x0075),
+            0,
+            "".to_string(),
+            -1,
+        );
+        assert!(!a.is_variadic_heuristic());
+    }
+
+    #[test]
+    fn test_array_raw_size() {
+        let a = make_test_array();
+        assert_eq!(a.raw_size(), 40);
+    }
+
+    #[test]
+    fn test_array_array_name() {
+        let a = make_test_array();
+        assert_eq!(a.array_name(), "int[10]");
+    }
+
+    #[test]
+    fn test_array_array_name_from_parsed() {
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        assert_eq!(a.array_name(), "float[4]");
     }
 }

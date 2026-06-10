@@ -81,7 +81,7 @@ pub use lf_fieldlist::LfFieldlist;
 pub use lf_member::LfMember;
 pub use lf_method::LfMethod;
 pub use lf_mfunction::LfMfunction;
-pub use lf_modifier::LfModifier;
+pub use lf_modifier::{LfModifier, LfModifierEx, ExtendedModifier};
 pub use lf_nesttype::LfNesttype;
 pub use lf_onemethod::LfOnemethod;
 pub use lf_pointer::LfPointer;

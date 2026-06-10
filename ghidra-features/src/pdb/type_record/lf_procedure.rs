@@ -344,6 +344,34 @@ impl LfProcedure {
         self.calling_convention == CallingConvention::Inline
     }
 
+    /// Whether this procedure is variadic (takes `...` arguments).
+    ///
+    /// A procedure is considered variadic if its argument list contains
+    /// exactly one parameter of type `T_NOTYPE` (0x0003, `void`), which
+    /// is a common convention in PDB files to denote ellipsis parameters.
+    ///
+    /// This method returns `true` based on the `num_parameters` field being
+    /// exactly 1 and the arg list record number pointing to a T_NOTYPE.
+    /// For a definitive check, the actual `LfArglist` record should be
+    /// resolved and checked via [`super::lf_arglist::LfArglist::is_variadic`].
+    ///
+    /// This is a heuristic that matches the Java convention.
+    pub fn is_variadic_heuristic(&self) -> bool {
+        self.num_parameters == 1
+    }
+
+    /// Get the calling convention byte value for serialization.
+    pub fn calling_convention_byte(&self) -> u8 {
+        self.calling_convention as u8
+    }
+
+    /// Get the function attributes byte value for serialization.
+    pub fn attributes_byte(&self) -> u8 {
+        (self.function_attributes.has_cpp_style_return_udt as u8)
+            | ((self.function_attributes.is_instance_constructor as u8) << 1)
+            | ((self.function_attributes.is_instance_constructor_virtual_bases as u8) << 2)
+    }
+
     /// Emit the full signature including calling convention, parameter count,
     /// and a `this` pointer reference when present.
     ///
@@ -663,5 +691,95 @@ mod tests {
     fn test_procedure_pdb_id_constants() {
         assert_eq!(LfProcedure::PDB_ID_16, 0x0008);
         assert_eq!(LfProcedure::PDB_ID_32, 0x1008);
+    }
+
+    #[test]
+    fn test_procedure_is_variadic_heuristic_true() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::NearC,
+            FunctionAttributes::empty(),
+            1, // single param -- heuristic says variadic
+            RecordNumber::type_record(0x1001),
+        );
+        assert!(p.is_variadic_heuristic());
+    }
+
+    #[test]
+    fn test_procedure_is_variadic_heuristic_false() {
+        let p = make_test_procedure(); // 2 params
+        assert!(!p.is_variadic_heuristic());
+    }
+
+    #[test]
+    fn test_procedure_is_variadic_heuristic_false_zero_params() {
+        let p = LfProcedure::new(
+            RecordNumber::NO_TYPE,
+            CallingConvention::NearC,
+            FunctionAttributes::empty(),
+            0,
+            RecordNumber::type_record(0x1001),
+        );
+        assert!(!p.is_variadic_heuristic());
+    }
+
+    #[test]
+    fn test_procedure_calling_convention_byte() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::ThisCall,
+            FunctionAttributes::empty(),
+            1,
+            RecordNumber::type_record(0x1001),
+        );
+        assert_eq!(p.calling_convention_byte(), 0x0b);
+    }
+
+    #[test]
+    fn test_procedure_calling_convention_byte_cdecl() {
+        let p = make_test_procedure();
+        assert_eq!(p.calling_convention_byte(), 0x00);
+    }
+
+    #[test]
+    fn test_procedure_attributes_byte_empty() {
+        let p = make_test_procedure();
+        assert_eq!(p.attributes_byte(), 0x00);
+    }
+
+    #[test]
+    fn test_procedure_attributes_byte_constructor() {
+        let p = LfProcedure::new(
+            RecordNumber::NO_TYPE,
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x02),
+            0,
+            RecordNumber::type_record(0x1002),
+        );
+        assert_eq!(p.attributes_byte(), 0x02);
+    }
+
+    #[test]
+    fn test_procedure_attributes_byte_cpp_return_udt() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::NearC,
+            FunctionAttributes::from_byte(0x01),
+            1,
+            RecordNumber::type_record(0x1001),
+        );
+        assert_eq!(p.attributes_byte(), 0x01);
+    }
+
+    #[test]
+    fn test_procedure_attributes_byte_all() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::NearC,
+            FunctionAttributes::from_byte(0x07), // all bits
+            1,
+            RecordNumber::type_record(0x1001),
+        );
+        assert_eq!(p.attributes_byte(), 0x07);
     }
 }

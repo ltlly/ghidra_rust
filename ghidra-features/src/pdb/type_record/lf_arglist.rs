@@ -83,6 +83,45 @@ impl LfArglist {
     pub fn iter_arguments(&self) -> impl Iterator<Item = RecordNumber> + '_ {
         self.argument_record_numbers.iter().copied()
     }
+
+    /// Check whether this argument list represents a variadic function.
+    ///
+    /// In PDB, a variadic function is indicated by a single argument of type
+    /// `T_NOTYPE` (0x0003, which is the `void` type). This is a common
+    /// convention to denote `...` (ellipsis) parameters.
+    ///
+    /// Mirrors the Java convention where `ArgListMsType` with a single void
+    /// argument is treated as variadic.
+    pub fn is_variadic(&self) -> bool {
+        self.argument_record_numbers.len() == 1
+            && self.argument_record_numbers[0] == RecordNumber::type_record(0x0003)
+    }
+
+    /// Emit the argument list with resolved type names.
+    ///
+    /// When a type resolver is available (i.e., a PDB context that can look up
+    /// type records by record number), this method produces human-readable
+    /// output like `(int, float, void *)` rather than raw record number
+    /// references.
+    ///
+    /// The `resolver` closure takes a `RecordNumber` and returns the display
+    /// name of the corresponding type.
+    pub fn emit_with_resolver<F>(&self, resolver: F) -> String
+    where
+        F: Fn(RecordNumber) -> String,
+    {
+        let mut ds = DelimiterState::new("", ", ");
+        let mut result = String::new();
+        result.push('(');
+
+        for arg_rn in &self.argument_record_numbers {
+            result.push_str(ds.out(true));
+            result.push_str(&resolver(*arg_rn));
+        }
+
+        result.push(')');
+        result
+    }
 }
 
 impl AbstractMsType for LfArglist {
@@ -272,5 +311,72 @@ mod tests {
     fn test_arglist_pdb_id_constants() {
         assert_eq!(LfArglist::PDB_ID_16, 0x1001);
         assert_eq!(LfArglist::PDB_ID_32, 0x1201);
+    }
+
+    #[test]
+    fn test_arglist_is_variadic_true() {
+        // Single void arg (T_NOTYPE = 0x0003) indicates variadic.
+        let al = LfArglist::new(vec![RecordNumber::type_record(0x0003)]);
+        assert!(al.is_variadic());
+    }
+
+    #[test]
+    fn test_arglist_is_variadic_false_multiple_args() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0003),
+        ]);
+        assert!(!al.is_variadic());
+    }
+
+    #[test]
+    fn test_arglist_is_variadic_false_empty() {
+        let al = LfArglist::new(vec![]);
+        assert!(!al.is_variadic());
+    }
+
+    #[test]
+    fn test_arglist_is_variadic_false_non_void_single() {
+        let al = LfArglist::new(vec![RecordNumber::type_record(0x0074)]);
+        assert!(!al.is_variadic());
+    }
+
+    #[test]
+    fn test_arglist_emit_with_resolver() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+            RecordNumber::type_record(0x0003),
+        ]);
+        let emitted = al.emit_with_resolver(|rn| match rn.index() {
+            0x0074 => "int".to_string(),
+            0x0040 => "float".to_string(),
+            0x0003 => "void".to_string(),
+            _ => "unknown".to_string(),
+        });
+        assert_eq!(emitted, "(int, float, void)");
+    }
+
+    #[test]
+    fn test_arglist_emit_with_resolver_empty() {
+        let al = LfArglist::new(vec![]);
+        let emitted = al.emit_with_resolver(|_| "x".to_string());
+        assert_eq!(emitted, "()");
+    }
+
+    #[test]
+    fn test_arglist_emit_with_resolver_single() {
+        let al = LfArglist::new(vec![RecordNumber::type_record(0x0074)]);
+        let emitted = al.emit_with_resolver(|rn| match rn.index() {
+            0x0074 => "int".to_string(),
+            _ => "unknown".to_string(),
+        });
+        assert_eq!(emitted, "(int)");
+    }
+
+    #[test]
+    fn test_arglist_is_variadic_from_parsed() {
+        let al = LfArglist::from_parsed(vec![0x0003]);
+        assert!(al.is_variadic());
     }
 }

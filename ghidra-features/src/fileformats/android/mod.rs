@@ -18,7 +18,12 @@ pub mod oat;
 pub mod vdex;
 
 // Re-exports
-pub use bootimg::AndroidBootImage;
+pub use bootimg::{
+    BootImageAnalyzer, BootImageHeader, BootImageHeaderVersion, BootImageHeaderV0,
+    BootImageHeaderV1, BootImageHeaderV2, BootImageHeaderV3, BootImageHeaderV4,
+    VendorBootImageHeaderVersion, VendorBootImageHeaderV3, VendorBootImageHeaderV4,
+    VendorRamdiskTableEntryV4, BOOT_MAGIC, VENDOR_BOOT_MAGIC,
+};
 pub use dex_class_def::{ClassDataItem, ClassDefItem, EncodedClassField, EncodedClassMethod};
 pub use dex_field::{EncodedField, FieldIDItem};
 pub use dex_format::DexHeader;

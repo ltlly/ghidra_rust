@@ -4,37 +4,39 @@
 
 use std::fmt;
 
+use super::abstract_constant::AbstractConstant;
 use super::abstract_ms_symbol::AbstractMsSymbol;
 use super::name_ms_symbol::NameMsSymbol;
 use super::numeric::Numeric;
-use super::record_number::{RecordCategory, RecordNumber};
+use super::record_number::RecordNumber;
 
 /// A constant symbol (`S_CONSTANT`).
 ///
 /// This symbol represents a named compile-time constant whose value is encoded
 /// as an MSFT [`Numeric`]. The type index may be zero for untyped constants.
 ///
+/// Internally this wraps [`AbstractConstant`] which holds the shared fields
+/// (type record number, value, name).
+///
+/// # PDB Binary Layout
+///
+/// ```text
+/// type_record(u32) + numeric_value(variable) + name(NT)
+/// ```
+///
 /// This corresponds to `S_CONSTANT` (0x0003), `S_CONSTANT_ST` (0x1002), and
 /// `S_MANCONSTANT` (0x1020) in the CodeView symbol set.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SConstant {
-    /// The type record number for this constant's type.
-    pub type_record_number: RecordNumber,
-
-    /// The constant value.
-    pub value: Numeric,
-
-    /// The constant name.
-    pub name: String,
+    /// The underlying constant data.
+    pub inner: AbstractConstant,
 }
 
 impl SConstant {
     /// Create a new constant symbol.
     pub fn new(type_record_number: RecordNumber, value: Numeric, name: String) -> Self {
         Self {
-            type_record_number,
-            value,
-            name,
+            inner: AbstractConstant::new(type_record_number, value, name),
         }
     }
 
@@ -42,22 +44,18 @@ impl SConstant {
     ///
     /// Expects the layout: `type_record(u32) + numeric_value(variable) + name(NT)`.
     pub fn parse(data: &[u8]) -> Option<Self> {
-        if data.len() < 6 {
-            return None;
-        }
-        let (trn, _) = RecordNumber::parse(data, 0, RecordCategory::Type, 32);
-        let (value, numeric_consumed) = Numeric::parse(data, 4);
-        let name_offset = 4 + numeric_consumed;
-        let name = if name_offset < data.len() {
-            parse_nt_string(&data[name_offset..])
-        } else {
-            String::new()
-        };
-        Some(Self {
-            type_record_number: trn,
-            value,
-            name,
-        })
+        let inner = AbstractConstant::parse(data)?;
+        Some(Self { inner })
+    }
+
+    /// Return the type record number for this constant's type.
+    pub fn type_record_number(&self) -> &RecordNumber {
+        &self.inner.type_record_number
+    }
+
+    /// Return a reference to the constant value.
+    pub fn value(&self) -> &Numeric {
+        &self.inner.value
     }
 }
 
@@ -74,14 +72,14 @@ impl AbstractMsSymbol for SConstant {
         write!(
             f,
             "Constant: Type: {}, Value: {}, {}",
-            self.type_record_number, self.value, self.name
+            self.inner.type_record_number, self.inner.value, self.inner.name
         )
     }
 }
 
 impl NameMsSymbol for SConstant {
     fn name(&self) -> &str {
-        &self.name
+        &self.inner.name
     }
 }
 
@@ -89,12 +87,6 @@ impl fmt::Display for SConstant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.emit(f)
     }
-}
-
-/// Parse a null-terminated UTF-8 string from a byte slice.
-fn parse_nt_string(data: &[u8]) -> String {
-    let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
-    String::from_utf8_lossy(&data[..end]).to_string()
 }
 
 #[cfg(test)]
@@ -112,9 +104,9 @@ mod tests {
         data.extend_from_slice(b"MAX\0");
 
         let sym = SConstant::parse(&data).unwrap();
-        assert_eq!(sym.type_record_number.number(), 0x1020);
-        assert_eq!(sym.value.as_u64(), Some(42));
-        assert_eq!(sym.name, "MAX");
+        assert_eq!(sym.type_record_number().number(), 0x1020);
+        assert_eq!(sym.value().as_u64(), Some(42));
+        assert_eq!(sym.name(), "MAX");
     }
 
     #[test]
@@ -128,8 +120,8 @@ mod tests {
         data.extend_from_slice(b"VAL\0");
 
         let sym = SConstant::parse(&data).unwrap();
-        assert_eq!(sym.value.as_u64(), Some(0x12345678));
-        assert_eq!(sym.name, "VAL");
+        assert_eq!(sym.value().as_u64(), Some(0x12345678));
+        assert_eq!(sym.name(), "VAL");
     }
 
     #[test]
@@ -163,5 +155,30 @@ mod tests {
         assert!(s.contains("Constant"));
         assert!(s.contains("42"));
         assert!(s.contains("SIZE"));
+    }
+
+    #[test]
+    fn test_inner_access() {
+        let (numeric, _) = Numeric::parse(&[0x2A, 0x00], 0);
+        let sym = SConstant::new(
+            RecordNumber::type_record_number(0x1020),
+            numeric,
+            "LIMIT".to_string(),
+        );
+        // Verify inner field is accessible
+        assert_eq!(sym.inner.type_record_number.number(), 0x1020);
+        assert_eq!(sym.inner.name, "LIMIT");
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let (numeric, _) = Numeric::parse(&[0x2A, 0x00], 0);
+        let a = SConstant::new(
+            RecordNumber::type_record_number(0x1020),
+            numeric,
+            "TEST".to_string(),
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }

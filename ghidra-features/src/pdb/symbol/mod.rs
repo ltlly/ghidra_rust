@@ -145,3 +145,10 @@ pub use s_gprocref::SGProcRef;
 pub use s_lprocref::SLProcRef;
 pub use s_dataref::SDataRef;
 pub use s_annotation::SAnnotation;
+
+// Register-related symbol types ported from Ghidra Java
+pub mod s_register;
+pub mod s_manyreg;
+
+pub use s_register::SRegister;
+pub use s_manyreg::SManyReg;

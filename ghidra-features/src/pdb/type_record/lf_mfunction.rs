@@ -183,6 +183,38 @@ impl LfMfunction {
         self.this_adjustment as i32
     }
 
+    /// Whether this member function has a non-zero this-pointer adjustment.
+    ///
+    /// A non-zero adjustment occurs with multiple or virtual inheritance,
+    /// where the `this` pointer must be adjusted before accessing the
+    /// correct vtable or member offsets.
+    pub fn has_this_adjustment(&self) -> bool {
+        self.this_adjustment != 0
+    }
+
+    /// Whether this member function has a virtual base this-pointer
+    /// adjustment (adjustment for virtual inheritance).
+    ///
+    /// In practice, a non-zero `this_adjustment` combined with the
+    /// constructor attribute for virtual bases indicates this case.
+    pub fn has_virtual_base_this_adjustment(&self) -> bool {
+        self.this_adjustment != 0
+            && self.function_attributes.is_instance_constructor_virtual_bases
+    }
+
+    /// Whether this member function is a destructor.
+    ///
+    /// Note: PDB does not explicitly mark destructors in the function
+    /// attributes. This method returns `true` if the return type is void
+    /// (NO_TYPE) and the function is not a constructor, which is a common
+    /// heuristic. For definitive identification, the symbol name should
+    /// be checked instead.
+    pub fn is_destructor_heuristic(&self) -> bool {
+        self.return_value_record_number == RecordNumber::NO_TYPE
+            && !self.function_attributes.is_constructor()
+            && self.num_parameters == 0
+    }
+
     /// Emit the full signature including class qualification, this-pointer
     /// info, and structured metadata matching the Java `emit()` output.
     fn emit_full(&self, bind: Bind) -> String {
@@ -515,5 +547,135 @@ mod tests {
     fn test_mfunction_pdb_id_constants() {
         assert_eq!(LfMfunction::PDB_ID_16, 0x0009);
         assert_eq!(LfMfunction::PDB_ID_32, 0x1009);
+    }
+
+    #[test]
+    fn test_mfunction_has_this_adjustment_false() {
+        let mf = make_test_mfunction();
+        assert!(!mf.has_this_adjustment());
+    }
+
+    #[test]
+    fn test_mfunction_has_this_adjustment_true() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::empty(),
+            1,
+            RecordNumber::type_record(0x1002),
+            4, // non-zero adjustment
+        );
+        assert!(mf.has_this_adjustment());
+    }
+
+    #[test]
+    fn test_mfunction_has_virtual_base_this_adjustment_true() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x04), // virtual base constructor
+            0,
+            RecordNumber::type_record(0x1002),
+            8, // non-zero adjustment
+        );
+        assert!(mf.has_virtual_base_this_adjustment());
+    }
+
+    #[test]
+    fn test_mfunction_has_virtual_base_this_adjustment_false_zero_adj() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x04), // virtual base constructor
+            0,
+            RecordNumber::type_record(0x1002),
+            0, // zero adjustment
+        );
+        assert!(!mf.has_virtual_base_this_adjustment());
+    }
+
+    #[test]
+    fn test_mfunction_has_virtual_base_this_adjustment_false_not_vbase() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::empty(), // no virtual base flag
+            0,
+            RecordNumber::type_record(0x1002),
+            8, // non-zero adjustment
+        );
+        assert!(!mf.has_virtual_base_this_adjustment());
+    }
+
+    #[test]
+    fn test_mfunction_is_destructor_heuristic_true() {
+        let mf = LfMfunction::new(
+            RecordNumber::NO_TYPE, // void return
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::empty(), // not a constructor
+            0,                           // no params
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert!(mf.is_destructor_heuristic());
+    }
+
+    #[test]
+    fn test_mfunction_is_destructor_heuristic_false_constructor() {
+        let mf = LfMfunction::new(
+            RecordNumber::NO_TYPE,
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x02), // constructor
+            0,
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert!(!mf.is_destructor_heuristic());
+    }
+
+    #[test]
+    fn test_mfunction_is_destructor_heuristic_false_has_return() {
+        let mf = make_test_mfunction(); // has int return type
+        assert!(!mf.is_destructor_heuristic());
+    }
+
+    #[test]
+    fn test_mfunction_emit_contains_angle_bracket_metadata() {
+        let mf = make_test_mfunction();
+        let emitted = mf.emit(Bind::NONE);
+        // Angle brackets should contain this-pointer, adjustment, param count, attrs
+        assert!(emitted.contains('<'));
+        assert!(emitted.contains('>'));
+        // Should contain "::" for class qualification
+        assert!(emitted.contains("::"));
+    }
+
+    #[test]
+    fn test_mfunction_emit_with_virtual_base_constructor() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x04), // virtual base constructor
+            0,
+            RecordNumber::type_record(0x1002),
+            12,
+        );
+        let emitted = mf.emit(Bind::NONE);
+        assert!(emitted.contains("virtual base"));
+        assert!(emitted.contains(",12,"));
     }
 }
