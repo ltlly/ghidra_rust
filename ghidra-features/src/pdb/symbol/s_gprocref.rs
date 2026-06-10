@@ -89,7 +89,7 @@ impl SGProcRef {
 
 impl AbstractMsSymbol for SGProcRef {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_PROCREF
+        super::super::symbol_kind::S_GPROCREF
     }
 
     fn symbol_type_name(&self) -> &'static str {
@@ -170,7 +170,7 @@ mod tests {
             3,
             RecordNumber::type_record_number(0x1020),
         );
-        assert_eq!(sym.pdb_id(), 0x0400);
+        assert_eq!(sym.pdb_id(), 0x1125);
         assert_eq!(sym.symbol_type_name(), "S_GPROCREF");
         assert_eq!(sym.name(), "printf");
         assert_eq!(sym.module_index, 3);

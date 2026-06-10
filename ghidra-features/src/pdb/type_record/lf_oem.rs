@@ -42,6 +42,14 @@ pub struct LfOem {
 }
 
 impl LfOem {
+    /// PDB ID for the 16-bit variant (`LF_OEM_16` / `OemDefinableString16MsType`).
+    pub const PDB_ID_16: u32 = 0x0015;
+
+    /// PDB ID for the OEM Definable String 2 variant (`OemDefinableString2MsType`).
+    ///
+    /// This variant uses a GUID instead of the two u16 OEM identifiers.
+    pub const PDB_ID_STRING2: u32 = 0x1011;
+
     /// Create a new OEM definable string type record.
     pub fn new(
         ms_assigned_oem_id: u16,
@@ -97,6 +105,106 @@ impl LfOem {
     /// Get the length of remaining OEM-defined data.
     pub fn remaining_data_length(&self) -> usize {
         self.remaining_bytes.len()
+    }
+
+    /// Whether this OEM record has no record numbers and no remaining data.
+    pub fn is_empty(&self) -> bool {
+        self.record_numbers.is_empty() && self.remaining_bytes.is_empty()
+    }
+
+    /// Get a record number reference by index.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn record_number_at(&self, index: usize) -> Option<RecordNumber> {
+        self.record_numbers.get(index).copied()
+    }
+
+    /// Whether this record contains any OEM-defined trailing data.
+    pub fn has_remaining_data(&self) -> bool {
+        !self.remaining_bytes.is_empty()
+    }
+
+    /// Get the combined OEM identifier as a 32-bit value.
+    ///
+    /// Packs the MS-assigned OEM ID (upper 16 bits) and OEM-assigned type ID
+    /// (lower 16 bits) into a single `u32`.
+    pub fn combined_oem_id(&self) -> u32 {
+        ((self.ms_assigned_oem_id as u32) << 16) | (self.oem_assigned_type_id as u32)
+    }
+
+    /// The total binary size of this record in the PDB stream.
+    ///
+    /// Includes the 4-byte header (two u16 fields), 4-byte count, record
+    /// number references (4 bytes each), and remaining data bytes.
+    pub fn total_record_size(&self) -> usize {
+        4 + 4 + (self.record_numbers.len() * 4) + self.remaining_bytes.len()
+    }
+
+    /// Parse an `LF_OEM` record (32-bit variant, PDB_ID 0x100F) from raw bytes.
+    ///
+    /// Mirrors the Java `AbstractOemDefinableStringMsType(AbstractPdb,
+    /// PdbByteReader, intSize)` constructor with `intSize = 32`.
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   msAssignedOEMIdentifier    Microsoft-assigned OEM ID
+    /// +2  u16   oemAssignedTypeIdentifier  OEM-assigned type ID
+    /// +4  u32   count                      Number of record number references
+    /// +8  u32[] recordNumbers              Array of type indices (4 bytes each)
+    /// var  byte[] remainingBytes           OEM-defined trailing data
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        Self::parse_inner(data, 4) // 4-byte (32-bit) record numbers
+    }
+
+    /// Parse a 16-bit variant `LF_OEM` record (PDB_ID 0x0015) from raw bytes.
+    ///
+    /// Same layout as the 32-bit variant but with 16-bit (2-byte) record
+    /// number references.
+    pub fn parse_16(data: &[u8]) -> Result<Self, String> {
+        Self::parse_inner(data, 2) // 2-byte (16-bit) record numbers
+    }
+
+    /// Internal parser that handles both 16-bit and 32-bit record number sizes.
+    fn parse_inner(data: &[u8], record_num_size: usize) -> Result<Self, String> {
+        if data.len() < 8 {
+            return Err(format!(
+                "LF_OEM payload too short: need >= 8 bytes, got {}",
+                data.len()
+            ));
+        }
+        let ms_oem_id = u16::from_le_bytes([data[0], data[1]]);
+        let oem_type_id = u16::from_le_bytes([data[2], data[3]]);
+        let count = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+
+        let records_start = 8;
+        let records_end = records_start + count * record_num_size;
+        if data.len() < records_end {
+            return Err(format!(
+                "LF_OEM payload too short: need {} bytes for {} record numbers, got {}",
+                records_end, count, data.len()
+            ));
+        }
+
+        let mut record_numbers = Vec::with_capacity(count);
+        for i in 0..count {
+            let off = records_start + i * record_num_size;
+            let idx = if record_num_size == 4 {
+                u32::from_le_bytes([data[off], data[off + 1], data[off + 2], data[off + 3]])
+            } else {
+                u16::from_le_bytes([data[off], data[off + 1]]) as u32
+            };
+            record_numbers.push(RecordNumber::type_record(idx));
+        }
+
+        let remaining_bytes = if data.len() > records_end {
+            data[records_end..].to_vec()
+        } else {
+            Vec::new()
+        };
+
+        Ok(Self::new(ms_oem_id, oem_type_id, record_numbers, remaining_bytes))
     }
 }
 
@@ -242,5 +350,137 @@ mod tests {
         let display = format!("{}", oem);
         assert!(display.contains("OEM Definable String"));
         assert!(display.contains("MSFT-assigned"));
+    }
+
+    #[test]
+    fn test_oem_is_empty() {
+        let empty = LfOem::new(0, 0, vec![], vec![]);
+        assert!(empty.is_empty());
+
+        let with_records = LfOem::new(0, 0, vec![RecordNumber::type_record(1)], vec![]);
+        assert!(!with_records.is_empty());
+
+        let with_data = LfOem::new(0, 0, vec![], vec![0xFF]);
+        assert!(!with_data.is_empty());
+    }
+
+    #[test]
+    fn test_oem_record_number_at() {
+        let oem = make_test_oem();
+        assert_eq!(
+            oem.record_number_at(0),
+            Some(RecordNumber::type_record(0x1000))
+        );
+        assert_eq!(
+            oem.record_number_at(1),
+            Some(RecordNumber::type_record(0x1001))
+        );
+        assert_eq!(oem.record_number_at(2), None);
+    }
+
+    #[test]
+    fn test_oem_has_remaining_data() {
+        let oem = make_test_oem();
+        assert!(oem.has_remaining_data());
+
+        let no_data = LfOem::new(0, 0, vec![], vec![]);
+        assert!(!no_data.has_remaining_data());
+    }
+
+    #[test]
+    fn test_oem_combined_id() {
+        let oem = make_test_oem();
+        assert_eq!(oem.combined_oem_id(), 0x00010042);
+    }
+
+    #[test]
+    fn test_oem_combined_id_zero() {
+        let oem = LfOem::new(0, 0, vec![], vec![]);
+        assert_eq!(oem.combined_oem_id(), 0);
+    }
+
+    #[test]
+    fn test_oem_total_record_size() {
+        // 4 (header) + 4 (count) + 2*4 (records) + 3 (remaining) = 19
+        let oem = make_test_oem();
+        assert_eq!(oem.total_record_size(), 19);
+
+        let empty = LfOem::new(0, 0, vec![], vec![]);
+        assert_eq!(empty.total_record_size(), 8);
+    }
+
+    #[test]
+    fn test_oem_parse() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0001u16.to_le_bytes()); // msOemId
+        data.extend_from_slice(&0x0042u16.to_le_bytes()); // oemTypeId
+        data.extend_from_slice(&2u32.to_le_bytes());       // count
+        data.extend_from_slice(&0x1000u32.to_le_bytes());  // record[0]
+        data.extend_from_slice(&0x1001u32.to_le_bytes());  // record[1]
+        data.extend_from_slice(&[0xAA, 0xBB, 0xCC]);      // remaining
+
+        let oem = LfOem::parse(&data).unwrap();
+        assert_eq!(oem.pdb_id(), 0x100F);
+        assert_eq!(oem.ms_oem_id(), 0x0001);
+        assert_eq!(oem.oem_type_id(), 0x0042);
+        assert_eq!(oem.num_record_numbers(), 2);
+        assert_eq!(oem.record_numbers[0], RecordNumber::type_record(0x1000));
+        assert_eq!(oem.record_numbers[1], RecordNumber::type_record(0x1001));
+        assert_eq!(oem.remaining_bytes, vec![0xAA, 0xBB, 0xCC]);
+    }
+
+    #[test]
+    fn test_oem_parse_empty_records() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0u32.to_le_bytes()); // count=0
+
+        let oem = LfOem::parse(&data).unwrap();
+        assert_eq!(oem.num_record_numbers(), 0);
+        assert!(oem.remaining_bytes.is_empty());
+    }
+
+    #[test]
+    fn test_oem_parse_16() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // msOemId
+        data.extend_from_slice(&0x0004u16.to_le_bytes()); // oemTypeId
+        data.extend_from_slice(&1u32.to_le_bytes());       // count
+        data.extend_from_slice(&0x2000u16.to_le_bytes());  // 16-bit record[0]
+
+        let oem = LfOem::parse_16(&data).unwrap();
+        assert_eq!(oem.ms_oem_id(), 0x0003);
+        assert_eq!(oem.oem_type_id(), 0x0004);
+        assert_eq!(oem.num_record_numbers(), 1);
+        assert_eq!(oem.record_numbers[0], RecordNumber::type_record(0x2000));
+    }
+
+    #[test]
+    fn test_oem_parse_too_short() {
+        let data = [0u8; 6];
+        assert!(LfOem::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_oem_parse_record_data_too_short() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&2u32.to_le_bytes()); // count=2
+        // Only room for 1 record number
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+
+        assert!(LfOem::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_oem_pdb_id_16() {
+        assert_eq!(LfOem::PDB_ID_16, 0x0015);
+    }
+
+    #[test]
+    fn test_oem_pdb_id_string2() {
+        assert_eq!(LfOem::PDB_ID_STRING2, 0x1011);
     }
 }

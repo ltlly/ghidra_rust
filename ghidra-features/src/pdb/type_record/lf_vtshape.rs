@@ -63,6 +63,13 @@ impl VtShapeDescriptor {
         }
     }
 
+    /// Get the numeric value of this descriptor (0-7).
+    ///
+    /// Matches the Java `value` field on `VtShapeDescriptorMsProperty`.
+    pub fn value(&self) -> u8 {
+        *self as u8
+    }
+
     /// Parse from a 4-bit nibble value.
     pub fn from_value(val: u8) -> Self {
         match val {
@@ -75,6 +82,16 @@ impl VtShapeDescriptor {
             6 => Self::Far32,
             _ => Self::Unused,
         }
+    }
+
+    /// Whether this descriptor represents a 32-bit pointer kind.
+    pub fn is_32bit(&self) -> bool {
+        matches!(self, Self::Near32 | Self::Far32)
+    }
+
+    /// Whether this descriptor is a recognized (non-unused) value.
+    pub fn is_valid(&self) -> bool {
+        *self != Self::Unused
     }
 }
 
@@ -103,6 +120,11 @@ pub struct LfVtshape {
 }
 
 impl LfVtshape {
+    /// PDB ID for the 16-bit variant (`LF_VTSHAPE_16`).
+    ///
+    /// Some older PDB files use the 16-bit leaf identifier.
+    pub const PDB_ID_16: u32 = 0x000A;
+
     /// Create a new VT shape type record.
     pub fn new(descriptors: Vec<VtShapeDescriptor>) -> Self {
         let count = descriptors.len() as u16;
@@ -111,6 +133,31 @@ impl LfVtshape {
             count,
             descriptors,
         }
+    }
+
+    /// Parse an `LF_VTSHAPE` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `VtShapeMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `count` field (after the
+    /// 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u16   count           Number of vftable entries
+    /// +2  nib[] descriptors     Packed nibble descriptors (2 per byte, upper first)
+    ///     ...  padding          Align to 4-byte boundary
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 2 {
+            return Err(format!(
+                "LF_VTSHAPE payload too short: need >= 2 bytes, got {}",
+                data.len()
+            ));
+        }
+        let count = u16::from_le_bytes([data[0], data[1]]);
+        let packed = &data[2..];
+        Ok(Self::from_packed(count, packed))
     }
 
     /// Create from raw parsed field values (packed nibble bytes).
@@ -153,6 +200,54 @@ impl LfVtshape {
     /// Whether the shape contains a specific descriptor kind.
     pub fn has_descriptor(&self, descriptor: VtShapeDescriptor) -> bool {
         self.descriptors.contains(&descriptor)
+    }
+
+    /// Get the descriptor at a specific index.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn descriptor_at(&self, index: usize) -> Option<VtShapeDescriptor> {
+        self.descriptors.get(index).copied()
+    }
+
+    /// Whether all descriptors are the same kind.
+    ///
+    /// Returns `true` for empty shapes and single-element shapes.
+    pub fn is_uniform(&self) -> bool {
+        if self.descriptors.is_empty() {
+            return true;
+        }
+        let first = self.descriptors[0];
+        self.descriptors.iter().all(|d| *d == first)
+    }
+
+    /// Serialize descriptors back to packed nibble form.
+    ///
+    /// Returns the byte vector that would appear in the binary PDB stream.
+    /// Each byte holds two descriptors: upper nibble first, lower nibble second.
+    pub fn to_packed_bytes(&self) -> Vec<u8> {
+        let count = self.descriptors.len();
+        let byte_count = (count + 1) / 2;
+        let mut bytes = Vec::with_capacity(byte_count);
+
+        for i in 0..count / 2 {
+            let upper = self.descriptors[i * 2].value();
+            let lower = self.descriptors[i * 2 + 1].value();
+            bytes.push((upper << 4) | lower);
+        }
+        if count % 2 == 1 {
+            bytes.push(self.descriptors[count - 1].value() << 4);
+        }
+
+        bytes
+    }
+
+    /// The total binary size of this record in the PDB stream.
+    ///
+    /// Includes the 2-byte count field plus packed descriptor bytes,
+    /// rounded up to a 4-byte alignment boundary.
+    pub fn total_record_size(&self) -> usize {
+        let data_size = 2 + self.to_packed_bytes().len();
+        (data_size + 3) & !3 // align to 4
     }
 }
 
@@ -316,5 +411,219 @@ mod tests {
         let display = format!("{}", vs);
         assert!(display.contains("vtshape"));
         assert!(display.contains("near32"));
+    }
+
+    #[test]
+    fn test_vtshape_descriptor_value() {
+        assert_eq!(VtShapeDescriptor::Near.value(), 0);
+        assert_eq!(VtShapeDescriptor::Far.value(), 1);
+        assert_eq!(VtShapeDescriptor::Thin.value(), 2);
+        assert_eq!(VtShapeDescriptor::Outer.value(), 3);
+        assert_eq!(VtShapeDescriptor::Meta.value(), 4);
+        assert_eq!(VtShapeDescriptor::Near32.value(), 5);
+        assert_eq!(VtShapeDescriptor::Far32.value(), 6);
+        assert_eq!(VtShapeDescriptor::Unused.value(), 7);
+    }
+
+    #[test]
+    fn test_vtshape_descriptor_is_32bit() {
+        assert!(VtShapeDescriptor::Near32.is_32bit());
+        assert!(VtShapeDescriptor::Far32.is_32bit());
+        assert!(!VtShapeDescriptor::Near.is_32bit());
+        assert!(!VtShapeDescriptor::Far.is_32bit());
+        assert!(!VtShapeDescriptor::Thin.is_32bit());
+    }
+
+    #[test]
+    fn test_vtshape_descriptor_is_valid() {
+        assert!(VtShapeDescriptor::Near.is_valid());
+        assert!(VtShapeDescriptor::Near32.is_valid());
+        assert!(!VtShapeDescriptor::Unused.is_valid());
+    }
+
+    #[test]
+    fn test_vtshape_descriptor_at() {
+        let vs = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Far,
+            VtShapeDescriptor::Thin,
+        ]);
+        assert_eq!(vs.descriptor_at(0), Some(VtShapeDescriptor::Near32));
+        assert_eq!(vs.descriptor_at(1), Some(VtShapeDescriptor::Far));
+        assert_eq!(vs.descriptor_at(2), Some(VtShapeDescriptor::Thin));
+        assert_eq!(vs.descriptor_at(3), None);
+    }
+
+    #[test]
+    fn test_vtshape_descriptor_at_empty() {
+        let vs = LfVtshape::new(vec![]);
+        assert_eq!(vs.descriptor_at(0), None);
+    }
+
+    #[test]
+    fn test_vtshape_is_uniform_true() {
+        let vs = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Near32,
+        ]);
+        assert!(vs.is_uniform());
+    }
+
+    #[test]
+    fn test_vtshape_is_uniform_false() {
+        let vs = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Far,
+        ]);
+        assert!(!vs.is_uniform());
+    }
+
+    #[test]
+    fn test_vtshape_is_uniform_empty() {
+        let vs = LfVtshape::new(vec![]);
+        assert!(vs.is_uniform());
+    }
+
+    #[test]
+    fn test_vtshape_is_uniform_single() {
+        let vs = LfVtshape::new(vec![VtShapeDescriptor::Thin]);
+        assert!(vs.is_uniform());
+    }
+
+    #[test]
+    fn test_vtshape_to_packed_bytes_even() {
+        let vs = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32, // 5
+            VtShapeDescriptor::Near32, // 5
+            VtShapeDescriptor::Far,    // 1
+            VtShapeDescriptor::Thin,   // 2
+        ]);
+        let packed = vs.to_packed_bytes();
+        assert_eq!(packed, vec![0x55, 0x12]);
+    }
+
+    #[test]
+    fn test_vtshape_to_packed_bytes_odd() {
+        let vs = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32, // 5
+            VtShapeDescriptor::Near32, // 5
+            VtShapeDescriptor::Far,    // 1
+        ]);
+        let packed = vs.to_packed_bytes();
+        assert_eq!(packed, vec![0x55, 0x10]);
+    }
+
+    #[test]
+    fn test_vtshape_to_packed_bytes_empty() {
+        let vs = LfVtshape::new(vec![]);
+        let packed = vs.to_packed_bytes();
+        assert!(packed.is_empty());
+    }
+
+    #[test]
+    fn test_vtshape_to_packed_roundtrip() {
+        let original = vec![
+            VtShapeDescriptor::Near,
+            VtShapeDescriptor::Far,
+            VtShapeDescriptor::Thin,
+            VtShapeDescriptor::Outer,
+            VtShapeDescriptor::Meta,
+        ];
+        let vs = LfVtshape::new(original.clone());
+        let packed = vs.to_packed_bytes();
+        let vs2 = LfVtshape::from_packed(vs.count(), &packed);
+        assert_eq!(vs2.descriptors(), &original[..]);
+    }
+
+    #[test]
+    fn test_vtshape_total_record_size() {
+        // 2 bytes count + 1 byte packed (2 descriptors) = 3, aligned to 4
+        let vs = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Near32,
+        ]);
+        assert_eq!(vs.total_record_size(), 4);
+
+        // 2 bytes count + 2 bytes packed (4 descriptors) = 4, already aligned
+        let vs2 = LfVtshape::new(vec![
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Near32,
+            VtShapeDescriptor::Near32,
+        ]);
+        assert_eq!(vs2.total_record_size(), 4);
+
+        // 2 bytes count + 0 packed = 2, aligned to 4
+        let vs3 = LfVtshape::new(vec![]);
+        assert_eq!(vs3.total_record_size(), 4);
+    }
+
+    #[test]
+    fn test_vtshape_parse() {
+        // count=4, packed bytes: 0x55, 0x12 => near32,near32,far,thin
+        let mut data = Vec::new();
+        data.extend_from_slice(&4u16.to_le_bytes()); // count
+        data.extend_from_slice(&[0x55, 0x12]);       // packed descriptors
+
+        let vs = LfVtshape::parse(&data).unwrap();
+        assert_eq!(vs.pdb_id(), 0x000A);
+        assert_eq!(vs.count(), 4);
+        assert_eq!(vs.descriptors()[0], VtShapeDescriptor::Near32);
+        assert_eq!(vs.descriptors()[1], VtShapeDescriptor::Near32);
+        assert_eq!(vs.descriptors()[2], VtShapeDescriptor::Far);
+        assert_eq!(vs.descriptors()[3], VtShapeDescriptor::Thin);
+    }
+
+    #[test]
+    fn test_vtshape_parse_odd() {
+        // count=3, packed bytes: 0x55, 0x10 => near32,near32,far
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&[0x55, 0x10]);
+
+        let vs = LfVtshape::parse(&data).unwrap();
+        assert_eq!(vs.count(), 3);
+        assert_eq!(vs.descriptors()[0], VtShapeDescriptor::Near32);
+        assert_eq!(vs.descriptors()[1], VtShapeDescriptor::Near32);
+        assert_eq!(vs.descriptors()[2], VtShapeDescriptor::Far);
+    }
+
+    #[test]
+    fn test_vtshape_parse_empty() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u16.to_le_bytes());
+
+        let vs = LfVtshape::parse(&data).unwrap();
+        assert_eq!(vs.count(), 0);
+        assert!(vs.descriptors().is_empty());
+    }
+
+    #[test]
+    fn test_vtshape_parse_too_short() {
+        let data = [0u8; 1];
+        assert!(LfVtshape::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_vtshape_parse_roundtrip() {
+        let original = vec![
+            VtShapeDescriptor::Near,
+            VtShapeDescriptor::Far,
+            VtShapeDescriptor::Near32,
+        ];
+        let vs = LfVtshape::new(original.clone());
+        let packed = vs.to_packed_bytes();
+        let mut data = Vec::new();
+        data.extend_from_slice(&vs.count().to_le_bytes());
+        data.extend_from_slice(&packed);
+
+        let vs2 = LfVtshape::parse(&data).unwrap();
+        assert_eq!(vs2.descriptors(), &original[..]);
+    }
+
+    #[test]
+    fn test_vtshape_pdb_id_16() {
+        assert_eq!(LfVtshape::PDB_ID_16, 0x000A);
     }
 }

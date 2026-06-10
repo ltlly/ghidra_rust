@@ -181,6 +181,11 @@ impl DrgnThread {
         self.frames.get(&level)
     }
 
+    /// Get a mutable reference to a frame by level.
+    pub fn get_frame_mut(&mut self, level: u32) -> Option<&mut DrgnStackFrame> {
+        self.frames.get_mut(&level)
+    }
+
     /// Get the innermost frame (level 0).
     pub fn innermost_frame(&self) -> Option<&DrgnStackFrame> {
         self.frames.get(&0)
@@ -189,6 +194,11 @@ impl DrgnThread {
     /// Get the number of frames.
     pub fn frame_count(&self) -> usize {
         self.frames.len()
+    }
+
+    /// Get all frame levels sorted.
+    pub fn frame_levels(&self) -> Vec<u32> {
+        self.frames.keys().copied().collect()
     }
 
     /// Convert to a `ThreadInfo` for the common agent interface.
@@ -229,6 +239,18 @@ impl DrgnThread {
         }
     }
 
+    /// Build the long display string for this thread.
+    ///
+    /// Format: `idx process:tid name` or `idx process:tid cpu=N`
+    pub fn build_long_display(&self, index: usize) -> String {
+        let tid = self.tid.unwrap_or(0);
+        let base = format!("{:x} {:x}:{:x}", index, self.process_num, tid);
+        match &self.name {
+            Some(name) => format!("{} {}", base, name),
+            None => base,
+        }
+    }
+
     /// Mark this thread as synchronized.
     pub fn mark_synced(&mut self) {
         self.synced = true;
@@ -249,12 +271,50 @@ impl DrgnThread {
     }
 }
 
+/// Source location information for a stack frame.
+///
+/// Captured from drgn's `StackFrame.source()` which returns
+/// (filename, line, column).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FrameSourceInfo {
+    /// Source file path.
+    pub filename: String,
+    /// Line number.
+    pub line: i64,
+    /// Column number.
+    pub column: i64,
+}
+
+impl FrameSourceInfo {
+    /// Create a new source info.
+    pub fn new(filename: impl Into<String>, line: i64, column: i64) -> Self {
+        Self {
+            filename: filename.into(),
+            line,
+            column,
+        }
+    }
+
+    /// Build trace values for this source info.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("Filename".to_string(), self.filename.clone()),
+            ("Line".to_string(), self.line.to_string()),
+            ("Column".to_string(), self.column.to_string()),
+        ]
+    }
+}
+
 /// A stack frame within a drgn thread.
 ///
 /// Each frame represents one level of the call stack. Frame 0 is the
 /// currently executing function. Frame 1 is its caller, and so on.
 ///
 /// For kernel debugging, frames correspond to kernel stack frames.
+///
+/// Ported from `put_frames()` in commands.py which reads `StackFrame.pc`,
+/// `StackFrame.sp`, `StackFrame.name`, `StackFrame.is_inline`,
+/// `StackFrame.interrupted`, and `StackFrame.source()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DrgnStackFrame {
     /// Frame level (0 = innermost / currently executing).
@@ -269,6 +329,12 @@ pub struct DrgnStackFrame {
     pub return_address: u64,
     /// Function name, if known.
     pub function_name: Option<String>,
+    /// Whether this frame is an inline frame.
+    pub is_inline: bool,
+    /// Whether execution was interrupted (e.g. by signal).
+    pub interrupted: bool,
+    /// Source location, if available.
+    pub source: Option<FrameSourceInfo>,
     /// Register values for this frame.
     #[serde(skip)]
     pub registers: Vec<RegisterValue>,
@@ -284,6 +350,9 @@ impl DrgnStackFrame {
             fp: 0,
             return_address: 0,
             function_name: None,
+            is_inline: false,
+            interrupted: false,
+            source: None,
             registers: Vec::new(),
         }
     }
@@ -312,10 +381,60 @@ impl DrgnStackFrame {
         self
     }
 
+    /// Set whether this is an inline frame.
+    pub fn with_inline(mut self, is_inline: bool) -> Self {
+        self.is_inline = is_inline;
+        self
+    }
+
+    /// Set whether execution was interrupted.
+    pub fn with_interrupted(mut self, interrupted: bool) -> Self {
+        self.interrupted = interrupted;
+        self
+    }
+
+    /// Set the source location.
+    pub fn with_source(mut self, source: FrameSourceInfo) -> Self {
+        self.source = Some(source);
+        self
+    }
+
+    /// Get the trace path for this frame.
+    pub fn trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}]",
+            process_num, thread_num, self.level
+        )
+    }
+
     /// Get the trace path for this frame's registers.
     pub fn registers_trace_path(&self, process_num: u32, thread_num: u32) -> String {
         format!(
             "Processes[{}].Threads[{}].Stack[{}].Registers",
+            process_num, thread_num, self.level
+        )
+    }
+
+    /// Get the trace path for this frame's locals.
+    pub fn locals_trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Locals",
+            process_num, thread_num, self.level
+        )
+    }
+
+    /// Get the trace path for this frame's attributes.
+    pub fn attributes_trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Attributes",
+            process_num, thread_num, self.level
+        )
+    }
+
+    /// Get the trace path for this frame's source info.
+    pub fn source_trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Source",
             process_num, thread_num, self.level
         )
     }
@@ -342,6 +461,43 @@ impl DrgnStackFrame {
         }
     }
 
+    /// Build trace object key-value pairs for this frame.
+    ///
+    /// These are used to populate the `Processes[N].Threads[M].Stack[L]` node.
+    /// Matches the output of `put_frames()` in the Python agent.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            (
+                "_display".to_string(),
+                match &self.function_name {
+                    Some(name) => format!("#{} 0x{:x} {}", self.level, self.pc, name),
+                    None => format!("#{} 0x{:x}", self.level, self.pc),
+                },
+            ),
+        ];
+        if let Some(ref name) = self.function_name {
+            values.push(("Name".to_string(), name.clone()));
+        }
+        values
+    }
+
+    /// Build trace values for this frame's attributes (inline, interrupted).
+    ///
+    /// Matches the `fobj.Attributes` output from `put_frames()`.
+    pub fn build_attribute_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("Inline".to_string(), self.is_inline.to_string()),
+            ("Interrupted".to_string(), self.interrupted.to_string()),
+        ]
+    }
+
+    /// Build trace values for this frame's source info.
+    ///
+    /// Matches the `fobj.Source` output from `put_frames()`.
+    pub fn build_source_values(&self) -> Option<Vec<(String, String)>> {
+        self.source.as_ref().map(|s| s.build_trace_values())
+    }
+
     /// Set a register value. Replaces if same name exists.
     pub fn set_register(&mut self, reg: RegisterValue) {
         self.registers.retain(|r| r.name != reg.name);
@@ -361,6 +517,13 @@ impl DrgnStackFrame {
     /// Clear all register values.
     pub fn clear_registers(&mut self) {
         self.registers.clear();
+    }
+
+    /// Build register display value (hex string).
+    ///
+    /// Matches the Python `hex(value)` output in `putreg()`.
+    pub fn build_register_display(value: u64) -> String {
+        format!("0x{:x}", value)
     }
 }
 
@@ -473,6 +636,30 @@ mod tests {
     }
 
     #[test]
+    fn test_thread_frame_levels() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        t.add_frame(DrgnStackFrame::new(2, 0x2000));
+        t.add_frame(DrgnStackFrame::new(1, 0x3000));
+        let levels = t.frame_levels();
+        assert_eq!(levels.len(), 3);
+        assert!(levels.contains(&0));
+        assert!(levels.contains(&1));
+        assert!(levels.contains(&2));
+    }
+
+    #[test]
+    fn test_thread_frame_mut() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        {
+            let f = t.get_frame_mut(0).unwrap();
+            f.sp = 0x7fff00;
+        }
+        assert_eq!(t.get_frame(0).unwrap().sp, 0x7fff00);
+    }
+
+    #[test]
     fn test_thread_to_thread_info() {
         let t = DrgnThread::cpu_thread(0, 2)
             .with_state(ExecutionState::Stopped);
@@ -504,6 +691,17 @@ mod tests {
     }
 
     #[test]
+    fn test_thread_build_long_display() {
+        let t = DrgnThread::cpu_thread(0, 1)
+            .with_tid(42)
+            .with_name("CPU 1");
+        assert_eq!(t.build_long_display(0), "0 0:2a CPU 1");
+
+        let t = DrgnThread::new(0).with_tid(100);
+        assert_eq!(t.build_long_display(2), "2 0:64");
+    }
+
+    #[test]
     fn test_thread_exit() {
         let mut t = DrgnThread::new(0).with_state(ExecutionState::Running);
         t.add_frame(DrgnStackFrame::new(0, 0xffffffff81234567));
@@ -522,6 +720,9 @@ mod tests {
         assert_eq!(f.pc, 0xffffffff81234567);
         assert_eq!(f.sp, 0);
         assert!(f.function_name.is_none());
+        assert!(!f.is_inline);
+        assert!(!f.interrupted);
+        assert!(f.source.is_none());
     }
 
     #[test]
@@ -530,11 +731,51 @@ mod tests {
             .with_sp(0xffff888000000000)
             .with_fp(0xffff888000001000)
             .with_return_address(0xffffffff81234000)
-            .with_function("do_sys_open");
+            .with_function("do_sys_open")
+            .with_inline(false)
+            .with_interrupted(true);
         assert_eq!(f.sp, 0xffff888000000000);
         assert_eq!(f.fp, 0xffff888000001000);
         assert_eq!(f.return_address, 0xffffffff81234000);
         assert_eq!(f.function_name.as_deref(), Some("do_sys_open"));
+        assert!(!f.is_inline);
+        assert!(f.interrupted);
+    }
+
+    #[test]
+    fn test_stack_frame_with_source() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_source(FrameSourceInfo::new("fs/open.c", 1234, 5));
+        assert!(f.source.is_some());
+        let src = f.source.as_ref().unwrap();
+        assert_eq!(src.filename, "fs/open.c");
+        assert_eq!(src.line, 1234);
+        assert_eq!(src.column, 5);
+    }
+
+    #[test]
+    fn test_stack_frame_trace_paths() {
+        let f = DrgnStackFrame::new(2, 0xffffffff81234567);
+        assert_eq!(
+            f.trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2]"
+        );
+        assert_eq!(
+            f.registers_trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2].Registers"
+        );
+        assert_eq!(
+            f.locals_trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2].Locals"
+        );
+        assert_eq!(
+            f.attributes_trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2].Attributes"
+        );
+        assert_eq!(
+            f.source_trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2].Source"
+        );
     }
 
     #[test]
@@ -544,6 +785,40 @@ mod tests {
 
         let f = DrgnStackFrame::new(1, 0xffffffff81234000);
         assert_eq!(f.build_display(), "#1 0xffffffff81234000");
+    }
+
+    #[test]
+    fn test_stack_frame_build_trace_values() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_function("do_sys_open");
+        let values = f.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "do_sys_open"));
+        assert!(values.iter().any(|(k, v)| k == "_display" && v.contains("do_sys_open")));
+    }
+
+    #[test]
+    fn test_stack_frame_build_attribute_values() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_inline(true)
+            .with_interrupted(false);
+        let values = f.build_attribute_values();
+        assert!(values.iter().any(|(k, v)| k == "Inline" && v == "true"));
+        assert!(values.iter().any(|(k, v)| k == "Interrupted" && v == "false"));
+    }
+
+    #[test]
+    fn test_stack_frame_build_source_values() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_source(FrameSourceInfo::new("fs/open.c", 1234, 5));
+        let values = f.build_source_values();
+        assert!(values.is_some());
+        let v = values.unwrap();
+        assert!(v.iter().any(|(k, val)| k == "Filename" && val == "fs/open.c"));
+        assert!(v.iter().any(|(k, val)| k == "Line" && val == "1234"));
+        assert!(v.iter().any(|(k, val)| k == "Column" && val == "5"));
+
+        let f2 = DrgnStackFrame::new(0, 0x1000);
+        assert!(f2.build_source_values().is_none());
     }
 
     #[test]
@@ -578,11 +853,22 @@ mod tests {
     }
 
     #[test]
-    fn test_stack_frame_registers_trace_path() {
-        let f = DrgnStackFrame::new(2, 0xffffffff81234567);
+    fn test_register_display() {
+        assert_eq!(DrgnStackFrame::build_register_display(0x1234), "0x1234");
+        assert_eq!(DrgnStackFrame::build_register_display(0), "0x0");
         assert_eq!(
-            f.registers_trace_path(0, 3),
-            "Processes[0].Threads[3].Stack[2].Registers"
+            DrgnStackFrame::build_register_display(0xffffffff81234567),
+            "0xffffffff81234567"
         );
+    }
+
+    #[test]
+    fn test_frame_source_info() {
+        let src = FrameSourceInfo::new("kernel/sched/core.c", 5678, 12);
+        let values = src.build_trace_values();
+        assert_eq!(values.len(), 3);
+        assert!(values.iter().any(|(k, v)| k == "Filename" && v == "kernel/sched/core.c"));
+        assert!(values.iter().any(|(k, v)| k == "Line" && v == "5678"));
+        assert!(values.iter().any(|(k, v)| k == "Column" && v == "12"));
     }
 }

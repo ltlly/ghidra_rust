@@ -80,6 +80,46 @@ impl LfMfuncId {
     pub fn function_type(&self) -> RecordNumber {
         self.function_type_record_number
     }
+
+    /// Build a fully-qualified name for this member function.
+    ///
+    /// Returns `parent::name` format.
+    pub fn qualified_name(&self) -> String {
+        format!("{}::{}", self.parent_type_record_number, self.name)
+    }
+
+    /// Whether the function name appears to be a C++ constructor.
+    ///
+    /// Heuristic: checks if the function name matches the unqualified
+    /// portion of the parent type name (i.e., `ClassName::ClassName`).
+    pub fn is_constructor(&self) -> bool {
+        let parent_str = self.parent_type_record_number.to_string();
+        let parent_name = parent_str.rsplit("::").next().unwrap_or(&parent_str);
+        parent_name == self.name
+    }
+
+    /// Whether the function name appears to be a C++ destructor.
+    ///
+    /// Heuristic: checks if the name starts with '~' and the rest matches
+    /// the unqualified portion of the parent type name.
+    pub fn is_destructor(&self) -> bool {
+        if let Some(stripped) = self.name.strip_prefix('~') {
+            let parent_str = self.parent_type_record_number.to_string();
+            let parent_name = parent_str.rsplit("::").next().unwrap_or(&parent_str);
+            stripped == parent_name
+        } else {
+            false
+        }
+    }
+
+    /// The total binary size of this record in the PDB stream.
+    ///
+    /// Includes the 4-byte parent type, 4-byte function type, and the
+    /// null-terminated name string, rounded up to 4-byte alignment.
+    pub fn total_record_size(&self) -> usize {
+        let data_size = 4 + 4 + self.name.len() + 1; // +1 for null terminator
+        (data_size + 3) & !3 // align to 4
+    }
 }
 
 impl AbstractMsType for LfMfuncId {
@@ -224,5 +264,31 @@ mod tests {
         let emitted = mf.emit(Bind::NONE);
         assert!(emitted.contains("MemberFunctionId for:"));
         assert!(emitted.contains("::"));
+    }
+
+    #[test]
+    fn test_mfunc_id_qualified_name() {
+        let mf = make_test_mfunc_id();
+        let qn = mf.qualified_name();
+        assert!(qn.contains("::"));
+        assert!(qn.contains("doSomething"));
+    }
+
+    #[test]
+    fn test_mfunc_id_total_record_size() {
+        // 4 (parent) + 4 (func type) + 11 ("doSomething" + null = 12, aligned to 12)
+        let mf = make_test_mfunc_id();
+        assert_eq!(mf.total_record_size(), 20);
+    }
+
+    #[test]
+    fn test_mfunc_id_total_record_size_short_name() {
+        // 4 + 4 + 2 ("f" + null = 2) = 10, aligned to 4 = 12
+        let mf = LfMfuncId::new(
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1005),
+            "f".to_string(),
+        );
+        assert_eq!(mf.total_record_size(), 12);
     }
 }

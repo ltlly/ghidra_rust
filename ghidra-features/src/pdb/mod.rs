@@ -1482,8 +1482,10 @@ pub mod symbol_kind {
     pub const S_REGREL32: u16=0x020C; pub const S_LTHREAD32: u16=0x020D;
     pub const S_GTHREAD32: u16=0x020E; pub const S_SLINK32: u16=0x020F;
     pub const S_LPROCMIPS: u16=0x0300; pub const S_GPROCMIPS: u16=0x0301;
-    pub const S_PROCREF: u16=0x0400; pub const S_DATAREF: u16=0x0401;
-    pub const S_ALIGN: u16=0x0402; pub const S_LPROCREF: u16=0x0403;
+    pub const S_PROCREF_ST: u16=0x0400; pub const S_DATAREF_ST: u16=0x0401;
+    pub const S_ALIGN: u16=0x0402; pub const S_LPROCREF_ST: u16=0x0403;
+    pub const S_PROCREF: u16=0x1125; pub const S_DATAREF: u16=0x1126;
+    pub const S_LPROCREF: u16=0x1127;
     pub const S_OEM: u16=0x0404; pub const S_TI16_MAX: u16=0x1000;
     pub const S_REGISTER_ST: u16=0x1001; pub const S_CONSTANT_ST: u16=0x1002;
     pub const S_UDT_ST: u16=0x1003; pub const S_COBOLUDT_ST: u16=0x1004;
@@ -1523,12 +1525,14 @@ pub mod symbol_kind {
     pub const S_REGFRAME: u16=0x111F;
     pub const S_FILESTATIC: u16=0x1120;
     pub const S_HEAPALLOCA: u16=0x115E;
+    pub const S_UNAMESPACE_ST: u16=0x1029;
     pub const S_UNAMESPACE: u16=0x1124;
     pub const S_PECOFF_SECTION: u16=0x1136;
     pub const S_INDIRECT_CALLSITEINFO: u16=0x1139;
     pub const S_ENVBLOCK_V2: u16=0x113D;
     pub const S_BUILDINFO_V2: u16=0x114C;
     pub const S_GPROCREF: u16=0x1125;
+    pub const S_DATAREF_V2: u16=0x1126;
     pub const S_LPROCREF_V2: u16=0x1127;
     pub const S_THUNK32_V2: u16=0x1102;
     pub const S_THUNK32_ST: u16=0x1114;
@@ -1674,8 +1678,8 @@ fn parse_symbol_payload(kind: u16, payload: &[u8]) -> SymbolRecord {
         symbol_kind::S_OBJNAME => parse_objname(payload),
         symbol_kind::S_FRAMEPROC => parse_frameproc(payload),
         symbol_kind::S_THUNK32|symbol_kind::S_THUNK16 => parse_thunk(payload),
-        symbol_kind::S_PROCREF|symbol_kind::S_LPROCREF => parse_procref(payload),
-        symbol_kind::S_DATAREF => parse_dataref(payload),
+        symbol_kind::S_PROCREF|symbol_kind::S_PROCREF_ST|symbol_kind::S_LPROCREF|symbol_kind::S_LPROCREF_ST|symbol_kind::S_GPROCREF => parse_procref(payload),
+        symbol_kind::S_DATAREF|symbol_kind::S_DATAREF_ST|symbol_kind::S_DATAREF_V2 => parse_dataref(payload),
         symbol_kind::S_ANNOTATION => parse_annotation(payload),
         symbol_kind::S_TRAMPOLINE => parse_trampoline(payload),
         symbol_kind::S_SECTION => parse_section_sym(payload),
@@ -1799,17 +1803,42 @@ fn parse_thunk(payload: &[u8]) -> SymbolRecord {
 }
 
 fn parse_procref(payload: &[u8]) -> SymbolRecord {
-    if payload.len()<8 { return SymbolRecord::Unknown{kind:symbol_kind::S_PROCREF}; }
-    let nm = parse_null_terminated_string(payload);
-    let an = nm.len()+1;
-    SymbolRecord::ProcedureReference{name:nm,module_index:if an+2<=payload.len(){u16::from_le_bytes([payload[an],payload[an+1]])}else{0},type_index:if an+6<=payload.len(){le_u32_at(payload,an+2)}else{0}}
+    if payload.len()<10 { return SymbolRecord::Unknown{kind:symbol_kind::S_PROCREF}; }
+    // V2 format: sum_name(u32) + sym_offset(u32) + module_index(u16) + name(NT)
+    // Detect V2 by checking if the first bytes look like a checksum (not a printable name char)
+    let is_v2 = payload.len() >= 10 && payload[0] != 0 && !payload[0].is_ascii_graphic() && payload[0] != b'_';
+    if is_v2 {
+        let sum_name = le_u32_at(payload, 0);
+        let _sym_offset = le_u32_at(payload, 4);
+        let module_index = u16::from_le_bytes([payload[8], payload[9]]);
+        let nm = if payload.len() > 10 { parse_null_terminated_string(&payload[10..]) } else { String::new() };
+        SymbolRecord::ProcedureReference{name:nm,module_index,type_index:sum_name}
+    } else {
+        // Name-first (St) format: name(NT) + module_index(u16) + padding(u16) + type_index(u32)
+        let nm = parse_null_terminated_string(payload);
+        let an = nm.len()+1;
+        let aligned = (an + 3) & !3;
+        SymbolRecord::ProcedureReference{name:nm,module_index:if aligned+2<=payload.len(){u16::from_le_bytes([payload[aligned],payload[aligned+1]])}else{0},type_index:if aligned+6<=payload.len(){le_u32_at(payload,aligned+2)}else{0}}
+    }
 }
 
 fn parse_dataref(payload: &[u8]) -> SymbolRecord {
-    if payload.len()<8 { return SymbolRecord::Unknown{kind:symbol_kind::S_DATAREF}; }
-    let nm = parse_null_terminated_string(payload);
-    let an = nm.len()+1;
-    SymbolRecord::DataReference{name:nm,module_index:if an+2<=payload.len(){u16::from_le_bytes([payload[an],payload[an+1]])}else{0},type_index:if an+6<=payload.len(){le_u32_at(payload,an+2)}else{0}}
+    if payload.len()<10 { return SymbolRecord::Unknown{kind:symbol_kind::S_DATAREF}; }
+    // V2 format: sum_name(u32) + sym_offset(u32) + module_index(u16) + name(NT)
+    let is_v2 = payload.len() >= 10 && payload[0] != 0 && !payload[0].is_ascii_graphic() && payload[0] != b'_';
+    if is_v2 {
+        let sum_name = le_u32_at(payload, 0);
+        let _sym_offset = le_u32_at(payload, 4);
+        let module_index = u16::from_le_bytes([payload[8], payload[9]]);
+        let nm = if payload.len() > 10 { parse_null_terminated_string(&payload[10..]) } else { String::new() };
+        SymbolRecord::DataReference{name:nm,module_index,type_index:sum_name}
+    } else {
+        // Name-first (St) format: name(NT) + module_index(u16) + padding(u16) + type_index(u32)
+        let nm = parse_null_terminated_string(payload);
+        let an = nm.len()+1;
+        let aligned = (an + 3) & !3;
+        SymbolRecord::DataReference{name:nm,module_index:if aligned+2<=payload.len(){u16::from_le_bytes([payload[aligned],payload[aligned+1]])}else{0},type_index:if aligned+6<=payload.len(){le_u32_at(payload,aligned+2)}else{0}}
+    }
 }
 
 fn parse_annotation(payload: &[u8]) -> SymbolRecord {

@@ -94,6 +94,41 @@ impl LfFuncId {
     pub fn is_global(&self) -> bool {
         self.scope_id_record_number.is_no_type()
     }
+
+    /// Build a fully-qualified name for this function.
+    ///
+    /// If the function has a scope, returns `scope::name`. Otherwise returns
+    /// just the function name.
+    pub fn qualified_name(&self) -> String {
+        if self.is_global() {
+            self.name.clone()
+        } else {
+            format!("{}::{}", self.scope_id_record_number, self.name)
+        }
+    }
+
+    /// Whether the function name appears to be a C++ constructor.
+    ///
+    /// Heuristic: checks if the function name matches the unqualified
+    /// portion of its scope name (i.e., `ClassName::ClassName`).
+    pub fn is_constructor(&self) -> bool {
+        if self.is_global() {
+            return false;
+        }
+        let scope_str = self.scope_id_record_number.to_string();
+        // Extract the last component after "::" if present
+        let scope_name = scope_str.rsplit("::").next().unwrap_or(&scope_str);
+        scope_name == self.name
+    }
+
+    /// The total binary size of this record in the PDB stream.
+    ///
+    /// Includes the 4-byte scope ID, 4-byte function type, and the
+    /// null-terminated name string, rounded up to 4-byte alignment.
+    pub fn total_record_size(&self) -> usize {
+        let data_size = 4 + 4 + self.name.len() + 1; // +1 for null terminator
+        (data_size + 3) & !3 // align to 4
+    }
 }
 
 impl AbstractMsType for LfFuncId {
@@ -245,5 +280,37 @@ mod tests {
     fn test_func_id_name_trait() {
         let fid = LfFuncId::global(0x1005, "test_fn".to_string());
         assert_eq!(fid.name(), "test_fn");
+    }
+
+    #[test]
+    fn test_func_id_qualified_name_global() {
+        let fid = LfFuncId::global(0x1005, "main".to_string());
+        assert_eq!(fid.qualified_name(), "main");
+    }
+
+    #[test]
+    fn test_func_id_qualified_name_with_scope() {
+        let fid = LfFuncId::new(
+            RecordNumber::symbol_record(0x2000),
+            RecordNumber::type_record(0x1005),
+            "method".to_string(),
+        );
+        let qn = fid.qualified_name();
+        assert!(qn.contains("::"));
+        assert!(qn.contains("method"));
+    }
+
+    #[test]
+    fn test_func_id_total_record_size() {
+        // 4 (scope) + 4 (func type) + 4 (name "main" + null = 5, aligned to 8) = 16
+        let fid = LfFuncId::global(0x1005, "main".to_string());
+        assert_eq!(fid.total_record_size(), 16);
+    }
+
+    #[test]
+    fn test_func_id_total_record_size_empty_name() {
+        // 4 + 4 + 1 (just null terminator) = 9, aligned to 4 = 12
+        let fid = LfFuncId::global(0x1005, String::new());
+        assert_eq!(fid.total_record_size(), 12);
     }
 }
