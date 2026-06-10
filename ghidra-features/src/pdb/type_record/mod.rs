@@ -32,6 +32,14 @@ pub mod abstract_composite_ms_type;
 pub mod abstract_enum_ms_type;
 pub mod abstract_field_list_ms_type;
 
+// Concrete LF_* type records.
+pub mod lf_array;
+pub mod lf_modifier;
+pub mod lf_pointer;
+pub mod lf_procedure;
+pub mod lf_structure;
+pub mod lf_union;
+
 // Re-export key types for convenience.
 pub use bind::Bind;
 pub use ms_property::MsProperty;
@@ -42,6 +50,14 @@ pub use abstract_class_ms_type::AbstractClassMsType;
 pub use abstract_composite_ms_type::AbstractCompositeMsType;
 pub use abstract_enum_ms_type::AbstractEnumMsType;
 pub use abstract_field_list_ms_type::AbstractFieldListMsType;
+
+// Re-export concrete LF_* types.
+pub use lf_array::LfArray;
+pub use lf_modifier::LfModifier;
+pub use lf_pointer::LfPointer;
+pub use lf_procedure::LfProcedure;
+pub use lf_structure::LfStructure;
+pub use lf_union::LfUnion;
 
 use std::fmt;
 

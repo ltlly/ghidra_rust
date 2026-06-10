@@ -156,6 +156,8 @@ impl ExecutionStateRecord {
 pub struct TraceThread {
     /// Unique key identifying this thread.
     pub key: i64,
+    /// The key of the owning process.
+    pub process_key: i64,
     /// The object path (e.g., "Processes[0].Threads[1]").
     pub path: String,
     /// The OS-assigned thread ID.
@@ -188,6 +190,7 @@ impl TraceThread {
     ) -> Self {
         Self {
             key,
+            process_key: 0,
             path: path.into(),
             tid: None,
             name: name.into(),
@@ -325,6 +328,14 @@ impl TraceThread {
         self.stack_frames_at(snap).and_then(|frames| {
             frames.iter().find(|f| f.level == 0).map(|f| f.pc)
         })
+    }
+
+    /// Whether the thread is currently alive (has not been removed).
+    ///
+    /// This checks whether the lifespan has no upper bound (i.e., the thread
+    /// has not been terminated).
+    pub fn is_alive_now(&self) -> bool {
+        self.lifespan.lmax() == Lifespan::MAX
     }
 }
 

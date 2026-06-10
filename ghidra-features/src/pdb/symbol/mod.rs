@@ -38,8 +38,23 @@ pub use numeric::{Numeric, NumericValue};
 pub use record_number::{RecordCategory, RecordNumber};
 pub use string_parse_type::StringParseType;
 
+// Concrete symbol types ported from Ghidra Java
+pub mod s_constant;
+pub mod s_gproc32;
+pub mod s_label32;
+pub mod s_ldata32;
+pub mod s_thunk32;
+pub mod s_udt;
+
 pub use abstract_base_pointer_relative::AbstractBasePointerRelative;
 pub use abstract_block::AbstractBlock;
 pub use abstract_compile2::AbstractCompile2;
 pub use abstract_constant::AbstractConstant;
 pub use abstract_data::AbstractData;
+
+pub use s_constant::SConstant;
+pub use s_gproc32::SGProc32;
+pub use s_label32::SLabel32;
+pub use s_ldata32::SLData32;
+pub use s_thunk32::SThunk32;
+pub use s_udt::SUdt;

@@ -140,3 +140,10 @@ pub mod codebrowser;
 /// Provides: ProgramPlugin base class, ProgramManager trait, and
 /// InMemoryProgramManager implementation.
 pub mod program;
+
+/// Composite (struct/union) data type editor.
+/// Ported from `ghidra.app.plugin.core.compositeeditor` Java packages.
+/// Provides: editor panel with table management, selection, cell editing,
+/// drag-and-drop, undo/redo; field list editor; editor provider types
+/// (structure, union); structure-specific panel with bit-field and alignment.
+pub mod compositeeditor;
