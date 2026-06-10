@@ -9,7 +9,9 @@
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 
+pub mod async_utils;
 pub mod database;
+pub mod futures;
 pub mod spatial;
 
 // ---------------------------------------------------------------------------

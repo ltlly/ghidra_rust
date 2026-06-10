@@ -57,6 +57,7 @@ bzip2 = "0.4"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+pin-project = "1"
 
 # Logging
 log = "0.4"
