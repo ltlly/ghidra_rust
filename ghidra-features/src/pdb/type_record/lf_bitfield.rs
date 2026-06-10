@@ -70,6 +70,40 @@ impl LfBitfield {
             bit_position,
         )
     }
+
+    /// Get the record number of the underlying (base) integral type.
+    ///
+    /// Mirrors Java `AbstractBitfieldMsType.getElementRecordNumber()`.
+    pub fn element_record_number(&self) -> RecordNumber {
+        self.underlying_type_record_number
+    }
+
+    /// Get the bit length of the bitfield.
+    ///
+    /// Mirrors Java `AbstractBitfieldMsType.getBitLength()`.
+    pub fn bit_length(&self) -> u8 {
+        self.bit_length
+    }
+
+    /// Get the bit position of the least-significant bit.
+    ///
+    /// Mirrors Java `AbstractBitfieldMsType.getBitPosition()`.
+    pub fn bit_position(&self) -> u8 {
+        self.bit_position
+    }
+
+    /// Compute the bit mask for this bitfield within its storage unit.
+    ///
+    /// For a bitfield of `bit_length` bits at `bit_position`, the mask is
+    /// `((1 << bit_length) - 1) << bit_position`.
+    pub fn bit_mask(&self) -> u32 {
+        let width = self.bit_length.min(32);
+        if width == 0 {
+            0
+        } else {
+            ((1u32 << width) - 1) << self.bit_position
+        }
+    }
 }
 
 impl AbstractMsType for LfBitfield {
@@ -87,10 +121,12 @@ impl AbstractMsType for LfBitfield {
 
     fn emit(&self, _bind: Bind) -> String {
         let mut result = String::new();
+        // Mirrors Java: pdb.getTypeRecord(elementRecordNumber).emit(builder, Bind.NONE)
         result.push_str(&self.underlying_type_record_number.to_string());
         result.push_str(" : ");
         result.push_str(&self.bit_length.to_string());
-        result.push(' ');
+        // Mirrors Java: builder.append(" <@").append(position).append(">")
+        result.push_str(&format!(" <@{}>", self.bit_position));
         result
     }
 }
@@ -142,6 +178,7 @@ mod tests {
         let emitted = bf.emit(Bind::NONE);
         assert!(emitted.contains("0x0074"));
         assert!(emitted.contains(": 4"));
+        assert!(emitted.contains("<@0>"));
     }
 
     #[test]
@@ -154,6 +191,7 @@ mod tests {
         let emitted = bf.emit(Bind::NONE);
         assert!(emitted.contains("0x0030"));
         assert!(emitted.contains(": 1"));
+        assert!(emitted.contains("<@0>"));
     }
 
     #[test]
@@ -170,6 +208,7 @@ mod tests {
         let display = format!("{}", bf);
         assert!(display.contains("0x0074"));
         assert!(display.contains(": 4"));
+        assert!(display.contains("<@0>"));
     }
 
     #[test]
@@ -178,5 +217,44 @@ mod tests {
         let bf = LfBitfield::from_parsed(0x0020, 3, 5);
         assert_eq!(bf.bit_length, 3);
         assert_eq!(bf.bit_position, 5);
+    }
+
+    #[test]
+    fn test_bitfield_accessors() {
+        let bf = make_test_bitfield();
+        assert_eq!(bf.element_record_number(), RecordNumber::type_record(0x0074));
+        assert_eq!(bf.bit_length(), 4);
+        assert_eq!(bf.bit_position(), 0);
+    }
+
+    #[test]
+    fn test_bitfield_bit_mask() {
+        // 4-bit field at position 0: mask = 0x0F
+        let bf = make_test_bitfield();
+        assert_eq!(bf.bit_mask(), 0x0F);
+
+        // 1-bit field at position 0: mask = 0x01
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 1, 0);
+        assert_eq!(bf.bit_mask(), 0x01);
+
+        // 3-bit field at position 5: mask = 0xE0
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 3, 5);
+        assert_eq!(bf.bit_mask(), 0xE0);
+
+        // 8-bit field at position 0: mask = 0xFF
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 8, 0);
+        assert_eq!(bf.bit_mask(), 0xFF);
+
+        // 0-bit field: mask = 0
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 0, 0);
+        assert_eq!(bf.bit_mask(), 0);
+    }
+
+    #[test]
+    fn test_bitfield_emit_at_position() {
+        let bf = LfBitfield::from_parsed(0x0020, 3, 5);
+        let emitted = bf.emit(Bind::NONE);
+        assert!(emitted.contains("<@5>"));
+        assert!(emitted.contains(": 3"));
     }
 }

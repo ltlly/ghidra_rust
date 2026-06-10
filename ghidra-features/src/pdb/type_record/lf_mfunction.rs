@@ -102,6 +102,124 @@ impl LfMfunction {
             this_adjustment,
         )
     }
+
+    /// Get the record number of the return type.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getReturnRecordNumber()`.
+    pub fn return_record_number(&self) -> RecordNumber {
+        self.return_value_record_number
+    }
+
+    /// Get the record number of the containing class type.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getContainingClassRecordNumber()`.
+    pub fn containing_class_record_number(&self) -> RecordNumber {
+        self.class_record_number
+    }
+
+    /// Get the record number of the this-pointer type.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getThisPointerRecordNumber()`.
+    pub fn this_pointer_record_number(&self) -> RecordNumber {
+        self.this_record_number
+    }
+
+    /// Get the record number of the argument list type.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getArgListRecordNumber()`.
+    pub fn arg_list_record_number(&self) -> RecordNumber {
+        self.arg_list_record_number
+    }
+
+    /// Get the number of parameters.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getNumParams()`.
+    pub fn num_params(&self) -> u16 {
+        self.num_parameters
+    }
+
+    /// Get the calling convention.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getCallingConvention()`.
+    pub fn calling_convention(&self) -> CallingConvention {
+        self.calling_convention
+    }
+
+    /// Get the function attributes.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getFunctionAttributes()`.
+    pub fn function_attributes(&self) -> &FunctionAttributes {
+        &self.function_attributes
+    }
+
+    /// Whether this member function is a constructor.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.isConstructor()`.
+    pub fn is_constructor(&self) -> bool {
+        self.function_attributes.is_constructor()
+    }
+
+    /// Get the this-pointer adjustment value.
+    ///
+    /// Mirrors Java `AbstractMemberFunctionMsType.getThisAdjuster()`.
+    pub fn this_adjuster(&self) -> i32 {
+        self.this_adjustment as i32
+    }
+
+    /// Emit the full signature including class qualification, this-pointer
+    /// info, and structured metadata matching the Java `emit()` output.
+    fn emit_full(&self, bind: Bind) -> String {
+        let mut result = String::new();
+
+        if bind < Bind::PROC {
+            result.push('(');
+        }
+
+        // Emit containing class reference with "::"
+        // Mirrors Java: myBuilder.append(getContainingClassType()); myBuilder.append("::");
+        result.push_str(&self.class_record_number.to_string());
+        result.push_str("::");
+
+        // Emit argument list reference.
+        // Mirrors Java: builder.append(getArgumentsListType());
+        result.push_str(&self.arg_list_record_number.to_string());
+
+        // Emit structured metadata in angle brackets.
+        // Mirrors Java: builder.append("<this<thisPtrType>,adjuster,numParams,attrs>")
+        result.push('<');
+        result.push_str("this");
+        result.push_str(&self.this_record_number.to_string());
+        result.push(',');
+        result.push_str(&self.this_adjustment.to_string());
+        result.push(',');
+        result.push_str(&self.num_parameters.to_string());
+        let attrs_str = self.function_attributes.emit_string();
+        if attrs_str.is_empty() {
+            result.push(',');
+        } else {
+            result.push(',');
+            result.push_str(&attrs_str);
+        }
+        result.push('>');
+
+        // Emit return type with PROC binding.
+        // Mirrors Java: getReturnType().emit(builder, Bind.PROC);
+        result.push(' ');
+        result.push_str(&self.return_value_record_number.to_string());
+
+        // Emit calling convention annotation.
+        if !self.calling_convention.label().is_empty() {
+            result.push_str(" [");
+            result.push_str(self.calling_convention.label());
+            result.push(']');
+        }
+
+        if bind < Bind::PROC {
+            result.push(')');
+        }
+
+        result
+    }
 }
 
 impl AbstractMsType for LfMfunction {
@@ -118,40 +236,7 @@ impl AbstractMsType for LfMfunction {
     }
 
     fn emit(&self, bind: Bind) -> String {
-        let mut result = String::new();
-
-        if bind < Bind::PROC {
-            result.push('(');
-        }
-
-        // Emit the return type reference.
-        result.push_str(&self.return_value_record_number.to_string());
-        result.push(' ');
-
-        // Emit the class type reference.
-        result.push_str(&self.class_record_number.to_string());
-        result.push_str("::(");
-
-        // Emit calling convention.
-        if !self.calling_convention.label().is_empty() {
-            result.push_str(self.calling_convention.label());
-            result.push(' ');
-        }
-
-        // Emit argument list reference.
-        result.push_str(&self.arg_list_record_number.to_string());
-        result.push(')');
-
-        // Emit this-pointer adjustment if non-zero.
-        if self.this_adjustment != 0 {
-            result.push_str(&format!(" this+{}", self.this_adjustment));
-        }
-
-        if bind < Bind::PROC {
-            result.push(')');
-        }
-
-        result
+        self.emit_full(bind)
     }
 }
 
@@ -245,6 +330,7 @@ mod tests {
         assert!(emitted.contains("0x1000")); // class type
         assert!(emitted.contains("__thiscall"));
         assert!(emitted.contains("0x1002")); // arg list
+        assert!(emitted.contains("this"));   // this-pointer marker
     }
 
     #[test]
@@ -260,14 +346,16 @@ mod tests {
             8,
         );
         let emitted = mf.emit(Bind::NONE);
-        assert!(emitted.contains("this+8"));
+        // Adjustment appears in the angle-bracket metadata.
+        assert!(emitted.contains(",8,"));
     }
 
     #[test]
     fn test_mfunction_emit_no_adjustment() {
         let mf = make_test_mfunction();
         let emitted = mf.emit(Bind::NONE);
-        assert!(!emitted.contains("this+"));
+        // Zero adjustment still appears in metadata.
+        assert!(emitted.contains(",0,"));
     }
 
     #[test]
@@ -329,6 +417,44 @@ mod tests {
             0,
         );
         let emitted = mf.emit(Bind::NONE);
-        assert!(emitted.contains("__cdecl"));
+        assert!(emitted.contains("[__cdecl]"));
+    }
+
+    #[test]
+    fn test_mfunction_accessors() {
+        let mf = make_test_mfunction();
+        assert_eq!(mf.return_record_number(), RecordNumber::type_record(0x0074));
+        assert_eq!(mf.containing_class_record_number(), RecordNumber::type_record(0x1000));
+        assert_eq!(mf.this_pointer_record_number(), RecordNumber::type_record(0x1001));
+        assert_eq!(mf.arg_list_record_number(), RecordNumber::type_record(0x1002));
+        assert_eq!(mf.num_params(), 2);
+        assert_eq!(mf.calling_convention(), CallingConvention::ThisCall);
+        assert!(!mf.is_constructor());
+        assert_eq!(mf.this_adjuster(), 0);
+    }
+
+    #[test]
+    fn test_mfunction_is_constructor() {
+        let mf = LfMfunction::new(
+            RecordNumber::NO_TYPE,
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x04), // virtual base constructor
+            0,
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert!(mf.is_constructor());
+    }
+
+    #[test]
+    fn test_mfunction_emit_angle_bracket_metadata() {
+        let mf = make_test_mfunction();
+        let emitted = mf.emit(Bind::NONE);
+        // The angle-bracket metadata contains this-pointer, adjustment, param count.
+        assert!(emitted.contains('<'));
+        assert!(emitted.contains('>'));
+        assert!(emitted.contains("this0x1001"));
     }
 }

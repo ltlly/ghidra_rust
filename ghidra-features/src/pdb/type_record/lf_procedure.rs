@@ -276,6 +276,91 @@ impl LfProcedure {
             RecordNumber::type_record(arg_list_type_index),
         )
     }
+
+    /// Get the record number of the return type.
+    ///
+    /// Mirrors Java `AbstractProcedureMsType.getReturnRecordNumber()`.
+    pub fn return_record_number(&self) -> RecordNumber {
+        self.return_value_record_number
+    }
+
+    /// Get the record number of the argument list type.
+    ///
+    /// Mirrors Java `AbstractProcedureMsType.getArgListRecordNumber()`.
+    pub fn arg_list_record_number(&self) -> RecordNumber {
+        self.arg_list_record_number
+    }
+
+    /// Get the number of parameters.
+    ///
+    /// Mirrors Java `AbstractProcedureMsType.getNumParams()`.
+    pub fn num_params(&self) -> u16 {
+        self.num_parameters
+    }
+
+    /// Get the calling convention.
+    ///
+    /// Mirrors Java `AbstractProcedureMsType.getCallingConvention()`.
+    pub fn calling_convention(&self) -> CallingConvention {
+        self.calling_convention
+    }
+
+    /// Get the function attributes.
+    ///
+    /// Mirrors Java `AbstractProcedureMsType.getFunctionAttributes()`.
+    pub fn function_attributes(&self) -> &FunctionAttributes {
+        &self.function_attributes
+    }
+
+    /// Whether this procedure is a constructor.
+    ///
+    /// Mirrors Java `FunctionMsAttributes.isConstructor()`.
+    pub fn is_constructor(&self) -> bool {
+        self.function_attributes.is_constructor()
+    }
+
+    /// Emit the full signature including calling convention, parameter count,
+    /// and a `this` pointer reference when present.
+    ///
+    /// This method produces output closer to the Java `emit()` which emits
+    /// the arg list then recursively emits the return type at `Bind::PROC`.
+    fn emit_full(&self, bind: Bind) -> String {
+        let mut result = String::new();
+
+        if bind < Bind::PROC {
+            result.push('(');
+        }
+
+        // Emit argument list reference (mirrors Java: builder.append(getArgumentsListType()))
+        result.push_str(&self.arg_list_record_number.to_string());
+
+        // Emit return type with PROC binding (mirrors Java:
+        //   getReturnType().emit(builder, Bind.PROC))
+        result.push(' ');
+        result.push_str(&self.return_value_record_number.to_string());
+
+        // Emit calling convention annotation if non-empty.
+        if !self.calling_convention.label().is_empty() {
+            result.push_str(" [");
+            result.push_str(self.calling_convention.label());
+            result.push(']');
+        }
+
+        // Emit parameter count.
+        result.push_str(&format!(" params={}", self.num_parameters));
+
+        // Emit function attributes if non-empty.
+        let attrs_str = self.function_attributes.emit_string();
+        if !attrs_str.is_empty() {
+            result.push_str(&format!(" attrs={{{}}}", attrs_str));
+        }
+
+        if bind < Bind::PROC {
+            result.push(')');
+        }
+
+        result
+    }
 }
 
 impl AbstractMsType for LfProcedure {
@@ -292,32 +377,7 @@ impl AbstractMsType for LfProcedure {
     }
 
     fn emit(&self, bind: Bind) -> String {
-        let mut result = String::new();
-
-        if bind < Bind::PROC {
-            result.push('(');
-        }
-
-        // Emit the return type reference.
-        result.push_str(&self.return_value_record_number.to_string());
-        result.push(' ');
-
-        // Emit calling convention.
-        if !self.calling_convention.label().is_empty() {
-            result.push_str(self.calling_convention.label());
-            result.push(' ');
-        }
-
-        // Emit argument list reference.
-        result.push('(');
-        result.push_str(&self.arg_list_record_number.to_string());
-        result.push(')');
-
-        if bind < Bind::PROC {
-            result.push(')');
-        }
-
-        result
+        self.emit_full(bind)
     }
 }
 
@@ -460,6 +520,7 @@ mod tests {
         assert!(emitted.contains("0x0074")); // return type
         assert!(emitted.contains("__cdecl")); // calling convention
         assert!(emitted.contains("0x1001")); // arg list
+        assert!(emitted.contains("params=2")); // param count
     }
 
     #[test]
@@ -475,6 +536,42 @@ mod tests {
         let p = make_test_procedure();
         let emitted = p.emit(Bind::PROC);
         assert!(!emitted.starts_with('('));
+    }
+
+    #[test]
+    fn test_procedure_accessors() {
+        let p = make_test_procedure();
+        assert_eq!(p.return_record_number(), RecordNumber::type_record(0x0074));
+        assert_eq!(p.arg_list_record_number(), RecordNumber::type_record(0x1001));
+        assert_eq!(p.num_params(), 2);
+        assert_eq!(p.calling_convention(), CallingConvention::NearC);
+        assert!(!p.is_constructor());
+    }
+
+    #[test]
+    fn test_procedure_is_constructor() {
+        let p = LfProcedure::new(
+            RecordNumber::NO_TYPE,
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x02), // instance constructor
+            0,
+            RecordNumber::type_record(0x1002),
+        );
+        assert!(p.is_constructor());
+    }
+
+    #[test]
+    fn test_procedure_emit_constructor_attrs() {
+        let p = LfProcedure::new(
+            RecordNumber::NO_TYPE,
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x02),
+            0,
+            RecordNumber::type_record(0x1002),
+        );
+        let emitted = p.emit(Bind::NONE);
+        assert!(emitted.contains("attrs={"));
+        assert!(emitted.contains("instance constructor"));
     }
 
     #[test]
@@ -503,5 +600,6 @@ mod tests {
         );
         let emitted = p.emit(Bind::NONE);
         assert!(emitted.contains("__stdcall"));
+        assert!(emitted.contains("[__stdcall]"));
     }
 }

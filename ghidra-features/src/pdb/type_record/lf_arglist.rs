@@ -51,8 +51,30 @@ impl LfArglist {
     }
 
     /// Get the number of arguments.
+    ///
+    /// Mirrors Java's count field read during parsing.
     pub fn num_arguments(&self) -> usize {
         self.argument_record_numbers.len()
+    }
+
+    /// Get the record number for a specific argument by index.
+    ///
+    /// Returns `None` if the index is out of bounds.
+    pub fn get_argument(&self, index: usize) -> Option<RecordNumber> {
+        self.argument_record_numbers.get(index).copied()
+    }
+
+    /// Get the slice of all argument record numbers.
+    ///
+    /// This provides direct access to the underlying argument list without
+    /// copying.
+    pub fn arguments(&self) -> &[RecordNumber] {
+        &self.argument_record_numbers
+    }
+
+    /// Iterate over the argument record numbers.
+    pub fn iter_arguments(&self) -> impl Iterator<Item = RecordNumber> + '_ {
+        self.argument_record_numbers.iter().copied()
     }
 }
 
@@ -193,5 +215,42 @@ mod tests {
         let al = LfArglist::new(vec![]);
         let display = format!("{}", al);
         assert_eq!(display, "()");
+    }
+
+    #[test]
+    fn test_arglist_get_argument() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+            RecordNumber::type_record(0x0003),
+        ]);
+        assert_eq!(al.get_argument(0), Some(RecordNumber::type_record(0x0074)));
+        assert_eq!(al.get_argument(1), Some(RecordNumber::type_record(0x0040)));
+        assert_eq!(al.get_argument(2), Some(RecordNumber::type_record(0x0003)));
+        assert_eq!(al.get_argument(3), None);
+    }
+
+    #[test]
+    fn test_arglist_arguments_slice() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+        ]);
+        let args = al.arguments();
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], RecordNumber::type_record(0x0074));
+    }
+
+    #[test]
+    fn test_arglist_iter_arguments() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+            RecordNumber::type_record(0x0003),
+        ]);
+        let collected: Vec<_> = al.iter_arguments().collect();
+        assert_eq!(collected.len(), 3);
+        assert_eq!(collected[0], RecordNumber::type_record(0x0074));
+        assert_eq!(collected[2], RecordNumber::type_record(0x0003));
     }
 }

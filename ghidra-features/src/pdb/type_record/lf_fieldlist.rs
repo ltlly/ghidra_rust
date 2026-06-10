@@ -58,6 +58,71 @@ impl LfFieldlist {
     pub fn is_empty(&self) -> bool {
         self.field_list.is_empty()
     }
+
+    /// Get all entries as a slice.
+    pub fn entries(&self) -> &[FieldListEntry] {
+        self.field_list.entries()
+    }
+
+    /// Get an entry by index.
+    pub fn get_entry(&self, index: usize) -> Option<&FieldListEntry> {
+        self.field_list.entries().get(index)
+    }
+
+    /// Get the base class entries.
+    pub fn base_classes(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.base_classes()
+    }
+
+    /// Get the non-static member entries.
+    pub fn nonstatic_members(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.nonstatic_members()
+    }
+
+    /// Get the static member entries.
+    pub fn static_members(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.static_members()
+    }
+
+    /// Get the method entries (overloaded + single).
+    pub fn methods(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.methods()
+    }
+
+    /// Get the enumerate entries.
+    pub fn enumerates(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.enumerates()
+    }
+
+    /// Get the nested type entries.
+    pub fn nested_types(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.nested_types()
+    }
+
+    /// Get the vftable pointer entries.
+    pub fn vftable_pointers(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.vftable_pointers()
+    }
+
+    /// Get the continuation index entries.
+    pub fn continuation_indices(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.continuation_indices()
+    }
+
+    /// Count the number of non-static members.
+    pub fn num_nonstatic_members(&self) -> usize {
+        self.field_list.nonstatic_members().count()
+    }
+
+    /// Count the number of base classes.
+    pub fn num_base_classes(&self) -> usize {
+        self.field_list.base_classes().count()
+    }
+
+    /// Count the number of methods.
+    pub fn num_methods(&self) -> usize {
+        self.field_list.methods().count()
+    }
 }
 
 impl Default for LfFieldlist {
@@ -272,6 +337,103 @@ mod tests {
         });
 
         assert_eq!(fl.len(), 2);
-        assert_eq!(fl.field_list.continuation_indices().count(), 1);
+        assert_eq!(fl.continuation_indices().count(), 1);
+    }
+
+    #[test]
+    fn test_fieldlist_entries_slice() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 4,
+            access: 3,
+            name: "y".to_string(),
+        });
+
+        let entries = fl.entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].name(), Some("x"));
+        assert_eq!(entries[1].name(), Some("y"));
+    }
+
+    #[test]
+    fn test_fieldlist_get_entry() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+
+        assert!(fl.get_entry(0).is_some());
+        assert!(fl.get_entry(1).is_none());
+        assert_eq!(fl.get_entry(0).unwrap().name(), Some("x"));
+    }
+
+    #[test]
+    fn test_fieldlist_num_nonstatic_members() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "a".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 4,
+            access: 3,
+            name: "b".to_string(),
+        });
+        fl.add_entry(FieldListEntry::StaticMember {
+            type_record: RecordNumber::type_record(0x0074),
+            access: 3,
+            name: "count".to_string(),
+        });
+
+        assert_eq!(fl.num_nonstatic_members(), 2);
+    }
+
+    #[test]
+    fn test_fieldlist_num_base_classes() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::BaseClass {
+            type_record: RecordNumber::type_record(0x1000),
+            offset: 0,
+            access: 3,
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 8,
+            access: 3,
+            name: "data".to_string(),
+        });
+
+        assert_eq!(fl.num_base_classes(), 1);
+    }
+
+    #[test]
+    fn test_fieldlist_num_methods() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::OverloadedMethod {
+            count: 2,
+            method_list_record: RecordNumber::type_record(0x1010),
+            name: "foo".to_string(),
+        });
+        fl.add_entry(FieldListEntry::OneMethod {
+            type_record: RecordNumber::type_record(0x1011),
+            vftable_offset: -1,
+            access: 3,
+            name: "bar".to_string(),
+        });
+
+        assert_eq!(fl.num_methods(), 2);
     }
 }

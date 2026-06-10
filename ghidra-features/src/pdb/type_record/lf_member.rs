@@ -69,29 +69,118 @@ impl fmt::Display for AccessProtection {
 
 /// Member property flags.
 ///
-/// Parsed from the member attributes word. These flags describe
-/// characteristics of the member (e.g., whether it is a compiler-generated
-/// pseudo-field).
+/// Parsed from bits 2-4 of the member attributes word. Corresponds to
+/// the Java `ClassFieldMsAttributes.Property` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum MemberProperty {
+    /// No property specified.
+    Blank = 0,
+    /// Virtual member.
+    Virtual = 1,
+    /// Static member.
+    Static = 2,
+    /// Friend declaration.
+    Friend = 3,
+    /// Introducing virtual function (vftable slot).
+    Intro = 4,
+    /// Pure virtual function.
+    Pure = 5,
+    /// Introducing pure virtual function.
+    IntroPure = 6,
+    /// Reserved / unused.
+    Reserved = 7,
+}
+
+impl MemberProperty {
+    /// Parse from a 3-bit value.
+    pub fn from_value(val: u16) -> Self {
+        match (val >> 2) & 0x07 {
+            0 => Self::Blank,
+            1 => Self::Virtual,
+            2 => Self::Static,
+            3 => Self::Friend,
+            4 => Self::Intro,
+            5 => Self::Pure,
+            6 => Self::IntroPure,
+            7 => Self::Reserved,
+            _ => Self::Blank,
+        }
+    }
+
+    /// The label string for display.
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Blank => "",
+            Self::Virtual => "virtual",
+            Self::Static => "static",
+            Self::Friend => "friend",
+            Self::Intro => "<intro>",
+            Self::Pure => "<pure>",
+            Self::IntroPure => "<intro,pure>",
+            Self::Reserved => "",
+        }
+    }
+
+    /// Whether this property represents any kind of virtual function.
+    pub fn is_virtual(&self) -> bool {
+        matches!(self, Self::Virtual | Self::Intro | Self::Pure | Self::IntroPure)
+    }
+}
+
+impl fmt::Display for MemberProperty {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.label())
+    }
+}
+
+/// Member class field attributes.
+///
+/// Parsed from the full 16-bit attributes word in LF_MEMBER and related
+/// records. Corresponds to the Java `ClassFieldMsAttributes` class which
+/// contains access level, property flags, and several boolean modifiers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MemberAttributes {
-    /// Access protection level.
+    /// Access protection level (bits 0-1).
     pub access: AccessProtection,
-    /// Whether this member is a compiler-generated pseudo-field (e.g., padding).
+    /// Property classification (bits 2-4).
+    pub property: MemberProperty,
+    /// Whether this member is a compiler-generated pseudo-field (bit 5).
+    /// Corresponds to Java `compilerGenerateFunctionDoesNotExist`.
     pub is_pseudo: bool,
-    /// Whether this member does not contribute to the class's size/layout.
+    /// Whether this member cannot be inherited (bit 6).
     pub no_inherit: bool,
-    /// Whether this member is not constructible.
+    /// Whether this member is not constructible (bit 7).
     pub no_construct: bool,
+    /// Whether a compiler-generated function exists (bit 8).
+    /// Corresponds to Java `compilerGenerateFunctionDoesExist`.
+    pub compiler_generated_exists: bool,
+    /// Whether this member cannot be overridden (bit 9).
+    pub cannot_be_overridden: bool,
 }
 
 impl MemberAttributes {
     /// Create from a raw 16-bit attributes value.
+    ///
+    /// Layout matches Java `ClassFieldMsAttributes.processAttributes()`:
+    /// ```text
+    /// bits 0-1: Access
+    /// bits 2-4: Property
+    /// bit  5:   compilerGenerateFunctionDoesNotExist (pseudo)
+    /// bit  6:   cannotBeInherited
+    /// bit  7:   cannotBeConstructed
+    /// bit  8:   compilerGenerateFunctionDoesExist
+    /// bit  9:   cannotBeOverridden
+    /// ```
     pub fn from_u16(val: u16) -> Self {
         Self {
             access: AccessProtection::from_value(val),
-            is_pseudo: (val & 0x04) != 0,
-            no_inherit: (val & 0x08) != 0,
-            no_construct: (val & 0x10) != 0,
+            property: MemberProperty::from_value(val),
+            is_pseudo: (val & 0x0020) != 0,
+            no_inherit: (val & 0x0040) != 0,
+            no_construct: (val & 0x0080) != 0,
+            compiler_generated_exists: (val & 0x0100) != 0,
+            cannot_be_overridden: (val & 0x0200) != 0,
         }
     }
 
@@ -99,16 +188,54 @@ impl MemberAttributes {
     pub fn public_member() -> Self {
         Self {
             access: AccessProtection::Public,
+            property: MemberProperty::Blank,
             is_pseudo: false,
             no_inherit: false,
             no_construct: false,
+            compiler_generated_exists: false,
+            cannot_be_overridden: false,
         }
+    }
+
+    /// Emit the attributes as a formatted string matching the Java output.
+    ///
+    /// Format: `<access> <property>[<pseudo,noinherit,noconstruct>]`
+    pub fn emit_string(&self) -> String {
+        let mut result = String::new();
+        result.push_str(self.access.label());
+
+        let prop_label = self.property.label();
+        if !prop_label.is_empty() {
+            if !result.is_empty() {
+                result.push(' ');
+            }
+            result.push_str(prop_label);
+        }
+
+        if self.is_pseudo || self.no_inherit || self.no_construct {
+            let mut ds = super::DelimiterState::new("<", ", ");
+            result.push_str(ds.out(self.is_pseudo));
+            if self.is_pseudo {
+                result.push_str("pseudo");
+            }
+            result.push_str(ds.out(self.no_inherit));
+            if self.no_inherit {
+                result.push_str("noinherit");
+            }
+            result.push_str(ds.out(self.no_construct));
+            if self.no_construct {
+                result.push_str("noconstruct");
+            }
+            result.push('>');
+        }
+
+        result
     }
 }
 
 impl fmt::Display for MemberAttributes {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.access)
+        write!(f, "{}", self.emit_string())
     }
 }
 
@@ -175,6 +302,52 @@ impl LfMember {
             name,
         )
     }
+
+    /// Get the record number of the member's data type.
+    ///
+    /// Mirrors Java `AbstractMemberMsType.getFieldTypeRecordNumber()`.
+    pub fn field_type_record_number(&self) -> RecordNumber {
+        self.type_record_number
+    }
+
+    /// Get the byte offset within the containing composite.
+    ///
+    /// Mirrors Java `AbstractMemberMsType.getOffset()`.
+    pub fn byte_offset(&self) -> u32 {
+        self.offset
+    }
+
+    /// Get the member attributes.
+    ///
+    /// Mirrors Java `AbstractMemberMsType.getAttribute()`.
+    pub fn attribute(&self) -> &MemberAttributes {
+        &self.attributes
+    }
+
+    /// Get the access protection level.
+    pub fn access(&self) -> AccessProtection {
+        self.attributes.access
+    }
+
+    /// Get the member property classification.
+    pub fn property(&self) -> MemberProperty {
+        self.attributes.property
+    }
+
+    /// Whether this is a static member.
+    pub fn is_static(&self) -> bool {
+        self.attributes.property == MemberProperty::Static
+    }
+
+    /// Whether this is a virtual member.
+    pub fn is_virtual(&self) -> bool {
+        self.attributes.property.is_virtual()
+    }
+
+    /// Whether this is a compiler-generated pseudo-field.
+    pub fn is_pseudo(&self) -> bool {
+        self.attributes.is_pseudo
+    }
 }
 
 impl AbstractMsType for LfMember {
@@ -197,22 +370,23 @@ impl AbstractMsType for LfMember {
     fn emit(&self, _bind: Bind) -> String {
         let mut result = String::new();
 
-        // Emit the type reference.
-        result.push_str(&self.type_record_number.to_string());
-        result.push(' ');
+        // Emit attributes (access + property + modifiers).
+        // Mirrors Java: builder.append(attribute); builder.append(": ");
+        result.push_str(&self.attributes.emit_string());
+        result.push_str(": ");
 
         // Emit the member name.
         result.push_str(&self.name);
 
-        // Emit the offset.
-        result.push_str(&format!(" @ {}", self.offset));
-
-        // Emit access if not public.
-        if self.attributes.access != AccessProtection::Public {
-            result.push_str(&format!(" [{}]", self.attributes.access));
-        }
-
+        // Emit the type reference.
+        // Mirrors Java: pdb.getTypeRecord(fieldTypeRecordNumber).emit(myBuilder, Bind.NONE)
         result.push(' ');
+        result.push_str(&self.type_record_number.to_string());
+
+        // Emit the offset.
+        // Mirrors Java: builder.append("<@").append(offset).append(">")
+        result.push_str(&format!("<@{}>", self.offset));
+
         result
     }
 }
@@ -254,30 +428,139 @@ mod tests {
     fn test_member_attributes_public() {
         let attrs = MemberAttributes::from_u16(0x0003); // bits 0-1 = 3 = public
         assert_eq!(attrs.access, AccessProtection::Public);
+        assert_eq!(attrs.property, MemberProperty::Blank);
         assert!(!attrs.is_pseudo);
         assert!(!attrs.no_inherit);
         assert!(!attrs.no_construct);
+        assert!(!attrs.compiler_generated_exists);
+        assert!(!attrs.cannot_be_overridden);
     }
 
     #[test]
     fn test_member_attributes_pseudo() {
-        let attrs = MemberAttributes::from_u16(0x0007); // public + pseudo (bit 2)
+        // bit 5 = 0x0020
+        let attrs = MemberAttributes::from_u16(0x0023); // public + pseudo (bit 5)
         assert_eq!(attrs.access, AccessProtection::Public);
         assert!(attrs.is_pseudo);
     }
 
     #[test]
     fn test_member_attributes_no_inherit() {
-        let attrs = MemberAttributes::from_u16(0x000B); // public + no-inherit (bit 3)
+        // bit 6 = 0x0040
+        let attrs = MemberAttributes::from_u16(0x0043); // public + no-inherit (bit 6)
         assert_eq!(attrs.access, AccessProtection::Public);
         assert!(attrs.no_inherit);
     }
 
     #[test]
     fn test_member_attributes_no_construct() {
-        let attrs = MemberAttributes::from_u16(0x0013); // public + no-construct (bit 4)
+        // bit 7 = 0x0080
+        let attrs = MemberAttributes::from_u16(0x0083); // public + no-construct (bit 7)
         assert_eq!(attrs.access, AccessProtection::Public);
         assert!(attrs.no_construct);
+    }
+
+    #[test]
+    fn test_member_attributes_compiler_generated_exists() {
+        // bit 8 = 0x0100
+        let attrs = MemberAttributes::from_u16(0x0103); // public + compiler_gen_exists (bit 8)
+        assert_eq!(attrs.access, AccessProtection::Public);
+        assert!(attrs.compiler_generated_exists);
+    }
+
+    #[test]
+    fn test_member_attributes_cannot_be_overridden() {
+        // bit 9 = 0x0200
+        let attrs = MemberAttributes::from_u16(0x0203); // public + cannot_be_overridden (bit 9)
+        assert_eq!(attrs.access, AccessProtection::Public);
+        assert!(attrs.cannot_be_overridden);
+    }
+
+    #[test]
+    fn test_member_property_virtual() {
+        // property bits 2-4 = 1 (virtual) => val = 0x0004
+        let attrs = MemberAttributes::from_u16(0x0007); // public + virtual
+        assert_eq!(attrs.property, MemberProperty::Virtual);
+        assert!(attrs.property.is_virtual());
+    }
+
+    #[test]
+    fn test_member_property_static() {
+        // property bits 2-4 = 2 (static) => val = 0x0008
+        let attrs = MemberAttributes::from_u16(0x000B); // public + static
+        assert_eq!(attrs.property, MemberProperty::Static);
+        assert!(!attrs.property.is_virtual());
+    }
+
+    #[test]
+    fn test_member_property_friend() {
+        // property bits 2-4 = 3 (friend) => val = 0x000C
+        let attrs = MemberAttributes::from_u16(0x000F); // public + friend
+        assert_eq!(attrs.property, MemberProperty::Friend);
+    }
+
+    #[test]
+    fn test_member_property_intro() {
+        // property bits 2-4 = 4 (intro) => val = 0x0010
+        let attrs = MemberAttributes::from_u16(0x0013); // public + intro
+        assert_eq!(attrs.property, MemberProperty::Intro);
+        assert!(attrs.property.is_virtual());
+    }
+
+    #[test]
+    fn test_member_property_pure() {
+        // property bits 2-4 = 5 (pure) => val = 0x0014
+        let attrs = MemberAttributes::from_u16(0x0017); // public + pure
+        assert_eq!(attrs.property, MemberProperty::Pure);
+        assert!(attrs.property.is_virtual());
+    }
+
+    #[test]
+    fn test_member_property_intro_pure() {
+        // property bits 2-4 = 6 (intro_pure) => val = 0x0018
+        let attrs = MemberAttributes::from_u16(0x001B); // public + intro_pure
+        assert_eq!(attrs.property, MemberProperty::IntroPure);
+        assert!(attrs.property.is_virtual());
+    }
+
+    #[test]
+    fn test_member_property_display() {
+        assert_eq!(format!("{}", MemberProperty::Virtual), "virtual");
+        assert_eq!(format!("{}", MemberProperty::Static), "static");
+        assert_eq!(format!("{}", MemberProperty::IntroPure), "<intro,pure>");
+        assert_eq!(format!("{}", MemberProperty::Blank), "");
+    }
+
+    #[test]
+    fn test_member_attributes_emit_string() {
+        let attrs = MemberAttributes::public_member();
+        assert_eq!(attrs.emit_string(), "public");
+
+        let attrs = MemberAttributes::from_u16(0x0001); // private
+        assert_eq!(attrs.emit_string(), "private");
+
+        // public + static
+        let attrs = MemberAttributes::from_u16(0x000B);
+        assert!(attrs.emit_string().contains("public"));
+        assert!(attrs.emit_string().contains("static"));
+    }
+
+    #[test]
+    fn test_member_attributes_emit_with_pseudo() {
+        // public + pseudo (bit 5)
+        let attrs = MemberAttributes::from_u16(0x0023);
+        let emitted = attrs.emit_string();
+        assert!(emitted.contains("<pseudo>"));
+    }
+
+    #[test]
+    fn test_member_attributes_emit_with_multiple_modifiers() {
+        // public + pseudo (bit 5) + noinherit (bit 6) + noconstruct (bit 7)
+        let attrs = MemberAttributes::from_u16(0x00E3);
+        let emitted = attrs.emit_string();
+        assert!(emitted.contains("<pseudo"));
+        assert!(emitted.contains("noinherit"));
+        assert!(emitted.contains("noconstruct"));
     }
 
     #[test]
@@ -313,22 +596,24 @@ mod tests {
         let emitted = m.emit(Bind::NONE);
         assert!(emitted.contains("0x0074"));
         assert!(emitted.contains("x"));
-        assert!(emitted.contains("@ 0"));
+        assert!(emitted.contains("<@0>"));
+        assert!(emitted.contains("public"));
     }
 
     #[test]
     fn test_member_emit_private() {
         let m = LfMember::from_parsed(0x0001, 0x0074, 8, "secret".to_string());
         let emitted = m.emit(Bind::NONE);
-        assert!(emitted.contains("[private]"));
+        assert!(emitted.contains("private"));
+        assert!(emitted.contains("<@8>"));
     }
 
     #[test]
-    fn test_member_emit_public_no_access_shown() {
-        // Public members should not show access in emit.
+    fn test_member_emit_contains_attributes() {
+        // Public members show "public: " prefix.
         let m = make_test_member();
         let emitted = m.emit(Bind::NONE);
-        assert!(!emitted.contains("[public]"));
+        assert!(emitted.starts_with("public: "));
     }
 
     #[test]
@@ -367,12 +652,83 @@ mod tests {
             0,
             MemberAttributes {
                 access: AccessProtection::Public,
+                property: MemberProperty::Blank,
                 is_pseudo: true,
                 no_inherit: false,
                 no_construct: false,
+                compiler_generated_exists: false,
+                cannot_be_overridden: false,
             },
             "__padding".to_string(),
         );
         assert!(m.attributes.is_pseudo);
+    }
+
+    #[test]
+    fn test_member_accessors() {
+        let m = make_test_member();
+        assert_eq!(m.field_type_record_number(), RecordNumber::type_record(0x0074));
+        assert_eq!(m.byte_offset(), 0);
+        assert_eq!(m.access(), AccessProtection::Public);
+        assert_eq!(m.property(), MemberProperty::Blank);
+        assert!(!m.is_static());
+        assert!(!m.is_virtual());
+        assert!(!m.is_pseudo());
+    }
+
+    #[test]
+    fn test_member_is_static() {
+        let m = LfMember::new(
+            RecordNumber::type_record(0x0074),
+            0,
+            MemberAttributes::from_u16(0x000B), // public + static
+            "count".to_string(),
+        );
+        assert!(m.is_static());
+        assert!(!m.is_virtual());
+    }
+
+    #[test]
+    fn test_member_is_virtual() {
+        let m = LfMember::new(
+            RecordNumber::type_record(0x0074),
+            0,
+            MemberAttributes::from_u16(0x0007), // public + virtual
+            "vfunc".to_string(),
+        );
+        assert!(m.is_virtual());
+        assert!(!m.is_static());
+    }
+
+    #[test]
+    fn test_member_emit_virtual() {
+        let m = LfMember::new(
+            RecordNumber::type_record(0x0074),
+            0,
+            MemberAttributes::from_u16(0x0007), // public + virtual
+            "vfunc".to_string(),
+        );
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.contains("virtual"));
+    }
+
+    #[test]
+    fn test_member_emit_static() {
+        let m = LfMember::new(
+            RecordNumber::type_record(0x0074),
+            0,
+            MemberAttributes::from_u16(0x000B), // public + static
+            "count".to_string(),
+        );
+        let emitted = m.emit(Bind::NONE);
+        assert!(emitted.contains("static"));
+    }
+
+    #[test]
+    fn test_member_display_contains_attributes() {
+        let m = make_test_member();
+        let display = format!("{}", m);
+        assert!(display.contains("public"));
+        assert!(display.contains("x"));
     }
 }

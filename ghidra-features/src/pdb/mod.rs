@@ -1519,6 +1519,7 @@ pub mod symbol_kind {
     pub const S_BUILDINFO: u16=0x103D;
     pub const S_INLINESITE: u16=0x103E; pub const S_INLINESITE_END: u16=0x103F;
     pub const S_PROC_ID_END: u16=0x1040;
+    pub const S_HEAPALLOCA: u16=0x115E;
 }
 
 

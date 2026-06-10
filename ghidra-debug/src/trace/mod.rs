@@ -11,6 +11,9 @@ pub mod trace;
 pub mod trace_thread;
 pub mod trace_process;
 pub mod trace_execution_state;
+pub mod trace_memory_region;
+pub mod trace_stack_frame;
+pub mod trace_dynamic_table;
 
 pub use trace::{
     MemoryKey, TraceData, TraceEvent, TraceEventKind, TraceSnapshotEntry, TraceStatistics,
@@ -21,4 +24,14 @@ pub use trace_thread::{
 pub use trace_process::{ProcessEnvironment, TraceProcess};
 pub use trace_execution_state::{
     StateQuery, StateTransition, TraceExecutionStateManager,
+};
+pub use trace_memory_region::{
+    MemoryRegionPermissions, TraceMemoryRegionEntry, TraceMemoryRegionManager,
+};
+pub use trace_stack_frame::{
+    FrameKind, FrameRegisterValue, SourceLocation,
+    TraceStackEntry, TraceStackFrameEntry, TraceStackFrameManager,
+};
+pub use trace_dynamic_table::{
+    ColumnSchema, DynamicRow, DynamicTableEntry, DynamicValue, TraceDynamicTableManager,
 };
