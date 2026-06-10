@@ -21,6 +21,7 @@
 //! - [`select`] — flow-based code selection actions
 //! - [`plugin`] — base GUI plugins (codebrowser, listing, symboltree, bytes, comment, decompile, terminal)
 //! - [`searchtext`] — text search plugin (search dialog, provider, actions, history)
+//! - [`string`] — string analysis plugins (string table search, defined strings table)
 
 pub mod analyzer;
 pub mod assembler;
@@ -58,6 +59,7 @@ pub mod select;
 pub mod stack;
 pub mod subroutine;
 pub mod symbol;
+pub mod string;
 pub mod symboltable;
 pub mod terminal;
 

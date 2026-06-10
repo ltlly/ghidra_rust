@@ -122,7 +122,7 @@ pub struct PdbReaderContext {
     /// The IPI stream (stream 4).
     pub ipi: Option<IpiStream>,
     /// Cached type index to name mapping (built from TPI).
-    type_names: HashMap<u32, String>,
+    pub(crate) type_names: HashMap<u32, String>,
 }
 
 impl PdbReaderContext {

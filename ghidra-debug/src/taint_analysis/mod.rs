@@ -17,6 +17,8 @@ pub mod sarif_writer;
 pub mod taint_space;
 pub mod taint_engines;
 pub mod taint_states;
+pub mod taint_analysis_plugin;
+pub mod taint_analysis_provider;
 pub use taint_space::{TaintSet as TaintSpaceSet, TaintSpace};
 pub use taint_engines::{
     AngrTaintState, EmulatorTaintState, ExtKeyValue as TaintExtKeyValue, SarifKeyValueWriter,
@@ -27,4 +29,12 @@ pub use taint_states::{
     LogicalLocation as SarifLogicalLocationEntry,
     SarifKeyValueWriter as SarifKvWriter, SarifLogicalLocationWriter as SarifLocWriter,
     TaintEntry, TaintError, TaintLevel,
+};
+pub use taint_analysis_plugin::{
+    TaintAnalysisJob, TaintAnalysisPlugin, TaintAnalysisPluginConfig, TaintAnalysisPluginState,
+    TaintJobStatus,
+};
+pub use taint_analysis_provider::{
+    TaintAnalysisDisplayRow, TaintAnalysisProvider, TaintAnalysisProviderConfig,
+    TaintAnalysisProviderState, TaintAnalysisSummary,
 };

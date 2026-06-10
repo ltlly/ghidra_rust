@@ -50,6 +50,9 @@ pub mod pdb_byte_reader;
 pub mod pdb_exception;
 pub mod msf;
 
+// PDB applicator core -- applies parsed PDB data to a program
+pub mod applicator;
+
 use std::fmt;
 
 use nom::error::{ErrorKind, ParseError};
