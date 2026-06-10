@@ -832,6 +832,21 @@ impl LfPointer {
         ptr.parse_extended_pointer_info(reader)?;
         Ok(ptr)
     }
+
+    /// Parse the core fields from a 16-bit variant byte reader.
+    ///
+    /// This mirrors the Java `Pointer16MsType` constructor which reads
+    /// a 16-bit underlying type index and a u16 attributes field (with
+    /// a smaller attribute layout).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let underlying_type_index = reader.read_u16()? as u32;
+        let attributes = reader.read_u16()? as u32;
+        Ok(Self::from_parsed(underlying_type_index, attributes))
+    }
 }
 
 impl AbstractMsType for LfPointer {
@@ -877,6 +892,9 @@ impl AbstractMsType for LfPointer {
         }
         if self.is_volatile {
             result.push_str("volatile ");
+        }
+        if self.is_restrict {
+            result.push_str("restrict ");
         }
 
         result.push(' ');
@@ -1719,5 +1737,80 @@ mod tests {
         p.is_unaligned = true;
         p.is_restrict = true;
         assert_eq!(p.qualifier_flags(), "cvur");
+    }
+
+    // =========================================================================
+    // Restrict qualifier in emit output
+    // =========================================================================
+
+    #[test]
+    fn test_pointer_emit_restrict() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_restrict = true;
+        let emitted = p.emit(Bind::NONE);
+        assert!(emitted.contains("restrict "));
+    }
+
+    #[test]
+    fn test_pointer_emit_const_restrict() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_const = true;
+        p.is_restrict = true;
+        let emitted = p.emit(Bind::NONE);
+        assert!(emitted.contains("const "));
+        assert!(emitted.contains("restrict "));
+    }
+
+    #[test]
+    fn test_pointer_emit_all_qualifiers() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.is_const = true;
+        p.is_volatile = true;
+        p.is_restrict = true;
+        let emitted = p.emit(Bind::NONE);
+        assert!(emitted.contains("const "));
+        assert!(emitted.contains("volatile "));
+        assert!(emitted.contains("restrict "));
+    }
+
+    // =========================================================================
+    // 16-bit variant parsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_pointer_parse_from_reader_16() {
+        // underlyingType=0x0074(u16), attributes with ptrType=10(near32),
+        // mode=0(*), size=4
+        let attrs: u32 = 10 | (0 << 5) | (0 << 8) | (0 << 9) | (0 << 10)
+            | (0 << 11) | (0 << 12) | (4u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&(attrs as u16).to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(p.underlying_record_number, RecordNumber::type_record(0x0074));
+        assert_eq!(p.pointer_type, PointerType::Near32);
+        assert_eq!(p.pointer_mode, PointerMode::Pointer);
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_16_truncated() {
+        let data = [0x74u8]; // only 1 byte, need 4
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfPointer::parse_from_reader_16(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_16_ref() {
+        // ptrType=10(near32), mode=1(lvalue ref), size=4
+        let attrs: u32 = 10 | (1 << 5) | (4u32 << 13);
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&(attrs as u16).to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(p.pointer_mode, PointerMode::LValueReference);
+        assert!(p.is_reference());
     }
 }

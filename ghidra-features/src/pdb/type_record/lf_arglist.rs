@@ -181,7 +181,8 @@ impl LfArglist {
     /// Parse an argument list from a byte reader with a variable-sized count.
     ///
     /// Some PDB variant formats use a 16-bit count field instead of 32-bit.
-    /// This method accepts the count size as a parameter.
+    /// This method accepts the count size as a parameter. Record numbers
+    /// are always read as 32-bit (the ST-format variant).
     ///
     /// # Errors
     ///
@@ -203,6 +204,24 @@ impl LfArglist {
         let mut arg_type_indices = Vec::with_capacity(count);
         for _ in 0..count {
             arg_type_indices.push(reader.read_u32()?);
+        }
+        Ok(Self::from_parsed(arg_type_indices))
+    }
+
+    /// Parse a 16-bit argument list from a byte reader.
+    ///
+    /// Reads a u16 count followed by that many u16 type indices. This
+    /// mirrors the Java `ArgumentsList16MsType` constructor which calls
+    /// the `AbstractArgumentsListMsType` base with `intSize=16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let count = reader.read_u16()? as usize;
+        let mut arg_type_indices = Vec::with_capacity(count);
+        for _ in 0..count {
+            arg_type_indices.push(reader.read_u16()? as u32);
         }
         Ok(Self::from_parsed(arg_type_indices))
     }
@@ -645,5 +664,65 @@ mod tests {
         let mut reader = PdbByteReader::new(&data);
         let result = LfArglist::parse_from_reader_sized(&mut reader, 3);
         assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // 16-bit variant parsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_arglist_parse_from_reader_16_empty() {
+        // count=0(u16)
+        let data = 0u16.to_le_bytes();
+        let mut reader = PdbByteReader::new(&data);
+        let al = LfArglist::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(al.num_arguments(), 0);
+    }
+
+    #[test]
+    fn test_arglist_parse_from_reader_16_single() {
+        // count=1(u16), argType=0x0074(u16)
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let al = LfArglist::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(al.num_arguments(), 1);
+        assert_eq!(al.argument_record_numbers[0], RecordNumber::type_record(0x0074));
+    }
+
+    #[test]
+    fn test_arglist_parse_from_reader_16_multiple() {
+        // count=3, args=[0x0074, 0x0040, 0x0003]
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&0x0040u16.to_le_bytes());
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let al = LfArglist::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(al.num_arguments(), 3);
+        assert_eq!(al.argument_record_numbers[0], RecordNumber::type_record(0x0074));
+        assert_eq!(al.argument_record_numbers[1], RecordNumber::type_record(0x0040));
+        assert_eq!(al.argument_record_numbers[2], RecordNumber::type_record(0x0003));
+    }
+
+    #[test]
+    fn test_arglist_parse_from_reader_16_truncated() {
+        let data = [0x01u8]; // only 1 byte, need 2 for count
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfArglist::parse_from_reader_16(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_arglist_parse_from_reader_16_variadic() {
+        // Single void arg (T_NOTYPE = 0x0003) => variadic
+        let mut data = Vec::new();
+        data.extend_from_slice(&1u16.to_le_bytes());
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let al = LfArglist::parse_from_reader_16(&mut reader).unwrap();
+        assert!(al.is_variadic());
     }
 }

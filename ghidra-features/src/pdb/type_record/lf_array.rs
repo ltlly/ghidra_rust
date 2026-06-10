@@ -270,6 +270,24 @@ impl LfArray {
         Ok(Self::from_parsed(element_type_index, index_type_index, size, name))
     }
 
+    /// Parse a 16-bit array type record from a byte reader.
+    ///
+    /// Reads u16 record numbers for the element and index types, a
+    /// `Numeric`-encoded size value, and a null-terminated name string.
+    /// This mirrors the Java `Array16MsType` constructor which calls the
+    /// `AbstractArrayMsType` base with `recordNumberSize=16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let element_type_index = reader.read_u16()? as u32;
+        let index_type_index = reader.read_u16()? as u32;
+        let size = parse_numeric_u64(reader)?;
+        let name = reader.read_cstring_aligned4()?;
+        Ok(Self::from_parsed(element_type_index, index_type_index, size, name))
+    }
+
     /// Parse an array type record with stride from a byte reader.
     ///
     /// Like [`parse_from_reader`] but also reads the stride field (u32)
@@ -856,5 +874,53 @@ mod tests {
         let mut reader = PdbByteReader::new(&data);
         let val = super::parse_numeric_u64(&mut reader).unwrap();
         assert_eq!(val, u64::MAX);
+    }
+
+    // =========================================================================
+    // 16-bit variant parsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_array_parse_from_reader_16() {
+        // element_type=0x0074(u16), index_type=0x0075(u16), size=40(u16 numeric), name="int[10]"
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&0x0075u16.to_le_bytes());
+        data.extend_from_slice(&build_numeric_u16(40));
+        data.extend_from_slice(&build_cstring_aligned4("int[10]"));
+        let mut reader = PdbByteReader::new(&data);
+        let a = LfArray::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(a.name(), "int[10]");
+        assert_eq!(a.get_size(), 40);
+        assert_eq!(
+            a.array.element_type_record_number,
+            RecordNumber::type_record(0x0074)
+        );
+        assert_eq!(
+            a.array.index_type_record_number,
+            RecordNumber::type_record(0x0075)
+        );
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_16_truncated() {
+        let data = [0x74u8, 0x00]; // only 2 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfArray::parse_from_reader_16(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_array_parse_from_reader_16_u32_size() {
+        // element_type=0x0074(u16), index_type=0x0075(u16), size=256(u32 numeric)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&0x0075u16.to_le_bytes());
+        data.extend_from_slice(&build_numeric_u32(256));
+        data.extend_from_slice(&build_cstring_aligned4("big"));
+        let mut reader = PdbByteReader::new(&data);
+        let a = LfArray::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(a.get_size(), 256);
+        assert_eq!(a.name(), "big");
     }
 }

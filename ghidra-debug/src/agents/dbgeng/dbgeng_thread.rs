@@ -555,6 +555,64 @@ impl DbgEngThread {
     pub fn update_short_display(&mut self, radix: u32) {
         self.short_display = Some(self.build_short_display(radix));
     }
+
+    /// Build the backtrace as a list of display strings.
+    pub fn build_backtrace(&self) -> Vec<String> {
+        let mut frames: Vec<_> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames.iter().map(|f| f.build_display()).collect()
+    }
+
+    /// Build trace object key-value pairs for the stack container.
+    pub fn build_stack_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.frames.len().to_string())]
+    }
+
+    /// Collect all register names across all frames.
+    pub fn all_register_names(&self) -> Vec<String> {
+        let mut names = std::collections::BTreeSet::new();
+        for frame in self.frames.values() {
+            for reg in &frame.registers {
+                names.insert(reg.name.clone());
+            }
+        }
+        names.into_iter().collect()
+    }
+
+    /// Find the frame containing the given PC address.
+    pub fn frame_at_pc(&self, pc: u64) -> Option<&DbgEngStackFrame> {
+        self.frames.values().find(|f| f.pc == pc)
+    }
+
+    /// Get the return address for the innermost frame.
+    pub fn return_address(&self) -> Option<u64> {
+        self.innermost_frame()
+            .map(|f| f.return_address)
+            .filter(|&ra| ra != 0)
+    }
+
+    /// Whether the thread was stopped by a breakpoint.
+    pub fn stopped_at_breakpoint(&self) -> bool {
+        matches!(
+            self.stop_reason,
+            Some(DbgEngStopReason::Breakpoint { .. })
+                | Some(DbgEngStopReason::HardwareBreakpoint { .. })
+        )
+    }
+
+    /// Whether the thread was stopped by an exception.
+    pub fn stopped_by_exception(&self) -> bool {
+        matches!(
+            self.stop_reason,
+            Some(DbgEngStopReason::Exception { .. })
+                | Some(DbgEngStopReason::AccessViolation { .. })
+        )
+    }
+
+    /// Whether the thread finished a step operation.
+    pub fn stopped_at_step(&self) -> bool {
+        self.stop_reason == Some(DbgEngStopReason::StepComplete)
+    }
 }
 
 /// A stack frame within a dbgeng thread.
@@ -1019,6 +1077,578 @@ impl DbgEngStackWalker {
     pub fn reset(&mut self) {
         self.last_frame_levels.clear();
         self.walked = false;
+    }
+}
+
+/// A register descriptor as returned by dbgeng's register enumeration API.
+///
+/// Ported from the Python agent's `putreg` function which iterates through
+/// all registers via `regs._reg.GetDescription(i)`. Each descriptor carries
+/// the register name, its group, and its size in bytes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterDescriptor {
+    /// Register name (e.g., "rax", "rip", "xmm0").
+    pub name: String,
+    /// Register group (e.g., "User", "Segment", "XMM").
+    pub group: Option<String>,
+    /// Register size in bytes.
+    pub size: Option<usize>,
+}
+
+impl RegisterDescriptor {
+    /// Create a new register descriptor.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            group: None,
+            size: None,
+        }
+    }
+
+    /// Set the register group.
+    pub fn with_group(mut self, group: impl Into<String>) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
+    /// Set the register size.
+    pub fn with_size(mut self, size: usize) -> Self {
+        self.size = Some(size);
+        self
+    }
+}
+
+/// A batch of register values for a frame.
+///
+/// Groups register values by frame for efficient trace writing.
+/// Ported from the register syncing logic in `commands.py` and `hooks.py`.
+#[derive(Debug, Clone, Default)]
+pub struct FrameRegisterBatch {
+    /// Frame level.
+    pub frame_level: u32,
+    /// Register values.
+    pub registers: Vec<RegisterValue>,
+}
+
+impl FrameRegisterBatch {
+    /// Create a new batch for a frame level.
+    pub fn new(frame_level: u32) -> Self {
+        Self {
+            frame_level,
+            registers: Vec::new(),
+        }
+    }
+
+    /// Add a register value.
+    pub fn push(&mut self, reg: RegisterValue) {
+        self.registers.push(reg);
+    }
+
+    /// Get a register value by name (case-insensitive for dbgeng).
+    pub fn get(&self, name: &str) -> Option<&RegisterValue> {
+        let lower = name.to_lowercase();
+        self.registers
+            .iter()
+            .find(|r| r.name.to_lowercase() == lower)
+    }
+
+    /// Get all register names.
+    pub fn names(&self) -> Vec<&str> {
+        self.registers.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    /// Number of registers.
+    pub fn len(&self) -> usize {
+        self.registers.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.registers.is_empty()
+    }
+}
+
+/// Thread event for the dbgeng hook system.
+///
+/// Tracks thread lifecycle events that need to be synchronized
+/// to the Ghidra trace. Ported from the Python hooks `on_threads_changed`,
+/// `on_thread_selected`, etc.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DbgEngThreadEvent {
+    /// A new thread was created.
+    Created {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+    /// A thread has exited.
+    Exited {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+    /// A thread's state has changed (running/stopped/etc).
+    StateChanged {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+        /// New execution state.
+        new_state: ExecutionState,
+    },
+    /// A thread was selected by the debugger.
+    Selected {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+}
+
+impl DbgEngThreadEvent {
+    /// Get the process number for this event.
+    pub fn process_num(&self) -> u32 {
+        match self {
+            Self::Created { process_num, .. }
+            | Self::Exited { process_num, .. }
+            | Self::StateChanged { process_num, .. }
+            | Self::Selected { process_num, .. } => *process_num,
+        }
+    }
+
+    /// Get the thread number for this event.
+    pub fn thread_num(&self) -> u32 {
+        match self {
+            Self::Created { thread_num, .. }
+            | Self::Exited { thread_num, .. }
+            | Self::StateChanged { thread_num, .. }
+            | Self::Selected { thread_num, .. } => *thread_num,
+        }
+    }
+
+    /// Human-readable description of this event.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Created {
+                process_num,
+                thread_num,
+            } => {
+                format!(
+                    "Thread {} created in process {}",
+                    thread_num, process_num
+                )
+            }
+            Self::Exited {
+                process_num,
+                thread_num,
+            } => {
+                format!(
+                    "Thread {} exited in process {}",
+                    thread_num, process_num
+                )
+            }
+            Self::StateChanged {
+                process_num,
+                thread_num,
+                new_state,
+            } => {
+                format!(
+                    "Thread {} in process {} -> {}",
+                    thread_num,
+                    process_num,
+                    new_state.as_trace_str()
+                )
+            }
+            Self::Selected {
+                process_num,
+                thread_num,
+            } => {
+                format!(
+                    "Thread {} selected in process {}",
+                    thread_num, process_num
+                )
+            }
+        }
+    }
+}
+
+/// Stepping mode for dbgeng thread operations.
+///
+/// Determines how dbgeng handles stepping. Dbgeng supports both
+/// instruction-level and source-line stepping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DbgEngSteppingMode {
+    /// Single instruction step (stepi/nexti).
+    Instruction,
+    /// Source line step (step/next).
+    SourceLine,
+}
+
+/// Step type for dbgeng thread operations.
+///
+/// Maps to dbgeng's stepping commands. Ported from the Python agent's
+/// step handling in `commands.py`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DbgEngStepType {
+    /// Step over (next source line / `p` command).
+    Over,
+    /// Step into (step into function calls / `t` command).
+    Into,
+    /// Step out (run until current function returns / `gu` command).
+    Out,
+    /// Step over one instruction (`p` with instruction granularity).
+    InstructionOver,
+    /// Step into one instruction (`t` with instruction granularity).
+    InstructionInto,
+}
+
+impl DbgEngStepType {
+    /// Convert to the dbgeng command string.
+    pub fn as_dbgeng_command(&self) -> &'static str {
+        match self {
+            Self::Over => "p",
+            Self::Into => "t",
+            Self::Out => "gu",
+            Self::InstructionOver => "p",
+            Self::InstructionInto => "t",
+        }
+    }
+
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Over => "Step Over",
+            Self::Into => "Step Into",
+            Self::Out => "Step Out",
+            Self::InstructionOver => "Step Instruction Over",
+            Self::InstructionInto => "Step Instruction Into",
+        }
+    }
+}
+
+/// Thread execution history record.
+///
+/// Tracks the recent execution history of a thread for display
+/// and debugging purposes. Ported from the TTD position tracking
+/// in the Python agent's `update_position`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbgEngThreadHistoryEntry {
+    /// Program counter at this point.
+    pub pc: u64,
+    /// Timestamp (relative to session start, in milliseconds).
+    pub timestamp: u64,
+    /// Stop reason at this point, if any.
+    pub stop_reason: Option<DbgEngStopReason>,
+    /// Frame level.
+    pub frame_level: u32,
+}
+
+impl DbgEngThreadHistoryEntry {
+    /// Create a new history entry.
+    pub fn new(pc: u64, timestamp: u64) -> Self {
+        Self {
+            pc,
+            timestamp,
+            stop_reason: None,
+            frame_level: 0,
+        }
+    }
+
+    /// Set the stop reason.
+    pub fn with_stop_reason(mut self, reason: DbgEngStopReason) -> Self {
+        self.stop_reason = Some(reason);
+        self
+    }
+
+    /// Set the frame level.
+    pub fn with_frame_level(mut self, level: u32) -> Self {
+        self.frame_level = level;
+        self
+    }
+}
+
+/// Thread execution history tracker.
+///
+/// Maintains a bounded ring buffer of recent execution history entries
+/// for a thread. Used for TTD and general debugging history.
+#[derive(Debug, Clone)]
+pub struct DbgEngThreadHistory {
+    entries: Vec<DbgEngThreadHistoryEntry>,
+    max_entries: usize,
+}
+
+impl DbgEngThreadHistory {
+    /// Create a new history tracker with a maximum number of entries.
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries,
+        }
+    }
+
+    /// Create with default capacity (100 entries).
+    pub fn with_default_capacity() -> Self {
+        Self::new(100)
+    }
+
+    /// Add an entry to the history.
+    pub fn push(&mut self, entry: DbgEngThreadHistoryEntry) {
+        if self.entries.len() >= self.max_entries {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+
+    /// Get the most recent entry.
+    pub fn latest(&self) -> Option<&DbgEngThreadHistoryEntry> {
+        self.entries.last()
+    }
+
+    /// Get all entries (oldest first).
+    pub fn entries(&self) -> &[DbgEngThreadHistoryEntry] {
+        &self.entries
+    }
+
+    /// Get the number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Get the last N entries.
+    pub fn last_n(&self, n: usize) -> &[DbgEngThreadHistoryEntry] {
+        let start = self.entries.len().saturating_sub(n);
+        &self.entries[start..]
+    }
+}
+
+/// Thread plan tracking for dbgeng.
+///
+/// Dbgeng uses stepping commands that define what a thread should do before
+/// stopping again. This struct tracks the active stepping plan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbgEngThreadPlan {
+    /// Plan description (e.g. "step over", "step out", "until 0x401000").
+    pub description: String,
+    /// The step type, if this is a standard stepping plan.
+    pub step_type: Option<DbgEngStepType>,
+    /// Target stop address (for `go <address>` plans).
+    pub stop_address: Option<u64>,
+    /// Whether the plan is complete.
+    pub completed: bool,
+}
+
+impl DbgEngThreadPlan {
+    /// Create a plan for a standard step.
+    pub fn step(step_type: DbgEngStepType) -> Self {
+        Self {
+            description: step_type.description().to_string(),
+            step_type: Some(step_type),
+            stop_address: None,
+            completed: false,
+        }
+    }
+
+    /// Create a plan to run to an address.
+    pub fn run_to_address(addr: u64) -> Self {
+        Self {
+            description: format!("go 0x{:x}", addr),
+            step_type: None,
+            stop_address: Some(addr),
+            completed: false,
+        }
+    }
+
+    /// Create a plan to step out of the current function.
+    pub fn step_out() -> Self {
+        Self::step(DbgEngStepType::Out)
+    }
+
+    /// Mark the plan as complete.
+    pub fn mark_complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+/// Extended stack frame information for dbgeng.
+///
+/// Contains additional dbgeng-specific frame metadata beyond the basic
+/// `DbgEngStackFrame`, including source information and symbol details.
+/// Ported from the Python agent's frame handling in `put_frames`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbgEngFrameDetails {
+    /// Frame level.
+    pub level: u32,
+    /// Whether this frame is an artificial/thunk frame.
+    pub is_artificial: bool,
+    /// Source file path, if known.
+    pub source_file: Option<String>,
+    /// Source line number, if known.
+    pub source_line: Option<u32>,
+    /// Module name for this frame.
+    pub module_name: Option<String>,
+    /// Whether the frame corresponds to a signal/exception handler.
+    pub is_exception_frame: bool,
+}
+
+impl DbgEngFrameDetails {
+    /// Create frame details for a given level.
+    pub fn new(level: u32) -> Self {
+        Self {
+            level,
+            is_artificial: false,
+            source_file: None,
+            source_line: None,
+            module_name: None,
+            is_exception_frame: false,
+        }
+    }
+
+    /// Mark as artificial frame.
+    pub fn with_artificial(mut self, artificial: bool) -> Self {
+        self.is_artificial = artificial;
+        self
+    }
+
+    /// Set source location.
+    pub fn with_source(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.source_file = Some(file.into());
+        self.source_line = Some(line);
+        self
+    }
+
+    /// Set module name.
+    pub fn with_module(mut self, module: impl Into<String>) -> Self {
+        self.module_name = Some(module.into());
+        self
+    }
+
+    /// Mark as exception frame.
+    pub fn with_exception_frame(mut self, exception: bool) -> Self {
+        self.is_exception_frame = exception;
+        self
+    }
+
+    /// Build a display string including source location.
+    pub fn build_display(&self, pc: u64, function_name: Option<&str>) -> String {
+        let mut display = format!("#{} 0x{:x}", self.level, pc);
+        if let Some(name) = function_name {
+            display += &format!(" {}", name);
+        }
+        if let (Some(file), Some(line)) = (&self.source_file, self.source_line) {
+            display += &format!(" at {}:{}", file, line);
+        }
+        display
+    }
+}
+
+/// A thread collection manager for a dbgeng process.
+///
+/// Manages thread lifecycle events (creation, exit) and provides
+/// bulk operations on the thread set. Ported from the Python agent's
+/// thread management in `hooks.py` `on_threads_changed`.
+#[derive(Debug, Default)]
+pub struct DbgEngThreadCollection {
+    threads: BTreeMap<u32, DbgEngThread>,
+    process_num: u32,
+}
+
+impl DbgEngThreadCollection {
+    /// Create a new thread collection for a process.
+    pub fn new(process_num: u32) -> Self {
+        Self {
+            threads: BTreeMap::new(),
+            process_num,
+        }
+    }
+
+    /// Add or replace a thread.
+    pub fn insert(&mut self, thread: DbgEngThread) {
+        self.threads.insert(thread.num, thread);
+    }
+
+    /// Remove a thread by number.
+    pub fn remove(&mut self, num: u32) -> Option<DbgEngThread> {
+        self.threads.remove(&num)
+    }
+
+    /// Get a thread by number.
+    pub fn get(&self, num: u32) -> Option<&DbgEngThread> {
+        self.threads.get(&num)
+    }
+
+    /// Get a mutable thread by number.
+    pub fn get_mut(&mut self, num: u32) -> Option<&mut DbgEngThread> {
+        self.threads.get_mut(&num)
+    }
+
+    /// Get the number of threads.
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
+
+    /// Get all thread numbers.
+    pub fn numbers(&self) -> Vec<u32> {
+        self.threads.keys().copied().collect()
+    }
+
+    /// Iterate over threads.
+    pub fn iter(&self) -> impl Iterator<Item = &DbgEngThread> {
+        self.threads.values()
+    }
+
+    /// Mark all threads as synchronized.
+    pub fn mark_all_synced(&mut self) {
+        for t in self.threads.values_mut() {
+            t.mark_synced();
+        }
+    }
+
+    /// Remove all exited threads and return their numbers.
+    pub fn prune_exited(&mut self) -> Vec<u32> {
+        let exited: Vec<u32> = self
+            .threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Exited)
+            .map(|(&num, _)| num)
+            .collect();
+        for num in &exited {
+            self.threads.remove(num);
+        }
+        exited
+    }
+
+    /// Clear all frames from all threads (used before re-syncing).
+    pub fn clear_all_frames(&mut self) {
+        for t in self.threads.values_mut() {
+            t.clear_frames();
+        }
+    }
+
+    /// Get the process number this collection belongs to.
+    pub fn process_num(&self) -> u32 {
+        self.process_num
+    }
+
+    /// Build thread info list for the common agent interface.
+    pub fn build_thread_info_list(&self) -> Vec<ThreadInfo> {
+        self.threads.values().map(|t| t.to_thread_info()).collect()
     }
 }
 
@@ -1683,5 +2313,254 @@ mod tests {
     fn test_stack_walker_max_depth() {
         let walker = DbgEngStackWalker::new().with_max_depth(100);
         assert_eq!(walker.max_depth, 100);
+    }
+
+    #[test]
+    fn test_thread_build_backtrace() {
+        let mut t = DbgEngThread::new(1);
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000).with_function("main"));
+        t.add_frame(DbgEngStackFrame::new(1, 0x402000).with_function("foo"));
+        t.add_frame(DbgEngStackFrame::new(2, 0x403000));
+        let bt = t.build_backtrace();
+        assert_eq!(bt.len(), 3);
+        assert!(bt[0].contains("main"));
+        assert!(bt[1].contains("foo"));
+        assert!(bt[2].contains("403000"));
+    }
+
+    #[test]
+    fn test_thread_build_stack_container_values() {
+        let mut t = DbgEngThread::new(1);
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t.add_frame(DbgEngStackFrame::new(1, 0x402000));
+        let values = t.build_stack_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "2"));
+    }
+
+    #[test]
+    fn test_thread_all_register_names() {
+        let mut t = DbgEngThread::new(1);
+        let mut f0 = DbgEngStackFrame::new(0, 0x401000);
+        f0.set_register(RegisterValue::from_u64("RAX", 0x100));
+        f0.set_register(RegisterValue::from_u64("RBX", 0x200));
+        t.add_frame(f0);
+        let mut f1 = DbgEngStackFrame::new(1, 0x402000);
+        f1.set_register(RegisterValue::from_u64("RAX", 0x300));
+        f1.set_register(RegisterValue::from_u64("RCX", 0x400));
+        t.add_frame(f1);
+        let names = t.all_register_names();
+        assert_eq!(names.len(), 3); // RAX, RBX, RCX (deduplicated)
+        assert!(names.contains(&"RAX".to_string()));
+        assert!(names.contains(&"RBX".to_string()));
+        assert!(names.contains(&"RCX".to_string()));
+    }
+
+    #[test]
+    fn test_thread_frame_at_pc() {
+        let mut t = DbgEngThread::new(1);
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t.add_frame(DbgEngStackFrame::new(1, 0x402000));
+        assert!(t.frame_at_pc(0x401000).is_some());
+        assert!(t.frame_at_pc(0x402000).is_some());
+        assert!(t.frame_at_pc(0x500000).is_none());
+    }
+
+    #[test]
+    fn test_thread_return_address() {
+        let mut t = DbgEngThread::new(1);
+        assert!(t.return_address().is_none());
+        t.add_frame(
+            DbgEngStackFrame::new(0, 0x401000).with_return_address(0x402000),
+        );
+        assert_eq!(t.return_address(), Some(0x402000));
+    }
+
+    #[test]
+    fn test_thread_stopped_at_breakpoint() {
+        let t = DbgEngThread::new(1).with_stop_reason(DbgEngStopReason::Breakpoint {
+            bp_number: 1,
+            address: 0x401000,
+        });
+        assert!(t.stopped_at_breakpoint());
+        assert!(!t.stopped_by_exception());
+        assert!(!t.stopped_at_step());
+    }
+
+    #[test]
+    fn test_thread_stopped_by_exception() {
+        let t = DbgEngThread::new(1).with_stop_reason(DbgEngStopReason::Exception {
+            code: 0xc0000005,
+            name: Some("Access Violation".to_string()),
+        });
+        assert!(!t.stopped_at_breakpoint());
+        assert!(t.stopped_by_exception());
+    }
+
+    #[test]
+    fn test_thread_stopped_at_step() {
+        let t = DbgEngThread::new(1).with_stop_reason(DbgEngStopReason::StepComplete);
+        assert!(t.stopped_at_step());
+        assert!(!t.stopped_at_breakpoint());
+    }
+
+    #[test]
+    fn test_register_descriptor() {
+        let rd = RegisterDescriptor::new("rax")
+            .with_group("User")
+            .with_size(8);
+        assert_eq!(rd.name, "rax");
+        assert_eq!(rd.group.as_deref(), Some("User"));
+        assert_eq!(rd.size, Some(8));
+    }
+
+    #[test]
+    fn test_frame_register_batch() {
+        let mut batch = FrameRegisterBatch::new(0);
+        assert!(batch.is_empty());
+        batch.push(RegisterValue::from_u64("RAX", 0x1234));
+        batch.push(RegisterValue::from_u64("RBX", 0x5678));
+        assert_eq!(batch.len(), 2);
+        // Case-insensitive lookup
+        assert!(batch.get("rax").is_some());
+        assert!(batch.get("RAX").is_some());
+        assert!(batch.get("Rax").is_some());
+        assert!(batch.get("rcx").is_none());
+        let names = batch.names();
+        assert_eq!(names.len(), 2);
+    }
+
+    #[test]
+    fn test_dbgeng_thread_event() {
+        let evt = DbgEngThreadEvent::Created {
+            process_num: 1,
+            thread_num: 2,
+        };
+        assert_eq!(evt.process_num(), 1);
+        assert_eq!(evt.thread_num(), 2);
+        assert!(evt.description().contains("created"));
+
+        let sel = DbgEngThreadEvent::Selected {
+            process_num: 0,
+            thread_num: 1,
+        };
+        assert!(sel.description().contains("selected"));
+    }
+
+    #[test]
+    fn test_dbgeng_step_type() {
+        assert_eq!(DbgEngStepType::Over.as_dbgeng_command(), "p");
+        assert_eq!(DbgEngStepType::Into.as_dbgeng_command(), "t");
+        assert_eq!(DbgEngStepType::Out.as_dbgeng_command(), "gu");
+        assert_eq!(DbgEngStepType::Over.description(), "Step Over");
+    }
+
+    #[test]
+    fn test_thread_history_entry() {
+        let entry = DbgEngThreadHistoryEntry::new(0x401000, 1000)
+            .with_stop_reason(DbgEngStopReason::StepComplete)
+            .with_frame_level(0);
+        assert_eq!(entry.pc, 0x401000);
+        assert_eq!(entry.timestamp, 1000);
+        assert_eq!(entry.frame_level, 0);
+        assert!(entry.stop_reason.is_some());
+    }
+
+    #[test]
+    fn test_thread_history() {
+        let mut history = DbgEngThreadHistory::new(3);
+        assert!(history.is_empty());
+        history.push(DbgEngThreadHistoryEntry::new(0x1000, 1));
+        history.push(DbgEngThreadHistoryEntry::new(0x2000, 2));
+        history.push(DbgEngThreadHistoryEntry::new(0x3000, 3));
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.latest().unwrap().pc, 0x3000);
+
+        // Overflow removes oldest
+        history.push(DbgEngThreadHistoryEntry::new(0x4000, 4));
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.entries()[0].pc, 0x2000);
+        assert_eq!(history.latest().unwrap().pc, 0x4000);
+
+        // last_n
+        let last2 = history.last_n(2);
+        assert_eq!(last2.len(), 2);
+        assert_eq!(last2[0].pc, 0x3000);
+
+        history.clear();
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn test_thread_history_default_capacity() {
+        let history = DbgEngThreadHistory::with_default_capacity();
+        assert_eq!(history.max_entries, 100);
+    }
+
+    #[test]
+    fn test_thread_plan() {
+        let plan = DbgEngThreadPlan::step(DbgEngStepType::Over);
+        assert_eq!(plan.step_type, Some(DbgEngStepType::Over));
+        assert!(!plan.completed);
+        assert!(plan.stop_address.is_none());
+
+        let plan_addr = DbgEngThreadPlan::run_to_address(0x401000);
+        assert!(plan_addr.step_type.is_none());
+        assert_eq!(plan_addr.stop_address, Some(0x401000));
+
+        let plan_out = DbgEngThreadPlan::step_out();
+        assert_eq!(plan_out.step_type, Some(DbgEngStepType::Out));
+
+        let mut plan2 = DbgEngThreadPlan::step(DbgEngStepType::Into);
+        assert!(!plan2.completed);
+        plan2.mark_complete();
+        assert!(plan2.completed);
+    }
+
+    #[test]
+    fn test_frame_details() {
+        let details = DbgEngFrameDetails::new(0)
+            .with_artificial(false)
+            .with_source("main.c", 42)
+            .with_module("test.exe")
+            .with_exception_frame(false);
+        assert_eq!(details.level, 0);
+        assert!(!details.is_artificial);
+        assert_eq!(details.source_file.as_deref(), Some("main.c"));
+        assert_eq!(details.source_line, Some(42));
+        assert_eq!(details.module_name.as_deref(), Some("test.exe"));
+
+        let display = details.build_display(0x401000, Some("main"));
+        assert!(display.contains("main.c:42"));
+        assert!(display.contains("main"));
+    }
+
+    #[test]
+    fn test_thread_collection() {
+        let mut coll = DbgEngThreadCollection::new(1);
+        assert!(coll.is_empty());
+        assert_eq!(coll.process_num(), 1);
+
+        coll.insert(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        coll.insert(DbgEngThread::new(1).with_state(ExecutionState::Stopped));
+        coll.insert(DbgEngThread::new(2).with_state(ExecutionState::Exited));
+        assert_eq!(coll.len(), 3);
+        assert_eq!(coll.numbers().len(), 3);
+
+        // prune_exited
+        let exited = coll.prune_exited();
+        assert_eq!(exited, vec![2]);
+        assert_eq!(coll.len(), 2);
+
+        // mark_all_synced
+        coll.mark_all_synced();
+        assert!(coll.get(0).unwrap().synced);
+        assert!(coll.get(1).unwrap().synced);
+
+        // build_thread_info_list
+        let info = coll.build_thread_info_list();
+        assert_eq!(info.len(), 2);
+
+        // clear_all_frames
+        coll.clear_all_frames();
     }
 }

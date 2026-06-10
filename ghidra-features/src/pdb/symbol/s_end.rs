@@ -1,10 +1,11 @@
 //! S_END -- End symbol.
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.EndMsSymbol`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.EndMsSymbol`
+//! (0x0006), `EndArgumentsListMsSymbol` (0x000A), `ProcedureIdEndMsSymbol`
+//! (0x1040 / 0x114F), and `InlinedFunctionEndMsSymbol` (0x114E).
 //!
-//! The same zero-length sentinel is used by `S_END` (0x0006), `S_ENDARG`
-//! (0x000A), and `S_PROC_ID_END` (0x1040) -- all share the same binary
-//! layout (no payload) and differ only in semantic context.
+//! All share the same zero-length binary layout (no payload) and differ only
+//! in semantic context.
 
 use std::fmt;
 
@@ -12,7 +13,7 @@ use super::abstract_ms_symbol::AbstractMsSymbol;
 
 /// Which variant of the end symbol this represents.
 ///
-/// All three share the same zero-payload binary format but carry different
+/// All variants share the same zero-payload binary format but carry different
 /// semantic meaning in the PDB symbol stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EndVariant {
@@ -22,6 +23,12 @@ pub enum EndVariant {
     EndArg,
     /// `S_PROC_ID_END` (0x1040) -- end of procedure ID scope (PDB v70+).
     ProcIdEnd,
+    /// `S_INLINESITE_END` (0x103F) -- end of inline site.
+    InlineSiteEnd,
+    /// `S_INLINED_FUNCTION_END` (0x114E) -- end of inlined function.
+    InlinedFunctionEnd,
+    /// `S_PROCEDURE_ID_END` (0x114F) -- end of procedure ID (v7 variant).
+    ProcedureIdEnd,
 }
 
 /// An end symbol (`S_END`).
@@ -36,6 +43,9 @@ pub enum EndVariant {
 /// - `S_END` (0x0006) -- general end-of-scope marker
 /// - `S_ENDARG` (0x000A) -- end of argument list
 /// - `S_PROC_ID_END` (0x1040) -- end of procedure ID scope
+/// - `S_INLINESITE_END` (0x103F) -- end of inline site
+/// - `S_INLINED_FUNCTION_END` (0x114E) -- end of inlined function
+/// - `S_PROCEDURE_ID_END` (0x114F) -- end of procedure ID (v7 variant)
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SEnd {
     /// Which variant was specified.
@@ -80,6 +90,33 @@ impl SEnd {
         }
     }
 
+    /// Create an S_END symbol for the `S_INLINESITE_END` variant (0x103F).
+    ///
+    /// This marks the end of an inline site scope.
+    pub fn inline_site_end() -> Self {
+        Self {
+            variant: EndVariant::InlineSiteEnd,
+        }
+    }
+
+    /// Create an S_END symbol for the `S_INLINED_FUNCTION_END` variant (0x114E).
+    ///
+    /// This marks the end of an inlined function.
+    pub fn inlined_function_end() -> Self {
+        Self {
+            variant: EndVariant::InlinedFunctionEnd,
+        }
+    }
+
+    /// Create an S_END symbol for the `S_PROCEDURE_ID_END` variant (0x114F).
+    ///
+    /// This marks the end of a procedure ID (v7 variant).
+    pub fn procedure_id_end() -> Self {
+        Self {
+            variant: EndVariant::ProcedureIdEnd,
+        }
+    }
+
     /// Return the variant of this end symbol.
     pub fn variant(&self) -> EndVariant {
         self.variant
@@ -100,6 +137,23 @@ impl SEnd {
         self.variant == EndVariant::ProcIdEnd
     }
 
+    /// Return `true` if this is an inline site end marker (`S_INLINESITE_END`).
+    pub fn is_inline_site_end(&self) -> bool {
+        self.variant == EndVariant::InlineSiteEnd
+    }
+
+    /// Return `true` if this is an inlined function end marker
+    /// (`S_INLINED_FUNCTION_END`).
+    pub fn is_inlined_function_end(&self) -> bool {
+        self.variant == EndVariant::InlinedFunctionEnd
+    }
+
+    /// Return `true` if this is a procedure ID end marker (v7 variant,
+    /// `S_PROCEDURE_ID_END`).
+    pub fn is_procedure_id_end(&self) -> bool {
+        self.variant == EndVariant::ProcedureIdEnd
+    }
+
     /// Parse an S_ENDARG symbol from a byte slice.
     ///
     /// The S_ENDARG symbol has no payload; any data present is ignored.
@@ -114,6 +168,27 @@ impl SEnd {
     /// Always returns `Some(SEnd)` with the `ProcIdEnd` variant.
     pub fn parse_proc_id_end(_data: &[u8]) -> Option<Self> {
         Some(Self::proc_id_end())
+    }
+
+    /// Parse an S_INLINESITE_END symbol from a byte slice.
+    ///
+    /// Always returns `Some(SEnd)` with the `InlineSiteEnd` variant.
+    pub fn parse_inline_site_end(_data: &[u8]) -> Option<Self> {
+        Some(Self::inline_site_end())
+    }
+
+    /// Parse an S_INLINED_FUNCTION_END symbol from a byte slice.
+    ///
+    /// Always returns `Some(SEnd)` with the `InlinedFunctionEnd` variant.
+    pub fn parse_inlined_function_end(_data: &[u8]) -> Option<Self> {
+        Some(Self::inlined_function_end())
+    }
+
+    /// Parse an S_PROCEDURE_ID_END symbol from a byte slice.
+    ///
+    /// Always returns `Some(SEnd)` with the `ProcedureIdEnd` variant.
+    pub fn parse_procedure_id_end(_data: &[u8]) -> Option<Self> {
+        Some(Self::procedure_id_end())
     }
 }
 
@@ -135,6 +210,9 @@ impl AbstractMsSymbol for SEnd {
             EndVariant::End => super::super::symbol_kind::S_END,
             EndVariant::EndArg => super::super::symbol_kind::S_ENDARG,
             EndVariant::ProcIdEnd => super::super::symbol_kind::S_PROC_ID_END,
+            EndVariant::InlineSiteEnd => super::super::symbol_kind::S_INLINESITE_END,
+            EndVariant::InlinedFunctionEnd => super::super::symbol_kind::S_INLINED_FUNCTION_END,
+            EndVariant::ProcedureIdEnd => super::super::symbol_kind::S_PROCEDURE_ID_END,
         }
     }
 
@@ -143,6 +221,9 @@ impl AbstractMsSymbol for SEnd {
             EndVariant::End => "S_END",
             EndVariant::EndArg => "S_ENDARG",
             EndVariant::ProcIdEnd => "S_PROC_ID_END",
+            EndVariant::InlineSiteEnd => "S_INLINESITE_END",
+            EndVariant::InlinedFunctionEnd => "S_INLINED_FUNCTION_END",
+            EndVariant::ProcedureIdEnd => "S_PROCEDURE_ID_END",
         }
     }
 
@@ -151,6 +232,9 @@ impl AbstractMsSymbol for SEnd {
             EndVariant::End => write!(f, "End"),
             EndVariant::EndArg => write!(f, "EndArg"),
             EndVariant::ProcIdEnd => write!(f, "ProcIdEnd"),
+            EndVariant::InlineSiteEnd => write!(f, "InlineSiteEnd"),
+            EndVariant::InlinedFunctionEnd => write!(f, "InlinedFunctionEnd"),
+            EndVariant::ProcedureIdEnd => write!(f, "ProcedureIdEnd"),
         }
     }
 }
@@ -311,5 +395,104 @@ mod tests {
         let data = [0xFF, 0xFF];
         let sym = SEnd::parse_endarg(&data).unwrap();
         assert_eq!(sym.pdb_id(), 0x000A);
+    }
+
+    #[test]
+    fn test_inline_site_end() {
+        let sym = SEnd::inline_site_end();
+        assert_eq!(sym.pdb_id(), 0x103F);
+        assert_eq!(sym.symbol_type_name(), "S_INLINESITE_END");
+        assert_eq!(sym.variant(), EndVariant::InlineSiteEnd);
+        assert!(sym.is_inline_site_end());
+        assert!(!sym.is_end());
+        let s = format!("{}", sym);
+        assert_eq!(s, "InlineSiteEnd");
+    }
+
+    #[test]
+    fn test_inlined_function_end() {
+        let sym = SEnd::inlined_function_end();
+        assert_eq!(sym.pdb_id(), 0x114E);
+        assert_eq!(sym.symbol_type_name(), "S_INLINED_FUNCTION_END");
+        assert_eq!(sym.variant(), EndVariant::InlinedFunctionEnd);
+        assert!(sym.is_inlined_function_end());
+        let s = format!("{}", sym);
+        assert_eq!(s, "InlinedFunctionEnd");
+    }
+
+    #[test]
+    fn test_procedure_id_end() {
+        let sym = SEnd::procedure_id_end();
+        assert_eq!(sym.pdb_id(), 0x114F);
+        assert_eq!(sym.symbol_type_name(), "S_PROCEDURE_ID_END");
+        assert_eq!(sym.variant(), EndVariant::ProcedureIdEnd);
+        assert!(sym.is_procedure_id_end());
+        let s = format!("{}", sym);
+        assert_eq!(s, "ProcedureIdEnd");
+    }
+
+    #[test]
+    fn test_parse_inline_site_end() {
+        let sym = SEnd::parse_inline_site_end(&[]).unwrap();
+        assert_eq!(sym.pdb_id(), 0x103F);
+        assert!(sym.is_inline_site_end());
+    }
+
+    #[test]
+    fn test_parse_inlined_function_end() {
+        let sym = SEnd::parse_inlined_function_end(&[]).unwrap();
+        assert_eq!(sym.pdb_id(), 0x114E);
+        assert!(sym.is_inlined_function_end());
+    }
+
+    #[test]
+    fn test_parse_procedure_id_end() {
+        let sym = SEnd::parse_procedure_id_end(&[]).unwrap();
+        assert_eq!(sym.pdb_id(), 0x114F);
+        assert!(sym.is_procedure_id_end());
+    }
+
+    #[test]
+    fn test_clone_eq_new_variants() {
+        let a = SEnd::inline_site_end();
+        let b = a.clone();
+        assert_eq!(a, b);
+
+        let a = SEnd::inlined_function_end();
+        let b = a.clone();
+        assert_eq!(a, b);
+
+        let a = SEnd::procedure_id_end();
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_from_variant_new() {
+        let sym: SEnd = EndVariant::InlineSiteEnd.into();
+        assert_eq!(sym.pdb_id(), 0x103F);
+
+        let sym: SEnd = EndVariant::InlinedFunctionEnd.into();
+        assert_eq!(sym.pdb_id(), 0x114E);
+
+        let sym: SEnd = EndVariant::ProcedureIdEnd.into();
+        assert_eq!(sym.pdb_id(), 0x114F);
+    }
+
+    #[test]
+    fn test_variant_distinct_all() {
+        let variants = [
+            SEnd::new().variant(),
+            SEnd::endarg().variant(),
+            SEnd::proc_id_end().variant(),
+            SEnd::inline_site_end().variant(),
+            SEnd::inlined_function_end().variant(),
+            SEnd::procedure_id_end().variant(),
+        ];
+        for i in 0..variants.len() {
+            for j in (i + 1)..variants.len() {
+                assert_ne!(variants[i], variants[j]);
+            }
+        }
     }
 }

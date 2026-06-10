@@ -92,6 +92,17 @@ impl SRegister {
         }
     }
 
+    /// Create a new ST-format register variable symbol (S_REGISTER_ST variant).
+    pub fn new_st(type_record_number: RecordNumber, register_index: u16, name: String) -> Self {
+        Self {
+            type_record_number,
+            register_index,
+            register_index2: 0,
+            name,
+            variant: RegisterVariant::RegisterSt,
+        }
+    }
+
     /// Create a new 16-bit dual-register variable symbol (S_REGISTER_16 variant).
     ///
     /// `register_val` is the raw 16-bit value where the high byte is the
@@ -241,6 +252,30 @@ impl SRegister {
         let total = 8 + st_len;
         let aligned = (total + 3) & !3;
         Some((sym, aligned))
+    }
+
+    /// Parse an S_REGISTER_16 symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_register16_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_register16(data)?;
+        // type_record(2) + register(2) + st_len_prefix(2) + name_bytes, aligned to 4
+        if data.len() < 6 {
+            return Some((sym, data.len()));
+        }
+        let st_len = u16::from_le_bytes([data[4], data[5]]) as usize;
+        let total = 6 + st_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    /// Return the human-readable register names for all registers in this
+    /// symbol (both primary and secondary for the 16-bit variant).
+    pub fn register_names(&self) -> Vec<&'static str> {
+        let mut names = vec![self.register_name()];
+        if self.is_dual_register() && self.register_index2 != 0 {
+            names.push(self.register_name2());
+        }
+        names
     }
 }
 
@@ -606,6 +641,73 @@ mod tests {
         );
         assert_eq!(sym.register_name(), "EAX");
         assert_eq!(sym.register_name2(), "ECX");
+    }
+
+    #[test]
+    fn test_new_st_constructor() {
+        let sym = SRegister::new_st(
+            RecordNumber::type_record_number(0x1020),
+            17,
+            "st_var".to_string(),
+        );
+        assert_eq!(sym.variant(), RegisterVariant::RegisterSt);
+        assert_eq!(sym.register_index, 17);
+        assert_eq!(sym.name, "st_var");
+        assert_eq!(sym.pdb_id(), 0x1001);
+        assert!(sym.is_st_format());
+    }
+
+    #[test]
+    fn test_register_names_single() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011,
+            "v".to_string(),
+        );
+        let names = sym.register_names();
+        assert_eq!(names, vec!["EAX"]);
+    }
+
+    #[test]
+    fn test_register_names_dual() {
+        let sym = SRegister::new_register16(
+            RecordNumber::type_record_number(0x0100),
+            0x1112,
+            "v".to_string(),
+        );
+        let names = sym.register_names();
+        assert_eq!(names, vec!["EAX", "ECX"]);
+    }
+
+    #[test]
+    fn test_register_names_dual_no_secondary() {
+        let sym = SRegister::new_register16(
+            RecordNumber::type_record_number(0x0100),
+            0x1100, // secondary=0
+            "v".to_string(),
+        );
+        let names = sym.register_names();
+        assert_eq!(names, vec!["EAX"]);
+    }
+
+    #[test]
+    fn test_parse_register16_aligned_basic() {
+        // type_record(2) + register(2) + st_len(2) + "abc"(3) = 9, aligned to 12
+        let data = make_register16_bytes(0x0100, 0x1112, b"abc");
+        let (sym, consumed) = SRegister::parse_register16_aligned(&data).unwrap();
+        assert_eq!(sym.register_index, 0x11);
+        assert_eq!(sym.register_index2, 0x12);
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_register16_aligned_empty() {
+        // type_record(2) + register(2) + st_len(2) + ""(0) = 6, aligned to 8
+        let data = make_register16_bytes(0x0100, 0x1100, b"");
+        let (sym, consumed) = SRegister::parse_register16_aligned(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(consumed, 8);
     }
 
     #[test]

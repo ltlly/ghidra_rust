@@ -1543,6 +1543,17 @@ pub mod symbol_kind {
     pub const S_LPROCIA64: u16=0x1118;
     pub const S_GPROCIA64: u16=0x1119;
     pub const S_REGREL32_V2: u16=0x1111;
+
+    // V7/v2 symbol types for register, constant, UDT, objname, manyreg, end
+    pub const S_REGISTER_V2: u16=0x1106;
+    pub const S_CONSTANT_V2: u16=0x1107;
+    pub const S_UDT_V2: u16=0x1108;
+    pub const S_OBJNAME_V2: u16=0x1101;
+    pub const S_MANYREG_V2: u16=0x110A;
+    pub const S_MANYREG2_V2: u16=0x1117;
+    pub const S_MANYREG2_ST: u16=0x1014;
+    pub const S_INLINED_FUNCTION_END: u16=0x114E;
+    pub const S_PROCEDURE_ID_END: u16=0x114F;
 }
 
 

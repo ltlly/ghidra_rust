@@ -54,6 +54,8 @@ pub struct LfModifier {
 impl LfModifier {
     /// PDB ID for the 16-bit modifier variant.
     pub const PDB_ID_16: u32 = 0x0001;
+    /// PDB ID for the ST-format modifier variant.
+    pub const PDB_ID_ST: u32 = 0x1001;
     /// PDB ID for the 32-bit (MsType) modifier variant.
     pub const PDB_ID_32: u32 = 0x1001;
 
@@ -831,6 +833,7 @@ mod tests {
     #[test]
     fn test_modifier_pdb_id_constants() {
         assert_eq!(LfModifier::PDB_ID_16, 0x0001);
+        assert_eq!(LfModifier::PDB_ID_ST, 0x1001);
         assert_eq!(LfModifier::PDB_ID_32, 0x1001);
     }
 

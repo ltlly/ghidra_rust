@@ -516,6 +516,87 @@ impl DbgEngInferiorProcess {
             .map(|(&num, _)| num)
             .collect()
     }
+
+    /// Get all threads sorted by thread number.
+    ///
+    /// Returns references to threads ordered by their number, which
+    /// matches the display order in dbgeng's thread listing.
+    pub fn threads_sorted(&self) -> Vec<&DbgEngThread> {
+        self.threads.values().collect()
+    }
+
+    /// Get all running threads.
+    pub fn running_threads(&self) -> Vec<&DbgEngThread> {
+        self.threads
+            .values()
+            .filter(|t| t.state == ExecutionState::Running)
+            .collect()
+    }
+
+    /// Get all stopped threads.
+    pub fn stopped_threads(&self) -> Vec<&DbgEngThread> {
+        self.threads
+            .values()
+            .filter(|t| t.state == ExecutionState::Stopped)
+            .collect()
+    }
+
+    /// Get a count of threads in each execution state.
+    ///
+    /// Returns a map from `ExecutionState` to the number of threads
+    /// currently in that state.
+    pub fn thread_state_counts(&self) -> BTreeMap<ExecutionState, usize> {
+        let mut counts = BTreeMap::new();
+        for t in self.threads.values() {
+            *counts.entry(t.state).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Build trace object key-value pairs for the threads container.
+    ///
+    /// Used when syncing the `Processes[N].Threads` node.
+    pub fn build_threads_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.threads.len().to_string())]
+    }
+
+    /// Get all modules sorted by base address.
+    pub fn modules_sorted(&self) -> Vec<&ModuleInfo> {
+        let mut mods: Vec<&ModuleInfo> = self.modules.iter().collect();
+        mods.sort_by_key(|m| m.base);
+        mods
+    }
+
+    /// Build trace object key-value pairs for the modules container.
+    ///
+    /// Used when syncing the `Processes[N].Modules` node.
+    pub fn build_modules_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.modules.len().to_string())]
+    }
+
+    /// Compute the total memory footprint of all mapped regions.
+    ///
+    /// Returns the sum of sizes of all memory regions in bytes.
+    pub fn memory_footprint(&self) -> u64 {
+        self.memory_regions.iter().map(|r| r.size).sum()
+    }
+
+    /// Add a module with sections to this process.
+    ///
+    /// This is a convenience method that extracts the base `ModuleInfo`
+    /// and stores it. The sections data is used for trace synchronization
+    /// but the process only stores the base `ModuleInfo` directly.
+    pub fn add_module_with_sections(&mut self, module: ModuleWithSections) {
+        self.add_module(module.info);
+    }
+
+    /// Get the trace path for a breakpoint location within this process.
+    ///
+    /// In dbgeng, breakpoints are per-process. The path follows the pattern
+    /// `Processes[N].Debug.Breakpoints[id]`.
+    pub fn breakpoint_loc_path(&self, break_id: u32) -> String {
+        format!("Processes[{}].Debug.Breakpoints[{}]", self.num, break_id)
+    }
 }
 
 /// An available process entry, as reported by `.tlist`.
@@ -2613,5 +2694,151 @@ mod tests {
         let active = mgr.active_mut().unwrap();
         active.set_exit(0);
         assert_eq!(mgr.get(0).unwrap().state, ExecutionState::Exited);
+    }
+
+    #[test]
+    fn test_process_threads_sorted() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(3));
+        p.add_thread(DbgEngThread::new(1));
+        p.add_thread(DbgEngThread::new(2));
+        let sorted = p.threads_sorted();
+        assert_eq!(sorted.len(), 3);
+        // BTreeMap iterates in key order
+        assert_eq!(sorted[0].num, 1);
+        assert_eq!(sorted[1].num, 2);
+        assert_eq!(sorted[2].num, 3);
+    }
+
+    #[test]
+    fn test_process_running_threads() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DbgEngThread::new(1).with_state(ExecutionState::Stopped));
+        p.add_thread(DbgEngThread::new(2).with_state(ExecutionState::Running));
+        let running = p.running_threads();
+        assert_eq!(running.len(), 2);
+        assert!(running.iter().all(|t| t.state == ExecutionState::Running));
+    }
+
+    #[test]
+    fn test_process_stopped_threads() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DbgEngThread::new(1).with_state(ExecutionState::Stopped));
+        p.add_thread(DbgEngThread::new(2).with_state(ExecutionState::Stopped));
+        let stopped = p.stopped_threads();
+        assert_eq!(stopped.len(), 2);
+        assert!(stopped.iter().all(|t| t.state == ExecutionState::Stopped));
+    }
+
+    #[test]
+    fn test_process_thread_state_counts() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DbgEngThread::new(1).with_state(ExecutionState::Stopped));
+        p.add_thread(DbgEngThread::new(2).with_state(ExecutionState::Running));
+        p.add_thread(DbgEngThread::new(3).with_state(ExecutionState::Exited));
+        let counts = p.thread_state_counts();
+        assert_eq!(counts.get(&ExecutionState::Running), Some(&2));
+        assert_eq!(counts.get(&ExecutionState::Stopped), Some(&1));
+        assert_eq!(counts.get(&ExecutionState::Exited), Some(&1));
+    }
+
+    #[test]
+    fn test_process_build_threads_container_values() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(0));
+        p.add_thread(DbgEngThread::new(1));
+        let values = p.build_threads_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "2"));
+    }
+
+    #[test]
+    fn test_process_modules_sorted() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "b.dll".to_string(),
+            base: 0x200000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        p.add_module(ModuleInfo {
+            name: "a.dll".to_string(),
+            base: 0x100000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let sorted = p.modules_sorted();
+        assert_eq!(sorted.len(), 2);
+        assert_eq!(sorted[0].base, 0x100000);
+        assert_eq!(sorted[1].base, 0x200000);
+    }
+
+    #[test]
+    fn test_process_build_modules_container_values() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "ntdll.dll".to_string(),
+            base: 0x7ff800000000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let values = p.build_modules_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "1"));
+    }
+
+    #[test]
+    fn test_process_memory_footprint() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        assert_eq!(p.memory_footprint(), 0);
+        p.add_memory_region(MemoryRegion {
+            base: 0x10000,
+            size: 0x5000,
+            offset: 0,
+            permissions: "rw-".to_string(),
+            object_file: "stack".to_string(),
+        });
+        p.add_memory_region(MemoryRegion {
+            base: 0x20000,
+            size: 0x3000,
+            offset: 0,
+            permissions: "r-x".to_string(),
+            object_file: "code".to_string(),
+        });
+        assert_eq!(p.memory_footprint(), 0x8000);
+    }
+
+    #[test]
+    fn test_process_add_module_with_sections() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        let info = ModuleInfo {
+            name: "test.exe".to_string(),
+            base: 0x400000,
+            size: 0x10000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        };
+        let mut mod_ws = ModuleWithSections::from_info(info);
+        mod_ws.add_section(ModuleSection::new(".text", 0x1000, 0x8000));
+        p.add_module_with_sections(mod_ws);
+        assert_eq!(p.module_count(), 1);
+        assert!(p.find_module("test.exe").is_some());
+    }
+
+    #[test]
+    fn test_process_breakpoint_loc_path() {
+        let p = DbgEngInferiorProcess::new(1);
+        assert_eq!(
+            p.breakpoint_loc_path(5),
+            "Processes[1].Debug.Breakpoints[5]"
+        );
     }
 }

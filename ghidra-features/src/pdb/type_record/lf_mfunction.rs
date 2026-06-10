@@ -311,6 +311,38 @@ impl LfMfunction {
         ))
     }
 
+    /// Parse a 16-bit member function type record from a byte reader.
+    ///
+    /// Reads u16 record numbers for the return type, class type, this-pointer
+    /// type, and argument list type. This mirrors the Java
+    /// `MemberFunction16MsType` constructor which calls the
+    /// `AbstractMemberFunctionMsType` base with `recordNumberSize=16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let return_type_index = reader.read_u16()? as u32;
+        let class_type_index = reader.read_u16()? as u32;
+        let this_type_index = reader.read_u16()? as u32;
+        let calling_convention_byte = reader.read_u8()?;
+        let attributes_byte = reader.read_u8()?;
+        let num_parameters = reader.read_u16()?;
+        let arg_list_type_index = reader.read_u16()? as u32;
+        let this_adjustment = reader.read_i32()? as u32;
+        reader.align(4); // skipPadding
+        Ok(Self::from_parsed(
+            return_type_index,
+            class_type_index,
+            this_type_index,
+            calling_convention_byte,
+            attributes_byte,
+            num_parameters,
+            arg_list_type_index,
+            this_adjustment,
+        ))
+    }
+
     /// Emit the full signature including class qualification, this-pointer
     /// info, and structured metadata matching the Java `emit()` output.
     fn emit_full(&self, bind: Bind) -> String {
@@ -955,5 +987,58 @@ mod tests {
         assert_eq!(mf.calling_convention, CallingConvention::NearC);
         let emitted = mf.emit(Bind::NONE);
         assert!(emitted.contains("[__cdecl]"));
+    }
+
+    // =========================================================================
+    // 16-bit variant parsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_mfunction_parse_from_reader_16() {
+        // returnType=0x0074(u16), classType=0x1000(u16), thisType=0x1001(u16),
+        // cc=0x0b(ThisCall)(u8), attrs=0x00(u8), numParams=2(u16),
+        // argList=0x1002(u16), thisAdjustment=0(i32)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&0x1000u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u16.to_le_bytes());
+        data.push(0x0bu8); // ThisCall
+        data.push(0x00u8); // no attributes
+        data.extend_from_slice(&2u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u16.to_le_bytes());
+        data.extend_from_slice(&0i32.to_le_bytes()); // this_adjustment
+        let mut reader = PdbByteReader::new(&data);
+        let mf = LfMfunction::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(mf.calling_convention, CallingConvention::ThisCall);
+        assert_eq!(mf.num_parameters, 2);
+        assert_eq!(mf.this_adjustment, 0);
+        assert_eq!(mf.class_record_number, RecordNumber::type_record(0x1000));
+        assert_eq!(mf.this_record_number, RecordNumber::type_record(0x1001));
+    }
+
+    #[test]
+    fn test_mfunction_parse_from_reader_16_truncated() {
+        let data = [0x74u8, 0x00, 0x00, 0x00]; // only 4 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfMfunction::parse_from_reader_16(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mfunction_parse_from_reader_16_with_adjustment() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.extend_from_slice(&0x1000u16.to_le_bytes());
+        data.extend_from_slice(&0x1001u16.to_le_bytes());
+        data.push(0x0bu8); // ThisCall
+        data.push(0x04u8); // virtual base constructor
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u16.to_le_bytes());
+        data.extend_from_slice(&8i32.to_le_bytes()); // this_adjustment = 8
+        let mut reader = PdbByteReader::new(&data);
+        let mf = LfMfunction::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(mf.this_adjustment, 8);
+        assert!(mf.has_this_adjustment());
+        assert!(mf.has_virtual_base_this_adjustment());
     }
 }

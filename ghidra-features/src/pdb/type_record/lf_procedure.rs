@@ -84,6 +84,8 @@ pub enum CallingConvention {
     Inline = 0x17,
     /// Near vector call (`__vectorcall`).
     NearVector = 0x18,
+    /// First unused call enumeration (reserved).
+    Reserved = 0x19,
 }
 
 impl CallingConvention {
@@ -110,6 +112,41 @@ impl CallingConvention {
             Self::ClrCall => "clrcall",
             Self::Inline => "inline",
             Self::NearVector => "__vectorcall",
+            Self::Reserved => "",
+        }
+    }
+
+    /// A longer description of the calling convention.
+    ///
+    /// Corresponds to the Java `CallingConvention.getInfo()` method.
+    pub fn info(&self) -> &'static str {
+        match self {
+            Self::NearC => "near right to left push, caller pops stack",
+            Self::FarC => "far right to left push, caller pops stack",
+            Self::NearPascal => "near left to right push, callee pops stack",
+            Self::FarPascal => "far left to right push, callee pops stack",
+            Self::NearFast => "near left to right push with regs, callee pops stack",
+            Self::FarFast => "far left to right push with regs, callee pops stack",
+            Self::Skipped => "skipped (unused) call index",
+            Self::NearStd => "near standard call",
+            Self::FarStd => "far standard call",
+            Self::NearSys => "near sys call",
+            Self::FarSys => "far sys call",
+            Self::ThisCall => "this call (this passed in register)",
+            Self::MipsCall => "Mips call",
+            Self::Generic => "Generic call sequence",
+            Self::AlphaCall => "Alpha call",
+            Self::PpcCall => "PPC call",
+            Self::ShCall => "Hitachi SuperH call",
+            Self::ArmCall => "ARM call",
+            Self::Am33Call => "AM33 call",
+            Self::TriCall => "TriCore Call",
+            Self::Sh5Call => "Hitachi SuperH-5 call",
+            Self::M32rCall => "M32R Call",
+            Self::ClrCall => "clr call",
+            Self::Inline => "Marker for routines always inlined and thus lacking a convention",
+            Self::NearVector => "near left to right push with regs, callee pops stack",
+            Self::Reserved => "first unused call enumeration",
         }
     }
 
@@ -141,6 +178,7 @@ impl CallingConvention {
             0x16 => Some(Self::ClrCall),
             0x17 => Some(Self::Inline),
             0x18 => Some(Self::NearVector),
+            0x19 => Some(Self::Reserved),
             _ => None,
         }
     }
@@ -431,6 +469,31 @@ impl LfProcedure {
         let num_parameters = reader.read_u16()?;
         let arg_list_type_index = reader.read_u32()?;
         reader.align(4); // skipPadding
+        Ok(Self::from_parsed(
+            return_type_index,
+            calling_convention_byte,
+            attributes_byte,
+            num_parameters,
+            arg_list_type_index,
+        ))
+    }
+
+    /// Parse a 16-bit procedure type record from a byte reader.
+    ///
+    /// Reads u16 record numbers instead of u32 for the return type and
+    /// argument list. This mirrors the Java `Procedure16MsType` constructor
+    /// which calls the `AbstractProcedureMsType` base with
+    /// `recordNumberSize=16`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let return_type_index = reader.read_u16()? as u32;
+        let calling_convention_byte = reader.read_u8()?;
+        let attributes_byte = reader.read_u8()?;
+        let num_parameters = reader.read_u16()?;
+        let arg_list_type_index = reader.read_u16()? as u32;
         Ok(Self::from_parsed(
             return_type_index,
             calling_convention_byte,
@@ -997,5 +1060,93 @@ mod tests {
         let mut reader = PdbByteReader::new(&data);
         let p = LfProcedure::parse_from_reader(&mut reader).unwrap();
         assert!(p.has_cpp_return_udt());
+    }
+
+    // =========================================================================
+    // CallingConvention::Reserved and info() tests
+    // =========================================================================
+
+    #[test]
+    fn test_calling_convention_reserved() {
+        assert_eq!(
+            CallingConvention::from_value(0x19),
+            Some(CallingConvention::Reserved)
+        );
+        assert_eq!(CallingConvention::Reserved.label(), "");
+        assert_eq!(CallingConvention::Reserved.info(), "first unused call enumeration");
+    }
+
+    #[test]
+    fn test_calling_convention_info() {
+        assert_eq!(
+            CallingConvention::NearC.info(),
+            "near right to left push, caller pops stack"
+        );
+        assert_eq!(
+            CallingConvention::NearStd.info(),
+            "near standard call"
+        );
+        assert_eq!(
+            CallingConvention::ThisCall.info(),
+            "this call (this passed in register)"
+        );
+        assert_eq!(
+            CallingConvention::Inline.info(),
+            "Marker for routines always inlined and thus lacking a convention"
+        );
+        assert_eq!(
+            CallingConvention::Skipped.info(),
+            "skipped (unused) call index"
+        );
+    }
+
+    // =========================================================================
+    // 16-bit variant parsing tests
+    // =========================================================================
+
+    #[test]
+    fn test_procedure_parse_from_reader_16() {
+        // returnType=0x0074(u16), cc=0x07(NearStd)(u8), attrs=0x00(u8),
+        // numParams=3(u16), argList=0x1002(u16)
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.push(0x07u8);  // NearStd
+        data.push(0x00u8);  // no attributes
+        data.extend_from_slice(&3u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfProcedure::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(p.calling_convention, CallingConvention::NearStd);
+        assert_eq!(p.num_parameters, 3);
+        assert_eq!(
+            p.arg_list_record_number,
+            RecordNumber::type_record(0x1002)
+        );
+        assert_eq!(
+            p.return_value_record_number,
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_procedure_parse_from_reader_16_truncated() {
+        let data = [0x74u8, 0x00]; // only 2 bytes
+        let mut reader = PdbByteReader::new(&data);
+        let result = LfProcedure::parse_from_reader_16(&mut reader);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_procedure_parse_from_reader_16_constructor() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        data.push(0x0bu8);  // ThisCall
+        data.push(0x02u8);  // instance constructor
+        data.extend_from_slice(&0u16.to_le_bytes());
+        data.extend_from_slice(&0x1002u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfProcedure::parse_from_reader_16(&mut reader).unwrap();
+        assert_eq!(p.calling_convention, CallingConvention::ThisCall);
+        assert!(p.is_constructor());
     }
 }

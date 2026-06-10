@@ -968,6 +968,496 @@ impl AvailableProcess {
     }
 }
 
+/// A local variable within a stack frame.
+///
+/// Ported from Python `put_locals()` in `commands.py` which reads
+/// `StackFrame.locals()` and `StackFrame[key]` to populate the
+/// `Processes[N].Threads[M].Stack[L].Locals` container.
+///
+/// Each local variable has a name, a drgn type, a kind (parameter,
+/// local, global, etc.), and an optional address and display value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnLocalVariable {
+    /// Variable name.
+    pub name: String,
+    /// Type name as a string (e.g., "struct task_struct *").
+    pub type_name: String,
+    /// Kind of variable.
+    pub kind: DrgnVariableKind,
+    /// Address of the variable in memory, if addressable.
+    pub address: Option<u64>,
+    /// Display value (stringified value).
+    pub display_value: String,
+    /// Whether the value is absent (optimized out).
+    pub is_absent: bool,
+}
+
+impl DrgnLocalVariable {
+    /// Create a new local variable.
+    pub fn new(
+        name: impl Into<String>,
+        type_name: impl Into<String>,
+        kind: DrgnVariableKind,
+        display_value: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            type_name: type_name.into(),
+            kind,
+            address: None,
+            display_value: display_value.into(),
+            is_absent: false,
+        }
+    }
+
+    /// Set the address.
+    pub fn with_address(mut self, addr: u64) -> Self {
+        self.address = Some(addr);
+        self
+    }
+
+    /// Mark as absent (optimized out).
+    pub fn with_absent(mut self, absent: bool) -> Self {
+        self.is_absent = absent;
+        self
+    }
+
+    /// Get the trace path for this local variable.
+    pub fn trace_path(&self, process_num: u32, thread_num: u32, frame_level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Locals.{}",
+            process_num, thread_num, frame_level, self.name
+        )
+    }
+
+    /// Build trace object key-value pairs.
+    ///
+    /// Matches the Python `put_object()` output in `commands.py`.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            (
+                "_display".to_string(),
+                format!("{} [{}:{}]", self.name, self.type_name, self.display_value),
+            ),
+            ("Kind".to_string(), self.kind.as_str().to_string()),
+            ("Type".to_string(), self.type_name.clone()),
+        ];
+        if self.is_absent {
+            values.push(("Value".to_string(), "<absent>".to_string()));
+        } else {
+            values.push(("Value".to_string(), self.display_value.clone()));
+        }
+        if let Some(addr) = self.address {
+            values.push(("Address".to_string(), format!("0x{:x}", addr)));
+        }
+        values
+    }
+}
+
+/// Kind of variable in a stack frame.
+///
+/// Ported from drgn's `TypeKind` and variable classification in
+/// `commands.py` `put_object()`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnVariableKind {
+    /// Function parameter.
+    Parameter,
+    /// Local variable.
+    Local,
+    /// Global variable.
+    Global,
+    /// Struct/union/class member.
+    Member,
+    /// Pointer type.
+    Pointer,
+    /// Typedef.
+    Typedef,
+    /// Primitive type (int, char, etc.).
+    Primitive,
+    /// Unknown or other.
+    Other,
+}
+
+impl DrgnVariableKind {
+    /// Get the string representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Parameter => "parameter",
+            Self::Local => "local",
+            Self::Global => "global",
+            Self::Member => "member",
+            Self::Pointer => "pointer",
+            Self::Typedef => "typedef",
+            Self::Primitive => "primitive",
+            Self::Other => "other",
+        }
+    }
+}
+
+/// Symbol binding attribute.
+///
+/// Ported from Python `put_symbols()` which reads `s.binding`
+/// (e.g., `STB_GLOBAL`, `STB_LOCAL`, `STB_WEAK`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnSymbolBinding {
+    /// Local binding.
+    Local,
+    /// Global binding.
+    Global,
+    /// Weak binding.
+    Weak,
+    /// Other/unknown binding.
+    Other,
+}
+
+impl DrgnSymbolBinding {
+    /// Parse from drgn binding string.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "STB_LOCAL" | "LOCAL" => Self::Local,
+            "STB_GLOBAL" | "GLOBAL" => Self::Global,
+            "STB_WEAK" | "WEAK" => Self::Weak,
+            _ => Self::Other,
+        }
+    }
+
+    /// Get string representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "LOCAL",
+            Self::Global => "GLOBAL",
+            Self::Weak => "WEAK",
+            Self::Other => "OTHER",
+        }
+    }
+}
+
+/// Symbol kind/type.
+///
+/// Ported from Python `put_symbols()` which reads `s.kind`
+/// (e.g., `STT_FUNC`, `STT_OBJECT`, `STT_NOTYPE`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnSymbolKind {
+    /// Function symbol.
+    Function,
+    /// Data/object symbol.
+    Object,
+    /// Section symbol.
+    Section,
+    /// File symbol.
+    File,
+    /// No type.
+    NoType,
+    /// Other/unknown.
+    Other,
+}
+
+impl DrgnSymbolKind {
+    /// Parse from drgn kind string.
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "STT_FUNC" | "FUNC" => Self::Function,
+            "STT_OBJECT" | "OBJECT" => Self::Object,
+            "STT_SECTION" | "SECTION" => Self::Section,
+            "STT_FILE" | "FILE" => Self::File,
+            "STT_NOTYPE" | "NOTYPE" => Self::NoType,
+            _ => Self::Other,
+        }
+    }
+
+    /// Get string representation.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Function => "FUNC",
+            Self::Object => "OBJECT",
+            Self::Section => "SECTION",
+            Self::File => "FILE",
+            Self::NoType => "NOTYPE",
+            Self::Other => "OTHER",
+        }
+    }
+}
+
+/// Enriched symbol information with binding and kind metadata.
+///
+/// Extends `DrgnSymbolInfo` with the binding and kind fields that
+/// the Python `put_symbols()` reads from `s.binding` and `s.kind`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrgnEnrichedSymbol {
+    /// Symbol name.
+    pub name: String,
+    /// Symbol address.
+    pub address: u64,
+    /// Symbol size.
+    pub size: u64,
+    /// Symbol binding (local, global, weak).
+    pub binding: DrgnSymbolBinding,
+    /// Symbol kind (function, object, etc.).
+    pub kind: DrgnSymbolKind,
+}
+
+impl DrgnEnrichedSymbol {
+    /// Create a new enriched symbol.
+    pub fn new(
+        name: impl Into<String>,
+        address: u64,
+        size: u64,
+        binding: DrgnSymbolBinding,
+        kind: DrgnSymbolKind,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            size,
+            binding,
+            kind,
+        }
+    }
+
+    /// Build trace object key-value pairs.
+    ///
+    /// Matches the Python `put_symbols()` output which includes
+    /// Address, Size, Name, Binding, and Kind.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("Address".to_string(), format!("0x{:x}", self.address)),
+            ("Size".to_string(), format!("0x{:x}", self.size)),
+            ("Name".to_string(), self.name.clone()),
+            ("Binding".to_string(), self.binding.as_str().to_string()),
+            ("Kind".to_string(), self.kind.as_str().to_string()),
+            (
+                "_display".to_string(),
+                format!("{} 0x{:x}", self.name, self.address),
+            ),
+            (
+                "_short_display".to_string(),
+                format!("0x{:x}", self.address),
+            ),
+        ]
+    }
+}
+
+/// A memory and register mapper for translating drgn addresses to
+/// Ghidra trace addresses.
+///
+/// Ported from Python `DefaultMemoryMapper` and `DefaultRegisterMapper`
+/// in `arch.py`. The mapper translates process-local offsets into
+/// Ghidra's address space model.
+#[derive(Debug, Clone)]
+pub struct DrgnMemoryMapper {
+    /// Default address space name (typically "ram").
+    pub default_space: String,
+}
+
+impl DrgnMemoryMapper {
+    /// Create a new memory mapper with default space "ram".
+    pub fn new() -> Self {
+        Self {
+            default_space: "ram".to_string(),
+        }
+    }
+
+    /// Create a mapper with a specific default space.
+    pub fn with_space(space: impl Into<String>) -> Self {
+        Self {
+            default_space: space.into(),
+        }
+    }
+
+    /// Map a process offset to (base_space, address_space, offset).
+    ///
+    /// In drgn's simple model, the base space is always the default space.
+    pub fn map(&self, _process_num: u32, offset: u64) -> (&str, u64) {
+        (&self.default_space, offset)
+    }
+
+    /// Reverse map a Ghidra address back to a process offset.
+    pub fn map_back(&self, _process_num: u32, space: &str, offset: u64) -> Option<u64> {
+        if space == self.default_space {
+            Some(offset)
+        } else {
+            None
+        }
+    }
+}
+
+impl Default for DrgnMemoryMapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// A register mapper for translating register names and values.
+///
+/// Ported from Python `DefaultRegisterMapper` in `arch.py`.
+/// Handles byte order conversion for register values.
+#[derive(Debug, Clone)]
+pub struct DrgnRegisterMapper {
+    /// Byte order for register values.
+    pub byte_order: DrgnByteOrder,
+}
+
+/// Byte order for register values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrgnByteOrder {
+    /// Little-endian.
+    Little,
+    /// Big-endian.
+    Big,
+}
+
+impl DrgnByteOrder {
+    /// Convert to trace string.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Little => "little",
+            Self::Big => "big",
+        }
+    }
+}
+
+impl DrgnRegisterMapper {
+    /// Create a register mapper.
+    pub fn new(byte_order: DrgnByteOrder) -> Self {
+        Self { byte_order }
+    }
+
+    /// Create a little-endian mapper.
+    pub fn little_endian() -> Self {
+        Self::new(DrgnByteOrder::Little)
+    }
+
+    /// Create a big-endian mapper.
+    pub fn big_endian() -> Self {
+        Self::new(DrgnByteOrder::Big)
+    }
+
+    /// Map a register name (identity in the default mapper).
+    pub fn map_name(&self, _process_num: u32, name: &str) -> String {
+        name.to_string()
+    }
+
+    /// Map a register name back (identity in the default mapper).
+    pub fn map_name_back(&self, _process_num: u32, name: &str) -> String {
+        name.to_string()
+    }
+}
+
+impl Default for DrgnRegisterMapper {
+    fn default() -> Self {
+        Self::little_endian()
+    }
+}
+
+/// Manages multiple drgn processes (the `PROGRAMS` dict from Python).
+///
+/// Ported from the Python `commands.py` `PROGRAMS` dictionary that maps
+/// process IDs to `drgn.Program` instances. In the Rust port, this
+/// manages `DrgnInferiorProcess` instances.
+#[derive(Debug, Default)]
+pub struct DrgnProcessManager {
+    /// Active processes keyed by process number.
+    pub processes: BTreeMap<u32, DrgnInferiorProcess>,
+    /// Convenience state for selected process/thread/frame.
+    pub convenience: DrgnConvenienceState,
+    /// Memory mapper.
+    pub memory_mapper: DrgnMemoryMapper,
+    /// Register mapper.
+    pub register_mapper: DrgnRegisterMapper,
+}
+
+impl DrgnProcessManager {
+    /// Create a new process manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add a process.
+    pub fn add_process(&mut self, process: DrgnInferiorProcess) {
+        let num = process.num;
+        self.processes.insert(num, process);
+    }
+
+    /// Remove a process by number.
+    pub fn remove_process(&mut self, num: u32) -> Option<DrgnInferiorProcess> {
+        self.processes.remove(&num)
+    }
+
+    /// Get a process by number.
+    pub fn get_process(&self, num: u32) -> Option<&DrgnInferiorProcess> {
+        self.processes.get(&num)
+    }
+
+    /// Get a mutable reference to a process by number.
+    pub fn get_process_mut(&mut self, num: u32) -> Option<&mut DrgnInferiorProcess> {
+        self.processes.get_mut(&num)
+    }
+
+    /// Get the currently selected process.
+    pub fn selected_process(&self) -> Option<&DrgnInferiorProcess> {
+        self.convenience
+            .selected_process()
+            .and_then(|pid| self.processes.get(&pid))
+    }
+
+    /// Get a mutable reference to the currently selected process.
+    pub fn selected_process_mut(&mut self) -> Option<&mut DrgnInferiorProcess> {
+        let pid = self.convenience.selected_process()?;
+        self.processes.get_mut(&pid)
+    }
+
+    /// Select a process and return it.
+    pub fn select_process(&mut self, pid: i64) -> Option<&DrgnInferiorProcess> {
+        self.convenience.select_process(pid);
+        self.processes.get(&(pid as u32))
+    }
+
+    /// Select a thread within the current process.
+    pub fn select_thread(&mut self, tid: i64) {
+        self.convenience.select_thread(tid);
+    }
+
+    /// Select a frame level.
+    pub fn select_frame(&mut self, level: i64) {
+        self.convenience.select_frame(level);
+    }
+
+    /// Get all process numbers.
+    pub fn process_numbers(&self) -> Vec<u32> {
+        self.processes.keys().copied().collect()
+    }
+
+    /// Get the number of processes.
+    pub fn process_count(&self) -> usize {
+        self.processes.len()
+    }
+
+    /// Check if a process exists.
+    pub fn has_process(&self, num: u32) -> bool {
+        self.processes.contains_key(&num)
+    }
+
+    /// Mark all processes for module sync.
+    pub fn mark_all_modules_changed(&mut self) {
+        for p in self.processes.values_mut() {
+            p.mark_modules_changed();
+        }
+    }
+
+    /// Mark all processes for thread sync.
+    pub fn mark_all_threads_changed(&mut self) {
+        for p in self.processes.values_mut() {
+            p.mark_threads_changed();
+        }
+    }
+
+    /// Reset all state.
+    pub fn reset(&mut self) {
+        self.processes.clear();
+        self.convenience.reset();
+    }
+}
+
 /// drgn-specific module section with address information for relocatable modules.
 ///
 /// For kernel modules (RelocatableModule in drgn), sections have relocated
@@ -1651,5 +2141,161 @@ mod tests {
             is_relocatable: true,
         });
         assert_eq!(p.module_count(), 1);
+    }
+
+    #[test]
+    fn test_local_variable() {
+        let local = DrgnLocalVariable::new(
+            "fd",
+            "int",
+            DrgnVariableKind::Parameter,
+            "3",
+        )
+        .with_address(0x7fff0000);
+        assert_eq!(local.name, "fd");
+        assert_eq!(local.type_name, "int");
+        assert_eq!(local.kind, DrgnVariableKind::Parameter);
+        assert_eq!(local.address, Some(0x7fff0000));
+        assert!(!local.is_absent);
+        assert_eq!(
+            local.trace_path(0, 1, 2),
+            "Processes[0].Threads[1].Stack[2].Locals.fd"
+        );
+        let values = local.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Kind" && v == "parameter"));
+        assert!(values.iter().any(|(k, v)| k == "Type" && v == "int"));
+        assert!(values.iter().any(|(k, v)| k == "Value" && v == "3"));
+        assert!(values.iter().any(|(k, v)| k == "Address" && v == "0x7fff0000"));
+    }
+
+    #[test]
+    fn test_local_variable_absent() {
+        let local = DrgnLocalVariable::new(
+            "reg",
+            "unsigned long",
+            DrgnVariableKind::Local,
+            "<optimized out>",
+        )
+        .with_absent(true);
+        assert!(local.is_absent);
+        let values = local.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Value" && v == "<absent>"));
+    }
+
+    #[test]
+    fn test_variable_kind() {
+        assert_eq!(DrgnVariableKind::Parameter.as_str(), "parameter");
+        assert_eq!(DrgnVariableKind::Local.as_str(), "local");
+        assert_eq!(DrgnVariableKind::Global.as_str(), "global");
+        assert_eq!(DrgnVariableKind::Pointer.as_str(), "pointer");
+    }
+
+    #[test]
+    fn test_symbol_binding() {
+        assert_eq!(DrgnSymbolBinding::from_str("STB_GLOBAL"), DrgnSymbolBinding::Global);
+        assert_eq!(DrgnSymbolBinding::from_str("LOCAL"), DrgnSymbolBinding::Local);
+        assert_eq!(DrgnSymbolBinding::from_str("STB_WEAK"), DrgnSymbolBinding::Weak);
+        assert_eq!(DrgnSymbolBinding::from_str("unknown"), DrgnSymbolBinding::Other);
+        assert_eq!(DrgnSymbolBinding::Global.as_str(), "GLOBAL");
+    }
+
+    #[test]
+    fn test_symbol_kind() {
+        assert_eq!(DrgnSymbolKind::from_str("STT_FUNC"), DrgnSymbolKind::Function);
+        assert_eq!(DrgnSymbolKind::from_str("OBJECT"), DrgnSymbolKind::Object);
+        assert_eq!(DrgnSymbolKind::from_str("STT_NOTYPE"), DrgnSymbolKind::NoType);
+        assert_eq!(DrgnSymbolKind::Function.as_str(), "FUNC");
+    }
+
+    #[test]
+    fn test_enriched_symbol() {
+        let sym = DrgnEnrichedSymbol::new(
+            "do_sys_open",
+            0xffffffff81234567,
+            0x100,
+            DrgnSymbolBinding::Global,
+            DrgnSymbolKind::Function,
+        );
+        let values = sym.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Binding" && v == "GLOBAL"));
+        assert!(values.iter().any(|(k, v)| k == "Kind" && v == "FUNC"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "do_sys_open"));
+        assert!(values.iter().any(|(k, v)| k == "_short_display" && v == "0xffffffff81234567"));
+    }
+
+    #[test]
+    fn test_memory_mapper() {
+        let mapper = DrgnMemoryMapper::new();
+        assert_eq!(mapper.default_space, "ram");
+        let (space, offset) = mapper.map(0, 0x12345678);
+        assert_eq!(space, "ram");
+        assert_eq!(offset, 0x12345678);
+        assert_eq!(mapper.map_back(0, "ram", 0x12345678), Some(0x12345678));
+        assert_eq!(mapper.map_back(0, "other", 0x12345678), None);
+
+        let mapper2 = DrgnMemoryMapper::with_space("kernel");
+        assert_eq!(mapper2.default_space, "kernel");
+    }
+
+    #[test]
+    fn test_register_mapper() {
+        let mapper = DrgnRegisterMapper::little_endian();
+        assert_eq!(mapper.byte_order, DrgnByteOrder::Little);
+        assert_eq!(mapper.map_name(0, "rax"), "rax");
+        assert_eq!(mapper.map_name_back(0, "rax"), "rax");
+
+        let be_mapper = DrgnRegisterMapper::big_endian();
+        assert_eq!(be_mapper.byte_order, DrgnByteOrder::Big);
+    }
+
+    #[test]
+    fn test_byte_order() {
+        assert_eq!(DrgnByteOrder::Little.as_str(), "little");
+        assert_eq!(DrgnByteOrder::Big.as_str(), "big");
+    }
+
+    #[test]
+    fn test_process_manager() {
+        let mut mgr = DrgnProcessManager::new();
+        assert_eq!(mgr.process_count(), 0);
+
+        mgr.add_process(DrgnInferiorProcess::kernel(0));
+        mgr.add_process(DrgnInferiorProcess::new(1).with_pid(1234));
+        assert_eq!(mgr.process_count(), 2);
+        assert!(mgr.has_process(0));
+        assert!(mgr.has_process(1));
+        assert!(!mgr.has_process(2));
+
+        mgr.select_process(0);
+        assert!(mgr.selected_process().is_some());
+        assert_eq!(mgr.selected_process().unwrap().num, 0);
+
+        mgr.select_thread(42);
+        assert_eq!(mgr.convenience.selected_thread(), Some(42));
+
+        let removed = mgr.remove_process(1);
+        assert!(removed.is_some());
+        assert_eq!(mgr.process_count(), 1);
+        assert_eq!(mgr.process_numbers(), vec![0]);
+    }
+
+    #[test]
+    fn test_process_manager_reset() {
+        let mut mgr = DrgnProcessManager::new();
+        mgr.add_process(DrgnInferiorProcess::new(0));
+        mgr.select_process(0);
+        mgr.reset();
+        assert_eq!(mgr.process_count(), 0);
+        assert_eq!(mgr.convenience.selected_pid, -1);
+    }
+
+    #[test]
+    fn test_process_manager_mark_all() {
+        let mut mgr = DrgnProcessManager::new();
+        mgr.add_process(DrgnInferiorProcess::new(0));
+        mgr.add_process(DrgnInferiorProcess::new(1));
+        mgr.mark_all_modules_changed();
+        assert!(mgr.get_process(0).unwrap().modules_changed);
+        assert!(mgr.get_process(1).unwrap().modules_changed);
     }
 }

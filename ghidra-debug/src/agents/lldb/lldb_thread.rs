@@ -537,6 +537,151 @@ impl LldbThread {
     pub fn stopped_at_step(&self) -> bool {
         self.stop_reason == Some(super::LldbStopReason::PlanComplete)
     }
+
+    /// Whether the thread finished a function call (returned).
+    ///
+    /// Checks the detailed stop reason for `FunctionFinished`.
+    pub fn stopped_at_function_return(&self) -> bool {
+        matches!(
+            self.detailed_stop_reason,
+            Some(LldbDetailedStopReason::FunctionFinished { .. })
+        )
+    }
+}
+
+/// Thread event for the LLDB hook system.
+///
+/// Tracks thread lifecycle events that need to be synchronized
+/// to the Ghidra trace. Ported from the Python agent's thread
+/// event handling in `hooks.py`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LldbThreadEvent {
+    /// A new thread was created.
+    Created {
+        /// Process index.
+        process_index: u32,
+        /// Thread index.
+        thread_index: u32,
+    },
+    /// A thread has exited.
+    Exited {
+        /// Process index.
+        process_index: u32,
+        /// Thread index.
+        thread_index: u32,
+    },
+    /// A thread's state has changed (running/stopped/etc).
+    StateChanged {
+        /// Process index.
+        process_index: u32,
+        /// Thread index.
+        thread_index: u32,
+        /// New execution state.
+        new_state: ExecutionState,
+    },
+    /// A thread was selected by the user.
+    Selected {
+        /// Process index.
+        process_index: u32,
+        /// Thread index.
+        thread_index: u32,
+    },
+}
+
+impl LldbThreadEvent {
+    /// Get the process index for this event.
+    pub fn process_index(&self) -> u32 {
+        match self {
+            Self::Created { process_index, .. }
+            | Self::Exited { process_index, .. }
+            | Self::StateChanged { process_index, .. }
+            | Self::Selected { process_index, .. } => *process_index,
+        }
+    }
+
+    /// Get the thread index for this event.
+    pub fn thread_index(&self) -> u32 {
+        match self {
+            Self::Created { thread_index, .. }
+            | Self::Exited { thread_index, .. }
+            | Self::StateChanged { thread_index, .. }
+            | Self::Selected { thread_index, .. } => *thread_index,
+        }
+    }
+
+    /// Human-readable description of this event.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Created { process_index, thread_index } => {
+                format!("Thread {} created in process {}", thread_index, process_index)
+            }
+            Self::Exited { process_index, thread_index } => {
+                format!("Thread {} exited in process {}", thread_index, process_index)
+            }
+            Self::StateChanged {
+                process_index,
+                thread_index,
+                new_state,
+            } => {
+                format!(
+                    "Thread {} in process {} -> {}",
+                    thread_index,
+                    process_index,
+                    new_state.as_trace_str()
+                )
+            }
+            Self::Selected { process_index, thread_index } => {
+                format!("Thread {} selected in process {}", thread_index, process_index)
+            }
+        }
+    }
+}
+
+/// A batch of register values for a frame.
+///
+/// Groups register values by frame for efficient trace writing.
+/// Ported from the register syncing logic in `commands.py` and `hooks.py`.
+#[derive(Debug, Clone, Default)]
+pub struct LldbFrameRegisterBatch {
+    /// Frame level.
+    pub frame_level: u32,
+    /// Register values.
+    pub registers: Vec<RegisterValue>,
+}
+
+impl LldbFrameRegisterBatch {
+    /// Create a new batch for a frame level.
+    pub fn new(frame_level: u32) -> Self {
+        Self {
+            frame_level,
+            registers: Vec::new(),
+        }
+    }
+
+    /// Add a register value.
+    pub fn push(&mut self, reg: RegisterValue) {
+        self.registers.push(reg);
+    }
+
+    /// Get a register value by name.
+    pub fn get(&self, name: &str) -> Option<&RegisterValue> {
+        self.registers.iter().find(|r| r.name == name)
+    }
+
+    /// Get all register names.
+    pub fn names(&self) -> Vec<&str> {
+        self.registers.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    /// Number of registers.
+    pub fn len(&self) -> usize {
+        self.registers.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.registers.is_empty()
+    }
 }
 
 /// Stepping type for LLDB thread operations.
@@ -641,6 +786,11 @@ pub struct LldbFrameDetails {
     pub language: Option<String>,
     /// Whether the frame corresponds to a signal handler.
     pub is_signal_frame: bool,
+    /// Whether this is an inline frame.
+    ///
+    /// LLDB can unwind inline frames when debug info is available.
+    /// This corresponds to `SBFrame.IsInlined()`.
+    pub is_inline: bool,
     /// Compiler-specific frame flags.
     pub flags: u32,
 }
@@ -655,6 +805,7 @@ impl LldbFrameDetails {
             source_line: None,
             language: None,
             is_signal_frame: false,
+            is_inline: false,
             flags: 0,
         }
     }
@@ -684,9 +835,18 @@ impl LldbFrameDetails {
         self
     }
 
+    /// Mark as inline frame.
+    pub fn with_inline(mut self, inline: bool) -> Self {
+        self.is_inline = inline;
+        self
+    }
+
     /// Build a display string including source location.
     pub fn build_display(&self, pc: u64, function_name: Option<&str>) -> String {
         let mut display = format!("#{} 0x{:x}", self.level, pc);
+        if self.is_inline {
+            display += " [inlined]";
+        }
         if let Some(name) = function_name {
             display += &format!(" {}", name);
         }
@@ -2078,5 +2238,130 @@ mod register_bank_tests {
         assert_eq!(f.register_bank_count(), 1);
         let bank = f.get_register_bank("GPR").unwrap();
         assert_eq!(bank.len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod thread_event_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_event_created() {
+        let event = LldbThreadEvent::Created {
+            process_index: 0,
+            thread_index: 1,
+        };
+        assert_eq!(event.process_index(), 0);
+        assert_eq!(event.thread_index(), 1);
+        assert!(event.description().contains("created"));
+    }
+
+    #[test]
+    fn test_thread_event_exited() {
+        let event = LldbThreadEvent::Exited {
+            process_index: 1,
+            thread_index: 2,
+        };
+        assert_eq!(event.process_index(), 1);
+        assert_eq!(event.thread_index(), 2);
+        assert!(event.description().contains("exited"));
+    }
+
+    #[test]
+    fn test_thread_event_state_changed() {
+        let event = LldbThreadEvent::StateChanged {
+            process_index: 0,
+            thread_index: 1,
+            new_state: ExecutionState::Running,
+        };
+        assert!(event.description().contains("RUNNING"));
+    }
+
+    #[test]
+    fn test_thread_event_selected() {
+        let event = LldbThreadEvent::Selected {
+            process_index: 0,
+            thread_index: 3,
+        };
+        assert!(event.description().contains("selected"));
+    }
+}
+
+#[cfg(test)]
+mod register_batch_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_register_batch() {
+        let mut batch = LldbFrameRegisterBatch::new(0);
+        assert!(batch.is_empty());
+        assert_eq!(batch.len(), 0);
+
+        batch.push(RegisterValue::from_u64("x0", 0x1234));
+        batch.push(RegisterValue::from_u64("x1", 0x5678));
+        assert_eq!(batch.len(), 2);
+        assert!(!batch.is_empty());
+
+        assert!(batch.get("x0").is_some());
+        assert_eq!(batch.get("x0").unwrap().as_u64(), Some(0x1234));
+        assert!(batch.get("x2").is_none());
+
+        let names = batch.names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"x0"));
+        assert!(names.contains(&"x1"));
+    }
+}
+
+#[cfg(test)]
+mod frame_details_inline_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_details_with_inline() {
+        let details = LldbFrameDetails::new(0)
+            .with_source("main.c", 10)
+            .with_language("c")
+            .with_inline(true);
+        assert!(details.is_inline);
+        assert_eq!(details.source_file.as_deref(), Some("main.c"));
+    }
+
+    #[test]
+    fn test_frame_details_inline_display() {
+        let details = LldbFrameDetails::new(0).with_inline(true);
+        let display = details.build_display(0x401000, Some("inlined_fn"));
+        assert!(display.contains("[inlined]"));
+        assert!(display.contains("inlined_fn"));
+    }
+
+    #[test]
+    fn test_frame_details_no_inline_display() {
+        let details = LldbFrameDetails::new(0);
+        let display = details.build_display(0x401000, Some("normal_fn"));
+        assert!(!display.contains("[inlined]"));
+    }
+}
+
+#[cfg(test)]
+mod function_return_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_stopped_at_function_return() {
+        let t = LldbThread::new(1, 0)
+            .with_state(ExecutionState::Stopped)
+            .with_detailed_stop_reason(LldbDetailedStopReason::FunctionFinished {
+                return_value: Some(42),
+            });
+        assert!(t.stopped_at_function_return());
+    }
+
+    #[test]
+    fn test_thread_not_stopped_at_function_return() {
+        let t = LldbThread::new(1, 0)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(super::super::LldbStopReason::Breakpoint);
+        assert!(!t.stopped_at_function_return());
     }
 }

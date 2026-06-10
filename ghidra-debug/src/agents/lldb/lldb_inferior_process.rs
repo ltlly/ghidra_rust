@@ -229,12 +229,17 @@ impl LldbInferiorProcess {
     /// Build trace object key-value pairs for this process.
     ///
     /// These are used to populate the `Processes[N]` node in the trace.
+    /// Ported from `put_process_state` in `commands.py`.
     pub fn build_trace_values(&self) -> Vec<(String, String)> {
         let state = self.compute_state();
-        vec![
+        let mut values = vec![
             ("_state".to_string(), state.as_trace_str().to_string()),
             ("_display".to_string(), self.display.clone()),
-        ]
+        ];
+        if let Some(code) = self.exit_code {
+            values.push(("Exit Code".to_string(), code.to_string()));
+        }
+        values
     }
 
     /// Build trace object key-value pairs for this process's environment.
@@ -1460,6 +1465,120 @@ impl LldbAvailableProcess {
     }
 }
 
+/// Address index for fast base-address lookup from memory regions.
+///
+/// Ported from the Python `Index` class in `util.py`. Uses sorted
+/// base addresses with binary search for efficient lookup of which
+/// region a given address falls within. This is the LLDB equivalent
+/// of GDB's `RegionIndex`, using LLDB's `SBProcess.GetMemoryRegions()`
+/// output.
+#[derive(Debug, Clone)]
+pub struct LldbRegionIndex {
+    /// Regions keyed by base address.
+    regions: BTreeMap<u64, MemoryRegion>,
+    /// Sorted base addresses for binary search.
+    bases: Vec<u64>,
+}
+
+impl Default for LldbRegionIndex {
+    fn default() -> Self {
+        Self {
+            regions: BTreeMap::new(),
+            bases: Vec::new(),
+        }
+    }
+}
+
+impl LldbRegionIndex {
+    /// Create a new empty region index.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Build an index from a list of memory regions.
+    pub fn from_regions(regions: &[MemoryRegion]) -> Self {
+        let mut map = BTreeMap::new();
+        let mut bases = Vec::new();
+        for r in regions {
+            map.insert(r.base, r.clone());
+            bases.push(r.base);
+        }
+        bases.sort();
+        Self { regions: map, bases }
+    }
+
+    /// Compute the base address for a given address.
+    ///
+    /// Returns the base address of the region containing `address`,
+    /// or `address` itself if no region contains it.
+    ///
+    /// Ported from `Index.compute_base` in `util.py`.
+    pub fn compute_base(&self, address: u64) -> u64 {
+        match self.bases.binary_search(&address) {
+            Ok(idx) => self.bases[idx],
+            Err(0) => address,
+            Err(idx) => {
+                let floor = self.bases[idx - 1];
+                if let Some(region) = self.regions.get(&floor) {
+                    if region.base + region.size > address {
+                        floor
+                    } else {
+                        address
+                    }
+                } else {
+                    address
+                }
+            }
+        }
+    }
+
+    /// Find the region containing the given address.
+    pub fn find_region(&self, address: u64) -> Option<&MemoryRegion> {
+        // Binary search: find the last base <= address
+        match self.bases.binary_search(&address) {
+            Ok(idx) => self.regions.get(&self.bases[idx]),
+            Err(0) => None,
+            Err(idx) => {
+                let floor = self.bases[idx - 1];
+                if let Some(region) = self.regions.get(&floor) {
+                    if region.base + region.size > address {
+                        Some(region)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Check if regions have changed compared to a reference list.
+    ///
+    /// Ported from `RegionInfoReader.have_changed` in `util.py`.
+    pub fn have_changed(&self, new_regions: &[MemoryRegion]) -> bool {
+        if self.regions.len() != new_regions.len() {
+            return true;
+        }
+        for r in new_regions {
+            if self.regions.get(&r.base) != Some(r) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get the number of indexed regions.
+    pub fn len(&self) -> usize {
+        self.regions.len()
+    }
+
+    /// Check if the index is empty.
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+}
+
 /// LLDB register bank (group).
 ///
 /// In LLDB, registers are organized into banks/groups (e.g.,
@@ -1712,6 +1831,262 @@ impl LldbProcessManager {
             .iter()
             .map(|a| format!("[{}]", a.pid))
             .collect()
+    }
+}
+
+/// Parsed module section from LLDB image list output.
+///
+/// LLDB's `SBModule.GetSectionAtIndex()` returns section info including
+/// name, address range, and file offset. This struct models the parsed
+/// section data before conversion to `LldbModuleSection`.
+///
+/// Ported from the section iteration in the Python agent's `put_modules`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LldbParsedSection {
+    /// Section name (e.g., "__TEXT.__text", ".text").
+    pub name: String,
+    /// Virtual memory start address.
+    pub vma_start: u64,
+    /// Virtual memory end address.
+    pub vma_end: u64,
+    /// File offset.
+    pub file_offset: u64,
+    /// Section attributes (e.g., "code", "data", "instructions").
+    pub attrs: Vec<String>,
+}
+
+impl LldbParsedSection {
+    /// Create a new parsed section.
+    pub fn new(
+        name: impl Into<String>,
+        vma_start: u64,
+        vma_end: u64,
+        file_offset: u64,
+        attrs: Vec<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            vma_start,
+            vma_end,
+            file_offset,
+            attrs,
+        }
+    }
+
+    /// Check if this is a code section.
+    pub fn is_code(&self) -> bool {
+        self.attrs.iter().any(|a| a == "code" || a == "instructions")
+    }
+
+    /// Check if this is a data section.
+    pub fn is_data(&self) -> bool {
+        self.attrs.iter().any(|a| a == "data")
+    }
+
+    /// Check if this is a read-only section.
+    pub fn is_readonly(&self) -> bool {
+        self.attrs.iter().any(|a| a == "read_only")
+    }
+
+    /// Get the size of the section.
+    pub fn size(&self) -> u64 {
+        self.vma_end.saturating_sub(self.vma_start)
+    }
+
+    /// Merge with another section's info (takes non-zero values, merges attrs).
+    pub fn merge(&self, other: &LldbParsedSection) -> LldbParsedSection {
+        let start = if self.vma_start != 0 { self.vma_start } else { other.vma_start };
+        let end = if self.vma_end != 0 { self.vma_end } else { other.vma_end };
+        let offset = if self.file_offset != 0 { self.file_offset } else { other.file_offset };
+        let mut attrs: BTreeSet<String> = self.attrs.iter().cloned().collect();
+        for a in &other.attrs {
+            attrs.insert(a.clone());
+        }
+        LldbParsedSection {
+            name: self.name.clone(),
+            vma_start: start,
+            vma_end: end,
+            file_offset: offset,
+            attrs: attrs.into_iter().collect(),
+        }
+    }
+
+    /// Convert to an `LldbModuleSection`.
+    pub fn to_module_section(&self) -> LldbModuleSection {
+        LldbModuleSection::new(&self.name, self.vma_start, self.vma_end)
+            .with_offset(self.file_offset)
+            .with_attrs(self.attrs.clone())
+    }
+}
+
+/// Parsed module from LLDB image list output.
+///
+/// Groups sections by module (image) name. LLDB's `SBModule` provides
+/// sections via `GetSectionAtIndex()`. This struct models a module's
+/// parsed sections before conversion to `LldbModuleWithSections`.
+///
+/// Ported from the Python agent's `put_modules` function which iterates
+/// `lldb.target.module[IDX].GetSectionAtIndex(SECTION_IDX)`.
+#[derive(Debug, Clone)]
+pub struct LldbParsedModule {
+    /// Module (image) name.
+    pub name: String,
+    /// Sections within this module, keyed by section name.
+    pub sections: BTreeMap<String, LldbParsedSection>,
+}
+
+impl LldbParsedModule {
+    /// Create a new parsed module.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            sections: BTreeMap::new(),
+        }
+    }
+
+    /// Add a section. Merges if same name exists.
+    pub fn add_section(&mut self, section: LldbParsedSection) {
+        if let Some(existing) = self.sections.get(&section.name) {
+            let merged = existing.merge(&section);
+            self.sections.insert(section.name.clone(), merged);
+        } else {
+            self.sections.insert(section.name.clone(), section);
+        }
+    }
+
+    /// Get only the code sections.
+    pub fn code_sections(&self) -> Vec<&LldbParsedSection> {
+        self.sections.values().filter(|s| s.is_code()).collect()
+    }
+
+    /// Compute the base address from all sections.
+    ///
+    /// Uses the minimum VMA start of all sections.
+    pub fn compute_base(&self) -> u64 {
+        self.sections
+            .values()
+            .map(|s| s.vma_start)
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Compute the maximum address from all sections.
+    pub fn compute_max_addr(&self) -> u64 {
+        self.sections
+            .values()
+            .map(|s| s.vma_end)
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// Convert to a `ModuleInfo` using computed base addresses.
+    pub fn to_module_info(&self) -> ModuleInfo {
+        let base = self.compute_base();
+        let max_addr = self.compute_max_addr();
+        ModuleInfo {
+            name: self.name.clone(),
+            base,
+            size: max_addr.saturating_sub(base),
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        }
+    }
+
+    /// Convert to an `LldbModuleWithSections`.
+    pub fn to_module_with_sections(&self) -> LldbModuleWithSections {
+        let info = self.to_module_info();
+        let mut mod_ws = LldbModuleWithSections::from_info(info);
+        for sec in self.sections.values() {
+            mod_ws.add_section(sec.to_module_section());
+        }
+        mod_ws
+    }
+}
+
+/// Compute the maximum address for the current pointer size.
+///
+/// Ported from `compute_max_addr` in `util.py`.
+pub fn compute_max_addr(pointer_size: usize) -> u64 {
+    let bits = pointer_size * 8;
+    if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    }
+}
+
+/// Parse an LLDB image list section line.
+///
+/// LLDB's `image dump sections` output format varies. This handles
+/// the common format:
+/// `[IDX] SECT_NAME  0xVMA_START - 0xVMA_END  [ATTRS]`
+///
+/// Or the `SBModule.GetSectionAtIndex()` API output which provides
+/// name, address range, and file offset.
+pub fn parse_lldb_section_line(line: &str, max_addr: u64) -> Option<LldbParsedSection> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Try to find pattern: NAME 0xSTART - 0xEND
+    let dash_pos = trimmed.find(" - ")?;
+    let before_dash = &trimmed[..dash_pos];
+    let after_dash = &trimmed[dash_pos + 3..];
+
+    // Find the name (last word before the first 0x)
+    let name_end = before_dash.rfind("0x").unwrap_or(before_dash.len());
+    let name = before_dash[..name_end].trim().to_string();
+    if name.is_empty() {
+        return None;
+    }
+
+    // Extract start address
+    let start_str = &before_dash[name_end..].trim();
+    let vma_start = u64::from_str_radix(start_str.trim_start_matches("0x"), 16).ok()? & max_addr;
+
+    // Extract end address (first token in after_dash)
+    let end_token = after_dash.split_whitespace().next()?;
+    let vma_end = u64::from_str_radix(end_token.trim_start_matches("0x"), 16).ok()? & max_addr;
+
+    // Extract attributes from the rest
+    let rest = &after_dash[end_token.len()..];
+    let attrs: Vec<String> = rest
+        .split_whitespace()
+        .map(|s| s.to_string())
+        .collect();
+
+    Some(LldbParsedSection::new(name, vma_start, vma_end, 0, attrs))
+}
+
+/// Parse an LLDB image list module header line.
+///
+/// LLDB's `image list` output starts each module with:
+/// `[IDX] /path/to/module`
+///
+/// Or in `image dump sections`:
+/// `Module: /path/to/module`
+pub fn parse_lldb_module_header(line: &str) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("Module:") {
+        let rest = trimmed.strip_prefix("Module:")?.trim();
+        if rest.is_empty() {
+            return None;
+        }
+        Some(rest.to_string())
+    } else if trimmed.starts_with('[') {
+        // Format: `[IDX] /path/to/module`
+        let bracket_end = trimmed.find(']')?;
+        let rest = trimmed[bracket_end + 1..].trim();
+        if rest.is_empty() {
+            return None;
+        }
+        // Take just the path (first token)
+        let path = rest.split_whitespace().next()?;
+        Some(path.to_string())
+    } else {
+        None
     }
 }
 
@@ -2711,5 +3086,292 @@ mod process_watchpoint_tests {
         assert!(keys.contains(&"[1]".to_string()));
         assert!(keys.contains(&"[3]".to_string()));
         assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn test_process_build_trace_values_with_exit_code() {
+        let mut p = LldbInferiorProcess::new(1, 0);
+        p.set_exit(42);
+        let values = p.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Exit Code" && v == "42"));
+    }
+}
+
+#[cfg(test)]
+mod region_index_tests {
+    use super::*;
+
+    #[test]
+    fn test_region_index_from_regions() {
+        let regions = vec![
+            MemoryRegion {
+                base: 0x1000,
+                size: 0x2000,
+                offset: 0,
+                permissions: "r-xp".to_string(),
+                object_file: "a.out".to_string(),
+            },
+            MemoryRegion {
+                base: 0x5000,
+                size: 0x1000,
+                offset: 0,
+                permissions: "rw-p".to_string(),
+                object_file: "libc.so".to_string(),
+            },
+        ];
+        let index = LldbRegionIndex::from_regions(&regions);
+        assert_eq!(index.len(), 2);
+        assert!(!index.is_empty());
+    }
+
+    #[test]
+    fn test_region_index_compute_base() {
+        let regions = vec![
+            MemoryRegion {
+                base: 0x1000,
+                size: 0x2000,
+                offset: 0,
+                permissions: "r-xp".to_string(),
+                object_file: "a.out".to_string(),
+            },
+        ];
+        let index = LldbRegionIndex::from_regions(&regions);
+        assert_eq!(index.compute_base(0x1000), 0x1000);
+        assert_eq!(index.compute_base(0x1500), 0x1000);
+        assert_eq!(index.compute_base(0x2fff), 0x1000);
+        // Address outside any region returns itself
+        assert_eq!(index.compute_base(0x4000), 0x4000);
+        assert_eq!(index.compute_base(0x0500), 0x0500);
+    }
+
+    #[test]
+    fn test_region_index_find_region() {
+        let regions = vec![
+            MemoryRegion {
+                base: 0x1000,
+                size: 0x2000,
+                offset: 0,
+                permissions: "r-xp".to_string(),
+                object_file: "a.out".to_string(),
+            },
+        ];
+        let index = LldbRegionIndex::from_regions(&regions);
+        assert!(index.find_region(0x1000).is_some());
+        assert!(index.find_region(0x1500).is_some());
+        assert!(index.find_region(0x3000).is_none());
+        assert!(index.find_region(0x0500).is_none());
+    }
+
+    #[test]
+    fn test_region_index_have_changed() {
+        let regions = vec![
+            MemoryRegion {
+                base: 0x1000,
+                size: 0x2000,
+                offset: 0,
+                permissions: "r-xp".to_string(),
+                object_file: "a.out".to_string(),
+            },
+        ];
+        let index = LldbRegionIndex::from_regions(&regions);
+        assert!(!index.have_changed(&regions));
+
+        let different = vec![
+            MemoryRegion {
+                base: 0x2000,
+                size: 0x2000,
+                offset: 0,
+                permissions: "r-xp".to_string(),
+                object_file: "a.out".to_string(),
+            },
+        ];
+        assert!(index.have_changed(&different));
+    }
+
+    #[test]
+    fn test_region_index_empty() {
+        let index = LldbRegionIndex::new();
+        assert!(index.is_empty());
+        assert_eq!(index.len(), 0);
+        assert_eq!(index.compute_base(0x1000), 0x1000);
+    }
+}
+
+#[cfg(test)]
+mod parsed_module_tests {
+    use super::*;
+
+    #[test]
+    fn test_parsed_section() {
+        let sec = LldbParsedSection::new(
+            "__TEXT.__text",
+            0x100000000,
+            0x100080000,
+            0x1000,
+            vec!["code".to_string(), "instructions".to_string()],
+        );
+        assert_eq!(sec.name, "__TEXT.__text");
+        assert_eq!(sec.size(), 0x80000);
+        assert!(sec.is_code());
+        assert!(!sec.is_data());
+        assert!(!sec.is_readonly());
+    }
+
+    #[test]
+    fn test_parsed_section_merge() {
+        let sec1 = LldbParsedSection::new(
+            "__TEXT.__text",
+            0x100000000,
+            0,
+            0x1000,
+            vec!["code".to_string()],
+        );
+        let sec2 = LldbParsedSection::new(
+            "__TEXT.__text",
+            0,
+            0x100080000,
+            0,
+            vec!["instructions".to_string()],
+        );
+        let merged = sec1.merge(&sec2);
+        assert_eq!(merged.vma_start, 0x100000000);
+        assert_eq!(merged.vma_end, 0x100080000);
+        assert_eq!(merged.file_offset, 0x1000);
+        assert!(merged.attrs.contains(&"code".to_string()));
+        assert!(merged.attrs.contains(&"instructions".to_string()));
+    }
+
+    #[test]
+    fn test_parsed_section_to_module_section() {
+        let sec = LldbParsedSection::new(
+            "__DATA.__data",
+            0x100080000,
+            0x100100000,
+            0x80000,
+            vec!["data".to_string()],
+        );
+        let mod_sec = sec.to_module_section();
+        assert_eq!(mod_sec.name, "__DATA.__data");
+        assert_eq!(mod_sec.start, 0x100080000);
+        assert_eq!(mod_sec.end, 0x100100000);
+        assert_eq!(mod_sec.offset, 0x80000);
+    }
+
+    #[test]
+    fn test_parsed_module() {
+        let mut module = LldbParsedModule::new("a.out");
+        module.add_section(LldbParsedSection::new(
+            "__TEXT.__text",
+            0x100000000,
+            0x100080000,
+            0x1000,
+            vec!["code".to_string()],
+        ));
+        module.add_section(LldbParsedSection::new(
+            "__DATA.__data",
+            0x100080000,
+            0x100100000,
+            0x80000,
+            vec!["data".to_string()],
+        ));
+        assert_eq!(module.sections.len(), 2);
+        assert_eq!(module.code_sections().len(), 1);
+    }
+
+    #[test]
+    fn test_parsed_module_compute_base() {
+        let mut module = LldbParsedModule::new("test");
+        module.add_section(LldbParsedSection::new(
+            "__TEXT",
+            0x100000000,
+            0x100080000,
+            0,
+            vec![],
+        ));
+        module.add_section(LldbParsedSection::new(
+            "__DATA",
+            0x100080000,
+            0x100100000,
+            0,
+            vec![],
+        ));
+        assert_eq!(module.compute_base(), 0x100000000);
+        assert_eq!(module.compute_max_addr(), 0x100100000);
+    }
+
+    #[test]
+    fn test_parsed_module_to_module_info() {
+        let mut module = LldbParsedModule::new("libtest.dylib");
+        module.add_section(LldbParsedSection::new(
+            "__TEXT",
+            0x7fff20000000,
+            0x7fff20100000,
+            0,
+            vec![],
+        ));
+        let info = module.to_module_info();
+        assert_eq!(info.name, "libtest.dylib");
+        assert_eq!(info.base, 0x7fff20000000);
+        assert_eq!(info.size, 0x100000);
+    }
+
+    #[test]
+    fn test_parsed_module_to_module_with_sections() {
+        let mut module = LldbParsedModule::new("test");
+        module.add_section(LldbParsedSection::new(
+            "__TEXT.__text",
+            0x100000000,
+            0x100080000,
+            0x1000,
+            vec!["code".to_string()],
+        ));
+        let mod_ws = module.to_module_with_sections();
+        assert_eq!(mod_ws.info.name, "test");
+        assert_eq!(mod_ws.section_count(), 1);
+        assert!(mod_ws.sections.contains_key("__TEXT.__text"));
+    }
+}
+
+#[cfg(test)]
+mod parsing_tests {
+    use super::*;
+
+    #[test]
+    fn test_compute_max_addr() {
+        assert_eq!(compute_max_addr(8), u64::MAX);
+        assert_eq!(compute_max_addr(4), 0xFFFF_FFFF);
+        assert_eq!(compute_max_addr(2), 0xFFFF);
+    }
+
+    #[test]
+    fn test_parse_lldb_section_line() {
+        let line = "  __TEXT.__text  0x100000000 - 0x100080000  code instructions";
+        let sec = parse_lldb_section_line(line, u64::MAX);
+        assert!(sec.is_some());
+        let sec = sec.unwrap();
+        assert_eq!(sec.name, "__TEXT.__text");
+        assert_eq!(sec.vma_start, 0x100000000);
+        assert_eq!(sec.vma_end, 0x100080000);
+        assert!(sec.is_code());
+    }
+
+    #[test]
+    fn test_parse_lldb_section_line_empty() {
+        assert!(parse_lldb_section_line("", u64::MAX).is_none());
+        assert!(parse_lldb_section_line("   ", u64::MAX).is_none());
+    }
+
+    #[test]
+    fn test_parse_lldb_module_header() {
+        assert_eq!(
+            parse_lldb_module_header("[0] /usr/lib/libSystem.B.dylib"),
+            Some("/usr/lib/libSystem.B.dylib".to_string())
+        );
+        assert_eq!(
+            parse_lldb_module_header("Module: /usr/lib/libc.so.6"),
+            Some("/usr/lib/libc.so.6".to_string())
+        );
+        assert!(parse_lldb_module_header("").is_none());
+        assert!(parse_lldb_module_header("  ").is_none());
     }
 }

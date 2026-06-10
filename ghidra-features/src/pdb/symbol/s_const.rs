@@ -7,11 +7,12 @@
 //! type files.
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.ConstantMsSymbol`
-//! (0x1107), `ConstantStMsSymbol` (0x1002), and `ManagedConstantMsSymbol` (0x1020).
+//! (0x1107), `ConstantStMsSymbol` (0x1002), `Constant16MsSymbol` (0x0003),
+//! and `ManagedConstantMsSymbol` (0x112D).
 
 use super::numeric::Numeric;
 use super::record_number::RecordNumber;
-use super::s_constant::SConstant;
+use super::s_constant::{SConstant, ConstantVariant};
 
 /// A type alias for [`SConstant`] using the abbreviated name.
 ///
@@ -38,11 +39,21 @@ pub trait SConstExt {
         name: String,
     ) -> Self;
 
+    /// Create a new 16-bit constant from raw bytes.
+    fn from_numeric_bytes_16(
+        type_record_number: RecordNumber,
+        numeric_bytes: &[u8],
+        name: String,
+    ) -> Self;
+
     /// Return the constant value as a `u64`, if it can be represented.
     fn value_as_u64(&self) -> Option<u64>;
 
     /// Return `true` if the constant value is a literal (small integer < 0x8000).
     fn is_literal(&self) -> bool;
+
+    /// Return the constant variant.
+    fn constant_variant(&self) -> ConstantVariant;
 }
 
 impl SConstExt for SConstant {
@@ -55,12 +66,25 @@ impl SConstExt for SConstant {
         SConstant::new(type_record_number, numeric, name)
     }
 
+    fn from_numeric_bytes_16(
+        type_record_number: RecordNumber,
+        numeric_bytes: &[u8],
+        name: String,
+    ) -> Self {
+        let (numeric, _) = Numeric::parse(numeric_bytes, 0);
+        SConstant::new_constant16(type_record_number, numeric, name)
+    }
+
     fn value_as_u64(&self) -> Option<u64> {
         self.value().as_u64()
     }
 
     fn is_literal(&self) -> bool {
         self.value().sub_type_index() < 0x8000
+    }
+
+    fn constant_variant(&self) -> ConstantVariant {
+        self.variant()
     }
 }
 
@@ -80,8 +104,8 @@ mod tests {
             numeric,
             "MY_CONST".to_string(),
         );
-        assert_eq!(sym.pdb_id(), 0x0003);
-        assert_eq!(sym.symbol_type_name(), "S_CONSTANT");
+        assert_eq!(sym.pdb_id(), 0x1107);
+        assert_eq!(sym.symbol_type_name(), "S_CONSTANT_V2");
         assert_eq!(sym.name(), "MY_CONST");
     }
 
@@ -121,7 +145,7 @@ mod tests {
         );
         assert_eq!(sym.value_as_u64(), Some(42));
         assert_eq!(sym.name(), "ANSWER");
-        assert_eq!(sym.pdb_id(), 0x0003);
+        assert_eq!(sym.pdb_id(), 0x1107);
     }
 
     #[test]
@@ -167,7 +191,7 @@ mod tests {
             numeric,
             "TINY".to_string(),
         );
-        assert_eq!(sym.pdb_id(), 0x0003);
+        assert_eq!(sym.pdb_id(), 0x1107);
         assert_eq!(sym.name(), "TINY");
     }
 

@@ -11,9 +11,11 @@ use super::name_ms_symbol::NameMsSymbol;
 /// Which variant of the object name symbol was parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ObjNameVariant {
-    /// `S_OBJNAME` (0x1101) -- NT string.
+    /// `S_OBJNAME` (0x0009) -- NT string.
     ObjName,
-    /// `S_OBJNAME_ST` (0x1102) -- ST string.
+    /// `S_OBJNAME_V2` (0x1101) -- NT string (v7/v2 format).
+    ObjNameV2,
+    /// `S_OBJNAME_ST` (0x0009) -- ST string.
     ObjNameSt,
 }
 
@@ -61,6 +63,15 @@ impl SObjName {
         }
     }
 
+    /// Create a new S_OBJNAME_V2 object name symbol (v7 format).
+    pub fn new_v2(signature: u32, name: String) -> Self {
+        Self {
+            signature,
+            name,
+            variant: ObjNameVariant::ObjNameV2,
+        }
+    }
+
     /// Create a new S_OBJNAME_ST object name symbol.
     pub fn new_st(signature: u32, name: String) -> Self {
         Self {
@@ -88,11 +99,30 @@ impl SObjName {
         })
     }
 
+    /// Parse an S_OBJNAME_V2 symbol from a byte slice (NT string, v7 format).
+    ///
+    /// Expects the layout: `signature(u32) + name(NT)`.
+    ///
+    /// This handles `S_OBJNAME_V2` (0x1101). The layout is identical to
+    /// `S_OBJNAME` -- the difference is the symbol kind identifier.
+    pub fn parse_v2(data: &[u8]) -> Option<Self> {
+        if data.len() < 5 {
+            return None;
+        }
+        let signature = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let name = parse_nt_string(&data[4..]);
+        Some(Self {
+            signature,
+            name,
+            variant: ObjNameVariant::ObjNameV2,
+        })
+    }
+
     /// Parse an S_OBJNAME_ST symbol from a byte slice (ST string).
     ///
     /// Expects the layout: `signature(u32) + name(ST)`.
     ///
-    /// This handles `S_OBJNAME_ST` (0x1102).
+    /// This handles `S_OBJNAME_ST` (0x0009).
     pub fn parse_st(data: &[u8]) -> Option<Self> {
         if data.len() < 6 {
             return None;
@@ -146,19 +176,34 @@ impl SObjName {
         let aligned = (total + 3) & !3;
         Some((sym, aligned))
     }
+
+    /// Parse an S_OBJNAME_V2 symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_v2_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_v2(data)?;
+        // signature(4) + name_len + null, aligned to 4
+        let name_data = &data[4..];
+        let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        let name_len = end + 1;
+        let total = 4 + name_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
 }
 
 impl AbstractMsSymbol for SObjName {
     fn pdb_id(&self) -> u16 {
         match self.variant {
             ObjNameVariant::ObjName => super::super::symbol_kind::S_OBJNAME,
-            ObjNameVariant::ObjNameSt => 0x1102, // S_OBJNAME_ST
+            ObjNameVariant::ObjNameV2 => super::super::symbol_kind::S_OBJNAME_V2,
+            ObjNameVariant::ObjNameSt => super::super::symbol_kind::S_OBJNAME,
         }
     }
 
     fn symbol_type_name(&self) -> &'static str {
         match self.variant {
             ObjNameVariant::ObjName => "S_OBJNAME",
+            ObjNameVariant::ObjNameV2 => "S_OBJNAME_V2",
             ObjNameVariant::ObjNameSt => "S_OBJNAME_ST",
         }
     }
@@ -290,7 +335,7 @@ mod tests {
         let sym = SObjName::parse_st(&data).unwrap();
         assert_eq!(sym.signature, 0xABCD1234);
         assert_eq!(sym.name, "mylib.lib");
-        assert_eq!(sym.pdb_id(), 0x1102);
+        assert_eq!(sym.pdb_id(), 0x0009);
         assert_eq!(sym.symbol_type_name(), "S_OBJNAME_ST");
     }
 
@@ -307,7 +352,7 @@ mod tests {
     #[test]
     fn test_trait_impls_st() {
         let sym = SObjName::new_st(0xABCD, "mylib.lib".to_string());
-        assert_eq!(sym.pdb_id(), 0x1102);
+        assert_eq!(sym.pdb_id(), 0x0009);
         assert_eq!(sym.symbol_type_name(), "S_OBJNAME_ST");
         assert_eq!(sym.name(), "mylib.lib");
     }
@@ -411,5 +456,53 @@ mod tests {
         let (sym, consumed) = SObjName::parse_st_aligned(&data).unwrap();
         assert_eq!(sym.name, "");
         assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_v2_basic() {
+        let data = make_objname_bytes(0xDEADBEEF, b"test.obj");
+        let sym = SObjName::parse_v2(&data).unwrap();
+        assert_eq!(sym.signature, 0xDEADBEEF);
+        assert_eq!(sym.name, "test.obj");
+        assert_eq!(sym.variant, ObjNameVariant::ObjNameV2);
+        assert_eq!(sym.pdb_id(), 0x1101);
+        assert_eq!(sym.symbol_type_name(), "S_OBJNAME_V2");
+    }
+
+    #[test]
+    fn test_new_v2_constructor() {
+        let sym = SObjName::new_v2(0xABCD, "v2.obj".to_string());
+        assert_eq!(sym.variant(), ObjNameVariant::ObjNameV2);
+        assert_eq!(sym.signature, 0xABCD);
+        assert_eq!(sym.name, "v2.obj");
+        assert_eq!(sym.pdb_id(), 0x1101);
+    }
+
+    #[test]
+    fn test_parse_v2_aligned_basic() {
+        let data = make_objname_bytes(0x1000, b"abc");
+        let (sym, consumed) = SObjName::parse_v2_aligned(&data).unwrap();
+        assert_eq!(sym.signature, 0x1000);
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_variant_consistency_all() {
+        // S_OBJNAME
+        let sym = SObjName::new(0x1000, "a.obj".to_string());
+        assert_eq!(sym.variant(), ObjNameVariant::ObjName);
+        assert_eq!(sym.symbol_type_name(), "S_OBJNAME");
+
+        // S_OBJNAME_V2
+        let sym = SObjName::new_v2(0x1000, "b.obj".to_string());
+        assert_eq!(sym.variant(), ObjNameVariant::ObjNameV2);
+        assert_eq!(sym.symbol_type_name(), "S_OBJNAME_V2");
+        assert_eq!(sym.pdb_id(), 0x1101);
+
+        // S_OBJNAME_ST
+        let sym = SObjName::new_st(0x1000, "c.obj".to_string());
+        assert_eq!(sym.variant(), ObjNameVariant::ObjNameSt);
+        assert_eq!(sym.symbol_type_name(), "S_OBJNAME_ST");
     }
 }

@@ -594,6 +594,296 @@ impl DrgnStackFrame {
     }
 }
 
+/// A local variable value within a stack frame.
+///
+/// Ported from Python `put_locals()` in `commands.py` which iterates
+/// `frame.locals()` and calls `put_object()` for each. This captures
+/// the variable's value at a particular point in time for a specific
+/// frame.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnLocalVariableValue {
+    /// Variable name.
+    pub name: String,
+    /// Type name as string.
+    pub type_name: String,
+    /// Stringified value.
+    pub value: String,
+    /// Address in memory, if addressable.
+    pub address: Option<u64>,
+    /// Whether the value is absent (optimized out).
+    pub is_absent: bool,
+    /// drgn type kind (for display).
+    pub type_kind: Option<String>,
+}
+
+impl DrgnLocalVariableValue {
+    /// Create a new local variable value.
+    pub fn new(
+        name: impl Into<String>,
+        type_name: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            type_name: type_name.into(),
+            value: value.into(),
+            address: None,
+            is_absent: false,
+            type_kind: None,
+        }
+    }
+
+    /// Set the address.
+    pub fn with_address(mut self, addr: u64) -> Self {
+        self.address = Some(addr);
+        self
+    }
+
+    /// Mark as absent.
+    pub fn with_absent(mut self, absent: bool) -> Self {
+        self.is_absent = absent;
+        self
+    }
+
+    /// Set the type kind.
+    pub fn with_type_kind(mut self, kind: impl Into<String>) -> Self {
+        self.type_kind = Some(kind.into());
+        self
+    }
+
+    /// Build the trace path for this local variable.
+    pub fn trace_path(&self, process_num: u32, thread_num: u32, frame_level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Locals.{}",
+            process_num, thread_num, frame_level, self.name
+        )
+    }
+
+    /// Build trace object key-value pairs.
+    ///
+    /// Matches the Python `put_object()` output format.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            (
+                "_display".to_string(),
+                format!("{} [{}:{}]", self.name, self.type_name, self.value),
+            ),
+        ];
+        if let Some(ref kind) = self.type_kind {
+            values.push(("Kind".to_string(), kind.clone()));
+        }
+        values.push(("Type".to_string(), self.type_name.clone()));
+        if self.is_absent {
+            values.push(("Value".to_string(), "<absent>".to_string()));
+        } else {
+            values.push(("Value".to_string(), self.value.clone()));
+        }
+        if let Some(addr) = self.address {
+            values.push(("Address".to_string(), format!("0x{:x}", addr)));
+        }
+        values
+    }
+}
+
+/// Container for all local variables within a stack frame.
+///
+/// Groups the locals for a single frame level, ported from the
+/// `LocalsContainer` schema and `put_locals()` function in `commands.py`.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnFrameLocals {
+    /// Frame level.
+    pub frame_level: u32,
+    /// Thread number.
+    pub thread_num: u32,
+    /// Process number.
+    pub process_num: u32,
+    /// Local variables, keyed by name.
+    pub locals: BTreeMap<String, DrgnLocalVariableValue>,
+}
+
+impl DrgnFrameLocals {
+    /// Create a new frame locals container.
+    pub fn new(process_num: u32, thread_num: u32, frame_level: u32) -> Self {
+        Self {
+            frame_level,
+            thread_num,
+            process_num,
+            locals: BTreeMap::new(),
+        }
+    }
+
+    /// Add a local variable. Replaces if same name exists.
+    pub fn add_local(&mut self, local: DrgnLocalVariableValue) {
+        self.locals.insert(local.name.clone(), local);
+    }
+
+    /// Remove a local by name.
+    pub fn remove_local(&mut self, name: &str) -> Option<DrgnLocalVariableValue> {
+        self.locals.remove(name)
+    }
+
+    /// Get a local by name.
+    pub fn get_local(&self, name: &str) -> Option<&DrgnLocalVariableValue> {
+        self.locals.get(name)
+    }
+
+    /// Get all local names.
+    pub fn local_names(&self) -> Vec<&str> {
+        self.locals.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get the number of locals.
+    pub fn local_count(&self) -> usize {
+        self.locals.len()
+    }
+
+    /// Clear all locals.
+    pub fn clear(&mut self) {
+        self.locals.clear();
+    }
+
+    /// Get the trace path for the Locals container.
+    pub fn trace_path(&self) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Locals",
+            self.process_num, self.thread_num, self.frame_level
+        )
+    }
+
+    /// Build all local variable trace values.
+    pub fn build_all_trace_values(&self) -> Vec<(String, Vec<(String, String)>)> {
+        self.locals
+            .values()
+            .map(|local| {
+                let path = local.trace_path(self.process_num, self.thread_num, self.frame_level);
+                (path, local.build_trace_values())
+            })
+            .collect()
+    }
+}
+
+/// A batch of register values for a single frame.
+///
+/// Groups register values for efficient trace writing. Ported from
+/// the register syncing logic in `commands.py` `putreg()`.
+#[derive(Debug, Clone, Default)]
+pub struct FrameRegisterBatch {
+    /// Frame level.
+    pub frame_level: u32,
+    /// Register values.
+    pub registers: Vec<RegisterValue>,
+}
+
+impl FrameRegisterBatch {
+    /// Create a new batch for a frame level.
+    pub fn new(frame_level: u32) -> Self {
+        Self {
+            frame_level,
+            registers: Vec::new(),
+        }
+    }
+
+    /// Add a register value.
+    pub fn push(&mut self, reg: RegisterValue) {
+        self.registers.push(reg);
+    }
+
+    /// Get a register value by name.
+    pub fn get(&self, name: &str) -> Option<&RegisterValue> {
+        self.registers.iter().find(|r| r.name == name)
+    }
+
+    /// Get all register names.
+    pub fn names(&self) -> Vec<&str> {
+        self.registers.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    /// Number of registers.
+    pub fn len(&self) -> usize {
+        self.registers.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.registers.is_empty()
+    }
+
+    /// Clear all registers.
+    pub fn clear(&mut self) {
+        self.registers.clear();
+    }
+
+    /// Build the trace path for the registers container of this frame.
+    pub fn trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Registers",
+            process_num, thread_num, self.frame_level
+        )
+    }
+
+    /// Build individual register trace path/value pairs.
+    pub fn build_register_pairs(
+        &self,
+        process_num: u32,
+        thread_num: u32,
+    ) -> Vec<(String, Vec<u8>)> {
+        self.registers
+            .iter()
+            .map(|r| {
+                let path = format!(
+                    "Processes[{}].Threads[{}].Stack[{}].Registers.{}",
+                    process_num, thread_num, self.frame_level, r.name
+                );
+                (path, r.bytes.clone())
+            })
+            .collect()
+    }
+}
+
+/// Tracks whether a particular object path has been inserted into
+/// the trace during this sync cycle.
+///
+/// Used to implement the retain_values pattern from the Python agent
+/// where the container's children list is set to match exactly what
+/// was synced.
+#[derive(Debug, Clone, Default)]
+pub struct TraceSyncTracker {
+    /// Paths that have been synced in this cycle.
+    pub synced_paths: Vec<String>,
+}
+
+impl TraceSyncTracker {
+    /// Create a new tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a path as synced.
+    pub fn record(&mut self, path: String) {
+        self.synced_paths.push(path);
+    }
+
+    /// Get the key patterns for retain_values.
+    pub fn key_patterns(&self) -> Vec<String> {
+        self.synced_paths.clone()
+    }
+
+    /// Clear for a new sync cycle.
+    pub fn clear(&mut self) {
+        self.synced_paths.clear();
+    }
+
+    /// Number of synced paths.
+    pub fn len(&self) -> usize {
+        self.synced_paths.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.synced_paths.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,5 +1328,171 @@ mod tests {
             f.locals_trace_path(0, 2),
             "Processes[0].Threads[2].Stack[1].Locals"
         );
+    }
+
+    #[test]
+    fn test_local_variable_value() {
+        let local = DrgnLocalVariableValue::new("fd", "int", "3")
+            .with_address(0x7fff0000)
+            .with_type_kind("INT");
+        assert_eq!(local.name, "fd");
+        assert_eq!(local.type_name, "int");
+        assert_eq!(local.value, "3");
+        assert_eq!(local.address, Some(0x7fff0000));
+        assert!(!local.is_absent);
+        assert_eq!(local.type_kind.as_deref(), Some("INT"));
+        assert_eq!(
+            local.trace_path(0, 1, 2),
+            "Processes[0].Threads[1].Stack[2].Locals.fd"
+        );
+    }
+
+    #[test]
+    fn test_local_variable_value_absent() {
+        let local = DrgnLocalVariableValue::new("reg", "unsigned long", "<optimized out>")
+            .with_absent(true);
+        assert!(local.is_absent);
+        let values = local.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Value" && v == "<absent>"));
+        assert!(values.iter().any(|(k, v)| k == "Type" && v == "unsigned long"));
+    }
+
+    #[test]
+    fn test_local_variable_value_build_trace() {
+        let local = DrgnLocalVariableValue::new("count", "size_t", "42")
+            .with_address(0x1000);
+        let values = local.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Type" && v == "size_t"));
+        assert!(values.iter().any(|(k, v)| k == "Value" && v == "42"));
+        assert!(values.iter().any(|(k, v)| k == "Address" && v == "0x1000"));
+        assert!(values.iter().any(|(k, _)| k == "_display"));
+    }
+
+    #[test]
+    fn test_frame_locals() {
+        let mut locals = DrgnFrameLocals::new(0, 1, 2);
+        assert_eq!(locals.local_count(), 0);
+
+        locals.add_local(DrgnLocalVariableValue::new("fd", "int", "3"));
+        locals.add_local(DrgnLocalVariableValue::new("buf", "char *", "0x7fff0000"));
+        assert_eq!(locals.local_count(), 2);
+        assert!(locals.get_local("fd").is_some());
+        assert!(locals.get_local("buf").is_some());
+        assert!(locals.get_local("missing").is_none());
+
+        let names = locals.local_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"fd"));
+        assert!(names.contains(&"buf"));
+    }
+
+    #[test]
+    fn test_frame_locals_replace() {
+        let mut locals = DrgnFrameLocals::new(0, 0, 0);
+        locals.add_local(DrgnLocalVariableValue::new("x", "int", "1"));
+        locals.add_local(DrgnLocalVariableValue::new("x", "int", "2"));
+        assert_eq!(locals.local_count(), 1);
+        assert_eq!(locals.get_local("x").unwrap().value, "2");
+    }
+
+    #[test]
+    fn test_frame_locals_remove() {
+        let mut locals = DrgnFrameLocals::new(0, 0, 0);
+        locals.add_local(DrgnLocalVariableValue::new("x", "int", "1"));
+        let removed = locals.remove_local("x");
+        assert!(removed.is_some());
+        assert_eq!(locals.local_count(), 0);
+    }
+
+    #[test]
+    fn test_frame_locals_trace_path() {
+        let locals = DrgnFrameLocals::new(0, 2, 3);
+        assert_eq!(
+            locals.trace_path(),
+            "Processes[0].Threads[2].Stack[3].Locals"
+        );
+    }
+
+    #[test]
+    fn test_frame_locals_build_all() {
+        let mut locals = DrgnFrameLocals::new(0, 1, 0);
+        locals.add_local(DrgnLocalVariableValue::new("a", "int", "1"));
+        locals.add_local(DrgnLocalVariableValue::new("b", "int", "2"));
+        let all = locals.build_all_trace_values();
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().any(|(p, _)| p.contains("Locals.a")));
+        assert!(all.iter().any(|(p, _)| p.contains("Locals.b")));
+    }
+
+    #[test]
+    fn test_frame_locals_clear() {
+        let mut locals = DrgnFrameLocals::new(0, 0, 0);
+        locals.add_local(DrgnLocalVariableValue::new("x", "int", "1"));
+        locals.clear();
+        assert_eq!(locals.local_count(), 0);
+    }
+
+    #[test]
+    fn test_frame_register_batch() {
+        let mut batch = FrameRegisterBatch::new(0);
+        assert!(batch.is_empty());
+        assert_eq!(batch.len(), 0);
+
+        batch.push(RegisterValue::from_u64("rax", 0x1234));
+        batch.push(RegisterValue::from_u64("rbx", 0x5678));
+        assert_eq!(batch.len(), 2);
+        assert!(!batch.is_empty());
+
+        assert!(batch.get("rax").is_some());
+        assert_eq!(batch.get("rax").unwrap().as_u64(), Some(0x1234));
+        assert!(batch.get("rcx").is_none());
+
+        let names = batch.names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"rax"));
+        assert!(names.contains(&"rbx"));
+    }
+
+    #[test]
+    fn test_frame_register_batch_trace_path() {
+        let batch = FrameRegisterBatch::new(2);
+        assert_eq!(
+            batch.trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2].Registers"
+        );
+    }
+
+    #[test]
+    fn test_frame_register_batch_pairs() {
+        let mut batch = FrameRegisterBatch::new(0);
+        batch.push(RegisterValue::from_u64("rax", 0x1234));
+        let pairs = batch.build_register_pairs(0, 1);
+        assert_eq!(pairs.len(), 1);
+        assert!(pairs[0].0.contains("Registers.rax"));
+        assert_eq!(pairs[0].1.len(), 8); // u64 = 8 bytes
+    }
+
+    #[test]
+    fn test_frame_register_batch_clear() {
+        let mut batch = FrameRegisterBatch::new(0);
+        batch.push(RegisterValue::from_u64("rax", 0x1234));
+        batch.clear();
+        assert!(batch.is_empty());
+    }
+
+    #[test]
+    fn test_trace_sync_tracker() {
+        let mut tracker = TraceSyncTracker::new();
+        assert!(tracker.is_empty());
+
+        tracker.record("Processes[0].Threads[0]".to_string());
+        tracker.record("Processes[0].Threads[1]".to_string());
+        assert_eq!(tracker.len(), 2);
+
+        let keys = tracker.key_patterns();
+        assert_eq!(keys.len(), 2);
+
+        tracker.clear();
+        assert!(tracker.is_empty());
     }
 }
