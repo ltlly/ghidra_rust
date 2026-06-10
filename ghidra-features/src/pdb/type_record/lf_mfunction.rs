@@ -55,6 +55,13 @@ pub struct LfMfunction {
 }
 
 impl LfMfunction {
+    /// PDB ID for the 16-bit member function variant.
+    pub const PDB_ID_16: u32 = 0x0009;
+    /// PDB ID for the ST-format member function variant.
+    pub const PDB_ID_ST: u32 = 0x1009;
+    /// PDB ID for the 32-bit (MsType) member function variant.
+    pub const PDB_ID_32: u32 = 0x1009;
+
     /// Create a new member function type record.
     pub fn new(
         return_value_record_number: RecordNumber,
@@ -159,6 +166,16 @@ impl LfMfunction {
         self.function_attributes.is_constructor()
     }
 
+    /// Whether this member function has a C++-style return UDT.
+    pub fn has_cpp_return_udt(&self) -> bool {
+        self.function_attributes.has_cpp_style_return_udt
+    }
+
+    /// Whether this function is an inline marker.
+    pub fn is_inline(&self) -> bool {
+        self.calling_convention == CallingConvention::Inline
+    }
+
     /// Get the this-pointer adjustment value.
     ///
     /// Mirrors Java `AbstractMemberFunctionMsType.getThisAdjuster()`.
@@ -224,7 +241,7 @@ impl LfMfunction {
 
 impl AbstractMsType for LfMfunction {
     fn pdb_id(&self) -> u32 {
-        0x1009 // LF_MFUNCTION
+        Self::PDB_ID_32 // LF_MFUNCTION = 0x1009
     }
 
     fn record_number(&self) -> RecordNumber {
@@ -456,5 +473,47 @@ mod tests {
         assert!(emitted.contains('<'));
         assert!(emitted.contains('>'));
         assert!(emitted.contains("this0x1001"));
+    }
+
+    #[test]
+    fn test_mfunction_has_cpp_return_udt() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::from_byte(0x01),
+            1,
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert!(mf.has_cpp_return_udt());
+
+        let mf = make_test_mfunction();
+        assert!(!mf.has_cpp_return_udt());
+    }
+
+    #[test]
+    fn test_mfunction_is_inline() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::Inline,
+            FunctionAttributes::empty(),
+            0,
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert!(mf.is_inline());
+
+        let mf = make_test_mfunction();
+        assert!(!mf.is_inline());
+    }
+
+    #[test]
+    fn test_mfunction_pdb_id_constants() {
+        assert_eq!(LfMfunction::PDB_ID_16, 0x0009);
+        assert_eq!(LfMfunction::PDB_ID_32, 0x1009);
     }
 }

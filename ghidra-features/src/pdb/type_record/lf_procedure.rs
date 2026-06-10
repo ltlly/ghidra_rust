@@ -224,6 +224,12 @@ impl fmt::Display for FunctionAttributes {
 /// This is the Rust equivalent of Ghidra's `ProcedureMsType`.  It stores
 /// the function's return type, calling convention, function attributes,
 /// parameter count, and argument list type index.
+///
+/// # Variadic Functions
+///
+/// A procedure is considered variadic if its argument list contains exactly
+/// one parameter of type `T_NOTYPE` (0x0003, `void`), which is a common
+/// convention in PDB files to denote `...` (ellipsis) parameters.
 #[derive(Debug, Clone)]
 pub struct LfProcedure {
     /// Record number of this type (set during TPI/IPI registration).
@@ -241,6 +247,13 @@ pub struct LfProcedure {
 }
 
 impl LfProcedure {
+    /// PDB ID for the 16-bit procedure variant.
+    pub const PDB_ID_16: u32 = 0x0008;
+    /// PDB ID for the ST-format procedure variant.
+    pub const PDB_ID_ST: u32 = 0x1008;
+    /// PDB ID for the 32-bit (MsType) procedure variant.
+    pub const PDB_ID_32: u32 = 0x1008;
+
     /// Create a new procedure type record.
     pub fn new(
         return_value_record_number: RecordNumber,
@@ -319,6 +332,18 @@ impl LfProcedure {
         self.function_attributes.is_constructor()
     }
 
+    /// Whether this procedure has a C++-style return UDT.
+    ///
+    /// Mirrors Java `FunctionMsAttributes.hasCppStyleReturnUdt()`.
+    pub fn has_cpp_return_udt(&self) -> bool {
+        self.function_attributes.has_cpp_style_return_udt
+    }
+
+    /// Whether this function is an inline marker.
+    pub fn is_inline(&self) -> bool {
+        self.calling_convention == CallingConvention::Inline
+    }
+
     /// Emit the full signature including calling convention, parameter count,
     /// and a `this` pointer reference when present.
     ///
@@ -365,7 +390,7 @@ impl LfProcedure {
 
 impl AbstractMsType for LfProcedure {
     fn pdb_id(&self) -> u32 {
-        0x1008 // LF_PROCEDURE
+        Self::PDB_ID_32 // LF_PROCEDURE = 0x1008
     }
 
     fn record_number(&self) -> RecordNumber {
@@ -601,5 +626,42 @@ mod tests {
         let emitted = p.emit(Bind::NONE);
         assert!(emitted.contains("__stdcall"));
         assert!(emitted.contains("[__stdcall]"));
+    }
+
+    #[test]
+    fn test_procedure_has_cpp_return_udt() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::NearC,
+            FunctionAttributes::from_byte(0x01),
+            1,
+            RecordNumber::type_record(0x1001),
+        );
+        assert!(p.has_cpp_return_udt());
+
+        let p = make_test_procedure();
+        assert!(!p.has_cpp_return_udt());
+    }
+
+    #[test]
+    fn test_procedure_is_inline() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::Inline,
+            FunctionAttributes::empty(),
+            0,
+            RecordNumber::type_record(0x1001),
+        );
+        assert!(p.is_inline());
+        assert_eq!(p.calling_convention.label(), "inline");
+
+        let p = make_test_procedure();
+        assert!(!p.is_inline());
+    }
+
+    #[test]
+    fn test_procedure_pdb_id_constants() {
+        assert_eq!(LfProcedure::PDB_ID_16, 0x0008);
+        assert_eq!(LfProcedure::PDB_ID_32, 0x1008);
     }
 }

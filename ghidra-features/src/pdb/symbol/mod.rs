@@ -80,6 +80,12 @@ pub mod s_manframerel;
 pub mod s_regframe;
 pub mod s_defrange_framepointer_rel;
 
+// IA-64 and namespace symbol types ported from Ghidra Java
+pub mod s_unamespace;
+pub mod s_gprocia64;
+pub mod s_lprocia64;
+pub mod s_callsite_info;
+
 pub use abstract_base_pointer_relative::AbstractBasePointerRelative;
 pub use abstract_block::AbstractBlock;
 pub use abstract_compile2::AbstractCompile2;
@@ -124,3 +130,7 @@ pub use s_filestatic::SFileStatic;
 pub use s_manframerel::SManFrameRel;
 pub use s_regframe::SRegFrame;
 pub use s_defrange_framepointer_rel::SDefRangeFramePointerRelFullScope;
+
+pub use s_unamespace::SUNamespace;
+pub use s_gprocia64::SGProcIA64;
+pub use s_lprocia64::SLProcIA64;

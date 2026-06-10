@@ -46,6 +46,8 @@ use super::RecordNumber;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PointerType {
+    /// Invalid/unrecognized pointer type (default fallback).
+    Invalid = 0xFF,
     /// 16-bit pointer (near).
     Near = 0,
     /// 16:16 far pointer.
@@ -80,6 +82,7 @@ impl PointerType {
     /// Label string used in emit output.
     pub fn label(&self) -> &'static str {
         match self {
+            PointerType::Invalid => "invalid",
             PointerType::Near => "",
             PointerType::Far => "far ",
             PointerType::Huge => "huge ",
@@ -98,24 +101,31 @@ impl PointerType {
     }
 
     /// Parse from a 5-bit integer value.
-    pub fn from_value(val: u8) -> Option<Self> {
+    ///
+    /// Returns `Invalid` for unknown values (matching Java's default mapping).
+    pub fn from_value(val: u8) -> Self {
         match val {
-            0 => Some(Self::Near),
-            1 => Some(Self::Far),
-            2 => Some(Self::Huge),
-            3 => Some(Self::SegmentBased),
-            4 => Some(Self::ValueBased),
-            5 => Some(Self::SegmentValueBased),
-            6 => Some(Self::AddressBased),
-            7 => Some(Self::SegmentAddressBased),
-            8 => Some(Self::TypeBased),
-            9 => Some(Self::SelfBased),
-            10 => Some(Self::Near32),
-            11 => Some(Self::Far32),
-            12 => Some(Self::Ptr64),
-            13 => Some(Self::Unspecified),
-            _ => None,
+            0 => Self::Near,
+            1 => Self::Far,
+            2 => Self::Huge,
+            3 => Self::SegmentBased,
+            4 => Self::ValueBased,
+            5 => Self::SegmentValueBased,
+            6 => Self::AddressBased,
+            7 => Self::SegmentAddressBased,
+            8 => Self::TypeBased,
+            9 => Self::SelfBased,
+            10 => Self::Near32,
+            11 => Self::Far32,
+            12 => Self::Ptr64,
+            13 => Self::Unspecified,
+            _ => Self::Invalid,
         }
+    }
+
+    /// Whether this is an invalid/unrecognized pointer type.
+    pub fn is_invalid(&self) -> bool {
+        *self == Self::Invalid
     }
 }
 
@@ -135,6 +145,8 @@ impl fmt::Display for PointerType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum PointerMode {
+    /// Invalid/unrecognized pointer mode (default fallback).
+    Invalid = 0xFF,
     /// Normal pointer (`*`).
     Pointer = 0,
     /// Lvalue reference (`&`).
@@ -145,30 +157,47 @@ pub enum PointerMode {
     MemberFunctionPointer = 3,
     /// Rvalue reference (`&&`).
     RValueReference = 4,
+    /// Reserved (unused).
+    Reserved = 5,
 }
 
 impl PointerMode {
     /// Label string used in emit output.
     pub fn label(&self) -> &'static str {
         match self {
+            PointerMode::Invalid => "",
             PointerMode::Pointer => "*",
             PointerMode::LValueReference => "&",
             PointerMode::MemberDataPointer => "::*",
             PointerMode::MemberFunctionPointer => "::*",
             PointerMode::RValueReference => "&&",
+            PointerMode::Reserved => "",
         }
     }
 
     /// Parse from a 3-bit integer value.
-    pub fn from_value(val: u8) -> Option<Self> {
+    ///
+    /// Returns `Invalid` for unknown values (matching Java's default mapping).
+    pub fn from_value(val: u8) -> Self {
         match val {
-            0 => Some(Self::Pointer),
-            1 => Some(Self::LValueReference),
-            2 => Some(Self::MemberDataPointer),
-            3 => Some(Self::MemberFunctionPointer),
-            4 => Some(Self::RValueReference),
-            _ => None,
+            0 => Self::Pointer,
+            1 => Self::LValueReference,
+            2 => Self::MemberDataPointer,
+            3 => Self::MemberFunctionPointer,
+            4 => Self::RValueReference,
+            5 => Self::Reserved,
+            _ => Self::Invalid,
         }
+    }
+
+    /// Whether this is an invalid/unrecognized pointer mode.
+    pub fn is_invalid(&self) -> bool {
+        *self == Self::Invalid
+    }
+
+    /// Whether this is a member pointer (data or function).
+    pub fn is_member_pointer(&self) -> bool {
+        matches!(self, Self::MemberDataPointer | Self::MemberFunctionPointer)
     }
 }
 
@@ -189,6 +218,8 @@ impl fmt::Display for PointerMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u8)]
 pub enum MemberPointerType {
+    /// Invalid/unrecognized member pointer type (default fallback).
+    Invalid = 0xFF,
     /// Unspecified / 16-bit non-virtual.
     Unspecified = 0,
     /// Data, single inheritance.
@@ -223,6 +254,7 @@ impl MemberPointerType {
     /// Label string used in emit output.
     pub fn label(&self) -> &'static str {
         match self {
+            Self::Invalid => "invalid",
             Self::Unspecified => "pdm16_nonvirt",
             Self::DataSingleInheritance => "pdm16_vfcn",
             Self::DataMultipleInheritance => "pdm16_vbase",
@@ -241,24 +273,31 @@ impl MemberPointerType {
     }
 
     /// Parse from a raw integer value.
-    pub fn from_value(val: u8) -> Option<Self> {
+    ///
+    /// Returns `Invalid` for unknown values (matching Java's default mapping).
+    pub fn from_value(val: u8) -> Self {
         match val {
-            0 => Some(Self::Unspecified),
-            1 => Some(Self::DataSingleInheritance),
-            2 => Some(Self::DataMultipleInheritance),
-            3 => Some(Self::DataVirtualInheritance),
-            4 => Some(Self::DataGeneral),
-            5 => Some(Self::FunctionSingleInheritance),
-            6 => Some(Self::FunctionMultipleInheritance),
-            7 => Some(Self::FunctionVirtualInheritance),
-            8 => Some(Self::FunctionSingleInheritance1632),
-            9 => Some(Self::FunctionMultipleInheritance1632),
-            10 => Some(Self::FunctionVirtualInheritance1632),
-            11 => Some(Self::FunctionSingleInheritance32),
-            12 => Some(Self::FunctionMultipleInheritance32),
-            13 => Some(Self::FunctionVirtualInheritance32),
-            _ => None,
+            0 => Self::Unspecified,
+            1 => Self::DataSingleInheritance,
+            2 => Self::DataMultipleInheritance,
+            3 => Self::DataVirtualInheritance,
+            4 => Self::DataGeneral,
+            5 => Self::FunctionSingleInheritance,
+            6 => Self::FunctionMultipleInheritance,
+            7 => Self::FunctionVirtualInheritance,
+            8 => Self::FunctionSingleInheritance1632,
+            9 => Self::FunctionMultipleInheritance1632,
+            10 => Self::FunctionVirtualInheritance1632,
+            11 => Self::FunctionSingleInheritance32,
+            12 => Self::FunctionMultipleInheritance32,
+            13 => Self::FunctionVirtualInheritance32,
+            _ => Self::Invalid,
         }
+    }
+
+    /// Whether this is an invalid/unrecognized member pointer type.
+    pub fn is_invalid(&self) -> bool {
+        *self == Self::Invalid
     }
 }
 
@@ -315,11 +354,18 @@ pub struct LfPointer {
     pub base_segment: u16,
     /// For type-based pointers: the pointer base type record number.
     pub pointer_base_type_record_number: RecordNumber,
+    /// For invalid pointer types: the base symbol name.
+    pub base_symbol: String,
     /// Optional name associated with this pointer (e.g., for type-based pointers).
     pub pointer_name: String,
 }
 
 impl LfPointer {
+    /// PDB ID for the 16-bit pointer variant.
+    pub const PDB_ID_16: u32 = 0x0200;
+    /// PDB ID for the 32-bit (MsType) pointer variant.
+    pub const PDB_ID_32: u32 = 0x1002;
+
     /// Create a new pointer type record with explicit fields.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -355,6 +401,7 @@ impl LfPointer {
             member_pointer_type: None,
             base_segment: 0,
             pointer_base_type_record_number: RecordNumber::NO_TYPE,
+            base_symbol: String::new(),
             pointer_name: String::new(),
         }
     }
@@ -414,8 +461,8 @@ impl LfPointer {
         attrs >>= 1;
         let is_unknown = (attrs & 0x01) != 0;
 
-        let pointer_type = PointerType::from_value(pt_val).unwrap_or(PointerType::Unspecified);
-        let pointer_mode = PointerMode::from_value(pm_val).unwrap_or(PointerMode::Pointer);
+        let pointer_type = PointerType::from_value(pt_val);
+        let pointer_mode = PointerMode::from_value(pm_val);
 
         Self {
             record_number: RecordNumber::NO_TYPE,
@@ -436,22 +483,62 @@ impl LfPointer {
             member_pointer_type: None,
             base_segment: 0,
             pointer_base_type_record_number: RecordNumber::NO_TYPE,
+            base_symbol: String::new(),
             pointer_name: String::new(),
         }
     }
 
     /// Whether this is a member pointer (data or function).
     pub fn is_member_pointer(&self) -> bool {
-        matches!(
-            self.pointer_mode,
-            PointerMode::MemberDataPointer | PointerMode::MemberFunctionPointer
-        )
+        self.pointer_mode.is_member_pointer()
+    }
+
+    /// Get the size of the pointer in bytes.
+    ///
+    /// Mirrors Java `AbstractPointerMsType.getSize()`.
+    pub fn get_size(&self) -> u8 {
+        self.size
+    }
+
+    /// Whether this pointer has the restrict qualifier.
+    ///
+    /// Mirrors Java `PointerMsType.isRestrict()`.
+    pub fn is_restrict(&self) -> bool {
+        self.is_restrict
+    }
+
+    /// Whether this is a MOCOM pointer.
+    ///
+    /// Mirrors Java `PointerMsType.isMocom()`.
+    pub fn is_mocom(&self) -> bool {
+        self.is_mocom
+    }
+
+    /// Whether this is a left (lvalue) reference.
+    ///
+    /// Mirrors Java `PointerMsType.isLeftReference()`.
+    pub fn is_left_reference(&self) -> bool {
+        self.is_lref
+    }
+
+    /// Whether this is a right (rvalue) reference.
+    ///
+    /// Mirrors Java `PointerMsType.isRightReference()`.
+    pub fn is_right_reference(&self) -> bool {
+        self.is_rref
+    }
+
+    /// Whether the pointer type attribute is unknown/unrecognized.
+    ///
+    /// Mirrors Java `PointerMsType.isUnknownAttributes()`.
+    pub fn is_unknown_attributes(&self) -> bool {
+        self.is_unknown
     }
 }
 
 impl AbstractMsType for LfPointer {
     fn pdb_id(&self) -> u32 {
-        0x1002 // LF_POINTER
+        Self::PDB_ID_32 // LF_POINTER = 0x1002
     }
 
     fn record_number(&self) -> RecordNumber {
@@ -519,10 +606,10 @@ mod tests {
 
     #[test]
     fn test_pointer_type_from_value() {
-        assert_eq!(PointerType::from_value(0), Some(PointerType::Near));
-        assert_eq!(PointerType::from_value(12), Some(PointerType::Ptr64));
-        assert_eq!(PointerType::from_value(13), Some(PointerType::Unspecified));
-        assert_eq!(PointerType::from_value(14), None);
+        assert_eq!(PointerType::from_value(0), PointerType::Near);
+        assert_eq!(PointerType::from_value(12), PointerType::Ptr64);
+        assert_eq!(PointerType::from_value(13), PointerType::Unspecified);
+        assert_eq!(PointerType::from_value(14), PointerType::Invalid);
     }
 
     #[test]
@@ -530,14 +617,22 @@ mod tests {
         assert_eq!(PointerType::Near.label(), "");
         assert_eq!(PointerType::Ptr64.label(), "far64 ");
         assert_eq!(PointerType::Far.label(), "far ");
+        assert_eq!(PointerType::Invalid.label(), "invalid");
+    }
+
+    #[test]
+    fn test_pointer_type_is_invalid() {
+        assert!(!PointerType::Near.is_invalid());
+        assert!(PointerType::Invalid.is_invalid());
     }
 
     #[test]
     fn test_pointer_mode_from_value() {
-        assert_eq!(PointerMode::from_value(0), Some(PointerMode::Pointer));
-        assert_eq!(PointerMode::from_value(1), Some(PointerMode::LValueReference));
-        assert_eq!(PointerMode::from_value(4), Some(PointerMode::RValueReference));
-        assert_eq!(PointerMode::from_value(5), None);
+        assert_eq!(PointerMode::from_value(0), PointerMode::Pointer);
+        assert_eq!(PointerMode::from_value(1), PointerMode::LValueReference);
+        assert_eq!(PointerMode::from_value(4), PointerMode::RValueReference);
+        assert_eq!(PointerMode::from_value(5), PointerMode::Reserved);
+        assert_eq!(PointerMode::from_value(6), PointerMode::Invalid);
     }
 
     #[test]
@@ -548,16 +643,23 @@ mod tests {
     }
 
     #[test]
+    fn test_pointer_mode_is_member_pointer() {
+        assert!(!PointerMode::Pointer.is_member_pointer());
+        assert!(PointerMode::MemberDataPointer.is_member_pointer());
+        assert!(PointerMode::MemberFunctionPointer.is_member_pointer());
+    }
+
+    #[test]
     fn test_member_pointer_type_from_value() {
         assert_eq!(
             MemberPointerType::from_value(0),
-            Some(MemberPointerType::Unspecified)
+            MemberPointerType::Unspecified
         );
         assert_eq!(
             MemberPointerType::from_value(13),
-            Some(MemberPointerType::FunctionVirtualInheritance32)
+            MemberPointerType::FunctionVirtualInheritance32
         );
-        assert_eq!(MemberPointerType::from_value(14), None);
+        assert_eq!(MemberPointerType::from_value(14), MemberPointerType::Invalid);
     }
 
     #[test]
@@ -635,9 +737,12 @@ mod tests {
     #[test]
     fn test_pointer_emit_below_ptr() {
         let p = LfPointer::simple(0x0074, 4);
+        // PTR is the loosest binding (ordinal 0), so nothing is "below" it.
+        // ARRAY (ordinal 1) does NOT trigger parentheses -- only if there
+        // were a binding looser than PTR would they appear.
         let emitted = p.emit(Bind::ARRAY);
-        assert!(emitted.starts_with('('));
-        assert!(emitted.ends_with(')'));
+        assert!(!emitted.starts_with('('));
+        assert!(emitted.contains('*'));
     }
 
     #[test]
@@ -679,5 +784,75 @@ mod tests {
             format!("{}", MemberPointerType::DataGeneral),
             "pdm32_vbase"
         );
+    }
+
+    #[test]
+    fn test_pointer_get_size() {
+        let p = LfPointer::simple(0x0074, 8);
+        assert_eq!(p.get_size(), 8);
+
+        let p = LfPointer::simple(0x0074, 4);
+        assert_eq!(p.get_size(), 4);
+    }
+
+    #[test]
+    fn test_pointer_is_restrict() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_restrict());
+        p.is_restrict = true;
+        assert!(p.is_restrict());
+    }
+
+    #[test]
+    fn test_pointer_is_mocom() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_mocom());
+        p.is_mocom = true;
+        assert!(p.is_mocom());
+    }
+
+    #[test]
+    fn test_pointer_is_left_reference() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_left_reference());
+        p.is_lref = true;
+        assert!(p.is_left_reference());
+    }
+
+    #[test]
+    fn test_pointer_is_right_reference() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_right_reference());
+        p.is_rref = true;
+        assert!(p.is_right_reference());
+    }
+
+    #[test]
+    fn test_pointer_is_unknown_attributes() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        assert!(!p.is_unknown_attributes());
+        p.is_unknown = true;
+        assert!(p.is_unknown_attributes());
+    }
+
+    #[test]
+    fn test_pointer_pdb_id_constants() {
+        assert_eq!(LfPointer::PDB_ID_16, 0x0200);
+        assert_eq!(LfPointer::PDB_ID_32, 0x1002);
+    }
+
+    #[test]
+    fn test_pointer_base_symbol_default() {
+        let p = LfPointer::simple(0x0074, 4);
+        assert!(p.base_symbol.is_empty());
+    }
+
+    #[test]
+    fn test_pointer_with_base_symbol() {
+        let mut p = LfPointer::simple(0x0074, 4);
+        p.pointer_type = PointerType::Invalid;
+        p.base_symbol = "_some_symbol".to_string();
+        assert!(p.pointer_type.is_invalid());
+        assert_eq!(p.base_symbol, "_some_symbol");
     }
 }

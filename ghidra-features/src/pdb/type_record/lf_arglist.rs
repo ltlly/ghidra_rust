@@ -17,7 +17,7 @@ use std::fmt;
 
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{DelimiterState, RecordNumber};
 
 /// Concrete PDB argument list type record (`LF_ARGLIST`).
 ///
@@ -32,6 +32,13 @@ pub struct LfArglist {
 }
 
 impl LfArglist {
+    /// PDB ID for the 16-bit argument list variant.
+    pub const PDB_ID_16: u32 = 0x1001;
+    /// PDB ID for the ST-format argument list variant.
+    pub const PDB_ID_ST: u32 = 0x1201;
+    /// PDB ID for the 32-bit (MsType) argument list variant.
+    pub const PDB_ID_32: u32 = 0x1201;
+
     /// Create a new argument list type record.
     pub fn new(argument_record_numbers: Vec<RecordNumber>) -> Self {
         Self {
@@ -80,7 +87,7 @@ impl LfArglist {
 
 impl AbstractMsType for LfArglist {
     fn pdb_id(&self) -> u32 {
-        0x1201 // LF_ARGLIST
+        Self::PDB_ID_32 // LF_ARGLIST = 0x1201
     }
 
     fn record_number(&self) -> RecordNumber {
@@ -92,13 +99,20 @@ impl AbstractMsType for LfArglist {
     }
 
     fn emit(&self, _bind: Bind) -> String {
+        // Mirrors Java AbstractArgumentsListMsType.emit():
+        //   DelimiterState ds = new DelimiterState("", ", ");
+        //   builder.append("(");
+        //   for (RecordNumber recNumber : argRecordNumbers) {
+        //     AbstractMsType type = pdb.getTypeRecord(recNumber);
+        //     builder.append(ds.out(true, type.toString()));
+        //   }
+        //   builder.append(")");
+        let mut ds = DelimiterState::new("", ", ");
         let mut result = String::new();
         result.push('(');
 
-        for (i, arg_rn) in self.argument_record_numbers.iter().enumerate() {
-            if i > 0 {
-                result.push_str(", ");
-            }
+        for arg_rn in &self.argument_record_numbers {
+            result.push_str(ds.out(true));
             result.push_str(&arg_rn.to_string());
         }
 
@@ -252,5 +266,11 @@ mod tests {
         assert_eq!(collected.len(), 3);
         assert_eq!(collected[0], RecordNumber::type_record(0x0074));
         assert_eq!(collected[2], RecordNumber::type_record(0x0003));
+    }
+
+    #[test]
+    fn test_arglist_pdb_id_constants() {
+        assert_eq!(LfArglist::PDB_ID_16, 0x1001);
+        assert_eq!(LfArglist::PDB_ID_32, 0x1201);
     }
 }

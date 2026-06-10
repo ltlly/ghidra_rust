@@ -1523,6 +1523,7 @@ pub mod symbol_kind {
     pub const S_REGFRAME: u16=0x111F;
     pub const S_FILESTATIC: u16=0x1120;
     pub const S_HEAPALLOCA: u16=0x115E;
+    pub const S_UNAMESPACE: u16=0x1124;
 }
 
 

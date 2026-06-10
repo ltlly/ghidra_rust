@@ -38,6 +38,13 @@ pub struct LfArray {
 }
 
 impl LfArray {
+    /// PDB ID for the 16-bit array variant.
+    pub const PDB_ID_16: u32 = 0x0103;
+    /// PDB ID for the ST-format array variant.
+    pub const PDB_ID_ST: u32 = 0x1103;
+    /// PDB ID for the 32-bit (MsType) array variant.
+    pub const PDB_ID_32: u32 = 0x1503;
+
     /// Create a new array type record.
     ///
     /// # Parameters
@@ -84,6 +91,66 @@ impl LfArray {
             ),
         }
     }
+
+    /// Create from raw parsed field values with an explicit stride.
+    ///
+    /// This variant is used when the stride is known (e.g., from
+    /// `LF_STRARRAY` or when the caller computes the stride from
+    /// element size).
+    pub fn from_parsed_with_stride(
+        element_type_index: u32,
+        index_type_index: u32,
+        size: u64,
+        name: String,
+        stride: u32,
+    ) -> Self {
+        Self {
+            array: AbstractArrayMsType::new(
+                RecordNumber::type_record(element_type_index),
+                RecordNumber::type_record(index_type_index),
+                size,
+                name,
+                stride as i64,
+            ),
+        }
+    }
+
+    /// Get the record number of the element type.
+    ///
+    /// Mirrors Java `AbstractArrayMsType.getElementTypeRecordNumber()`.
+    pub fn element_type_record_number(&self) -> RecordNumber {
+        self.array.element_type_record_number
+    }
+
+    /// Get the record number of the index type.
+    pub fn index_type_record_number(&self) -> RecordNumber {
+        self.array.index_type_record_number
+    }
+
+    /// Get the total size of the array in bytes.
+    ///
+    /// Mirrors Java `AbstractArrayMsType.getSize()`.
+    pub fn get_size(&self) -> u64 {
+        self.array.size
+    }
+
+    /// Get the element stride in bytes.
+    ///
+    /// Returns -1 if the stride is not specified.
+    pub fn get_stride(&self) -> i64 {
+        self.array.stride
+    }
+
+    /// Get the number of elements in the array.
+    ///
+    /// Returns `None` if the stride is not specified (stride == -1) or
+    /// stride is zero.
+    pub fn num_elements(&self) -> Option<u64> {
+        if self.array.stride <= 0 || self.array.size == 0 {
+            return None;
+        }
+        Some(self.array.size / self.array.stride as u64)
+    }
 }
 
 impl AbstractMsType for LfArray {
@@ -92,7 +159,7 @@ impl AbstractMsType for LfArray {
     }
 
     fn pdb_id(&self) -> u32 {
-        0x1503 // LF_ARRAY (MsType variant)
+        Self::PDB_ID_32 // LF_ARRAY (MsType variant) = 0x1503
     }
 
     fn record_number(&self) -> RecordNumber {
@@ -203,5 +270,86 @@ mod tests {
             0,
         );
         assert_eq!(a.array.size, 0);
+    }
+
+    #[test]
+    fn test_array_from_parsed_with_stride() {
+        let a = LfArray::from_parsed_with_stride(
+            0x0074,
+            0x0075,
+            40,
+            "int[10]".to_string(),
+            4,
+        );
+        assert_eq!(a.name(), "int[10]");
+        assert_eq!(a.array.stride, 4);
+        assert_eq!(a.array.size, 40);
+    }
+
+    #[test]
+    fn test_array_element_type_record_number() {
+        let a = make_test_array();
+        assert_eq!(
+            a.element_type_record_number(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_array_index_type_record_number() {
+        let a = make_test_array();
+        assert_eq!(
+            a.index_type_record_number(),
+            RecordNumber::type_record(0x0075)
+        );
+    }
+
+    #[test]
+    fn test_array_get_size() {
+        let a = make_test_array();
+        assert_eq!(a.get_size(), 40);
+    }
+
+    #[test]
+    fn test_array_get_stride() {
+        let a = make_test_array();
+        assert_eq!(a.get_stride(), 4);
+
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        assert_eq!(a.get_stride(), -1);
+    }
+
+    #[test]
+    fn test_array_num_elements() {
+        let a = make_test_array();
+        // size=40, stride=4 => 10 elements
+        assert_eq!(a.num_elements(), Some(10));
+    }
+
+    #[test]
+    fn test_array_num_elements_no_stride() {
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        // stride=-1 => cannot determine count
+        assert_eq!(a.num_elements(), None);
+    }
+
+    #[test]
+    fn test_array_num_elements_zero_size() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0075),
+            0,
+            "empty".to_string(),
+            4,
+        );
+        // size=0 => 0 elements (but we return None since size is 0)
+        assert_eq!(a.num_elements(), None);
+    }
+
+    #[test]
+    fn test_array_pdb_id_constants() {
+        assert_eq!(LfArray::PDB_ID_16, 0x0103);
+        assert_eq!(LfArray::PDB_ID_ST, 0x1103);
+        assert_eq!(LfArray::PDB_ID_32, 0x1503);
     }
 }

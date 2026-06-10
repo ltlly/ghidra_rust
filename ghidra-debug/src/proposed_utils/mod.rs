@@ -6,12 +6,18 @@
 //! - **Spatial data structures**: R*-tree, hyper-box queries, 2D rectangles.
 //! - **Database utilities**: Key spans, field spans, cached object stores,
 //!   directed iterators, and annotated object frameworks.
+//! - **Pcode debugger access**: High-level access facade for pcode-based
+//!   debugging, combining memory, register, thread, and breakpoint management.
+//! - **Pcode debugger registers**: Register bank abstraction, register mapping,
+//!   register groups, value transformations, and calling conventions.
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 
 pub mod async_utils;
 pub mod database;
 pub mod futures;
+pub mod pcode_debugger_access;
+pub mod pcode_debugger_registers;
 pub mod spatial;
 
 // ---------------------------------------------------------------------------
