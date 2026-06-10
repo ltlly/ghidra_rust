@@ -35,17 +35,23 @@ pub mod abstract_field_list_ms_type;
 // Concrete LF_* type records.
 pub mod lf_arglist;
 pub mod lf_array;
+pub mod lf_bclass;
 pub mod lf_bitfield;
 pub mod lf_class;
 pub mod lf_enum;
 pub mod lf_fieldlist;
 pub mod lf_member;
+pub mod lf_method;
 pub mod lf_mfunction;
 pub mod lf_modifier;
+pub mod lf_nesttype;
+pub mod lf_onemethod;
 pub mod lf_pointer;
 pub mod lf_procedure;
+pub mod lf_stmember;
 pub mod lf_structure;
 pub mod lf_union;
+pub mod lf_vfunctab;
 
 // Re-export key types for convenience.
 pub use bind::Bind;
@@ -61,17 +67,23 @@ pub use abstract_field_list_ms_type::AbstractFieldListMsType;
 // Re-export concrete LF_* types.
 pub use lf_arglist::LfArglist;
 pub use lf_array::LfArray;
+pub use lf_bclass::LfBclass;
 pub use lf_bitfield::LfBitfield;
 pub use lf_class::LfClass;
 pub use lf_enum::LfEnum;
 pub use lf_fieldlist::LfFieldlist;
 pub use lf_member::LfMember;
+pub use lf_method::LfMethod;
 pub use lf_mfunction::LfMfunction;
 pub use lf_modifier::LfModifier;
+pub use lf_nesttype::LfNesttype;
+pub use lf_onemethod::LfOnemethod;
 pub use lf_pointer::LfPointer;
 pub use lf_procedure::LfProcedure;
+pub use lf_stmember::LfStmember;
 pub use lf_structure::LfStructure;
 pub use lf_union::LfUnion;
+pub use lf_vfunctab::LfVfunctab;
 
 use std::fmt;
 

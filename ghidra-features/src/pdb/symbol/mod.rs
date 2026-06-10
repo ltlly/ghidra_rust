@@ -64,6 +64,14 @@ pub mod s_thunk32;
 pub mod s_trampoline;
 pub mod s_udt;
 
+// New symbol types ported from Ghidra Java
+pub mod s_defrange_register;
+pub mod s_defrange_framepointer;
+pub mod s_defrange_subfield;
+pub mod s_defrange_register_rel;
+pub mod s_local;
+pub mod s_inlinesite;
+
 pub use abstract_base_pointer_relative::AbstractBasePointerRelative;
 pub use abstract_block::AbstractBlock;
 pub use abstract_compile2::AbstractCompile2;
@@ -94,3 +102,10 @@ pub use s_skip::SSkip;
 pub use s_thunk32::SThunk32;
 pub use s_trampoline::STrampoline;
 pub use s_udt::SUdt;
+
+pub use s_defrange_register::SDefRangeRegister;
+pub use s_defrange_framepointer::SDefRangeFramePointer;
+pub use s_defrange_subfield::SDefRangeSubfield;
+pub use s_defrange_register_rel::SDefRangeRegisterRel;
+pub use s_local::{SLocal, LocalFlags};
+pub use s_inlinesite::SInlineSite;

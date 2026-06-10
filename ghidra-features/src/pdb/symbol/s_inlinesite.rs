@@ -1,0 +1,266 @@
+//! S_INLINESITE -- Inline site symbol.
+//!
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.InlineSiteMsSymbol`.
+
+use std::fmt;
+
+use super::abstract_ms_symbol::AbstractMsSymbol;
+use super::record_number::{RecordCategory, RecordNumber};
+
+/// An inline site symbol (`S_INLINESITE`).
+///
+/// This symbol marks the beginning of an inlined function's scope within
+/// its caller. It is paired with [`super::s_end::SEnd`] (specifically
+/// `S_INLINESITE_END`) to delimit the range of code that was inlined.
+///
+/// The `inlinee` field references an item record in the IPI stream that
+/// contains the inlinee's function information (via `S_BUILDINFO`).
+///
+/// # PDB Binary Layout
+///
+/// ```text
+/// parent_offset  : u32
+/// end_offset     : u32
+/// inlinee        : u32  (IPI item index)
+/// annotations    : variable-length binary data
+/// ```
+///
+/// The `parent_offset` and `end_offset` fields form a linked-list structure
+/// among nested scopes. The `annotations` field contains BinaryAnnotation
+/// records that describe the inlined code's mapping back to the original
+/// source.
+///
+/// This corresponds to `S_INLINESITE` (0x103E) in the CodeView symbol set.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SInlineSite {
+    /// Offset to the parent scope record (for nesting).
+    pub parent_offset: u32,
+
+    /// Offset to the end (S_INLINESITE_END) record.
+    pub end_offset: u32,
+
+    /// The inlinee's item record number (IPI index referencing S_BUILDINFO).
+    pub inlinee: RecordNumber,
+
+    /// Raw binary annotation data following the fixed fields.
+    pub annotations: Vec<u8>,
+}
+
+impl SInlineSite {
+    /// Create a new inline site symbol.
+    pub fn new(
+        parent_offset: u32,
+        end_offset: u32,
+        inlinee: RecordNumber,
+        annotations: Vec<u8>,
+    ) -> Self {
+        Self {
+            parent_offset,
+            end_offset,
+            inlinee,
+            annotations,
+        }
+    }
+
+    /// Parse an S_INLINESITE symbol from a byte slice.
+    ///
+    /// Expects the layout:
+    /// `parent_offset(u32) + end_offset(u32) + inlinee(u32) + annotations(variable)`.
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.len() < 12 {
+            return None;
+        }
+        let parent_offset = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let end_offset = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let (inlinee, _) = RecordNumber::parse(data, 8, RecordCategory::Item, 32);
+        let annotations = if data.len() > 12 {
+            data[12..].to_vec()
+        } else {
+            Vec::new()
+        };
+        Some(Self {
+            parent_offset,
+            end_offset,
+            inlinee,
+            annotations,
+        })
+    }
+
+    /// Return `true` if this inline site has annotation data.
+    pub fn has_annotations(&self) -> bool {
+        !self.annotations.is_empty()
+    }
+
+    /// Return the number of raw annotation bytes.
+    pub fn annotation_byte_count(&self) -> usize {
+        self.annotations.len()
+    }
+}
+
+impl AbstractMsSymbol for SInlineSite {
+    fn pdb_id(&self) -> u16 {
+        super::super::symbol_kind::S_INLINESITE
+    }
+
+    fn symbol_type_name(&self) -> &'static str {
+        "S_INLINESITE"
+    }
+
+    fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "InlineSite: Parent: {:#X}, End: {:#X}, Inlinee: {}, Annotations: {} bytes",
+            self.parent_offset,
+            self.end_offset,
+            self.inlinee,
+            self.annotations.len(),
+        )
+    }
+}
+
+impl fmt::Display for SInlineSite {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.emit(f)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::record_number::RecordNumber;
+
+    fn make_inlinesite_bytes(
+        parent_offset: u32,
+        end_offset: u32,
+        inlinee: u32,
+        annotations: &[u8],
+    ) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&parent_offset.to_le_bytes());
+        data.extend_from_slice(&end_offset.to_le_bytes());
+        data.extend_from_slice(&inlinee.to_le_bytes());
+        data.extend_from_slice(annotations);
+        data
+    }
+
+    #[test]
+    fn test_parse_basic() {
+        let data = make_inlinesite_bytes(0, 0x40, 0x1234, &[]);
+        let sym = SInlineSite::parse(&data).unwrap();
+        assert_eq!(sym.parent_offset, 0);
+        assert_eq!(sym.end_offset, 0x40);
+        assert_eq!(sym.inlinee.number(), 0x1234);
+        assert!(sym.annotations.is_empty());
+    }
+
+    #[test]
+    fn test_parse_truncated() {
+        let data = [0x00, 0x01, 0x02]; // too short
+        assert!(SInlineSite::parse(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_exact_minimum() {
+        let data = make_inlinesite_bytes(0, 0, 0, &[]);
+        assert_eq!(data.len(), 12);
+        let sym = SInlineSite::parse(&data).unwrap();
+        assert_eq!(sym.parent_offset, 0);
+        assert_eq!(sym.end_offset, 0);
+        assert_eq!(sym.inlinee.number(), 0);
+    }
+
+    #[test]
+    fn test_parse_with_annotations() {
+        let annotations = [0x01, 0x02, 0x03, 0x04];
+        let data = make_inlinesite_bytes(0x10, 0x80, 0x5678, &annotations);
+        let sym = SInlineSite::parse(&data).unwrap();
+        assert_eq!(sym.parent_offset, 0x10);
+        assert_eq!(sym.end_offset, 0x80);
+        assert_eq!(sym.inlinee.number(), 0x5678);
+        assert_eq!(sym.annotations, vec![0x01, 0x02, 0x03, 0x04]);
+        assert!(sym.has_annotations());
+    }
+
+    #[test]
+    fn test_has_annotations() {
+        let sym_no = SInlineSite::new(0, 0, RecordNumber::item_record_number(1), vec![]);
+        assert!(!sym_no.has_annotations());
+
+        let sym_yes = SInlineSite::new(0, 0, RecordNumber::item_record_number(1), vec![0xAA]);
+        assert!(sym_yes.has_annotations());
+    }
+
+    #[test]
+    fn test_annotation_byte_count() {
+        let sym = SInlineSite::new(
+            0,
+            0,
+            RecordNumber::item_record_number(1),
+            vec![0x01, 0x02, 0x03],
+        );
+        assert_eq!(sym.annotation_byte_count(), 3);
+    }
+
+    #[test]
+    fn test_trait_impls() {
+        let sym = SInlineSite::new(
+            0x10,
+            0x80,
+            RecordNumber::item_record_number(0x1234),
+            vec![],
+        );
+        assert_eq!(sym.pdb_id(), 0x103E);
+        assert_eq!(sym.symbol_type_name(), "S_INLINESITE");
+        assert_eq!(sym.parent_offset, 0x10);
+        assert_eq!(sym.end_offset, 0x80);
+    }
+
+    #[test]
+    fn test_display() {
+        let sym = SInlineSite::new(
+            0,
+            0x40,
+            RecordNumber::item_record_number(0x1000),
+            vec![0x01, 0x02],
+        );
+        let s = format!("{}", sym);
+        assert!(s.contains("InlineSite"));
+        assert!(s.contains("40"));
+        assert!(s.contains("2 bytes"));
+    }
+
+    #[test]
+    fn test_display_no_annotations() {
+        let sym = SInlineSite::new(
+            0,
+            0x40,
+            RecordNumber::item_record_number(0x1000),
+            vec![],
+        );
+        let s = format!("{}", sym);
+        assert!(s.contains("0 bytes"));
+    }
+
+    #[test]
+    fn test_inlinee_is_item_category() {
+        let sym = SInlineSite::new(
+            0,
+            0,
+            RecordNumber::item_record_number(0x100),
+            vec![],
+        );
+        assert_eq!(sym.inlinee.category(), super::super::record_number::RecordCategory::Item);
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let a = SInlineSite::new(
+            0x10,
+            0x80,
+            RecordNumber::item_record_number(0x1234),
+            vec![0x01, 0x02],
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+}
