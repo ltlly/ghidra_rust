@@ -2600,6 +2600,514 @@ pub trait PcodeDebuggerRegistersAccess {
 }
 
 // ============================================================================
+// RegisterBankIterator -- iterate over bank entries with metadata
+// ============================================================================
+
+/// An iterator entry over a register bank's definitions and values.
+///
+/// Ported from Ghidra's register bank iteration utilities used by
+/// the register window and serialization code to enumerate all registers
+/// along with their definitions and current values.
+#[derive(Debug, Clone)]
+pub struct RegisterBankEntry<'a> {
+    /// The register name.
+    pub name: &'a str,
+    /// The register definition.
+    pub definition: &'a RegisterDefinition,
+    /// The current value (if known).
+    pub value: Option<&'a Vec<u8>>,
+    /// The parent register name (if any).
+    pub parent: Option<&'a str>,
+    /// The register group name.
+    pub group: &'a str,
+}
+
+/// An iterator over a `PcodeRegisterBank` that yields entries with
+/// full metadata including definitions, values, and parent relationships.
+///
+/// Ported from Ghidra's register bank enumeration patterns. Yields
+/// entries in definition order (BTreeMap sorted by name).
+pub struct RegisterBankIterator<'a> {
+    bank: &'a PcodeRegisterBank,
+    names: Vec<&'a str>,
+    pos: usize,
+}
+
+impl<'a> RegisterBankIterator<'a> {
+    /// Create a new iterator over the register bank.
+    pub fn new(bank: &'a PcodeRegisterBank) -> Self {
+        let names = bank.register_names();
+        Self {
+            bank,
+            names,
+            pos: 0,
+        }
+    }
+
+    /// Collect all remaining entries into a vector.
+    pub fn collect_entries(&mut self) -> Vec<RegisterBankEntry<'a>> {
+        let mut result = Vec::new();
+        while let Some(entry) = self.next() {
+            result.push(entry);
+        }
+        result
+    }
+
+    /// Filter iterator to only registers in the given group.
+    pub fn filter_group(mut self, group_name: &str) -> Vec<RegisterBankEntry<'a>> {
+        self.names.retain(|n| {
+            self.bank
+                .definitions
+                .get(*n)
+                .map(|d| d.group == group_name)
+                .unwrap_or(false)
+        });
+        self.pos = 0;
+        self.collect_entries()
+    }
+
+    /// Filter iterator to only registers with known values.
+    pub fn filter_known(mut self) -> Vec<RegisterBankEntry<'a>> {
+        self.names
+            .retain(|n| self.bank.values.contains_key(*n));
+        self.pos = 0;
+        self.collect_entries()
+    }
+}
+
+impl<'a> Iterator for RegisterBankIterator<'a> {
+    type Item = RegisterBankEntry<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.pos < self.names.len() {
+            let name = self.names[self.pos];
+            self.pos += 1;
+            if let Some(definition) = self.bank.definitions.get(name) {
+                let value = self.bank.values.get(name);
+                let parent = self.bank.children_of.get(name).map(|s| s.as_str());
+                return Some(RegisterBankEntry {
+                    name,
+                    definition,
+                    value,
+                    parent,
+                    group: &definition.group,
+                });
+            }
+        }
+        None
+    }
+}
+
+/// An iterator over only register values (name -> value pairs).
+///
+/// Simpler than `RegisterBankIterator`, this only yields registers
+/// that have known values.
+pub struct RegisterValueIterator<'a> {
+    iter: std::collections::btree_map::Iter<'a, String, Vec<u8>>,
+}
+
+impl<'a> RegisterValueIterator<'a> {
+    /// Create a new value iterator from a register bank.
+    pub fn new(bank: &'a PcodeRegisterBank) -> Self {
+        Self {
+            iter: bank.values.iter(),
+        }
+    }
+}
+
+impl<'a> Iterator for RegisterValueIterator<'a> {
+    type Item = (&'a str, &'a Vec<u8>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|(k, v)| (k.as_str(), v))
+    }
+}
+
+// ============================================================================
+// RegisterChangeTracker -- incremental change tracking
+// ============================================================================
+
+/// Tracks incremental changes to a register bank over time.
+///
+/// Ported from Ghidra's register change tracking used by the
+/// `PcodeDebuggerRegistersAccess` to efficiently determine which
+/// registers have been modified since the last sync. Maintains a
+/// delta of changed values and supports rolling back individual
+/// changes.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterChangeTracker {
+    /// Snapshot of values at the last checkpoint.
+    checkpoint_values: BTreeMap<String, Vec<u8>>,
+    /// Changes since the last checkpoint: register_name -> new_value.
+    /// `None` means the register was deleted/unknowned.
+    deltas: BTreeMap<String, Option<Vec<u8>>>,
+    /// Whether any changes have been tracked.
+    dirty: bool,
+}
+
+impl RegisterChangeTracker {
+    /// Create a new change tracker from a register bank's current values.
+    pub fn from_bank(bank: &PcodeRegisterBank) -> Self {
+        Self {
+            checkpoint_values: bank.values.clone(),
+            deltas: BTreeMap::new(),
+            dirty: false,
+        }
+    }
+
+    /// Record a write to a register.
+    pub fn record_write(&mut self, name: impl Into<String>, value: Vec<u8>) {
+        let name = name.into();
+        self.deltas.insert(name, Some(value));
+        self.dirty = true;
+    }
+
+    /// Record that a register was cleared/unknowned.
+    pub fn record_clear(&mut self, name: impl Into<String>) {
+        let name = name.into();
+        self.deltas.insert(name, None);
+        self.dirty = true;
+    }
+
+    /// Get the names of all changed registers.
+    pub fn changed_names(&self) -> Vec<&str> {
+        self.deltas.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Whether there are any pending changes.
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+
+    /// The number of pending changes.
+    pub fn num_changes(&self) -> usize {
+        self.deltas.len()
+    }
+
+    /// Apply the tracked deltas to a register bank and reset the tracker.
+    pub fn apply_to(&mut self, bank: &mut PcodeRegisterBank) {
+        for (name, value) in &self.deltas {
+            match value {
+                Some(val) => bank.write_register(name, val),
+                None => { bank.values.remove(name); }
+            }
+        }
+        // Update checkpoint to the new state
+        self.checkpoint_values = bank.values.clone();
+        self.deltas.clear();
+        self.dirty = false;
+    }
+
+    /// Roll back all tracked changes by restoring the checkpoint values
+    /// into the given bank.
+    pub fn rollback(&mut self, bank: &mut PcodeRegisterBank) {
+        // Restore checkpoint values
+        for (name, val) in &self.checkpoint_values {
+            bank.values.insert(name.clone(), val.clone());
+        }
+        // Remove any registers that were added since checkpoint
+        let checkpoint_names: BTreeSet<String> =
+            self.checkpoint_values.keys().cloned().collect();
+        let current_names: Vec<String> = bank.values.keys().cloned().collect();
+        for name in current_names {
+            if !checkpoint_names.contains(&name) && self.deltas.contains_key(&name) {
+                bank.values.remove(&name);
+            }
+        }
+        self.deltas.clear();
+        self.dirty = false;
+    }
+
+    /// Create a new checkpoint from the current bank state, discarding
+    /// the current deltas.
+    pub fn checkpoint(&mut self, bank: &PcodeRegisterBank) {
+        self.checkpoint_values = bank.values.clone();
+        self.deltas.clear();
+        self.dirty = false;
+    }
+
+    /// Get the checkpoint value for a register (the value before changes).
+    pub fn checkpoint_value(&self, name: &str) -> Option<&Vec<u8>> {
+        self.checkpoint_values.get(name)
+    }
+
+    /// Diff the current bank state against the checkpoint, returning
+    /// registers that differ.
+    pub fn diff_against_checkpoint(
+        &self,
+        bank: &PcodeRegisterBank,
+    ) -> Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>)> {
+        let mut result = Vec::new();
+        let all_names: BTreeSet<String> = self
+            .checkpoint_values
+            .keys()
+            .chain(bank.values.keys())
+            .cloned()
+            .collect();
+
+        for name in &all_names {
+            let old = self.checkpoint_values.get(name);
+            let new = bank.values.get(name);
+            if old != new {
+                result.push((name.clone(), old.cloned(), new.cloned()));
+            }
+        }
+        result
+    }
+}
+
+// ============================================================================
+// RegisterBankMerger -- 3-way merge support
+// ============================================================================
+
+/// The strategy for resolving register merge conflicts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MergeStrategy {
+    /// Prefer values from the "ours" side.
+    PreferOurs,
+    /// Prefer values from the "theirs" side.
+    PreferTheirs,
+    /// Keep the base value on conflict (effectively reject both changes).
+    KeepBase,
+    /// Mark conflicting registers as unknown.
+    MarkUnknown,
+}
+
+/// The result of a 3-way register bank merge.
+#[derive(Debug, Clone, Default)]
+pub struct RegisterBankMerge3Result {
+    /// Registers that were the same in both branches (auto-merged).
+    pub unchanged: Vec<String>,
+    /// Registers changed only in "ours" (auto-merged).
+    pub ours_only: Vec<String>,
+    /// Registers changed only in "theirs" (auto-merged).
+    pub theirs_only: Vec<String>,
+    /// Registers changed in both branches (conflict).
+    pub conflicts: Vec<RegisterMerge3Conflict>,
+    /// Registers added in either branch.
+    pub added: Vec<String>,
+    /// Registers removed in either branch.
+    pub removed: Vec<String>,
+}
+
+/// A conflict in a 3-way merge.
+#[derive(Debug, Clone)]
+pub struct RegisterMerge3Conflict {
+    /// The register name.
+    pub name: String,
+    /// The base value.
+    pub base: Option<Vec<u8>>,
+    /// The "ours" value.
+    pub ours: Option<Vec<u8>>,
+    /// The "theirs" value.
+    pub theirs: Option<Vec<u8>>,
+}
+
+impl RegisterBankMerge3Result {
+    /// Whether there are any conflicts.
+    pub fn has_conflicts(&self) -> bool {
+        !self.conflicts.is_empty()
+    }
+
+    /// The total number of registers processed.
+    pub fn total(&self) -> usize {
+        self.unchanged.len()
+            + self.ours_only.len()
+            + self.theirs_only.len()
+            + self.conflicts.len()
+            + self.added.len()
+            + self.removed.len()
+    }
+}
+
+/// Perform a 3-way merge of register banks.
+///
+/// Given a `base` bank and two derived banks (`ours` and `theirs`),
+/// determines which registers changed independently vs. in conflict.
+/// Returns a result describing the merge without modifying any bank.
+///
+/// Ported from Ghidra's register merge logic used in trace merge/undo.
+pub fn merge_register_banks_3way(
+    base: &PcodeRegisterBank,
+    ours: &PcodeRegisterBank,
+    theirs: &PcodeRegisterBank,
+) -> RegisterBankMerge3Result {
+    let mut result = RegisterBankMerge3Result::default();
+
+    let all_names: BTreeSet<String> = base
+        .register_names()
+        .into_iter()
+        .chain(ours.register_names().into_iter())
+        .chain(theirs.register_names().into_iter())
+        .map(|s| s.to_string())
+        .collect();
+
+    for name in &all_names {
+        let base_val = base.read_register(name);
+        let ours_val = ours.read_register(name);
+        let theirs_val = theirs.read_register(name);
+
+        let ours_changed = ours_val != base_val;
+        let theirs_changed = theirs_val != base_val;
+
+        if !ours_changed && !theirs_changed {
+            if base_val.is_some() {
+                result.unchanged.push(name.clone());
+            }
+        } else if ours_changed && !theirs_changed {
+            result.ours_only.push(name.clone());
+        } else if !ours_changed && theirs_changed {
+            result.theirs_only.push(name.clone());
+        } else {
+            // Both changed
+            if ours_val == theirs_val {
+                // Both changed to the same value -- no conflict
+                result.ours_only.push(name.clone());
+            } else {
+                result.conflicts.push(RegisterMerge3Conflict {
+                    name: name.clone(),
+                    base: base_val.clone(),
+                    ours: ours_val.clone(),
+                    theirs: theirs_val.clone(),
+                });
+            }
+        }
+
+        // Track adds and removes
+        if base_val.is_none() && (ours_val.is_some() || theirs_val.is_some()) {
+            result.added.push(name.clone());
+        }
+        if base_val.is_some() && ours_val.is_none() && theirs_val.is_none() {
+            result.removed.push(name.clone());
+        }
+    }
+
+    result
+}
+
+/// Apply a 3-way merge result with the given strategy, writing
+/// resolved values into the `output` bank.
+pub fn apply_merge_3way(
+    base: &PcodeRegisterBank,
+    ours: &PcodeRegisterBank,
+    theirs: &PcodeRegisterBank,
+    result: &RegisterBankMerge3Result,
+    strategy: MergeStrategy,
+    output: &mut PcodeRegisterBank,
+) {
+    // Apply unchanged (keep base value)
+    for name in &result.unchanged {
+        if let Some(val) = base.read_register(name) {
+            output.write_register(name, &val);
+        }
+    }
+
+    // Apply ours-only changes
+    for name in &result.ours_only {
+        if let Some(val) = ours.read_register(name) {
+            output.write_register(name, &val);
+        }
+    }
+
+    // Apply theirs-only changes
+    for name in &result.theirs_only {
+        if let Some(val) = theirs.read_register(name) {
+            output.write_register(name, &val);
+        }
+    }
+
+    // Apply conflicts per strategy
+    for conflict in &result.conflicts {
+        let resolved = match strategy {
+            MergeStrategy::PreferOurs => conflict.ours.as_ref(),
+            MergeStrategy::PreferTheirs => conflict.theirs.as_ref(),
+            MergeStrategy::KeepBase => conflict.base.as_ref(),
+            MergeStrategy::MarkUnknown => None,
+        };
+        if let Some(val) = resolved {
+            output.write_register(&conflict.name, val);
+        }
+    }
+
+    // Apply additions (prefer ours if both added)
+    for name in &result.added {
+        let val = ours
+            .read_register(name)
+            .or_else(|| theirs.read_register(name));
+        if let Some(val) = val {
+            output.write_register(name, &val);
+        }
+    }
+}
+
+// ============================================================================
+// RegisterSerializationUtils -- serialization helpers
+// ============================================================================
+
+/// Utilities for serializing and deserializing register data.
+///
+/// Ported from Ghidra's register serialization utilities used for
+/// trace persistence and network transfer.
+pub struct RegisterSerializationUtils;
+
+impl RegisterSerializationUtils {
+    /// Encode a register value as a hex string (little-endian byte order).
+    pub fn encode_value_hex(value: &[u8]) -> String {
+        value.iter().map(|b| format!("{:02x}", b)).collect()
+    }
+
+    /// Decode a hex string into a register value (little-endian byte order).
+    pub fn decode_value_hex(hex: &str) -> Result<Vec<u8>, String> {
+        if hex.len() % 2 != 0 {
+            return Err("hex string must have even length".into());
+        }
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| {
+                u8::from_str_radix(&hex[i..i + 2], 16)
+                    .map_err(|e| format!("invalid hex at position {}: {}", i, e))
+            })
+            .collect()
+    }
+
+    /// Encode all register values from a bank as a map of name -> hex string.
+    pub fn encode_bank_values(bank: &PcodeRegisterBank) -> BTreeMap<String, String> {
+        bank.values
+            .iter()
+            .map(|(name, value)| (name.clone(), Self::encode_value_hex(value)))
+            .collect()
+    }
+
+    /// Decode a map of name -> hex string into register values and write
+    /// them into a bank.
+    pub fn decode_bank_values(
+        encoded: &BTreeMap<String, String>,
+        bank: &mut PcodeRegisterBank,
+    ) -> Result<(), String> {
+        for (name, hex) in encoded {
+            let value = Self::decode_value_hex(hex)?;
+            bank.write_register(name, &value);
+        }
+        Ok(())
+    }
+
+    /// Encode a register definition as a portable map.
+    pub fn encode_definition(def: &RegisterDefinition) -> BTreeMap<String, String> {
+        let mut map = BTreeMap::new();
+        map.insert("name".to_string(), def.name.clone());
+        map.insert("bit_length".to_string(), def.bit_length.to_string());
+        map.insert("bit_offset".to_string(), def.bit_offset.to_string());
+        map.insert("group".to_string(), def.group.clone());
+        map.insert("big_endian".to_string(), def.big_endian.to_string());
+        map.insert("description".to_string(), def.description.clone());
+        if let Some(ref cn) = def.connector_name {
+            map.insert("connector_name".to_string(), cn.clone());
+        }
+        map
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -3652,5 +4160,307 @@ mod tests {
 
         let e2 = RegisterAccessError::RegisterNotFound("RAX".into());
         assert!(format!("{}", e2).contains("RAX"));
+    }
+
+    // -- RegisterBankIterator --
+
+    #[test]
+    fn test_register_bank_iterator() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.define("XMM0", 128, "Vector");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut iter = RegisterBankIterator::new(&bank);
+        let mut count = 0;
+        while let Some(entry) = iter.next() {
+            if entry.name == "RAX" {
+                assert!(entry.value.is_some());
+            } else {
+                assert!(entry.value.is_none());
+            }
+            count += 1;
+        }
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_register_bank_iterator_filter_group() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.define("XMM0", 128, "Vector");
+
+        let iter = RegisterBankIterator::new(&bank);
+        let gpr_entries = iter.filter_group("GPR");
+        assert_eq!(gpr_entries.len(), 2);
+    }
+
+    #[test]
+    fn test_register_bank_iterator_filter_known() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let iter = RegisterBankIterator::new(&bank);
+        let known = iter.filter_known();
+        assert_eq!(known.len(), 1);
+        assert_eq!(known[0].name, "RAX");
+    }
+
+    #[test]
+    fn test_register_value_iterator() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+
+        let vals: Vec<_> = RegisterValueIterator::new(&bank).collect();
+        assert_eq!(vals.len(), 2);
+    }
+
+    // -- RegisterChangeTracker --
+
+    #[test]
+    fn test_change_tracker_basic() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut tracker = RegisterChangeTracker::from_bank(&bank);
+        assert!(!tracker.is_dirty());
+
+        bank.write_register("RAX", &[0xFF; 8]);
+        tracker.record_write("RAX", vec![0xFF; 8]);
+
+        assert!(tracker.is_dirty());
+        assert_eq!(tracker.num_changes(), 1);
+        assert_eq!(tracker.changed_names(), vec!["RAX"]);
+    }
+
+    #[test]
+    fn test_change_tracker_apply() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut tracker = RegisterChangeTracker::from_bank(&bank);
+        bank.write_register("RAX", &[0xFF; 8]);
+        tracker.record_write("RAX", vec![0xFF; 8]);
+
+        // Apply deltas
+        tracker.apply_to(&mut bank);
+        assert!(!tracker.is_dirty());
+        assert_eq!(bank.read_register("RAX"), Some(vec![0xFF; 8]));
+    }
+
+    #[test]
+    fn test_change_tracker_rollback() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut tracker = RegisterChangeTracker::from_bank(&bank);
+        bank.write_register("RAX", &[0xFF; 8]);
+        tracker.record_write("RAX", vec![0xFF; 8]);
+
+        // Rollback should restore original value
+        tracker.rollback(&mut bank);
+        assert!(!tracker.is_dirty());
+        assert_eq!(bank.read_register("RAX"), Some(vec![0x42; 8]));
+    }
+
+    #[test]
+    fn test_change_tracker_diff_against_checkpoint() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+
+        let mut tracker = RegisterChangeTracker::from_bank(&bank);
+        bank.write_register("RAX", &[0xFF; 8]);
+
+        let diffs = tracker.diff_against_checkpoint(&bank);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].0, "RAX");
+        assert_eq!(diffs[0].1, Some(vec![0x42; 8]));
+        assert_eq!(diffs[0].2, Some(vec![0xFF; 8]));
+    }
+
+    #[test]
+    fn test_change_tracker_checkpoint() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+
+        let mut tracker = RegisterChangeTracker::from_bank(&bank);
+        tracker.record_write("RAX", vec![0xFF; 8]);
+
+        // Create new checkpoint -- clears deltas
+        tracker.checkpoint(&bank);
+        assert!(!tracker.is_dirty());
+        assert_eq!(tracker.num_changes(), 0);
+    }
+
+    // -- merge_register_banks_3way --
+
+    #[test]
+    fn test_3way_merge_no_changes() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+
+        let result = merge_register_banks_3way(&base, &base, &base);
+        assert!(!result.has_conflicts());
+        assert_eq!(result.unchanged.len(), 1);
+    }
+
+    #[test]
+    fn test_3way_merge_ours_only() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+
+        let mut ours = PcodeRegisterBank::new();
+        ours.define("RAX", 64, "GPR");
+        ours.write_register("RAX", &[0xFF; 8]);
+
+        let result = merge_register_banks_3way(&base, &ours, &base);
+        assert!(!result.has_conflicts());
+        assert_eq!(result.ours_only.len(), 1);
+    }
+
+    #[test]
+    fn test_3way_merge_conflict() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+
+        let mut ours = PcodeRegisterBank::new();
+        ours.define("RAX", 64, "GPR");
+        ours.write_register("RAX", &[0xAA; 8]);
+
+        let mut theirs = PcodeRegisterBank::new();
+        theirs.define("RAX", 64, "GPR");
+        theirs.write_register("RAX", &[0xBB; 8]);
+
+        let result = merge_register_banks_3way(&base, &ours, &theirs);
+        assert!(result.has_conflicts());
+        assert_eq!(result.conflicts.len(), 1);
+        assert_eq!(result.conflicts[0].name, "RAX");
+    }
+
+    #[test]
+    fn test_3way_merge_same_change() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+
+        let mut ours = PcodeRegisterBank::new();
+        ours.define("RAX", 64, "GPR");
+        ours.write_register("RAX", &[0xFF; 8]);
+
+        // Both changed to the same value -- no conflict
+        let result = merge_register_banks_3way(&base, &ours, &ours);
+        assert!(!result.has_conflicts());
+        assert_eq!(result.ours_only.len(), 1);
+    }
+
+    #[test]
+    fn test_apply_merge_3way_prefer_ours() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+
+        let mut ours = PcodeRegisterBank::new();
+        ours.define("RAX", 64, "GPR");
+        ours.write_register("RAX", &[0xAA; 8]);
+
+        let mut theirs = PcodeRegisterBank::new();
+        theirs.define("RAX", 64, "GPR");
+        theirs.write_register("RAX", &[0xBB; 8]);
+
+        let result = merge_register_banks_3way(&base, &ours, &theirs);
+        let mut output = PcodeRegisterBank::new();
+        output.define("RAX", 64, "GPR");
+        apply_merge_3way(&base, &ours, &theirs, &result, MergeStrategy::PreferOurs, &mut output);
+
+        assert_eq!(output.read_register("RAX"), Some(vec![0xAA; 8]));
+    }
+
+    #[test]
+    fn test_apply_merge_3way_mark_unknown() {
+        let mut base = PcodeRegisterBank::new();
+        base.define("RAX", 64, "GPR");
+        base.write_register("RAX", &[0x42; 8]);
+
+        let mut ours = PcodeRegisterBank::new();
+        ours.define("RAX", 64, "GPR");
+        ours.write_register("RAX", &[0xAA; 8]);
+
+        let mut theirs = PcodeRegisterBank::new();
+        theirs.define("RAX", 64, "GPR");
+        theirs.write_register("RAX", &[0xBB; 8]);
+
+        let result = merge_register_banks_3way(&base, &ours, &theirs);
+        let mut output = PcodeRegisterBank::new();
+        output.define("RAX", 64, "GPR");
+        apply_merge_3way(&base, &ours, &theirs, &result, MergeStrategy::MarkUnknown, &mut output);
+
+        // MarkUnknown doesn't write the conflicting value
+        assert!(output.read_register("RAX").is_none());
+    }
+
+    // -- RegisterSerializationUtils --
+
+    #[test]
+    fn test_serialization_encode_decode_hex() {
+        let value = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let hex = RegisterSerializationUtils::encode_value_hex(&value);
+        assert_eq!(hex, "deadbeef");
+
+        let decoded = RegisterSerializationUtils::decode_value_hex(&hex).unwrap();
+        assert_eq!(decoded, value);
+    }
+
+    #[test]
+    fn test_serialization_decode_invalid_hex() {
+        assert!(RegisterSerializationUtils::decode_value_hex("xyz").is_err());
+        assert!(RegisterSerializationUtils::decode_value_hex("123").is_err());
+    }
+
+    #[test]
+    fn test_serialization_bank_round_trip() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+
+        let encoded = RegisterSerializationUtils::encode_bank_values(&bank);
+        assert_eq!(encoded.len(), 2);
+
+        let mut restored = PcodeRegisterBank::new();
+        RegisterSerializationUtils::decode_bank_values(&encoded, &mut restored).unwrap();
+
+        assert_eq!(restored.read_register("RAX"), Some(vec![0x42; 8]));
+        assert_eq!(restored.read_register("RBX"), Some(vec![0xAA; 8]));
+    }
+
+    #[test]
+    fn test_serialization_encode_definition() {
+        let def = RegisterDefinition::new("RAX", 64)
+            .with_group("GPR")
+            .with_connector_name("rax");
+
+        let encoded = RegisterSerializationUtils::encode_definition(&def);
+        assert_eq!(encoded.get("name").unwrap(), "RAX");
+        assert_eq!(encoded.get("bit_length").unwrap(), "64");
+        assert_eq!(encoded.get("connector_name").unwrap(), "rax");
     }
 }

@@ -20,6 +20,8 @@ use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_member::{AccessProtection, MemberAttributes};
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB static member type record (`LF_STMEMBER`).
 ///
@@ -102,6 +104,23 @@ impl LfStmember {
         } else {
             String::new()
         };
+        Ok(Self::from_parsed(attributes_raw, type_index, name))
+    }
+
+    /// Parse an `LF_STMEMBER` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `StaticMemberMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// Reads attributes, type record number (32-bit), and a null-terminated name
+    /// string, then aligns to 4 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let attributes_raw = reader.read_u16()?;
+        let type_index = reader.read_u32()?;
+        let name = reader.read_cstring()?;
+        reader.align(4);
         Ok(Self::from_parsed(attributes_raw, type_index, name))
     }
 
@@ -452,5 +471,45 @@ mod tests {
         assert!(m.name().is_empty());
         assert!(m.record_number().is_no_type());
         assert!(m.is_static());
+    }
+
+    #[test]
+    fn test_stmember_parse_from_reader() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // attributes (public)
+        data.extend_from_slice(&0x0074u32.to_le_bytes()); // type
+        data.extend_from_slice(b"count\0");                // name
+        // align4: "count\0" is 6 bytes from offset 6, total 12 bytes, already aligned
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfStmember::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "count");
+        assert_eq!(m.pdb_id(), 0x150E);
+        assert_eq!(m.type_record_number, RecordNumber::type_record(0x0074));
+        assert_eq!(m.access(), AccessProtection::Public);
+    }
+
+    #[test]
+    fn test_stmember_parse_from_reader_aligns() {
+        // Name "ab" (3 bytes with null) after 6 fixed bytes = 9 total, needs padding to 12
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());
+        data.extend_from_slice(&0x0074u32.to_le_bytes());
+        data.extend_from_slice(b"ab\0"); // 3 bytes, total = 9
+        data.push(0); // padding byte, total = 10
+        data.push(0); // padding byte, total = 11
+        data.push(0); // padding byte, total = 12
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfStmember::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "ab");
+        assert_eq!(reader.position(), 12); // aligned to 4
+    }
+
+    #[test]
+    fn test_stmember_parse_from_reader_too_short() {
+        let data = [0u8; 4];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfStmember::parse_from_reader(&mut reader).is_err());
     }
 }

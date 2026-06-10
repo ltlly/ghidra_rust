@@ -20,6 +20,8 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB overloaded method type record (`LF_METHOD`).
 ///
@@ -97,6 +99,23 @@ impl LfMethod {
         } else {
             String::new()
         };
+        Ok(Self::from_parsed(count, method_list_ti, name))
+    }
+
+    /// Parse an `LF_METHOD` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `OverloadedMethodMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// Reads count (u16), method list record number (32-bit), and a null-terminated
+    /// name string, then aligns to 4 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let count = reader.read_u16()?;
+        let method_list_ti = reader.read_u32()?;
+        let name = reader.read_cstring()?;
+        reader.align(4);
         Ok(Self::from_parsed(count, method_list_ti, name))
     }
 
@@ -422,5 +441,44 @@ mod tests {
         assert!(m.name().is_empty());
         assert_eq!(m.count(), 0);
         assert!(m.record_number().is_no_type());
+    }
+
+    #[test]
+    fn test_method_parse_from_reader() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&3u16.to_le_bytes());        // count
+        data.extend_from_slice(&0x1010u32.to_le_bytes());   // methodList
+        data.extend_from_slice(b"foo\0");                    // name
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfMethod::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "foo");
+        assert_eq!(m.count(), 3);
+        assert_eq!(
+            m.method_list_record_number(),
+            RecordNumber::type_record(0x1010)
+        );
+        assert_eq!(m.pdb_id(), 0x150F);
+    }
+
+    #[test]
+    fn test_method_parse_from_reader_aligns() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&2u16.to_le_bytes());        // count
+        data.extend_from_slice(&0x2000u32.to_le_bytes());   // methodList
+        data.extend_from_slice(b"ab\0");                     // name (3 bytes, total 9)
+        data.extend_from_slice(&[0u8; 3]);                   // padding to 12
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfMethod::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "ab");
+        assert_eq!(reader.position(), 12); // aligned to 4
+    }
+
+    #[test]
+    fn test_method_parse_from_reader_too_short() {
+        let data = [0u8; 4];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfMethod::parse_from_reader(&mut reader).is_err());
     }
 }

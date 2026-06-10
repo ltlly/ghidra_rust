@@ -20,6 +20,8 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB virtual function table pointer type record (`LF_VFUNCTAB`).
 ///
@@ -77,6 +79,22 @@ impl LfVfunctab {
         }
         // Skip 2 bytes of padding at offset 0.
         let vftable_ti = u32::from_le_bytes([data[2], data[3], data[4], data[5]]);
+        Ok(Self::from_parsed(vftable_ti))
+    }
+
+    /// Parse an `LF_VFUNCTAB` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `VirtualFunctionTablePointerMsType(AbstractPdb, PdbByteReader)`
+    /// constructor. Skips 2 bytes of padding, reads the vftable type record number
+    /// (32-bit), then aligns to 4 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        reader.skip(2)?; // padding
+        let vftable_ti = reader.read_u32()?;
+        reader.align(4);
         Ok(Self::from_parsed(vftable_ti))
     }
 
@@ -213,6 +231,21 @@ impl LfVfuncoff {
         Ok(Self::from_parsed(vftable_ti, offset))
     }
 
+    /// Parse an `LF_VFUNCOFF` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `VirtualFunctionTablePointerWithOffsetMsType(AbstractPdb,
+    /// PdbByteReader)` constructor. Reads the vftable type record number (32-bit)
+    /// and the offset in the vftable (i32).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let vftable_ti = reader.read_u32()?;
+        let offset = reader.read_i32()? as u32;
+        Ok(Self::from_parsed(vftable_ti, offset))
+    }
+
     /// Get the record number of the vftable type.
     pub fn pointer_type_record_number(&self) -> RecordNumber {
         self.vftable_type_record_number
@@ -255,11 +288,16 @@ impl AbstractMsType for LfVfuncoff {
     }
 
     fn emit(&self, _bind: Bind) -> String {
+        // Mirrors Java AbstractVirtualFunctionTablePointerWithOffsetMsType.emit():
+        //   builder.append("VFTablePtr<off=");
+        //   builder.append(offset);
+        //   builder.append(">: ");
+        //   builder.append(pdb.getTypeRecord(pointerTypeRecordNumber));
         let mut result = String::new();
-        result.push_str("VFuncOff: ");
-        result.push_str(&self.vftable_type_record_number.to_string());
-        result.push_str(", ");
+        result.push_str("VFTablePtr<off=");
         result.push_str(&self.offset_in_vftable.to_string());
+        result.push_str(">: ");
+        result.push_str(&self.vftable_type_record_number.to_string());
         result
     }
 }
@@ -485,7 +523,8 @@ mod tests {
     fn test_vfuncoff_emit() {
         let vo = LfVfuncoff::from_parsed(0x3001, 16);
         let emitted = vo.emit(Bind::NONE);
-        assert!(emitted.contains("VFuncOff:"));
+        // Format: "VFTablePtr<off=16>: 0x3001"
+        assert!(emitted.contains("VFTablePtr<off="));
         assert!(emitted.contains("0x3001"));
         assert!(emitted.contains("16"));
     }
@@ -494,8 +533,9 @@ mod tests {
     fn test_vfuncoff_emit_format() {
         let vo = LfVfuncoff::from_parsed(0x4001, 24);
         let emitted = vo.emit(Bind::NONE);
-        assert!(emitted.starts_with("VFuncOff: "));
-        assert!(emitted.contains(", "));
+        // Format: "VFTablePtr<off=24>: 0x4001"
+        assert!(emitted.starts_with("VFTablePtr<off=24>: "));
+        assert!(emitted.contains("0x4001"));
     }
 
     #[test]
@@ -550,7 +590,7 @@ mod tests {
     fn test_vfuncoff_display() {
         let vo = LfVfuncoff::from_parsed(0x3001, 16);
         let display = format!("{}", vo);
-        assert!(display.contains("VFuncOff"));
+        assert!(display.contains("VFTablePtr<off=16>"));
         assert!(display.contains("0x3001"));
     }
 
@@ -562,5 +602,54 @@ mod tests {
 
         let vo3 = LfVfuncoff::new(RecordNumber::type_record(0x3001), 24);
         assert_ne!(vo1, vo3);
+    }
+
+    // =========================================================================
+    // parse_from_reader tests
+    // =========================================================================
+
+    #[test]
+    fn test_vfunctab_parse_from_reader() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x3001u32.to_le_bytes()); // vftableType
+
+        let mut reader = PdbByteReader::new(&data);
+        let vt = LfVfunctab::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(vt.pdb_id(), 0x1409);
+        assert_eq!(
+            vt.vftable_type_record_number,
+            RecordNumber::type_record(0x3001)
+        );
+    }
+
+    #[test]
+    fn test_vfunctab_parse_from_reader_too_short() {
+        let data = [0u8; 4];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfVfunctab::parse_from_reader(&mut reader).is_err());
+    }
+
+    #[test]
+    fn test_vfuncoff_parse_from_reader() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x3001u32.to_le_bytes()); // vftableType
+        data.extend_from_slice(&16i32.to_le_bytes());     // offsetInVFTable
+
+        let mut reader = PdbByteReader::new(&data);
+        let vo = LfVfuncoff::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(vo.pdb_id(), 0x140C);
+        assert_eq!(
+            vo.vftable_type_record_number,
+            RecordNumber::type_record(0x3001)
+        );
+        assert_eq!(vo.offset(), 16);
+    }
+
+    #[test]
+    fn test_vfuncoff_parse_from_reader_too_short() {
+        let data = [0u8; 6];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfVfuncoff::parse_from_reader(&mut reader).is_err());
     }
 }

@@ -20,6 +20,8 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB nested type record (`LF_NESTTYPE`).
 ///
@@ -92,6 +94,23 @@ impl LfNesttype {
         } else {
             String::new()
         };
+        Ok(Self::from_parsed(nested_type_ti, name))
+    }
+
+    /// Parse an `LF_NESTTYPE` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `NestedTypeMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// Skips 2 bytes of padding, reads the nested type record number (32-bit),
+    /// and a null-terminated name string, then aligns to 4 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        reader.skip(2)?; // padding
+        let nested_type_ti = reader.read_u32()?;
+        let name = reader.read_cstring()?;
+        reader.align(4);
         Ok(Self::from_parsed(nested_type_ti, name))
     }
 
@@ -351,5 +370,43 @@ mod tests {
         let nt = LfNesttype::default();
         assert!(nt.name().is_empty());
         assert!(nt.record_number().is_no_type());
+    }
+
+    #[test]
+    fn test_nesttype_parse_from_reader() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x1001u32.to_le_bytes()); // nestedType
+        data.extend_from_slice(b"InnerClass\0");           // name
+
+        let mut reader = PdbByteReader::new(&data);
+        let nt = LfNesttype::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(nt.name(), "InnerClass");
+        assert_eq!(nt.pdb_id(), 0x1510);
+        assert_eq!(
+            nt.nested_type_record_number,
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_nesttype_parse_from_reader_aligns() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0000u16.to_le_bytes()); // padding
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // nestedType
+        data.extend_from_slice(b"a\0");                    // name (2 bytes, total 8)
+        // 8 is already aligned to 4
+
+        let mut reader = PdbByteReader::new(&data);
+        let nt = LfNesttype::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(nt.name(), "a");
+        assert_eq!(reader.position(), 8); // aligned to 4
+    }
+
+    #[test]
+    fn test_nesttype_parse_from_reader_too_short() {
+        let data = [0u8; 4];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfNesttype::parse_from_reader(&mut reader).is_err());
     }
 }

@@ -18,6 +18,294 @@ use crate::agents::{
     ExecutionState, RegisterValue, StackFrameInfo, ThreadInfo,
 };
 
+/// A register descriptor as returned by GDB's architecture API.
+///
+/// Ported from the Python `RegisterDesc` dataclass in `util.py` and
+/// `gdb.RegisterDescriptor` in the GDB Python API. GDB 13+ provides
+/// `Architecture.registers()` which returns register descriptors.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RegisterDescriptor {
+    /// Register name (e.g., "rax", "rip", "xmm0").
+    pub name: String,
+    /// Register group (e.g., "general", "float", "vector").
+    pub group: Option<String>,
+    /// Register size in bytes.
+    pub size: Option<usize>,
+}
+
+impl RegisterDescriptor {
+    /// Create a new register descriptor.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            group: None,
+            size: None,
+        }
+    }
+
+    /// Set the register group.
+    pub fn with_group(mut self, group: impl Into<String>) -> Self {
+        self.group = Some(group.into());
+        self
+    }
+
+    /// Set the register size.
+    pub fn with_size(mut self, size: usize) -> Self {
+        self.size = Some(size);
+        self
+    }
+}
+
+/// A batch of register values for a frame.
+///
+/// Groups register values by frame for efficient trace writing.
+/// Ported from the register syncing logic in `commands.py` and `hooks.py`.
+#[derive(Debug, Clone, Default)]
+pub struct FrameRegisterBatch {
+    /// Frame level.
+    pub frame_level: u32,
+    /// Register values.
+    pub registers: Vec<RegisterValue>,
+}
+
+impl FrameRegisterBatch {
+    /// Create a new batch for a frame level.
+    pub fn new(frame_level: u32) -> Self {
+        Self {
+            frame_level,
+            registers: Vec::new(),
+        }
+    }
+
+    /// Add a register value.
+    pub fn push(&mut self, reg: RegisterValue) {
+        self.registers.push(reg);
+    }
+
+    /// Get a register value by name.
+    pub fn get(&self, name: &str) -> Option<&RegisterValue> {
+        self.registers.iter().find(|r| r.name == name)
+    }
+
+    /// Get all register names.
+    pub fn names(&self) -> Vec<&str> {
+        self.registers.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    /// Number of registers.
+    pub fn len(&self) -> usize {
+        self.registers.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.registers.is_empty()
+    }
+}
+
+/// Thread event for the hook system.
+///
+/// Tracks thread lifecycle events that need to be synchronized
+/// to the Ghidra trace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThreadEvent {
+    /// A new thread was created.
+    Created {
+        /// Inferior number.
+        inferior_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+    /// A thread has exited.
+    Exited {
+        /// Inferior number.
+        inferior_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+    /// A thread's state has changed (running/stopped/etc).
+    StateChanged {
+        /// Inferior number.
+        inferior_num: u32,
+        /// Thread number.
+        thread_num: u32,
+        /// New execution state.
+        new_state: ExecutionState,
+    },
+    /// A thread was selected by the user.
+    Selected {
+        /// Inferior number.
+        inferior_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+}
+
+impl ThreadEvent {
+    /// Get the inferior number for this event.
+    pub fn inferior_num(&self) -> u32 {
+        match self {
+            Self::Created { inferior_num, .. }
+            | Self::Exited { inferior_num, .. }
+            | Self::StateChanged { inferior_num, .. }
+            | Self::Selected { inferior_num, .. } => *inferior_num,
+        }
+    }
+
+    /// Get the thread number for this event.
+    pub fn thread_num(&self) -> u32 {
+        match self {
+            Self::Created { thread_num, .. }
+            | Self::Exited { thread_num, .. }
+            | Self::StateChanged { thread_num, .. }
+            | Self::Selected { thread_num, .. } => *thread_num,
+        }
+    }
+
+    /// Human-readable description of this event.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Created { inferior_num, thread_num } => {
+                format!("Thread {} created in inferior {}", thread_num, inferior_num)
+            }
+            Self::Exited { inferior_num, thread_num } => {
+                format!("Thread {} exited in inferior {}", thread_num, inferior_num)
+            }
+            Self::StateChanged {
+                inferior_num,
+                thread_num,
+                new_state,
+            } => {
+                format!(
+                    "Thread {} in inferior {} -> {}",
+                    thread_num,
+                    inferior_num,
+                    new_state.as_trace_str()
+                )
+            }
+            Self::Selected { inferior_num, thread_num } => {
+                format!("Thread {} selected in inferior {}", thread_num, inferior_num)
+            }
+        }
+    }
+}
+
+/// Stepping mode for GDB thread operations.
+///
+/// Determines how GDB handles signals and breakpoints during stepping.
+/// Ported from GDB's `nexti` / `stepi` / `next` / `step` semantics.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SteppingMode {
+    /// Single instruction step (stepi/nexti).
+    Instruction,
+    /// Source line step (step/next).
+    SourceLine,
+}
+
+/// Thread execution history record.
+///
+/// Tracks the recent execution history of a thread for display
+/// and debugging purposes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThreadHistoryEntry {
+    /// Program counter at this point.
+    pub pc: u64,
+    /// Timestamp (relative to session start, in milliseconds).
+    pub timestamp: u64,
+    /// Stop reason at this point, if any.
+    pub stop_reason: Option<ThreadStopReason>,
+    /// Frame level.
+    pub frame_level: u32,
+}
+
+impl ThreadHistoryEntry {
+    /// Create a new history entry.
+    pub fn new(pc: u64, timestamp: u64) -> Self {
+        Self {
+            pc,
+            timestamp,
+            stop_reason: None,
+            frame_level: 0,
+        }
+    }
+
+    /// Set the stop reason.
+    pub fn with_stop_reason(mut self, reason: ThreadStopReason) -> Self {
+        self.stop_reason = Some(reason);
+        self
+    }
+
+    /// Set the frame level.
+    pub fn with_frame_level(mut self, level: u32) -> Self {
+        self.frame_level = level;
+        self
+    }
+}
+
+/// Thread execution history tracker.
+///
+/// Maintains a bounded ring buffer of recent execution history entries
+/// for a thread.
+#[derive(Debug, Clone)]
+pub struct ThreadHistory {
+    entries: Vec<ThreadHistoryEntry>,
+    max_entries: usize,
+}
+
+impl ThreadHistory {
+    /// Create a new history tracker with a maximum number of entries.
+    pub fn new(max_entries: usize) -> Self {
+        Self {
+            entries: Vec::new(),
+            max_entries,
+        }
+    }
+
+    /// Create with default capacity (100 entries).
+    pub fn with_default_capacity() -> Self {
+        Self::new(100)
+    }
+
+    /// Add an entry to the history.
+    pub fn push(&mut self, entry: ThreadHistoryEntry) {
+        if self.entries.len() >= self.max_entries {
+            self.entries.remove(0);
+        }
+        self.entries.push(entry);
+    }
+
+    /// Get the most recent entry.
+    pub fn latest(&self) -> Option<&ThreadHistoryEntry> {
+        self.entries.last()
+    }
+
+    /// Get all entries (oldest first).
+    pub fn entries(&self) -> &[ThreadHistoryEntry] {
+        &self.entries
+    }
+
+    /// Get the number of entries.
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Clear all entries.
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    /// Get the last N entries.
+    pub fn last_n(&self, n: usize) -> &[ThreadHistoryEntry] {
+        let start = self.entries.len().saturating_sub(n);
+        &self.entries[start..]
+    }
+}
+
 /// Execution state of a GDB thread.
 ///
 /// This extends the common `ExecutionState` with GDB-specific states.
@@ -1653,5 +1941,198 @@ mod collection_tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, 1); // GDB uses thread num as id
         assert_eq!(list[0].name.as_deref(), Some("main"));
+    }
+}
+
+#[cfg(test)]
+mod register_descriptor_tests {
+    use super::*;
+
+    #[test]
+    fn test_register_descriptor_new() {
+        let desc = RegisterDescriptor::new("rax");
+        assert_eq!(desc.name, "rax");
+        assert!(desc.group.is_none());
+        assert!(desc.size.is_none());
+    }
+
+    #[test]
+    fn test_register_descriptor_builder() {
+        let desc = RegisterDescriptor::new("xmm0")
+            .with_group("vector")
+            .with_size(16);
+        assert_eq!(desc.name, "xmm0");
+        assert_eq!(desc.group.as_deref(), Some("vector"));
+        assert_eq!(desc.size, Some(16));
+    }
+}
+
+#[cfg(test)]
+mod frame_register_batch_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_register_batch_new() {
+        let batch = FrameRegisterBatch::new(0);
+        assert_eq!(batch.frame_level, 0);
+        assert!(batch.is_empty());
+    }
+
+    #[test]
+    fn test_frame_register_batch_push() {
+        let mut batch = FrameRegisterBatch::new(0);
+        batch.push(RegisterValue::from_u64("rax", 0x1234));
+        batch.push(RegisterValue::from_u64("rbx", 0x5678));
+        assert_eq!(batch.len(), 2);
+        assert!(!batch.is_empty());
+    }
+
+    #[test]
+    fn test_frame_register_batch_get() {
+        let mut batch = FrameRegisterBatch::new(0);
+        batch.push(RegisterValue::from_u64("rax", 0x1234));
+        assert!(batch.get("rax").is_some());
+        assert_eq!(batch.get("rax").unwrap().as_u64(), Some(0x1234));
+        assert!(batch.get("rcx").is_none());
+    }
+
+    #[test]
+    fn test_frame_register_batch_names() {
+        let mut batch = FrameRegisterBatch::new(0);
+        batch.push(RegisterValue::from_u64("rax", 1));
+        batch.push(RegisterValue::from_u64("rbx", 2));
+        batch.push(RegisterValue::from_u64("rcx", 3));
+        let names = batch.names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"rax"));
+        assert!(names.contains(&"rbx"));
+        assert!(names.contains(&"rcx"));
+    }
+}
+
+#[cfg(test)]
+mod thread_event_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_event_created() {
+        let event = ThreadEvent::Created {
+            inferior_num: 1,
+            thread_num: 2,
+        };
+        assert_eq!(event.inferior_num(), 1);
+        assert_eq!(event.thread_num(), 2);
+        assert!(event.description().contains("created"));
+    }
+
+    #[test]
+    fn test_thread_event_exited() {
+        let event = ThreadEvent::Exited {
+            inferior_num: 1,
+            thread_num: 2,
+        };
+        assert!(event.description().contains("exited"));
+    }
+
+    #[test]
+    fn test_thread_event_state_changed() {
+        let event = ThreadEvent::StateChanged {
+            inferior_num: 1,
+            thread_num: 2,
+            new_state: ExecutionState::Stopped,
+        };
+        assert!(event.description().contains("STOPPED"));
+    }
+
+    #[test]
+    fn test_thread_event_selected() {
+        let event = ThreadEvent::Selected {
+            inferior_num: 1,
+            thread_num: 3,
+        };
+        assert!(event.description().contains("selected"));
+    }
+}
+
+#[cfg(test)]
+mod thread_history_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_history_entry() {
+        let entry = ThreadHistoryEntry::new(0x401000, 1000)
+            .with_stop_reason(ThreadStopReason::Breakpoint {
+                bp_number: 1,
+                address: 0x401000,
+            })
+            .with_frame_level(0);
+        assert_eq!(entry.pc, 0x401000);
+        assert_eq!(entry.timestamp, 1000);
+        assert!(entry.stop_reason.is_some());
+        assert_eq!(entry.frame_level, 0);
+    }
+
+    #[test]
+    fn test_thread_history_basic() {
+        let mut history = ThreadHistory::new(10);
+        assert!(history.is_empty());
+        assert!(history.latest().is_none());
+
+        history.push(ThreadHistoryEntry::new(0x401000, 100));
+        history.push(ThreadHistoryEntry::new(0x402000, 200));
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.latest().unwrap().pc, 0x402000);
+    }
+
+    #[test]
+    fn test_thread_history_overflow() {
+        let mut history = ThreadHistory::new(3);
+        history.push(ThreadHistoryEntry::new(0x1000, 1));
+        history.push(ThreadHistoryEntry::new(0x2000, 2));
+        history.push(ThreadHistoryEntry::new(0x3000, 3));
+        history.push(ThreadHistoryEntry::new(0x4000, 4)); // evicts 0x1000
+        assert_eq!(history.len(), 3);
+        assert_eq!(history.entries()[0].pc, 0x2000);
+        assert_eq!(history.latest().unwrap().pc, 0x4000);
+    }
+
+    #[test]
+    fn test_thread_history_last_n() {
+        let mut history = ThreadHistory::new(100);
+        for i in 0..10 {
+            history.push(ThreadHistoryEntry::new(i * 0x1000, i));
+        }
+        let last3 = history.last_n(3);
+        assert_eq!(last3.len(), 3);
+        assert_eq!(last3[0].pc, 7 * 0x1000);
+        assert_eq!(last3[2].pc, 9 * 0x1000);
+    }
+
+    #[test]
+    fn test_thread_history_default_capacity() {
+        let history = ThreadHistory::with_default_capacity();
+        assert!(history.is_empty());
+        assert_eq!(history.max_entries, 100);
+    }
+
+    #[test]
+    fn test_thread_history_clear() {
+        let mut history = ThreadHistory::new(10);
+        history.push(ThreadHistoryEntry::new(0x1000, 1));
+        history.push(ThreadHistoryEntry::new(0x2000, 2));
+        assert_eq!(history.len(), 2);
+        history.clear();
+        assert!(history.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod stepping_mode_tests {
+    use super::*;
+
+    #[test]
+    fn test_stepping_mode() {
+        assert_ne!(SteppingMode::Instruction, SteppingMode::SourceLine);
+        assert_eq!(SteppingMode::Instruction, SteppingMode::Instruction);
     }
 }

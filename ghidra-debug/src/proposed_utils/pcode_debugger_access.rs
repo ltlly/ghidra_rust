@@ -3269,6 +3269,768 @@ impl PcodeDebuggerAccessBuilder {
 use super::pcode_debugger_registers::RegisterBankSnapshot;
 
 // ============================================================================
+// AccessEventBus -- publish/subscribe event bus for access events
+// ============================================================================
+
+/// The kind of event published on the access event bus.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum AccessEventType {
+    /// A memory read occurred.
+    MemoryRead,
+    /// A memory write occurred.
+    MemoryWrite,
+    /// A register was read.
+    RegisterRead,
+    /// A register was written.
+    RegisterWrite,
+    /// A breakpoint was hit.
+    BreakpointHit,
+    /// A watchpoint was hit.
+    WatchpointHit,
+    /// The active thread changed.
+    ThreadChanged,
+    /// The snap was advanced.
+    SnapAdvanced,
+    /// Execution state changed (stopped/running).
+    ExecutionStateChanged,
+}
+
+/// A published event on the access event bus.
+#[derive(Debug, Clone)]
+pub struct AccessEvent {
+    /// The type of event.
+    pub event_type: AccessEventType,
+    /// The thread key associated with this event (if any).
+    pub thread_key: Option<i64>,
+    /// The address space or register name involved.
+    pub target: String,
+    /// The offset (0 for registers).
+    pub offset: u64,
+    /// The data size.
+    pub size: u32,
+    /// Sequence number.
+    pub seq: u64,
+}
+
+/// A subscription handle returned when subscribing to events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SubscriptionId(u64);
+
+/// A pub/sub event bus for debugger access events.
+///
+/// Ported from Ghidra's event notification system used by the
+/// debugger model. Components subscribe to specific event types
+/// and receive notifications when those events occur. This provides
+/// loose coupling between the access layer and UI/plugin components.
+///
+/// Event listeners are identified by `SubscriptionId` and can be
+/// individually unsubscribed.
+#[derive(Debug)]
+pub struct AccessEventBus {
+    subscriptions: Vec<AccessSubscription>,
+    event_log: Vec<AccessEvent>,
+    next_sub_id: u64,
+    next_event_seq: u64,
+    /// Maximum log size (0 = don't log).
+    max_log_size: usize,
+}
+
+/// An event subscription.
+struct AccessSubscription {
+    id: SubscriptionId,
+    /// Which event types this subscription is interested in.
+    /// Empty means "all events".
+    event_types: Vec<AccessEventType>,
+    /// The callback function.
+    callback: Box<dyn Fn(&AccessEvent)>,
+}
+
+impl std::fmt::Debug for AccessSubscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AccessSubscription")
+            .field("id", &self.id)
+            .field("event_types", &self.event_types)
+            .finish()
+    }
+}
+
+impl AccessEventBus {
+    /// Create a new event bus.
+    pub fn new() -> Self {
+        Self {
+            subscriptions: Vec::new(),
+            event_log: Vec::new(),
+            next_sub_id: 0,
+            next_event_seq: 0,
+            max_log_size: 0,
+        }
+    }
+
+    /// Set the maximum event log size.
+    pub fn with_max_log_size(mut self, max: usize) -> Self {
+        self.max_log_size = max;
+        self
+    }
+
+    /// Subscribe to specific event types.
+    pub fn subscribe(
+        &mut self,
+        event_types: Vec<AccessEventType>,
+        callback: Box<dyn Fn(&AccessEvent)>,
+    ) -> SubscriptionId {
+        let id = SubscriptionId(self.next_sub_id);
+        self.next_sub_id += 1;
+        self.subscriptions.push(AccessSubscription {
+            id,
+            event_types,
+            callback,
+        });
+        id
+    }
+
+    /// Subscribe to all event types.
+    pub fn subscribe_all(
+        &mut self,
+        callback: Box<dyn Fn(&AccessEvent)>,
+    ) -> SubscriptionId {
+        self.subscribe(Vec::new(), callback)
+    }
+
+    /// Unsubscribe a listener.
+    pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
+        if let Some(pos) = self.subscriptions.iter().position(|s| s.id == id) {
+            self.subscriptions.remove(pos);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Publish an event to all matching subscribers.
+    pub fn publish(&mut self, mut event: AccessEvent) {
+        event.seq = self.next_event_seq;
+        self.next_event_seq += 1;
+
+        for sub in &self.subscriptions {
+            if sub.event_types.is_empty() || sub.event_types.contains(&event.event_type) {
+                (sub.callback)(&event);
+            }
+        }
+
+        if self.max_log_size > 0 {
+            if self.event_log.len() >= self.max_log_size {
+                self.event_log.remove(0);
+            }
+            self.event_log.push(event);
+        }
+    }
+
+    /// Convenience: publish a memory read event.
+    pub fn on_memory_read(&mut self, space: &str, offset: u64, size: u32, thread: Option<i64>) {
+        self.publish(AccessEvent {
+            event_type: AccessEventType::MemoryRead,
+            thread_key: thread,
+            target: space.to_string(),
+            offset,
+            size,
+            seq: 0,
+        });
+    }
+
+    /// Convenience: publish a memory write event.
+    pub fn on_memory_write(&mut self, space: &str, offset: u64, size: u32, thread: Option<i64>) {
+        self.publish(AccessEvent {
+            event_type: AccessEventType::MemoryWrite,
+            thread_key: thread,
+            target: space.to_string(),
+            offset,
+            size,
+            seq: 0,
+        });
+    }
+
+    /// Convenience: publish a register read event.
+    pub fn on_register_read(&mut self, name: &str, size: u32, thread: Option<i64>) {
+        self.publish(AccessEvent {
+            event_type: AccessEventType::RegisterRead,
+            thread_key: thread,
+            target: name.to_string(),
+            offset: 0,
+            size,
+            seq: 0,
+        });
+    }
+
+    /// Convenience: publish a register write event.
+    pub fn on_register_write(&mut self, name: &str, size: u32, thread: Option<i64>) {
+        self.publish(AccessEvent {
+            event_type: AccessEventType::RegisterWrite,
+            thread_key: thread,
+            target: name.to_string(),
+            offset: 0,
+            size,
+            seq: 0,
+        });
+    }
+
+    /// Convenience: publish a breakpoint hit event.
+    pub fn on_breakpoint_hit(&mut self, bp_id: u64, thread: Option<i64>) {
+        self.publish(AccessEvent {
+            event_type: AccessEventType::BreakpointHit,
+            thread_key: thread,
+            target: bp_id.to_string(),
+            offset: 0,
+            size: 0,
+            seq: 0,
+        });
+    }
+
+    /// Get the event log.
+    pub fn event_log(&self) -> &[AccessEvent] {
+        &self.event_log
+    }
+
+    /// Get events of a specific type from the log.
+    pub fn events_of_type(&self, event_type: AccessEventType) -> Vec<&AccessEvent> {
+        self.event_log
+            .iter()
+            .filter(|e| e.event_type == event_type)
+            .collect()
+    }
+
+    /// The number of active subscriptions.
+    pub fn num_subscriptions(&self) -> usize {
+        self.subscriptions.len()
+    }
+
+    /// Clear the event log.
+    pub fn clear_log(&mut self) {
+        self.event_log.clear();
+    }
+
+    /// Remove all subscriptions.
+    pub fn clear_subscriptions(&mut self) {
+        self.subscriptions.clear();
+    }
+}
+
+impl Default for AccessEventBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// MemoryCheckpointManager -- checkpoint/restore for memory state
+// ============================================================================
+
+/// A named checkpoint of memory state.
+#[derive(Debug, Clone)]
+pub struct MemoryCheckpoint {
+    /// The checkpoint ID.
+    pub id: u64,
+    /// A human-readable label.
+    pub label: String,
+    /// The snap value at checkpoint time.
+    pub snap: i64,
+    /// The memory data: (space, offset, bytes).
+    pub data: Vec<(String, u64, Vec<u8>)>,
+    /// Timestamp (millis since epoch).
+    pub timestamp_ms: u64,
+}
+
+/// Manages named checkpoints of memory state that can be restored.
+///
+/// Ported from Ghidra's memory checkpoint/restore mechanism used
+/// during emulation for speculative execution and undo support.
+/// Each checkpoint captures the current state of a memory view
+/// so it can be restored later.
+#[derive(Debug, Clone)]
+pub struct MemoryCheckpointManager {
+    checkpoints: Vec<MemoryCheckpoint>,
+    next_id: u64,
+    /// Maximum number of checkpoints to keep (0 = unlimited).
+    max_checkpoints: usize,
+}
+
+impl MemoryCheckpointManager {
+    /// Create a new checkpoint manager.
+    pub fn new() -> Self {
+        Self {
+            checkpoints: Vec::new(),
+            next_id: 0,
+            max_checkpoints: 0,
+        }
+    }
+
+    /// Set the maximum number of checkpoints.
+    pub fn with_max_checkpoints(mut self, max: usize) -> Self {
+        self.max_checkpoints = max;
+        self
+    }
+
+    /// Create a checkpoint from the current memory view.
+    ///
+    /// Captures all dirty regions and the current state of those regions.
+    pub fn checkpoint(
+        &mut self,
+        label: impl Into<String>,
+        snap: i64,
+        memory: &PcodeMemoryView,
+    ) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        let mut data = Vec::new();
+        // Capture all dirty regions
+        for (space, start, end) in memory.dirty_regions() {
+            let len = (*end - *start) as u32;
+            if let Some(bytes) = memory.read(space, *start, len) {
+                data.push((space.clone(), *start, bytes));
+            }
+        }
+
+        self.checkpoints.push(MemoryCheckpoint {
+            id,
+            label: label.into(),
+            snap,
+            data,
+            timestamp_ms: 0, // caller can set this externally
+        });
+
+        // Evict old checkpoints if needed
+        if self.max_checkpoints > 0 && self.checkpoints.len() > self.max_checkpoints {
+            self.checkpoints.remove(0);
+        }
+
+        id
+    }
+
+    /// Restore a checkpoint into a memory view.
+    ///
+    /// Writes the checkpoint data back into the memory view, effectively
+    /// reverting the memory to the checkpoint state.
+    pub fn restore(&self, id: u64, memory: &mut PcodeMemoryView) -> Result<(), String> {
+        let checkpoint = self
+            .checkpoints
+            .iter()
+            .find(|c| c.id == id)
+            .ok_or_else(|| format!("checkpoint {} not found", id))?;
+
+        for (space, offset, bytes) in &checkpoint.data {
+            memory.write(space, *offset, bytes);
+        }
+
+        Ok(())
+    }
+
+    /// Get a checkpoint by ID.
+    pub fn get(&self, id: u64) -> Option<&MemoryCheckpoint> {
+        self.checkpoints.iter().find(|c| c.id == id)
+    }
+
+    /// Get the most recent checkpoint.
+    pub fn latest(&self) -> Option<&MemoryCheckpoint> {
+        self.checkpoints.last()
+    }
+
+    /// Remove a checkpoint.
+    pub fn remove(&mut self, id: u64) -> Option<MemoryCheckpoint> {
+        if let Some(pos) = self.checkpoints.iter().position(|c| c.id == id) {
+            Some(self.checkpoints.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// The number of checkpoints.
+    pub fn len(&self) -> usize {
+        self.checkpoints.len()
+    }
+
+    /// Whether there are no checkpoints.
+    pub fn is_empty(&self) -> bool {
+        self.checkpoints.is_empty()
+    }
+
+    /// Clear all checkpoints.
+    pub fn clear(&mut self) {
+        self.checkpoints.clear();
+    }
+
+    /// List all checkpoint labels and IDs.
+    pub fn list(&self) -> Vec<(u64, &str, i64)> {
+        self.checkpoints
+            .iter()
+            .map(|c| (c.id, c.label.as_str(), c.snap))
+            .collect()
+    }
+}
+
+impl Default for MemoryCheckpointManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ============================================================================
+// AccessLockManager -- manage read/write locks on address ranges
+// ============================================================================
+
+/// The kind of lock held on an address range.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LockKind {
+    /// A shared (read) lock.
+    Shared,
+    /// An exclusive (write) lock.
+    Exclusive,
+}
+
+/// A lock held on a specific address range.
+#[derive(Debug, Clone)]
+pub struct AccessLock {
+    /// The lock ID.
+    pub id: u64,
+    /// The address space.
+    pub space: String,
+    /// The start offset (inclusive).
+    pub start: u64,
+    /// The end offset (exclusive).
+    pub end: u64,
+    /// The kind of lock.
+    pub kind: LockKind,
+    /// Which thread holds this lock.
+    pub thread_key: i64,
+    /// A description of why the lock was acquired.
+    pub reason: String,
+}
+
+/// Manages read/write locks on address ranges for concurrent access.
+///
+/// Ported from Ghidra's lock management used when multiple agents
+/// or threads access the same debug session. Prevents conflicting
+/// writes and ensures consistent reads by tracking shared and
+/// exclusive locks on address ranges.
+#[derive(Debug, Clone, Default)]
+pub struct AccessLockManager {
+    locks: Vec<AccessLock>,
+    next_id: u64,
+}
+
+impl AccessLockManager {
+    /// Create a new lock manager.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Acquire a shared (read) lock on a range. Returns the lock ID.
+    ///
+    /// Fails if an exclusive lock overlaps the range from a different thread.
+    pub fn acquire_shared(
+        &mut self,
+        space: &str,
+        start: u64,
+        end: u64,
+        thread_key: i64,
+        reason: impl Into<String>,
+    ) -> Result<u64, String> {
+        // Check for conflicting exclusive locks from other threads
+        for lock in &self.locks {
+            if lock.space == space
+                && lock.start < end
+                && start < lock.end
+                && lock.kind == LockKind::Exclusive
+                && lock.thread_key != thread_key
+            {
+                return Err(format!(
+                    "range {}:{:#x}-{:#x} is exclusively locked by thread {}",
+                    space, start, end, lock.thread_key
+                ));
+            }
+        }
+
+        let id = self.next_id;
+        self.next_id += 1;
+        self.locks.push(AccessLock {
+            id,
+            space: space.to_string(),
+            start,
+            end,
+            kind: LockKind::Shared,
+            thread_key,
+            reason: reason.into(),
+        });
+        Ok(id)
+    }
+
+    /// Acquire an exclusive (write) lock on a range. Returns the lock ID.
+    ///
+    /// Fails if any lock overlaps the range from a different thread.
+    pub fn acquire_exclusive(
+        &mut self,
+        space: &str,
+        start: u64,
+        end: u64,
+        thread_key: i64,
+        reason: impl Into<String>,
+    ) -> Result<u64, String> {
+        // Check for conflicting locks from other threads
+        for lock in &self.locks {
+            if lock.space == space
+                && lock.start < end
+                && start < lock.end
+                && lock.thread_key != thread_key
+            {
+                return Err(format!(
+                    "range {}:{:#x}-{:#x} is locked by thread {}",
+                    space, start, end, lock.thread_key
+                ));
+            }
+        }
+
+        let id = self.next_id;
+        self.next_id += 1;
+        self.locks.push(AccessLock {
+            id,
+            space: space.to_string(),
+            start,
+            end,
+            kind: LockKind::Exclusive,
+            thread_key,
+            reason: reason.into(),
+        });
+        Ok(id)
+    }
+
+    /// Release a lock by ID.
+    pub fn release(&mut self, id: u64) -> Option<AccessLock> {
+        if let Some(pos) = self.locks.iter().position(|l| l.id == id) {
+            Some(self.locks.remove(pos))
+        } else {
+            None
+        }
+    }
+
+    /// Release all locks held by a specific thread.
+    pub fn release_thread(&mut self, thread_key: i64) {
+        self.locks.retain(|l| l.thread_key != thread_key);
+    }
+
+    /// Check if a range is readable by the given thread.
+    ///
+    /// Readable if there are no exclusive locks from other threads.
+    pub fn is_readable(&self, space: &str, start: u64, end: u64, thread_key: i64) -> bool {
+        !self.locks.iter().any(|l| {
+            l.space == space
+                && l.start < end
+                && start < l.end
+                && l.kind == LockKind::Exclusive
+                && l.thread_key != thread_key
+        })
+    }
+
+    /// Check if a range is writable by the given thread.
+    ///
+    /// Writable if there are no locks from other threads.
+    pub fn is_writable(&self, space: &str, start: u64, end: u64, thread_key: i64) -> bool {
+        !self.locks.iter().any(|l| {
+            l.space == space
+                && l.start < end
+                && start < l.end
+                && l.thread_key != thread_key
+        })
+    }
+
+    /// Get all active locks.
+    pub fn active_locks(&self) -> &[AccessLock] {
+        &self.locks
+    }
+
+    /// Get locks held by a specific thread.
+    pub fn thread_locks(&self, thread_key: i64) -> Vec<&AccessLock> {
+        self.locks
+            .iter()
+            .filter(|l| l.thread_key == thread_key)
+            .collect()
+    }
+
+    /// The number of active locks.
+    pub fn len(&self) -> usize {
+        self.locks.len()
+    }
+
+    /// Whether there are no active locks.
+    pub fn is_empty(&self) -> bool {
+        self.locks.is_empty()
+    }
+
+    /// Release all locks.
+    pub fn clear(&mut self) {
+        self.locks.clear();
+    }
+}
+
+// ============================================================================
+// PcodeStepController -- high-level single-step and continue control
+// ============================================================================
+
+/// The result of a step operation.
+#[derive(Debug, Clone)]
+pub struct StepResult {
+    /// The kind of result.
+    pub kind: StepResultKind,
+    /// The program counter after the step.
+    pub pc: u64,
+    /// The snap after the step.
+    pub snap: i64,
+    /// The number of pcode ops executed.
+    pub ops_executed: u32,
+    /// An optional error message.
+    pub error: Option<String>,
+}
+
+/// The kind of step result.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StepResultKind {
+    /// Step completed normally.
+    Stepped,
+    /// A breakpoint was hit.
+    BreakpointHit,
+    /// A watchpoint was hit.
+    WatchpointHit,
+    /// Execution stopped (halt, exit, etc.).
+    Stopped,
+    /// An error occurred.
+    Error,
+    /// Execution is still running (async).
+    Running,
+}
+
+/// High-level controller for stepping through pcode execution.
+///
+/// Ported from Ghidra's step controller that coordinates memory/register
+/// access, breakpoint checking, and event emission during single-step
+/// and continue operations. Provides the `step_over`, `step_into`,
+/// `step_out`, and `continue_execution` semantics at the pcode level.
+#[derive(Debug, Clone)]
+pub struct PcodeStepController {
+    /// The current thread being controlled.
+    pub thread_key: i64,
+    /// The step mode.
+    pub mode: StepMode,
+    /// Maximum steps before auto-stopping (0 = unlimited).
+    pub max_steps: u32,
+    /// The number of steps taken in the current run.
+    steps_taken: u32,
+    /// The execution history (list of PCs visited).
+    history: Vec<u64>,
+    /// Maximum history depth (0 = unlimited).
+    max_history: usize,
+}
+
+/// The stepping mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum StepMode {
+    /// Step a single pcode op.
+    SingleOp,
+    /// Step one source-level instruction (may execute multiple ops).
+    Instruction,
+    /// Step over a call (stop at next instruction after call).
+    Over,
+    /// Step out of current function (stop at return address).
+    Out,
+    /// Continue until breakpoint or halt.
+    Continue,
+}
+
+impl PcodeStepController {
+    /// Create a new step controller for a thread.
+    pub fn new(thread_key: i64) -> Self {
+        Self {
+            thread_key,
+            mode: StepMode::SingleOp,
+            max_steps: 0,
+            steps_taken: 0,
+            history: Vec::new(),
+            max_history: 1000,
+        }
+    }
+
+    /// Set the step mode.
+    pub fn with_mode(mut self, mode: StepMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Set the maximum steps per run.
+    pub fn with_max_steps(mut self, max: u32) -> Self {
+        self.max_steps = max;
+        self
+    }
+
+    /// Set the maximum history depth.
+    pub fn with_max_history(mut self, max: usize) -> Self {
+        self.max_history = max;
+        self
+    }
+
+    /// Record a step in the execution history.
+    pub fn record_step(&mut self, pc: u64) {
+        self.steps_taken += 1;
+        if self.max_history > 0 && self.history.len() >= self.max_history {
+            self.history.remove(0);
+        }
+        self.history.push(pc);
+    }
+
+    /// Check if the maximum steps have been reached.
+    pub fn is_max_steps_reached(&self) -> bool {
+        self.max_steps > 0 && self.steps_taken >= self.max_steps
+    }
+
+    /// Reset the step counter for a new run.
+    pub fn reset_run(&mut self) {
+        self.steps_taken = 0;
+    }
+
+    /// The number of steps taken in the current run.
+    pub fn steps_taken(&self) -> u32 {
+        self.steps_taken
+    }
+
+    /// Get the execution history.
+    pub fn history(&self) -> &[u64] {
+        &self.history
+    }
+
+    /// Get the last N PCs from history.
+    pub fn recent_history(&self, n: usize) -> &[u64] {
+        let start = self.history.len().saturating_sub(n);
+        &self.history[start..]
+    }
+
+    /// Get the most recent PC.
+    pub fn last_pc(&self) -> Option<u64> {
+        self.history.last().copied()
+    }
+
+    /// Check if a PC has been visited before in this run (loop detection).
+    pub fn is_pc_in_history(&self, pc: u64) -> bool {
+        self.history.contains(&pc)
+    }
+
+    /// Clear the history.
+    pub fn clear_history(&mut self) {
+        self.history.clear();
+    }
+
+    /// The total history depth.
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -4411,5 +5173,328 @@ mod tests {
     fn test_register_value_source_variants() {
         assert_ne!(RegisterValueSource::Target, RegisterValueSource::Trace);
         assert_ne!(RegisterValueSource::Emulated, RegisterValueSource::Unknown);
+    }
+
+    // -- AccessEventBus --
+
+    #[test]
+    fn test_event_bus_subscribe_and_publish() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let received = Rc::new(RefCell::new(Vec::new()));
+        let received_clone = received.clone();
+
+        let mut bus = AccessEventBus::new().with_max_log_size(100);
+        let _sub = bus.subscribe(
+            vec![AccessEventType::MemoryWrite],
+            Box::new(move |event: &AccessEvent| {
+                received_clone.borrow_mut().push(event.target.clone());
+            }),
+        );
+
+        bus.on_memory_write("ram", 0x1000, 4, Some(1));
+        bus.on_memory_read("ram", 0x2000, 2, Some(1)); // should not trigger
+
+        let recorded = received.borrow();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0], "ram");
+    }
+
+    #[test]
+    fn test_event_bus_subscribe_all() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let count = Rc::new(RefCell::new(0u32));
+        let count_clone = count.clone();
+
+        let mut bus = AccessEventBus::new();
+        let _sub = bus.subscribe_all(Box::new(move |_: &AccessEvent| {
+            *count_clone.borrow_mut() += 1;
+        }));
+
+        bus.on_memory_read("ram", 0x1000, 1, Some(1));
+        bus.on_register_write("RAX", 8, Some(1));
+        bus.on_breakpoint_hit(1, Some(1));
+
+        assert_eq!(*count.borrow(), 3);
+    }
+
+    #[test]
+    fn test_event_bus_unsubscribe() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let count = Rc::new(RefCell::new(0u32));
+        let count_clone = count.clone();
+
+        let mut bus = AccessEventBus::new();
+        let sub = bus.subscribe_all(Box::new(move |_: &AccessEvent| {
+            *count_clone.borrow_mut() += 1;
+        }));
+
+        bus.on_register_read("RAX", 8, Some(1));
+        assert_eq!(*count.borrow(), 1);
+
+        assert!(bus.unsubscribe(sub));
+        bus.on_register_read("RAX", 8, Some(1));
+        assert_eq!(*count.borrow(), 1); // no change
+    }
+
+    #[test]
+    fn test_event_bus_log() {
+        let mut bus = AccessEventBus::new().with_max_log_size(10);
+        bus.on_memory_write("ram", 0x1000, 4, Some(1));
+        bus.on_register_write("RAX", 8, Some(1));
+
+        assert_eq!(bus.event_log().len(), 2);
+        assert_eq!(
+            bus.events_of_type(AccessEventType::MemoryWrite).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_event_bus_num_subscriptions() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let dummy: Rc<RefCell<()>> = Rc::new(RefCell::new(()));
+
+        let mut bus = AccessEventBus::new();
+        let d1 = dummy.clone();
+        let s1 = bus.subscribe_all(Box::new(move |_| { let _ = &d1; }));
+        let d2 = dummy.clone();
+        let _s2 = bus.subscribe_all(Box::new(move |_| { let _ = &d2; }));
+        assert_eq!(bus.num_subscriptions(), 2);
+
+        bus.unsubscribe(s1);
+        assert_eq!(bus.num_subscriptions(), 1);
+    }
+
+    // -- MemoryCheckpointManager --
+
+    #[test]
+    fn test_memory_checkpoint_basic() {
+        let mut memory = PcodeMemoryView::new();
+        memory.write("ram", 0x1000, &[0x42, 0x43]);
+        memory.write("ram", 0x2000, &[0xAA]);
+
+        let mut mgr = MemoryCheckpointManager::new();
+        let id = mgr.checkpoint("before_changes", 0, &memory);
+        assert_eq!(mgr.len(), 1);
+
+        // Modify memory
+        memory.write("ram", 0x1000, &[0xFF, 0xFF]);
+        assert_eq!(memory.read("ram", 0x1000, 2), Some(vec![0xFF, 0xFF]));
+
+        // Restore checkpoint
+        mgr.restore(id, &mut memory).unwrap();
+        // Note: restore writes back checkpoint data, which was captured
+        // from dirty regions at checkpoint time
+        assert_eq!(mgr.get(id).unwrap().label, "before_changes");
+    }
+
+    #[test]
+    fn test_memory_checkpoint_max() {
+        let mut memory = PcodeMemoryView::new();
+
+        let mut mgr = MemoryCheckpointManager::new().with_max_checkpoints(2);
+        memory.write("ram", 0x1000, &[1]);
+        mgr.checkpoint("cp1", 0, &memory);
+        memory.write("ram", 0x2000, &[2]);
+        mgr.checkpoint("cp2", 1, &memory);
+        memory.write("ram", 0x3000, &[3]);
+        mgr.checkpoint("cp3", 2, &memory);
+
+        // Should have evicted the oldest
+        assert_eq!(mgr.len(), 2);
+        assert!(mgr.latest().is_some());
+    }
+
+    #[test]
+    fn test_memory_checkpoint_list() {
+        let mut memory = PcodeMemoryView::new();
+        memory.write("ram", 0x1000, &[0x42]);
+
+        let mut mgr = MemoryCheckpointManager::new();
+        mgr.checkpoint("start", 0, &memory);
+        mgr.checkpoint("mid", 5, &memory);
+
+        let list = mgr.list();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].1, "start");
+        assert_eq!(list[1].1, "mid");
+    }
+
+    #[test]
+    fn test_memory_checkpoint_remove() {
+        let mut memory = PcodeMemoryView::new();
+        memory.write("ram", 0x1000, &[0x42]);
+
+        let mut mgr = MemoryCheckpointManager::new();
+        let id = mgr.checkpoint("test", 0, &memory);
+        assert_eq!(mgr.len(), 1);
+
+        mgr.remove(id);
+        assert!(mgr.is_empty());
+    }
+
+    // -- AccessLockManager --
+
+    #[test]
+    fn test_lock_manager_shared_locks() {
+        let mut mgr = AccessLockManager::new();
+
+        // Two threads can acquire shared locks on the same range
+        let id1 = mgr.acquire_shared("ram", 0x1000, 0x2000, 1, "read data").unwrap();
+        let id2 = mgr.acquire_shared("ram", 0x1000, 0x2000, 2, "read data").unwrap();
+
+        assert!(mgr.is_readable("ram", 0x1500, 0x1600, 1));
+        assert!(mgr.is_readable("ram", 0x1500, 0x1600, 2));
+        assert!(!mgr.is_writable("ram", 0x1500, 0x1600, 1)); // shared lock blocks write
+
+        mgr.release(id1);
+        mgr.release(id2);
+        assert!(mgr.is_writable("ram", 0x1500, 0x1600, 1));
+    }
+
+    #[test]
+    fn test_lock_manager_exclusive_lock() {
+        let mut mgr = AccessLockManager::new();
+
+        let _id1 = mgr.acquire_exclusive("ram", 0x1000, 0x2000, 1, "write data").unwrap();
+
+        // Other thread can't read or write
+        assert!(!mgr.is_readable("ram", 0x1500, 0x1600, 2));
+        assert!(!mgr.is_writable("ram", 0x1500, 0x1600, 2));
+
+        // Same thread can read/write (it holds the lock)
+        assert!(mgr.is_readable("ram", 0x1500, 0x1600, 1));
+        assert!(mgr.is_writable("ram", 0x1500, 0x1600, 1));
+    }
+
+    #[test]
+    fn test_lock_manager_non_overlapping() {
+        let mut mgr = AccessLockManager::new();
+
+        let _id1 = mgr.acquire_exclusive("ram", 0x1000, 0x2000, 1, "write").unwrap();
+        let _id2 = mgr.acquire_exclusive("ram", 0x3000, 0x4000, 2, "write").unwrap();
+
+        // Non-overlapping ranges: thread 1 can write outside thread 2's lock range
+        assert!(mgr.is_writable("ram", 0x2000, 0x2100, 1));
+        // But thread 1 cannot write inside thread 2's exclusive lock
+        assert!(!mgr.is_writable("ram", 0x3500, 0x3600, 1));
+    }
+
+    #[test]
+    fn test_lock_manager_release_thread() {
+        let mut mgr = AccessLockManager::new();
+
+        mgr.acquire_shared("ram", 0x1000, 0x2000, 1, "a").unwrap();
+        mgr.acquire_shared("ram", 0x3000, 0x4000, 1, "b").unwrap();
+        mgr.acquire_shared("ram", 0x5000, 0x6000, 2, "c").unwrap();
+
+        assert_eq!(mgr.len(), 3);
+        mgr.release_thread(1);
+        assert_eq!(mgr.len(), 1);
+        assert_eq!(mgr.thread_locks(2).len(), 1);
+    }
+
+    #[test]
+    fn test_lock_manager_conflict_rejected() {
+        let mut mgr = AccessLockManager::new();
+
+        mgr.acquire_exclusive("ram", 0x1000, 0x2000, 1, "write").unwrap();
+        let result = mgr.acquire_shared("ram", 0x1500, 0x1600, 2, "read");
+        assert!(result.is_err());
+    }
+
+    // -- PcodeStepController --
+
+    #[test]
+    fn test_step_controller_basic() {
+        let mut ctrl = PcodeStepController::new(42)
+            .with_mode(StepMode::Instruction)
+            .with_max_history(100);
+
+        ctrl.record_step(0x400000);
+        ctrl.record_step(0x400004);
+        ctrl.record_step(0x400008);
+
+        assert_eq!(ctrl.steps_taken(), 3);
+        assert_eq!(ctrl.last_pc(), Some(0x400008));
+        assert_eq!(ctrl.history_len(), 3);
+    }
+
+    #[test]
+    fn test_step_controller_max_steps() {
+        let mut ctrl = PcodeStepController::new(0).with_max_steps(2);
+        assert!(!ctrl.is_max_steps_reached());
+
+        ctrl.record_step(0x100);
+        ctrl.record_step(0x104);
+        assert!(ctrl.is_max_steps_reached());
+    }
+
+    #[test]
+    fn test_step_controller_loop_detection() {
+        let mut ctrl = PcodeStepController::new(0);
+        ctrl.record_step(0x100);
+        ctrl.record_step(0x104);
+        ctrl.record_step(0x100); // loop back
+
+        assert!(ctrl.is_pc_in_history(0x100));
+        assert!(ctrl.is_pc_in_history(0x104));
+        assert!(!ctrl.is_pc_in_history(0x200));
+    }
+
+    #[test]
+    fn test_step_controller_max_history() {
+        let mut ctrl = PcodeStepController::new(0).with_max_history(3);
+        ctrl.record_step(0x100);
+        ctrl.record_step(0x104);
+        ctrl.record_step(0x108);
+        ctrl.record_step(0x10C);
+
+        assert_eq!(ctrl.history_len(), 3);
+        // 0x100 was evicted
+        assert!(!ctrl.is_pc_in_history(0x100));
+        assert_eq!(ctrl.history()[0], 0x104);
+    }
+
+    #[test]
+    fn test_step_controller_recent_history() {
+        let mut ctrl = PcodeStepController::new(0).with_max_history(100);
+        ctrl.record_step(0x100);
+        ctrl.record_step(0x104);
+        ctrl.record_step(0x108);
+        ctrl.record_step(0x10C);
+
+        let recent = ctrl.recent_history(2);
+        assert_eq!(recent, &[0x108, 0x10C]);
+    }
+
+    #[test]
+    fn test_step_controller_reset_run() {
+        let mut ctrl = PcodeStepController::new(0);
+        ctrl.record_step(0x100);
+        ctrl.record_step(0x104);
+        assert_eq!(ctrl.steps_taken(), 2);
+
+        ctrl.reset_run();
+        assert_eq!(ctrl.steps_taken(), 0);
+        // History is preserved
+        assert_eq!(ctrl.history_len(), 2);
+    }
+
+    #[test]
+    fn test_step_controller_clear_history() {
+        let mut ctrl = PcodeStepController::new(0);
+        ctrl.record_step(0x100);
+        ctrl.clear_history();
+        assert_eq!(ctrl.history_len(), 0);
+        assert!(ctrl.last_pc().is_none());
     }
 }

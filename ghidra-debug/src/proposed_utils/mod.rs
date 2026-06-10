@@ -26,8 +26,12 @@
 //!   `AccessStateDiff` for comparing two access states,
 //!   `PcodeDebuggerDataAccess` trait for debugger+trace data access,
 //!   `PcodeDebuggerRegistersAccessState` for concrete target register
-//!   interaction, `MemoryWriteBuffer` for buffered memory writes, and
-//!   `DataAccessError` for debugger data access errors.
+//!   interaction, `MemoryWriteBuffer` for buffered memory writes,
+//!   `DataAccessError` for debugger data access errors,
+//!   `AccessEventBus` for publish/subscribe event notifications,
+//!   `MemoryCheckpointManager` for memory checkpoint/restore,
+//!   `AccessLockManager` for concurrent access read/write locking,
+//!   and `PcodeStepController` for high-level step control.
 //! - **Pcode debugger registers**: Register bank abstraction, register mapping,
 //!   register groups, value transformations, calling conventions,
 //!   `RegisterSnapshot` / `RegisterBankDiff` for capturing and comparing
@@ -49,8 +53,14 @@
 //!   `RegisterBankSnapshot` for serializable bank state capture,
 //!   `RegisterBankMergeResult` / `RegisterMergeConflict` for merge
 //!   conflict tracking, `PcodeDebuggerRegistersAccess` trait for
-//!   target-synchronized register access, and `RegisterAccessError`
-//!   for register access errors.
+//!   target-synchronized register access, `RegisterAccessError`
+//!   for register access errors, `RegisterBankIterator` for
+//!   iterating over bank entries with full metadata,
+//!   `RegisterChangeTracker` for incremental delta tracking with
+//!   checkpoint/rollback, `RegisterBankMerge3Result` /
+//!   `merge_register_banks_3way` for 3-way merge support,
+//!   and `RegisterSerializationUtils` for hex encoding/decoding
+//!   of register values and definitions.
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 

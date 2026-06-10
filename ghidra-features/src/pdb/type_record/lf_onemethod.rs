@@ -21,6 +21,8 @@ use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_member::{MemberAttributes, MemberProperty};
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB single method type record (`LF_ONEMETHOD`).
 ///
@@ -138,6 +140,43 @@ impl LfOnemethod {
         } else {
             String::new()
         };
+
+        Ok(Self::new(
+            RecordNumber::type_record(procedure_type_ti),
+            vftable_offset,
+            attrs,
+            name,
+        ))
+    }
+
+    /// Parse an `LF_ONEMETHOD` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `OneMethodMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// Reads attributes, procedure type record number (32-bit), conditionally
+    /// reads the VFTable offset (if Intro/IntroPure), reads the name string,
+    /// then aligns to 4 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let attributes_raw = reader.read_u16()?;
+        let procedure_type_ti = reader.read_u32()?;
+
+        let attrs = MemberAttributes::from_u16(attributes_raw);
+        let is_intro = matches!(
+            attrs.property,
+            MemberProperty::Intro | MemberProperty::IntroPure
+        );
+
+        let vftable_offset = if is_intro {
+            reader.read_u32()? as i32
+        } else {
+            -1
+        };
+
+        let name = reader.read_cstring()?;
+        reader.align(4); // skipPadding
 
         Ok(Self::new(
             RecordNumber::type_record(procedure_type_ti),
@@ -599,5 +638,62 @@ mod tests {
         assert!(m.name().is_empty());
         assert!(m.record_number().is_no_type());
         assert_eq!(m.vftable_offset, -1);
+    }
+
+    #[test]
+    fn test_onemethod_parse_from_reader_non_virtual() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes());   // attributes (public)
+        data.extend_from_slice(&0x1011u32.to_le_bytes());   // procedureType
+        data.extend_from_slice(b"bar\0");                    // name
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfOnemethod::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "bar");
+        assert_eq!(m.pdb_id(), 0x1511);
+        assert_eq!(
+            m.procedure_type_record_number(),
+            RecordNumber::type_record(0x1011)
+        );
+        assert_eq!(m.vftable_offset, -1);
+        assert!(!m.is_virtual());
+    }
+
+    #[test]
+    fn test_onemethod_parse_from_reader_intro() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0013u16.to_le_bytes());   // attributes (public + intro)
+        data.extend_from_slice(&0x2000u32.to_le_bytes());   // procedureType
+        data.extend_from_slice(&16u32.to_le_bytes());       // vftableOffset
+        data.extend_from_slice(b"introFunc\0");              // name
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfOnemethod::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(m.name(), "introFunc");
+        assert!(m.is_intro_virtual());
+        assert!(m.is_virtual());
+        assert_eq!(m.vftable_offset, 16);
+    }
+
+    #[test]
+    fn test_onemethod_parse_from_reader_intro_pure() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x001Bu16.to_le_bytes());   // public + intro_pure
+        data.extend_from_slice(&0x3000u32.to_le_bytes());   // procedureType
+        data.extend_from_slice(&24u32.to_le_bytes());       // vftableOffset
+        data.extend_from_slice(b"pureIntro\0");
+
+        let mut reader = PdbByteReader::new(&data);
+        let m = LfOnemethod::parse_from_reader(&mut reader).unwrap();
+        assert!(m.is_intro_virtual());
+        assert!(m.is_pure_virtual());
+        assert_eq!(m.vftable_offset, 24);
+    }
+
+    #[test]
+    fn test_onemethod_parse_from_reader_too_short() {
+        let data = [0u8; 4];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfOnemethod::parse_from_reader(&mut reader).is_err());
     }
 }

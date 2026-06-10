@@ -20,6 +20,8 @@ use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_member::{AccessProtection, MemberAttributes};
 use super::RecordNumber;
+use crate::pdb::pdb_byte_reader::PdbByteReader;
+use crate::pdb::pdb_exception::PdbException;
 
 /// Concrete PDB base class type record (`LF_BCLASS`).
 ///
@@ -104,6 +106,44 @@ impl LfBclass {
         let (offset, _next) = crate::pdb::pdb_byte_reader::parse_numeric(data, 6);
 
         Ok(Self::from_parsed(attributes_raw, base_class_ti, offset as u32))
+    }
+
+    /// Parse an `LF_BCLASS` record from a [`PdbByteReader`].
+    ///
+    /// Mirrors the Java `BaseClassMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// Reads attributes, base class record number (32-bit), a PDB numeric offset,
+    /// then aligns to 4 bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PdbException`] if the reader does not have enough data or the
+    /// numeric is not integral.
+    pub fn parse_from_reader(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let attributes_raw = reader.read_u16()?;
+        let base_class_ti = reader.read_u32()?;
+        let offset = Self::read_numeric(reader)?;
+        reader.align(4);
+        Ok(Self::from_parsed(attributes_raw, base_class_ti, offset as u32))
+    }
+
+    /// Read a PDB numeric value from the reader.
+    ///
+    /// Small values (< 0x8000) are stored directly as u16. Larger values use
+    /// a variant tag byte to indicate the actual width.
+    fn read_numeric(reader: &mut PdbByteReader) -> Result<u64, PdbException> {
+        let low = reader.read_u16()?;
+        if low < 0x8000 {
+            return Ok(low as u64);
+        }
+        let variant = reader.read_u8()?;
+        match variant {
+            0x00 => Ok(reader.read_u16()? as u64),
+            0x01 => Ok(reader.read_i16()? as u64),
+            0x02 => Ok(reader.read_u32()? as u64),
+            0x03 => Ok(reader.read_i32()? as u64),
+            0x10 => Ok(reader.read_u64()?),
+            _ => Ok(low as u64),
+        }
     }
 
     /// Create a simple public base class.
@@ -459,5 +499,46 @@ mod tests {
         assert!(bc.record_number().is_no_type());
         assert!(bc.is_direct());
         assert_eq!(bc.byte_offset(), 0);
+    }
+
+    #[test]
+    fn test_bclass_parse_from_reader() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // attributes (public)
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // baseClass
+        data.extend_from_slice(&8u16.to_le_bytes());      // offset (numeric: < 0x8000)
+
+        let mut reader = PdbByteReader::new(&data);
+        let bc = LfBclass::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(bc.pdb_id(), 0x1400);
+        assert_eq!(
+            bc.base_class_record_number(),
+            RecordNumber::type_record(0x1000)
+        );
+        assert_eq!(bc.byte_offset(), 8);
+        assert_eq!(bc.access(), AccessProtection::Public);
+    }
+
+    #[test]
+    fn test_bclass_parse_from_reader_large_offset() {
+        // Offset > 0x8000: use numeric encoding with u32 variant
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0003u16.to_le_bytes()); // attributes
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // baseClass
+        // Numeric: 0x8000 tag + variant 0x02 (u32) + value 0x12345678
+        data.extend_from_slice(&0x8000u16.to_le_bytes()); // tag
+        data.push(0x02);                                   // variant = u32
+        data.extend_from_slice(&0x12345678u32.to_le_bytes()); // value
+
+        let mut reader = PdbByteReader::new(&data);
+        let bc = LfBclass::parse_from_reader(&mut reader).unwrap();
+        assert_eq!(bc.byte_offset(), 0x12345678);
+    }
+
+    #[test]
+    fn test_bclass_parse_from_reader_too_short() {
+        let data = [0u8; 4];
+        let mut reader = PdbByteReader::new(&data);
+        assert!(LfBclass::parse_from_reader(&mut reader).is_err());
     }
 }

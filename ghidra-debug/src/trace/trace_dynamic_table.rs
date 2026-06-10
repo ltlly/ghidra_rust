@@ -168,6 +168,104 @@ impl DynamicValue {
             Self::Null => "Null",
         }
     }
+
+    /// Try to coerce this value to the target column type.
+    ///
+    /// Returns `Some(coerced)` if the coercion succeeds, `None` otherwise.
+    /// Numeric types can be coerced between each other. Strings can be
+    /// parsed to numeric types. Bool is preserved as-is.
+    pub fn coerce_to(&self, target: &ColumnType) -> Option<DynamicValue> {
+        match target {
+            ColumnType::Any => Some(self.clone()),
+            ColumnType::Bool => self.as_bool().map(DynamicValue::Bool),
+            ColumnType::Integer => {
+                // Prefer i64 if the value is signed, u64 otherwise.
+                if let Some(v) = self.as_i64() {
+                    Some(DynamicValue::I64(v))
+                } else {
+                    self.as_u64().map(DynamicValue::U64)
+                }
+            }
+            ColumnType::Float => self.as_f64().map(DynamicValue::F64),
+            ColumnType::String => match self {
+                Self::Bool(v) => Some(Self::String(v.to_string())),
+                Self::I64(v) => Some(Self::String(v.to_string())),
+                Self::U64(v) => Some(Self::String(v.to_string())),
+                Self::F64(v) => Some(Self::String(v.to_string())),
+                Self::String(_) => Some(self.clone()),
+                Self::Bytes(v) => Some(Self::String(format!("<{} bytes>", v.len()))),
+                Self::Null => Some(Self::String("null".into())),
+            },
+            ColumnType::Bytes => match self {
+                Self::Bytes(_) => Some(self.clone()),
+                Self::String(s) => Some(Self::Bytes(s.as_bytes().to_vec())),
+                _ => None,
+            },
+        }
+    }
+
+    /// Whether this value can be coerced to the given column type.
+    pub fn can_coerce_to(&self, target: &ColumnType) -> bool {
+        self.coerce_to(target).is_some()
+    }
+
+    /// Compare two dynamic values for ordering.
+    ///
+    /// Returns `Some(ordering)` if both values are comparable (same type
+    /// or both numeric), `None` otherwise.
+    pub fn partial_cmp_value(&self, other: &DynamicValue) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (Self::Bool(a), Self::Bool(b)) => Some(a.cmp(b)),
+            (Self::I64(a), Self::I64(b)) => Some(a.cmp(b)),
+            (Self::U64(a), Self::U64(b)) => Some(a.cmp(b)),
+            (Self::F64(a), Self::F64(b)) => a.partial_cmp(b),
+            (Self::String(a), Self::String(b)) => Some(a.cmp(b)),
+            // Cross-type numeric comparisons
+            (Self::I64(a), Self::U64(b)) => {
+                i64::try_from(*b).ok().map(|bv| a.cmp(&bv))
+            }
+            (Self::U64(a), Self::I64(b)) => {
+                u64::try_from(*b).ok().map(|bv| a.cmp(&bv))
+            }
+            (Self::I64(a), Self::F64(b)) => (*a as f64).partial_cmp(b),
+            (Self::U64(a), Self::F64(b)) => (*a as f64).partial_cmp(b),
+            (Self::F64(a), Self::I64(b)) => a.partial_cmp(&(*b as f64)),
+            (Self::F64(a), Self::U64(b)) => a.partial_cmp(&(*b as f64)),
+            _ => None,
+        }
+    }
+
+    /// Multiply two numeric dynamic values.
+    pub fn multiply(&self, other: &DynamicValue) -> Option<DynamicValue> {
+        match (self, other) {
+            (Self::I64(a), Self::I64(b)) => Some(Self::I64(a.wrapping_mul(*b))),
+            (Self::U64(a), Self::U64(b)) => Some(Self::U64(a.wrapping_mul(*b))),
+            (Self::F64(a), Self::F64(b)) => Some(Self::F64(a * b)),
+            (Self::I64(a), Self::U64(b)) => {
+                i64::try_from(*b).ok().map(|b| Self::I64(a.wrapping_mul(b)))
+            }
+            (Self::U64(a), Self::I64(b)) => {
+                u64::try_from(*b).ok().map(|b| Self::U64(a.wrapping_mul(b)))
+            }
+            _ => None,
+        }
+    }
+
+    /// Divide two numeric dynamic values. Returns None on division by zero.
+    pub fn divide(&self, other: &DynamicValue) -> Option<DynamicValue> {
+        match (self, other) {
+            (Self::I64(a), Self::I64(b)) => {
+                if *b == 0 { None } else { Some(Self::I64(a / b)) }
+            }
+            (Self::U64(a), Self::U64(b)) => {
+                if *b == 0 { None } else { Some(Self::U64(a / b)) }
+            }
+            (Self::F64(a), Self::F64(b)) => {
+                if *b == 0.0 { None } else { Some(Self::F64(a / b)) }
+            }
+            _ => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -204,6 +302,25 @@ impl ColumnType {
             Self::Float => matches!(value, DynamicValue::F64(_)),
             Self::String => matches!(value, DynamicValue::String(_)),
             Self::Bytes => matches!(value, DynamicValue::Bytes(_)),
+        }
+    }
+
+    /// Try to coerce a value to this column type.
+    ///
+    /// This is a convenience wrapper around `DynamicValue::coerce_to`.
+    pub fn coerce(&self, value: &DynamicValue) -> Option<DynamicValue> {
+        value.coerce_to(self)
+    }
+
+    /// The type name as a human-readable string.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Any => "Any",
+            Self::Bool => "Bool",
+            Self::Integer => "Integer",
+            Self::Float => "Float",
+            Self::String => "String",
+            Self::Bytes => "Bytes",
         }
     }
 }
@@ -575,14 +692,8 @@ impl DynamicTableEntry {
     /// Create a snapshot of all values at a given snap (temporal lookup for all keys).
     pub fn snapshot_at(&self, snap: i64) -> BTreeMap<String, &DynamicValue> {
         let mut result = BTreeMap::new();
-        // Collect all keys that have ever been set
-        for row in self.rows.values() {
-            for key in row.values.keys() {
-                result.entry(key.clone());
-            }
-        }
-        // Fill in values at the given snap
-        for key in result.keys().cloned().collect::<Vec<_>>() {
+        // Collect all keys that have ever been set, then fill in values at the given snap.
+        for key in self.all_keys() {
             if let Some(val) = self.get_at(snap, &key) {
                 result.insert(key, val);
             }
@@ -665,6 +776,125 @@ impl DynamicTableEntry {
         for k in keys {
             self.rows.remove(&k);
         }
+    }
+
+    /// Get all (key, value) pairs at a specific snap.
+    pub fn entries_at(&self, snap: i64) -> Vec<(&str, &DynamicValue)> {
+        self.rows
+            .get(&snap)
+            .map(|r| r.iter().collect())
+            .unwrap_or_default()
+    }
+
+    /// Compute a structured diff between two snapshots.
+    pub fn diff(&self, snap_a: i64, snap_b: i64) -> DynamicTableDiff {
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut changed = Vec::new();
+        let mut unchanged = Vec::new();
+
+        // Collect all keys known at either snap.
+        let mut all_keys: BTreeMap<String, ()> = BTreeMap::new();
+        for key in self.keys_at(snap_a) {
+            all_keys.insert(key.to_string(), ());
+        }
+        for key in self.keys_at(snap_b) {
+            all_keys.insert(key.to_string(), ());
+        }
+
+        for key in all_keys.keys() {
+            let val_a = self.get_exact(snap_a, key);
+            let val_b = self.get_exact(snap_b, key);
+            match (val_a, val_b) {
+                (None, None) => {}
+                (None, Some(b)) => added.push((key.clone(), b.clone())),
+                (Some(a), None) => removed.push((key.clone(), a.clone())),
+                (Some(a), Some(b)) => {
+                    if a == b {
+                        unchanged.push((key.clone(), a.clone()));
+                    } else {
+                        changed.push((key.clone(), a.clone(), b.clone()));
+                    }
+                }
+            }
+        }
+
+        DynamicTableDiff {
+            added,
+            removed,
+            changed,
+            unchanged,
+        }
+    }
+
+    /// Find rows matching a predicate across all snaps.
+    ///
+    /// Returns (snap, row) pairs where the predicate returns true.
+    pub fn find_where<F>(&self, predicate: F) -> Vec<(i64, &DynamicRow)>
+    where
+        F: Fn(i64, &DynamicRow) -> bool,
+    {
+        self.rows
+            .iter()
+            .filter(|(&snap, row)| predicate(snap, row))
+            .map(|(&snap, row)| (snap, row))
+            .collect()
+    }
+
+    /// Copy data from one snap range to another, offsetting snap values.
+    ///
+    /// Copies all rows in `[from_start, from_end]` to new snaps offset by
+    /// `to_start - from_start`.
+    pub fn copy_range(&mut self, from_start: i64, from_end: i64, to_start: i64) {
+        let offset = to_start - from_start;
+        let keys: Vec<(i64, DynamicRow)> = self
+            .rows
+            .range(from_start..=from_end)
+            .map(|(&s, r)| (s + offset, r.clone()))
+            .collect();
+        for (new_snap, row) in keys {
+            let dest = self
+                .rows
+                .entry(new_snap)
+                .or_insert_with(|| DynamicRow::new(new_snap));
+            dest.merge_from(&row);
+        }
+    }
+
+    /// Set a value with automatic coercion to the column's type.
+    ///
+    /// If the column has a type constraint and the value doesn't match,
+    /// attempts to coerce it. Returns whether the value was accepted.
+    pub fn set_with_coerce(&mut self, snap: i64, key: impl Into<String>, value: DynamicValue) -> bool {
+        let key_str = key.into();
+        if let Some(col) = self.columns.get(&key_str) {
+            if col.validate(&value) {
+                let row = self.rows.entry(snap).or_insert_with(|| DynamicRow::new(snap));
+                row.set(key_str, value);
+                return true;
+            }
+            // Try coercion
+            if let Some(coerced) = col.column_type.coerce(&value) {
+                let row = self.rows.entry(snap).or_insert_with(|| DynamicRow::new(snap));
+                row.set(key_str, coerced);
+                return true;
+            }
+            return false;
+        }
+        // No column schema, accept anything
+        let row = self.rows.entry(snap).or_insert_with(|| DynamicRow::new(snap));
+        row.set(key_str, value);
+        true
+    }
+
+    /// Get the number of distinct keys ever set in this table.
+    pub fn key_count(&self) -> usize {
+        self.all_keys().len()
+    }
+
+    /// Whether this table has any data.
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
     }
 }
 
@@ -765,6 +995,134 @@ impl TraceDynamicTableManager {
     /// Iterate over all tables.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &DynamicTableEntry)> {
         self.tables.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// The number of tables whose path starts with the given prefix.
+    pub fn table_count_for_prefix(&self, prefix: &str) -> usize {
+        self.tables
+            .range(prefix.to_string()..)
+            .take_while(|(k, _)| k.starts_with(prefix))
+            .count()
+    }
+
+    /// Rename a table from `old_path` to `new_path`.
+    ///
+    /// Returns `true` if the table existed and was renamed.
+    pub fn rename_table(&mut self, old_path: &str, new_path: &str) -> bool {
+        if let Some(mut table) = self.tables.remove(old_path) {
+            table.path = new_path.to_string();
+            self.tables.insert(new_path.to_string(), table);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get all tables as a vector of (path, entry) pairs.
+    pub fn tables_vec(&self) -> Vec<(&str, &DynamicTableEntry)> {
+        self.tables.iter().map(|(k, v)| (k.as_str(), v)).collect()
+    }
+
+    /// Whether any tables exist.
+    pub fn is_empty(&self) -> bool {
+        self.tables.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DynamicTableDiff -- structured diff between two snaps
+// ---------------------------------------------------------------------------
+
+/// A structured diff between two snapshots of a dynamic table.
+///
+/// Ported from Ghidra's property map diff operations. Lists which keys
+/// were added, removed, or changed between two snap values.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicTableDiff {
+    /// Keys that exist at `snap_b` but not at `snap_a`.
+    pub added: Vec<(String, DynamicValue)>,
+    /// Keys that exist at `snap_a` but not at `snap_b`.
+    pub removed: Vec<(String, DynamicValue)>,
+    /// Keys present at both snaps but with different values.
+    pub changed: Vec<(String, DynamicValue, DynamicValue)>,
+    /// Keys present at both snaps with the same value.
+    pub unchanged: Vec<(String, DynamicValue)>,
+}
+
+impl DynamicTableDiff {
+    /// Whether the two snapshots are identical.
+    pub fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
+    }
+
+    /// The total number of differences (added + removed + changed).
+    pub fn difference_count(&self) -> usize {
+        self.added.len() + self.removed.len() + self.changed.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DynamicTableBatch -- batch operations with commit semantics
+// ---------------------------------------------------------------------------
+
+/// A batch of set/remove operations to apply atomically to a dynamic table.
+///
+/// Ported from Ghidra's batch property map operations. Collects pending
+/// changes and applies them in a single pass.
+#[derive(Debug, Clone, Default)]
+pub struct DynamicTableBatch {
+    /// Pending set operations: (snap, key, value).
+    pending_sets: Vec<(i64, String, DynamicValue)>,
+    /// Pending remove operations: (snap, key).
+    pending_removes: Vec<(i64, String)>,
+}
+
+impl DynamicTableBatch {
+    /// Create a new empty batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queue a set operation.
+    pub fn set(&mut self, snap: i64, key: impl Into<String>, value: DynamicValue) {
+        self.pending_sets.push((snap, key.into(), value));
+    }
+
+    /// Queue a remove operation.
+    pub fn remove(&mut self, snap: i64, key: impl Into<String>) {
+        self.pending_removes.push((snap, key.into()));
+    }
+
+    /// The number of pending operations.
+    pub fn pending_count(&self) -> usize {
+        self.pending_sets.len() + self.pending_removes.len()
+    }
+
+    /// Whether there are no pending operations.
+    pub fn is_empty(&self) -> bool {
+        self.pending_sets.is_empty() && self.pending_removes.is_empty()
+    }
+
+    /// Apply all pending operations to the given table.
+    ///
+    /// Returns the number of operations applied.
+    pub fn apply_to(self, table: &mut DynamicTableEntry) -> usize {
+        let mut count = 0;
+        for (snap, key, value) in self.pending_sets {
+            table.set(snap, key, value);
+            count += 1;
+        }
+        for (snap, key) in self.pending_removes {
+            table.remove(snap, &key);
+            count += 1;
+        }
+        count
+    }
+
+    /// Clear all pending operations.
+    pub fn clear(&mut self) {
+        self.pending_sets.clear();
+        self.pending_removes.clear();
     }
 }
 
@@ -1415,5 +1773,327 @@ mod tests {
         let b = DynamicValue::U64(5);
         assert_eq!(a.add(&b), Some(DynamicValue::I64(15)));
         assert_eq!(b.add(&a), Some(DynamicValue::U64(15)));
+    }
+
+    // -- New tests for DynamicValue coerce, compare, multiply, divide --
+
+    #[test]
+    fn test_dynamic_value_coerce_to_integer() {
+        let v = DynamicValue::F64(3.14);
+        let coerced = v.coerce_to(&ColumnType::Integer);
+        assert!(coerced.is_none()); // f64 -> integer requires lossy cast, not supported
+
+        let v2 = DynamicValue::I64(42);
+        let coerced2 = v2.coerce_to(&ColumnType::Integer).unwrap();
+        assert_eq!(coerced2.as_i64(), Some(42));
+
+        let v3 = DynamicValue::U64(100);
+        let coerced3 = v3.coerce_to(&ColumnType::Integer).unwrap();
+        assert_eq!(coerced3.as_u64(), Some(100));
+    }
+
+    #[test]
+    fn test_dynamic_value_coerce_to_string() {
+        let v = DynamicValue::I64(-42);
+        let coerced = v.coerce_to(&ColumnType::String).unwrap();
+        assert_eq!(coerced.as_str(), Some("-42"));
+
+        let v2 = DynamicValue::Bool(true);
+        let coerced2 = v2.coerce_to(&ColumnType::String).unwrap();
+        assert_eq!(coerced2.as_str(), Some("true"));
+
+        let v3 = DynamicValue::Null;
+        let coerced3 = v3.coerce_to(&ColumnType::String).unwrap();
+        assert_eq!(coerced3.as_str(), Some("null"));
+    }
+
+    #[test]
+    fn test_dynamic_value_coerce_to_bytes() {
+        let v = DynamicValue::String("hello".into());
+        let coerced = v.coerce_to(&ColumnType::Bytes).unwrap();
+        assert_eq!(coerced.as_bytes(), Some(b"hello".as_slice()));
+
+        // Numeric types cannot coerce to bytes
+        let v2 = DynamicValue::I64(42);
+        assert!(v2.coerce_to(&ColumnType::Bytes).is_none());
+    }
+
+    #[test]
+    fn test_dynamic_value_coerce_to_any() {
+        let v = DynamicValue::Bool(false);
+        let coerced = v.coerce_to(&ColumnType::Any).unwrap();
+        assert_eq!(coerced.as_bool(), Some(false));
+    }
+
+    #[test]
+    fn test_dynamic_value_can_coerce_to() {
+        assert!(DynamicValue::I64(1).can_coerce_to(&ColumnType::String));
+        assert!(DynamicValue::String("1".into()).can_coerce_to(&ColumnType::Bytes));
+        assert!(!DynamicValue::Bool(true).can_coerce_to(&ColumnType::Integer));
+    }
+
+    #[test]
+    fn test_dynamic_value_partial_cmp() {
+        use std::cmp::Ordering;
+
+        let a = DynamicValue::I64(5);
+        let b = DynamicValue::I64(10);
+        assert_eq!(a.partial_cmp_value(&b), Some(Ordering::Less));
+        assert_eq!(b.partial_cmp_value(&a), Some(Ordering::Greater));
+        assert_eq!(a.partial_cmp_value(&a), Some(Ordering::Equal));
+
+        let c = DynamicValue::U64(5);
+        assert_eq!(a.partial_cmp_value(&c), Some(Ordering::Equal));
+
+        let d = DynamicValue::F64(5.0);
+        assert_eq!(a.partial_cmp_value(&d), Some(Ordering::Equal));
+
+        // Incomparable types
+        assert!(DynamicValue::Bool(true).partial_cmp_value(&DynamicValue::I64(1)).is_none());
+    }
+
+    #[test]
+    fn test_dynamic_value_multiply() {
+        let a = DynamicValue::I64(3);
+        let b = DynamicValue::I64(4);
+        assert_eq!(a.multiply(&b), Some(DynamicValue::I64(12)));
+
+        let c = DynamicValue::U64(10);
+        let d = DynamicValue::U64(20);
+        assert_eq!(c.multiply(&d), Some(DynamicValue::U64(200)));
+
+        let e = DynamicValue::F64(2.5);
+        let f = DynamicValue::F64(4.0);
+        assert_eq!(e.multiply(&f), Some(DynamicValue::F64(10.0)));
+
+        assert!(DynamicValue::Bool(true).multiply(&DynamicValue::Bool(false)).is_none());
+    }
+
+    #[test]
+    fn test_dynamic_value_divide() {
+        let a = DynamicValue::I64(12);
+        let b = DynamicValue::I64(4);
+        assert_eq!(a.divide(&b), Some(DynamicValue::I64(3)));
+
+        let c = DynamicValue::U64(100);
+        let d = DynamicValue::U64(10);
+        assert_eq!(c.divide(&d), Some(DynamicValue::U64(10)));
+
+        // Division by zero
+        assert!(a.divide(&DynamicValue::I64(0)).is_none());
+        assert!(DynamicValue::F64(1.0).divide(&DynamicValue::F64(0.0)).is_none());
+    }
+
+    #[test]
+    fn test_column_type_coerce() {
+        let v = DynamicValue::I64(42);
+        let coerced = ColumnType::String.coerce(&v).unwrap();
+        assert_eq!(coerced.as_str(), Some("42"));
+    }
+
+    #[test]
+    fn test_column_type_name() {
+        assert_eq!(ColumnType::Any.name(), "Any");
+        assert_eq!(ColumnType::Integer.name(), "Integer");
+        assert_eq!(ColumnType::Float.name(), "Float");
+    }
+
+    // -- New tests for DynamicTableEntry methods --
+
+    #[test]
+    fn test_dynamic_table_entries_at() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        table.set(0, "sp", DynamicValue::U64(0x7FFF0000));
+
+        let entries = table.entries_at(0);
+        assert_eq!(entries.len(), 2);
+        assert!(entries.iter().any(|(k, _)| *k == "pc"));
+        assert!(entries.iter().any(|(k, _)| *k == "sp"));
+
+        assert!(table.entries_at(99).is_empty());
+    }
+
+    #[test]
+    fn test_dynamic_table_diff() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        table.set(0, "sp", DynamicValue::U64(0x7FFF0000));
+        table.set(0, "keep", DynamicValue::Bool(true));
+        table.set(5, "pc", DynamicValue::U64(0x2000));
+        table.set(5, "new_key", DynamicValue::I64(42));
+        table.set(5, "keep", DynamicValue::Bool(true));
+        // sp not set at snap 5 -> removed
+        // keep stays the same -> unchanged
+
+        let diff = table.diff(0, 5);
+        assert_eq!(diff.added.len(), 1); // new_key
+        assert_eq!(diff.removed.len(), 1); // sp
+        assert_eq!(diff.changed.len(), 1); // pc
+        assert_eq!(diff.unchanged.len(), 1); // keep
+        assert!(!diff.is_empty());
+        assert_eq!(diff.difference_count(), 3);
+    }
+
+    #[test]
+    fn test_dynamic_table_find_where() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        table.set(5, "pc", DynamicValue::U64(0x2000));
+        table.set(10, "pc", DynamicValue::U64(0x3000));
+
+        let found = table.find_where(|_snap, row| {
+            row.get("pc")
+                .and_then(|v| v.as_u64())
+                .map_or(false, |addr| addr > 0x1500)
+        });
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[0].0, 5);
+        assert_eq!(found[1].0, 10);
+    }
+
+    #[test]
+    fn test_dynamic_table_copy_range() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        table.set(1, "pc", DynamicValue::U64(0x2000));
+
+        table.copy_range(0, 1, 10);
+        assert_eq!(table.get_exact(10, "pc").unwrap().as_u64(), Some(0x1000));
+        assert_eq!(table.get_exact(11, "pc").unwrap().as_u64(), Some(0x2000));
+        // Original data still present
+        assert_eq!(table.get_exact(0, "pc").unwrap().as_u64(), Some(0x1000));
+    }
+
+    #[test]
+    fn test_dynamic_table_set_with_coerce() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.add_column(ColumnSchema::new("pc", 0).with_type(ColumnType::Integer));
+
+        // Direct match
+        assert!(table.set_with_coerce(0, "pc", DynamicValue::U64(0x1000)));
+        // String -> Integer coercion won't work (no parse)
+        assert!(!table.set_with_coerce(1, "pc", DynamicValue::String("bad".into())));
+        // No schema for other key, accepts anything
+        assert!(table.set_with_coerce(0, "other", DynamicValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_dynamic_table_set_with_coerce_string_target() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.add_column(ColumnSchema::new("label", 0).with_type(ColumnType::String));
+
+        // Integer -> String coercion
+        assert!(table.set_with_coerce(0, "label", DynamicValue::I64(42)));
+        assert_eq!(table.get_exact(0, "label").unwrap().as_str(), Some("42"));
+    }
+
+    #[test]
+    fn test_dynamic_table_key_count_and_is_empty() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        assert!(table.is_empty());
+        assert_eq!(table.key_count(), 0);
+
+        table.set(0, "a", DynamicValue::I64(1));
+        table.set(0, "b", DynamicValue::I64(2));
+        table.set(5, "c", DynamicValue::I64(3));
+
+        assert!(!table.is_empty());
+        assert_eq!(table.key_count(), 3);
+    }
+
+    // -- New tests for DynamicTableDiff and DynamicTableBatch --
+
+    #[test]
+    fn test_dynamic_table_diff_empty() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+
+        let diff = table.diff(0, 0);
+        assert!(diff.is_empty());
+        assert_eq!(diff.difference_count(), 0);
+        assert_eq!(diff.unchanged.len(), 1);
+    }
+
+    #[test]
+    fn test_dynamic_table_batch() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        let mut batch = DynamicTableBatch::new();
+
+        batch.set(0, "a", DynamicValue::I64(1));
+        batch.set(0, "b", DynamicValue::I64(2));
+        batch.set(1, "c", DynamicValue::I64(3));
+        batch.remove(0, "b");
+
+        assert_eq!(batch.pending_count(), 4);
+        assert!(!batch.is_empty());
+
+        let applied = batch.apply_to(&mut table);
+        assert_eq!(applied, 4);
+        assert_eq!(table.get_exact(0, "a").unwrap().as_i64(), Some(1));
+        assert_eq!(table.get_exact(0, "b").unwrap(), &DynamicValue::Null);
+        assert_eq!(table.get_exact(1, "c").unwrap().as_i64(), Some(3));
+    }
+
+    #[test]
+    fn test_dynamic_table_batch_clear() {
+        let mut batch = DynamicTableBatch::new();
+        batch.set(0, "a", DynamicValue::I64(1));
+        assert_eq!(batch.pending_count(), 1);
+
+        batch.clear();
+        assert!(batch.is_empty());
+        assert_eq!(batch.pending_count(), 0);
+    }
+
+    // -- New tests for TraceDynamicTableManager methods --
+
+    #[test]
+    fn test_manager_table_count_for_prefix() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0].Threads[1]", "regs");
+        mgr.get_or_create("P[0].Threads[2]", "regs");
+        mgr.get_or_create("P[1].Threads[1]", "regs");
+
+        assert_eq!(mgr.table_count_for_prefix("P[0]"), 2);
+        assert_eq!(mgr.table_count_for_prefix("P[1]"), 1);
+        assert_eq!(mgr.table_count_for_prefix("P[2]"), 0);
+    }
+
+    #[test]
+    fn test_manager_rename_table() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "pc", DynamicValue::U64(0x1000));
+
+        assert!(mgr.rename_table("P[0]", "P[0].renamed"));
+        assert!(mgr.table("P[0]").is_none());
+        assert!(mgr.table("P[0].renamed").is_some());
+        assert_eq!(
+            mgr.table("P[0].renamed").unwrap().get_exact(0, "pc").unwrap().as_u64(),
+            Some(0x1000)
+        );
+
+        // Rename nonexistent
+        assert!(!mgr.rename_table("nonexistent", "new"));
+    }
+
+    #[test]
+    fn test_manager_tables_vec() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state");
+        mgr.get_or_create("P[1]", "state");
+
+        let vec = mgr.tables_vec();
+        assert_eq!(vec.len(), 2);
+    }
+
+    #[test]
+    fn test_manager_is_empty() {
+        let mut mgr = TraceDynamicTableManager::new();
+        assert!(mgr.is_empty());
+
+        mgr.get_or_create("P[0]", "state");
+        assert!(!mgr.is_empty());
     }
 }

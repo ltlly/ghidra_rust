@@ -19,6 +19,85 @@ use crate::agents::{
     ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo,
 };
 
+/// A process available on the system (from `info os processes`).
+///
+/// Ported from the Python `Available` dataclass in `util.py`.
+/// These are processes visible on the OS that can potentially be
+/// attached to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AvailableProcess {
+    /// OS process ID.
+    pub pid: u32,
+    /// User running the process.
+    pub user: String,
+    /// Command line / process name.
+    pub command: String,
+}
+
+impl AvailableProcess {
+    /// Create a new available process entry.
+    pub fn new(pid: u32, user: impl Into<String>, command: impl Into<String>) -> Self {
+        Self {
+            pid,
+            user: user.into(),
+            command: command.into(),
+        }
+    }
+
+    /// Parse from `info os processes` output line.
+    ///
+    /// Expected format: `PID USER COMMAND`
+    pub fn from_info_line(line: &str) -> Option<Self> {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() >= 3 {
+            let pid = parts[0].parse::<u32>().ok()?;
+            let user = parts[1].to_string();
+            let command = parts[2..].join(" ");
+            Some(Self { pid, user, command })
+        } else {
+            None
+        }
+    }
+}
+
+/// A breakpoint location within a breakpoint.
+///
+/// Ported from the Python `BreakpointLocation` dataclass in `util.py`.
+/// GDB breakpoints can have multiple locations (e.g., inlined functions
+/// or template instantiations).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BreakpointLocationInfo {
+    /// Resolved address of this location.
+    pub address: u64,
+    /// Whether this location is enabled.
+    pub enabled: bool,
+    /// Thread group (inferior) IDs this location applies to.
+    pub thread_groups: Vec<u32>,
+}
+
+impl BreakpointLocationInfo {
+    /// Create a new breakpoint location.
+    pub fn new(address: u64, enabled: bool) -> Self {
+        Self {
+            address,
+            enabled,
+            thread_groups: Vec::new(),
+        }
+    }
+
+    /// Add a thread group (inferior) this location applies to.
+    pub fn with_thread_group(mut self, inf_num: u32) -> Self {
+        self.thread_groups.push(inf_num);
+        self
+    }
+
+    /// Set thread groups.
+    pub fn with_thread_groups(mut self, groups: Vec<u32>) -> Self {
+        self.thread_groups = groups;
+        self
+    }
+}
+
 /// A module section within a loaded module.
 ///
 /// Sections correspond to ELF sections (e.g., `.text`, `.data`, `.bss`)
@@ -1057,6 +1136,459 @@ impl GdbInferiorManager {
     }
 }
 
+/// Address index for fast base-address lookup from memory regions.
+///
+/// Ported from the Python `Index` class in `util.py`. Uses sorted
+/// base addresses with binary search for efficient lookup of which
+/// region a given address falls within.
+#[derive(Debug, Clone)]
+pub struct RegionIndex {
+    /// Regions keyed by base address.
+    regions: BTreeMap<u64, MemoryRegion>,
+    /// Sorted base addresses for binary search.
+    bases: Vec<u64>,
+}
+
+impl RegionIndex {
+    /// Build an index from a list of memory regions.
+    pub fn from_regions(regions: &[MemoryRegion]) -> Self {
+        let mut map = BTreeMap::new();
+        let mut bases = Vec::new();
+        for r in regions {
+            map.insert(r.base, r.clone());
+            bases.push(r.base);
+        }
+        bases.sort();
+        Self { regions: map, bases }
+    }
+
+    /// Compute the base address for a given address.
+    ///
+    /// Returns the base address of the region containing `address`,
+    /// or `address` itself if no region contains it.
+    ///
+    /// Ported from `Index.compute_base` in `util.py`.
+    pub fn compute_base(&self, address: u64) -> u64 {
+        // Binary search: find the last base <= address
+        match self.bases.binary_search(&address) {
+            Ok(idx) => self.bases[idx],
+            Err(0) => address,
+            Err(idx) => {
+                let floor = self.bases[idx - 1];
+                if let Some(region) = self.regions.get(&floor) {
+                    if region.base + region.size > address {
+                        floor
+                    } else {
+                        address
+                    }
+                } else {
+                    address
+                }
+            }
+        }
+    }
+
+    /// Find the region containing the given address.
+    pub fn find_region(&self, address: u64) -> Option<&MemoryRegion> {
+        let base = self.compute_base(address);
+        if base == address {
+            return None;
+        }
+        self.regions.get(&base)
+    }
+
+    /// Check if regions have changed compared to a reference list.
+    ///
+    /// Ported from `RegionInfoReader.have_changed` in `util.py`.
+    pub fn have_changed(&self, new_regions: &[MemoryRegion]) -> bool {
+        if self.regions.len() != new_regions.len() {
+            return true;
+        }
+        for r in new_regions {
+            if self.regions.get(&r.base) != Some(r) {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get the number of indexed regions.
+    pub fn len(&self) -> usize {
+        self.regions.len()
+    }
+
+    /// Check if the index is empty.
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+}
+
+impl Default for RegionIndex {
+    fn default() -> Self {
+        Self {
+            regions: BTreeMap::new(),
+            bases: Vec::new(),
+        }
+    }
+}
+
+/// GDB version-aware module info reader configuration.
+///
+/// Ported from the Python `ModuleInfoReader` hierarchy in `util.py`.
+/// GDB's `maintenance info sections` command output format varies
+/// across versions (v8, v9, v11+).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ModuleInfoFormat {
+    /// GDB 8.x format (`maintenance info sections ALLOBJ`).
+    V8,
+    /// GDB 9-10 format (v8 command, v9 section pattern).
+    V9,
+    /// GDB 11+ format (`maintenance info sections -all-objects`).
+    V11,
+}
+
+impl ModuleInfoFormat {
+    /// Choose the appropriate format for a GDB major version.
+    pub fn for_gdb_version(major: u32) -> Self {
+        match major {
+            8 => Self::V8,
+            9 | 10 => Self::V9,
+            _ => Self::V11, // 11, 12, 13+
+        }
+    }
+
+    /// The GDB command to list modules.
+    pub fn command(&self) -> &'static str {
+        match self {
+            Self::V8 | Self::V9 => "maintenance info sections ALLOBJ",
+            Self::V11 => "maintenance info sections -all-objects",
+        }
+    }
+
+    /// Whether the format uses "Exec file" in addition to "Object file".
+    pub fn has_exec_file(&self) -> bool {
+        matches!(self, Self::V11)
+    }
+}
+
+/// Parse region output from `info proc mappings`.
+///
+/// Expected format per line:
+/// `START END SIZE OFFSET [PERMS] OBJFILE`
+///
+/// Ported from `RegionInfoReader.region_from_line` in `util.py`.
+pub fn parse_proc_mapping_line(line: &str, max_addr: u64) -> Option<MemoryRegion> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    if parts.len() < 4 {
+        return None;
+    }
+    let start = u64::from_str_radix(parts[0].trim_start_matches("0x"), 16).ok()? & max_addr;
+    let end = u64::from_str_radix(parts[1].trim_start_matches("0x"), 16).ok()? & max_addr;
+    let _size = u64::from_str_radix(parts[2].trim_start_matches("0x"), 16).ok()?;
+    let offset = u64::from_str_radix(parts[3].trim_start_matches("0x"), 16).ok()?;
+
+    let (perms, objfile_start) = if parts.len() >= 5 {
+        let fourth = parts[4];
+        if fourth.starts_with('r') || fourth.starts_with('-') {
+            (fourth.to_string(), 5)
+        } else {
+            ("---p".to_string(), 4)
+        }
+    } else {
+        ("---p".to_string(), 4)
+    };
+
+    let objfile = if objfile_start < parts.len() {
+        parts[objfile_start..].join(" ")
+    } else {
+        String::new()
+    };
+
+    Some(MemoryRegion {
+        base: start,
+        size: end.saturating_sub(start),
+        offset,
+        permissions: perms,
+        object_file: objfile,
+    })
+}
+
+/// Compute the maximum address for the current pointer size.
+///
+/// Ported from `compute_max_addr` in `util.py`.
+pub fn compute_max_addr(pointer_size: usize) -> u64 {
+    let bits = pointer_size * 8;
+    if bits >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << bits) - 1
+    }
+}
+
+/// Module section info as parsed from `maintenance info sections`.
+///
+/// Ported from the Python `Section` dataclass in `util.py`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParsedSection {
+    /// Section name.
+    pub name: String,
+    /// Virtual memory start address.
+    pub vma_start: u64,
+    /// Virtual memory end address.
+    pub vma_end: u64,
+    /// File offset.
+    pub file_offset: u64,
+    /// Section attributes (e.g., "CONTENTS", "ALLOC", "LOAD", "READONLY", "CODE").
+    pub attrs: Vec<String>,
+}
+
+impl ParsedSection {
+    /// Create a new parsed section.
+    pub fn new(
+        name: impl Into<String>,
+        vma_start: u64,
+        vma_end: u64,
+        file_offset: u64,
+        attrs: Vec<String>,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            vma_start,
+            vma_end,
+            file_offset,
+            attrs,
+        }
+    }
+
+    /// Check if the section has the ALLOC attribute.
+    pub fn is_alloc(&self) -> bool {
+        self.attrs.iter().any(|a| a.to_uppercase() == "ALLOC")
+    }
+
+    /// Check if the section has the LOAD attribute.
+    pub fn is_load(&self) -> bool {
+        self.attrs.iter().any(|a| a.to_uppercase() == "LOAD")
+    }
+
+    /// Check if the section has the CODE attribute.
+    pub fn is_code(&self) -> bool {
+        self.attrs.iter().any(|a| a.to_uppercase() == "CODE")
+    }
+
+    /// Check if the section has the READONLY attribute.
+    pub fn is_readonly(&self) -> bool {
+        self.attrs.iter().any(|a| a.to_uppercase() == "READONLY")
+    }
+
+    /// Merge with another section's info (takes non-zero values, merges attrs).
+    ///
+    /// Ported from `Section.better` in `util.py`.
+    pub fn merge(&self, other: &ParsedSection) -> ParsedSection {
+        let start = if self.vma_start != 0 {
+            self.vma_start
+        } else {
+            other.vma_start
+        };
+        let end = if self.vma_end != 0 {
+            self.vma_end
+        } else {
+            other.vma_end
+        };
+        let offset = if self.file_offset != 0 {
+            self.file_offset
+        } else {
+            other.file_offset
+        };
+        let mut attrs: BTreeSet<String> = self.attrs.iter().cloned().collect();
+        for a in &other.attrs {
+            attrs.insert(a.clone());
+        }
+        ParsedSection {
+            name: self.name.clone(),
+            vma_start: start,
+            vma_end: end,
+            file_offset: offset,
+            attrs: attrs.into_iter().collect(),
+        }
+    }
+
+    /// Get the size of the section.
+    pub fn size(&self) -> u64 {
+        self.vma_end.saturating_sub(self.vma_start)
+    }
+}
+
+/// Parsed module info from `maintenance info sections`.
+///
+/// Groups sections by module (objfile) name.
+#[derive(Debug, Clone)]
+pub struct ParsedModule {
+    /// Module (objfile) name.
+    pub name: String,
+    /// Sections within this module, keyed by section name.
+    pub sections: BTreeMap<String, ParsedSection>,
+}
+
+impl ParsedModule {
+    /// Create a new parsed module.
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            sections: BTreeMap::new(),
+        }
+    }
+
+    /// Add a section. Merges if same name exists.
+    pub fn add_section(&mut self, section: ParsedSection) {
+        if let Some(existing) = self.sections.get(&section.name) {
+            let merged = existing.merge(&section);
+            self.sections.insert(section.name.clone(), merged);
+        } else {
+            self.sections.insert(section.name.clone(), section);
+        }
+    }
+
+    /// Get only the ALLOC sections.
+    pub fn alloc_sections(&self) -> Vec<&ParsedSection> {
+        self.sections.values().filter(|s| s.is_alloc()).collect()
+    }
+
+    /// Compute the base address from ALLOC sections.
+    ///
+    /// Uses the minimum VMA start of all ALLOC sections, adjusted
+    /// through the region index.
+    pub fn compute_base(&self, index: &RegionIndex) -> u64 {
+        let alloc: Vec<&ParsedSection> = self.alloc_sections();
+        if alloc.is_empty() {
+            return 0;
+        }
+        alloc
+            .iter()
+            .map(|s| index.compute_base(s.vma_start))
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Compute the maximum address from ALLOC sections.
+    pub fn compute_max_addr(&self) -> u64 {
+        let alloc: Vec<&ParsedSection> = self.alloc_sections();
+        if alloc.is_empty() {
+            return 0;
+        }
+        alloc.iter().map(|s| s.vma_end).max().unwrap_or(0)
+    }
+
+    /// Convert to a `ModuleInfo` using the region index for base address computation.
+    pub fn to_module_info(&self, index: &RegionIndex) -> ModuleInfo {
+        let base = self.compute_base(index);
+        let max_addr = self.compute_max_addr();
+        ModuleInfo {
+            name: self.name.clone(),
+            base,
+            size: max_addr.saturating_sub(base),
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        }
+    }
+
+    /// Convert to a `ModuleWithSections`.
+    pub fn to_module_with_sections(&self, index: &RegionIndex) -> ModuleWithSections {
+        let info = self.to_module_info(index);
+        let mut mod_ws = ModuleWithSections::from_info(info);
+        for sec in self.sections.values() {
+            if sec.is_alloc() {
+                mod_ws.add_section(ModuleSection::new(
+                    &sec.name,
+                    sec.vma_start,
+                    sec.vma_end,
+                ));
+            }
+        }
+        mod_ws
+    }
+}
+
+/// Parse a section line from `maintenance info sections`.
+///
+/// Handles both v8 (plain hex) and v9+ (bracket index) formats.
+///
+/// V8 format:
+/// `0xVMA_START -> 0xVMA_END at 0xOFFSET: NAME ATTRS`
+///
+/// V9+ format:
+/// `[IDX] 0xVMA_START -> 0xVMA_END at 0xOFFSET: NAME ATTRS`
+pub fn parse_section_line(line: &str, max_addr: u64) -> Option<ParsedSection> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // Try to find the pattern: 0xSTART -> 0xEND at 0xOFFSET: NAME ATTRS
+    let arrow_pos = trimmed.find(" -> ")?;
+    let at_pos = trimmed.find(" at ")?;
+    let colon_pos = trimmed.find(':')?;
+
+    if arrow_pos >= at_pos || at_pos >= colon_pos {
+        return None;
+    }
+
+    // Extract VMA start (before " -> ")
+    let vma_start_str = trimmed[..arrow_pos].trim();
+    // Handle optional [IDX] prefix
+    let vma_start_str = if let Some(bracket_end) = vma_start_str.rfind(']') {
+        vma_start_str[bracket_end + 1..].trim()
+    } else {
+        vma_start_str
+    };
+    let vma_start = u64::from_str_radix(vma_start_str.trim_start_matches("0x"), 16).ok()? & max_addr;
+
+    // Extract VMA end (between " -> " and " at ")
+    let vma_end_str = trimmed[arrow_pos + 4..at_pos].trim();
+    let vma_end = u64::from_str_radix(vma_end_str.trim_start_matches("0x"), 16).ok()? & max_addr;
+
+    // Extract offset (between " at " and ":")
+    let offset_str = trimmed[at_pos + 4..colon_pos].trim();
+    let file_offset = u64::from_str_radix(offset_str.trim_start_matches("0x"), 16).ok()?;
+
+    // Extract name and attrs (after ":")
+    let rest = trimmed[colon_pos + 1..].trim();
+    let rest_parts: Vec<&str> = rest.split_whitespace().collect();
+    if rest_parts.is_empty() {
+        return None;
+    }
+    let name = rest_parts[0].to_string();
+    let attrs: Vec<String> = rest_parts[1..].iter().map(|s| s.to_string()).collect();
+
+    Some(ParsedSection::new(name, vma_start, vma_end, file_offset, attrs))
+}
+
+/// Parse a module name line from `maintenance info sections`.
+///
+/// V8 format: `Object file: NAME`
+/// V11 format: `Exec file: \`NAME', file type TYPE`
+pub fn parse_module_name_line(line: &str, has_exec_file: bool) -> Option<String> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("Object file:") {
+        let name = trimmed.strip_prefix("Object file:")?.trim();
+        if name.is_empty() {
+            return None;
+        }
+        Some(name.to_string())
+    } else if has_exec_file && trimmed.starts_with("Exec file:") {
+        // Format: `Exec file: \`NAME', file type TYPE`
+        let rest = trimmed.strip_prefix("Exec file:")?.trim();
+        if rest.starts_with('`') {
+            let end = rest[1..].find('\'')?;
+            Some(rest[1..1 + end].to_string())
+        } else {
+            Some(rest.to_string())
+        }
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1606,6 +2138,362 @@ mod breakpoint_tests {
     fn test_breakpoint_type() {
         let bp = GdbProcessBreakpoint::new(1).with_type(GdbProcessBreakpointType::WriteWatchpoint);
         assert_eq!(bp.bp_type, GdbProcessBreakpointType::WriteWatchpoint);
+    }
+}
+
+#[cfg(test)]
+mod available_process_tests {
+    use super::*;
+
+    #[test]
+    fn test_available_process_new() {
+        let ap = AvailableProcess::new(1234, "root", "/usr/bin/test");
+        assert_eq!(ap.pid, 1234);
+        assert_eq!(ap.user, "root");
+        assert_eq!(ap.command, "/usr/bin/test");
+    }
+
+    #[test]
+    fn test_available_process_parse() {
+        let ap = AvailableProcess::from_info_line("1234 root /usr/bin/gdb --interpreter=mi2");
+        assert!(ap.is_some());
+        let ap = ap.unwrap();
+        assert_eq!(ap.pid, 1234);
+        assert_eq!(ap.user, "root");
+        assert!(ap.command.contains("gdb"));
+    }
+
+    #[test]
+    fn test_available_process_parse_short() {
+        let ap = AvailableProcess::from_info_line("1234");
+        assert!(ap.is_none());
+    }
+}
+
+#[cfg(test)]
+mod breakpoint_location_tests {
+    use super::*;
+
+    #[test]
+    fn test_breakpoint_location_info() {
+        let loc = BreakpointLocationInfo::new(0x401000, true)
+            .with_thread_group(1)
+            .with_thread_group(2);
+        assert_eq!(loc.address, 0x401000);
+        assert!(loc.enabled);
+        assert_eq!(loc.thread_groups, vec![1, 2]);
+    }
+
+    #[test]
+    fn test_breakpoint_location_disabled() {
+        let loc = BreakpointLocationInfo::new(0x401000, false);
+        assert!(!loc.enabled);
+        assert!(loc.thread_groups.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod region_index_tests {
+    use super::*;
+
+    #[test]
+    fn test_region_index_basic() {
+        let regions = vec![
+            MemoryRegion {
+                base: 0x1000,
+                size: 0x2000,
+                offset: 0,
+                permissions: "r-xp".to_string(),
+                object_file: "a.out".to_string(),
+            },
+            MemoryRegion {
+                base: 0x5000,
+                size: 0x1000,
+                offset: 0,
+                permissions: "rw-p".to_string(),
+                object_file: "libc.so".to_string(),
+            },
+        ];
+        let idx = RegionIndex::from_regions(&regions);
+        assert_eq!(idx.len(), 2);
+        assert_eq!(idx.compute_base(0x1500), 0x1000);
+        assert_eq!(idx.compute_base(0x5500), 0x5000);
+        // Address before all regions returns itself
+        assert_eq!(idx.compute_base(0x0500), 0x0500);
+        // Address between regions returns itself
+        assert_eq!(idx.compute_base(0x3000), 0x3000);
+    }
+
+    #[test]
+    fn test_region_index_find_region() {
+        let regions = vec![MemoryRegion {
+            base: 0x400000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "r-xp".to_string(),
+            object_file: "test".to_string(),
+        }];
+        let idx = RegionIndex::from_regions(&regions);
+        assert!(idx.find_region(0x400500).is_some());
+        assert!(idx.find_region(0x500000).is_none());
+    }
+
+    #[test]
+    fn test_region_index_empty() {
+        let idx = RegionIndex::default();
+        assert!(idx.is_empty());
+        assert_eq!(idx.compute_base(0x1000), 0x1000);
+    }
+
+    #[test]
+    fn test_region_index_have_changed() {
+        let regions = vec![MemoryRegion {
+            base: 0x400000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "r-xp".to_string(),
+            object_file: "test".to_string(),
+        }];
+        let idx = RegionIndex::from_regions(&regions);
+        assert!(!idx.have_changed(&regions));
+
+        let different = vec![MemoryRegion {
+            base: 0x500000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "r-xp".to_string(),
+            object_file: "test".to_string(),
+        }];
+        assert!(idx.have_changed(&different));
+    }
+}
+
+#[cfg(test)]
+mod module_info_format_tests {
+    use super::*;
+
+    #[test]
+    fn test_module_info_format_for_version() {
+        assert_eq!(ModuleInfoFormat::for_gdb_version(8), ModuleInfoFormat::V8);
+        assert_eq!(ModuleInfoFormat::for_gdb_version(9), ModuleInfoFormat::V9);
+        assert_eq!(ModuleInfoFormat::for_gdb_version(10), ModuleInfoFormat::V9);
+        assert_eq!(ModuleInfoFormat::for_gdb_version(11), ModuleInfoFormat::V11);
+        assert_eq!(ModuleInfoFormat::for_gdb_version(13), ModuleInfoFormat::V11);
+    }
+
+    #[test]
+    fn test_module_info_format_command() {
+        assert_eq!(ModuleInfoFormat::V8.command(), "maintenance info sections ALLOBJ");
+        assert_eq!(ModuleInfoFormat::V11.command(), "maintenance info sections -all-objects");
+    }
+
+    #[test]
+    fn test_module_info_format_has_exec_file() {
+        assert!(!ModuleInfoFormat::V8.has_exec_file());
+        assert!(!ModuleInfoFormat::V9.has_exec_file());
+        assert!(ModuleInfoFormat::V11.has_exec_file());
+    }
+}
+
+#[cfg(test)]
+mod parsed_section_tests {
+    use super::*;
+
+    #[test]
+    fn test_parsed_section_basic() {
+        let sec = ParsedSection::new(".text", 0x1000, 0x5000, 0x1000, vec!["ALLOC".to_string()]);
+        assert_eq!(sec.name, ".text");
+        assert_eq!(sec.size(), 0x4000);
+        assert!(sec.is_alloc());
+        assert!(!sec.is_readonly());
+    }
+
+    #[test]
+    fn test_parsed_section_attrs() {
+        let sec = ParsedSection::new(
+            ".rodata",
+            0x5000,
+            0x6000,
+            0x5000,
+            vec!["ALLOC".to_string(), "LOAD".to_string(), "READONLY".to_string()],
+        );
+        assert!(sec.is_alloc());
+        assert!(sec.is_load());
+        assert!(sec.is_readonly());
+        assert!(!sec.is_code());
+    }
+
+    #[test]
+    fn test_parsed_section_merge() {
+        let sec1 = ParsedSection::new(".text", 0x1000, 0, 0, vec!["ALLOC".to_string()]);
+        let sec2 = ParsedSection::new(".text", 0, 0x5000, 0x1000, vec!["LOAD".to_string()]);
+        let merged = sec1.merge(&sec2);
+        assert_eq!(merged.vma_start, 0x1000);
+        assert_eq!(merged.vma_end, 0x5000);
+        assert_eq!(merged.file_offset, 0x1000);
+        assert!(merged.attrs.contains(&"ALLOC".to_string()));
+        assert!(merged.attrs.contains(&"LOAD".to_string()));
+    }
+}
+
+#[cfg(test)]
+mod parsed_module_tests {
+    use super::*;
+
+    #[test]
+    fn test_parsed_module_basic() {
+        let mut module = ParsedModule::new("libc.so.6");
+        module.add_section(ParsedSection::new(
+            ".text",
+            0x7ffff7a01000,
+            0x7ffff7b00000,
+            0x1000,
+            vec!["ALLOC".to_string(), "LOAD".to_string()],
+        ));
+        module.add_section(ParsedSection::new(
+            ".data",
+            0x7ffff7b00000,
+            0x7ffff7b80000,
+            0x100000,
+            vec!["ALLOC".to_string(), "LOAD".to_string()],
+        ));
+        assert_eq!(module.sections.len(), 2);
+        assert_eq!(module.alloc_sections().len(), 2);
+    }
+
+    #[test]
+    fn test_parsed_module_add_section_merge() {
+        let mut module = ParsedModule::new("test");
+        module.add_section(ParsedSection::new(".text", 0x1000, 0, 0, vec!["ALLOC".to_string()]));
+        module.add_section(ParsedSection::new(".text", 0, 0x5000, 0x1000, vec!["LOAD".to_string()]));
+        assert_eq!(module.sections.len(), 1);
+        let sec = module.sections.get(".text").unwrap();
+        assert_eq!(sec.vma_start, 0x1000);
+        assert_eq!(sec.vma_end, 0x5000);
+    }
+
+    #[test]
+    fn test_parsed_module_to_module_info() {
+        let mut module = ParsedModule::new("test.so");
+        module.add_section(ParsedSection::new(
+            ".text",
+            0x1000,
+            0x3000,
+            0x1000,
+            vec!["ALLOC".to_string()],
+        ));
+        let idx = RegionIndex::default();
+        let info = module.to_module_info(&idx);
+        assert_eq!(info.name, "test.so");
+        assert_eq!(info.base, 0x1000);
+        assert_eq!(info.size, 0x2000);
+    }
+
+    #[test]
+    fn test_parsed_module_empty() {
+        let module = ParsedModule::new("empty");
+        assert!(module.alloc_sections().is_empty());
+        assert_eq!(module.compute_max_addr(), 0);
+    }
+}
+
+#[cfg(test)]
+mod parse_tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_section_line_v8() {
+        let line = "  0x0000000000401000 -> 0x0000000000402000 at 0x00001000: .text ALLOC LOAD READONLY CODE";
+        let max_addr = 0xFFFFFFFFFFFFFFFF;
+        let sec = parse_section_line(line, max_addr);
+        assert!(sec.is_some());
+        let sec = sec.unwrap();
+        assert_eq!(sec.name, ".text");
+        assert_eq!(sec.vma_start, 0x401000);
+        assert_eq!(sec.vma_end, 0x402000);
+        assert_eq!(sec.file_offset, 0x1000);
+        assert!(sec.is_alloc());
+        assert!(sec.is_code());
+    }
+
+    #[test]
+    fn test_parse_section_line_v9() {
+        let line = "  [ 1] 0x0000000000401000 -> 0x0000000000402000 at 0x00001000: .text ALLOC LOAD";
+        let max_addr = 0xFFFFFFFFFFFFFFFF;
+        let sec = parse_section_line(line, max_addr);
+        assert!(sec.is_some());
+        let sec = sec.unwrap();
+        assert_eq!(sec.name, ".text");
+        assert_eq!(sec.vma_start, 0x401000);
+    }
+
+    #[test]
+    fn test_parse_section_line_invalid() {
+        let max_addr = 0xFFFFFFFFFFFFFFFF;
+        assert!(parse_section_line("", max_addr).is_none());
+        assert!(parse_section_line("garbage", max_addr).is_none());
+    }
+
+    #[test]
+    fn test_parse_module_name_line_object() {
+        let line = "Object file: /usr/lib/x86_64-linux-gnu/libc.so.6";
+        let name = parse_module_name_line(line, false);
+        assert_eq!(name, Some("/usr/lib/x86_64-linux-gnu/libc.so.6".to_string()));
+    }
+
+    #[test]
+    fn test_parse_module_name_line_exec() {
+        let line = "Exec file: `/usr/bin/test', file type elf64-x86-64.";
+        let name = parse_module_name_line(line, true);
+        assert_eq!(name, Some("/usr/bin/test".to_string()));
+    }
+
+    #[test]
+    fn test_parse_module_name_line_exec_v8() {
+        // V8 does not recognize Exec file
+        let line = "Exec file: `/usr/bin/test', file type elf64-x86-64.";
+        let name = parse_module_name_line(line, false);
+        assert!(name.is_none());
+    }
+
+    #[test]
+    fn test_parse_module_name_line_invalid() {
+        assert!(parse_module_name_line("some random line", false).is_none());
+        assert!(parse_module_name_line("", false).is_none());
+    }
+
+    #[test]
+    fn test_parse_proc_mapping_line() {
+        let line = "0x00400000 0x00401000 0x00001000 0x00000000 r-xp /usr/bin/test";
+        let max_addr = 0xFFFFFFFFFFFFFFFF;
+        let region = parse_proc_mapping_line(line, max_addr);
+        assert!(region.is_some());
+        let r = region.unwrap();
+        assert_eq!(r.base, 0x400000);
+        assert_eq!(r.size, 0x1000);
+        assert_eq!(r.permissions, "r-xp");
+        assert_eq!(r.object_file, "/usr/bin/test");
+    }
+
+    #[test]
+    fn test_parse_proc_mapping_line_no_perms() {
+        let line = "0x00400000 0x00401000 0x00001000 0x00000000 /usr/bin/test";
+        let max_addr = 0xFFFFFFFFFFFFFFFF;
+        let region = parse_proc_mapping_line(line, max_addr);
+        assert!(region.is_some());
+    }
+
+    #[test]
+    fn test_parse_proc_mapping_line_short() {
+        let max_addr = 0xFFFFFFFFFFFFFFFF;
+        assert!(parse_proc_mapping_line("0x1000 0x2000", max_addr).is_none());
+        assert!(parse_proc_mapping_line("", max_addr).is_none());
+    }
+
+    #[test]
+    fn test_compute_max_addr() {
+        assert_eq!(compute_max_addr(4), 0xFFFFFFFF);
+        assert_eq!(compute_max_addr(8), 0xFFFFFFFFFFFFFFFF);
     }
 }
 

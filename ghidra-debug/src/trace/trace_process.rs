@@ -78,6 +78,31 @@ impl ProcessEnvironment {
     pub fn env_count(&self) -> usize {
         self.env.len()
     }
+
+    /// Merge another environment into this one.
+    ///
+    /// Variables from `other` overwrite on conflict.
+    pub fn merge(&mut self, other: &ProcessEnvironment) {
+        for (k, v) in &other.env {
+            self.env.insert(k.clone(), v.clone());
+        }
+        if !other.args.is_empty() {
+            self.args = other.args.clone();
+        }
+        if other.working_dir.is_some() {
+            self.working_dir = other.working_dir.clone();
+        }
+    }
+
+    /// Check if a specific environment variable exists.
+    pub fn has_env(&self, key: &str) -> bool {
+        self.env.contains_key(key)
+    }
+
+    /// Get all environment variables as a vector of (key, value) pairs.
+    pub fn env_pairs(&self) -> Vec<(&str, &str)> {
+        self.env.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +118,8 @@ pub enum ProcessExitInfo {
     ExitCode(i64),
     /// Process was killed by a signal with the given signal number.
     Signal(i32),
+    /// Process was killed by a signal with detailed information.
+    SignalDetail(ProcessSignalInfo),
     /// Process was killed by the debugger.
     Killed,
     /// Process detached.
@@ -109,7 +136,7 @@ impl ProcessExitInfo {
 
     /// Whether this represents a signal death.
     pub fn is_signal(&self) -> bool {
-        matches!(self, Self::Signal(_))
+        matches!(self, Self::Signal(_) | Self::SignalDetail(_))
     }
 
     /// Get the exit code, if this was a normal exit.
@@ -124,7 +151,28 @@ impl ProcessExitInfo {
     pub fn signal_number(&self) -> Option<i32> {
         match self {
             Self::Signal(sig) => Some(*sig),
+            Self::SignalDetail(info) => Some(info.signal),
             _ => None,
+        }
+    }
+
+    /// Get the signal info, if this was a detailed signal death.
+    pub fn signal_info(&self) -> Option<&ProcessSignalInfo> {
+        match self {
+            Self::SignalDetail(info) => Some(info),
+            _ => None,
+        }
+    }
+
+    /// Whether the exit was fatal (signal kills, killed by debugger).
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            Self::ExitCode(_) => false,
+            Self::Signal(_) => true,
+            Self::SignalDetail(info) => info.fatal,
+            Self::Killed => true,
+            Self::Detached => false,
+            Self::Unknown => false,
         }
     }
 }
@@ -338,6 +386,141 @@ impl ProcessMemoryMapping {
 }
 
 // ---------------------------------------------------------------------------
+// ProcessSignalInfo
+// ---------------------------------------------------------------------------
+
+/// Detailed information about a signal that terminated or stopped a process.
+///
+/// Ported from Ghidra's signal tracking in `DBTraceProcess`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessSignalInfo {
+    /// The signal number (e.g., 11 for SIGSEGV).
+    pub signal: i32,
+    /// The signal name (e.g., "SIGSEGV").
+    pub name: String,
+    /// Whether this signal is fatal (terminates the process).
+    pub fatal: bool,
+    /// An optional description of the signal.
+    pub description: Option<String>,
+}
+
+impl ProcessSignalInfo {
+    /// Create a new signal info.
+    pub fn new(signal: i32, name: impl Into<String>) -> Self {
+        Self {
+            signal,
+            name: name.into(),
+            fatal: false,
+            description: None,
+        }
+    }
+
+    /// Mark as fatal.
+    pub fn with_fatal(mut self, fatal: bool) -> Self {
+        self.fatal = fatal;
+        self
+    }
+
+    /// Set a description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+
+    /// Well-known signal info for common POSIX signals.
+    pub fn well_known(signal: i32) -> Self {
+        match signal {
+            1 => Self::new(1, "SIGHUP").with_fatal(true)
+                .with_description("Hangup detected on controlling terminal"),
+            2 => Self::new(2, "SIGINT").with_fatal(true)
+                .with_description("Interrupt from keyboard"),
+            3 => Self::new(3, "SIGQUIT").with_fatal(true)
+                .with_description("Quit from keyboard"),
+            4 => Self::new(4, "SIGILL").with_fatal(true)
+                .with_description("Illegal instruction"),
+            6 => Self::new(6, "SIGABRT").with_fatal(true)
+                .with_description("Abort signal"),
+            8 => Self::new(8, "SIGFPE").with_fatal(true)
+                .with_description("Floating-point exception"),
+            9 => Self::new(9, "SIGKILL").with_fatal(true)
+                .with_description("Kill signal (cannot be caught)"),
+            11 => Self::new(11, "SIGSEGV").with_fatal(true)
+                .with_description("Invalid memory reference"),
+            13 => Self::new(13, "SIGPIPE").with_fatal(true)
+                .with_description("Broken pipe"),
+            15 => Self::new(15, "SIGTERM").with_fatal(true)
+                .with_description("Termination signal"),
+            19 => Self::new(19, "SIGSTOP").with_fatal(false)
+                .with_description("Stop process (cannot be caught)"),
+            17 => Self::new(17, "SIGCHLD").with_fatal(false)
+                .with_description("Child stopped or terminated"),
+            _ => Self::new(signal, format!("SIGNAL_{signal}")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessResourceUsage
+// ---------------------------------------------------------------------------
+
+/// Resource usage tracking for a process.
+///
+/// Ported from Ghidra's process resource monitoring.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessResourceUsage {
+    /// Total CPU time consumed (in milliseconds).
+    pub cpu_time_ms: u64,
+    /// Peak resident set size (in bytes).
+    pub peak_rss_bytes: u64,
+    /// Current resident set size (in bytes).
+    pub current_rss_bytes: u64,
+    /// Number of minor page faults.
+    pub minor_faults: u64,
+    /// Number of major page faults.
+    pub major_faults: u64,
+    /// The snap at which this usage was recorded.
+    pub snap: i64,
+}
+
+impl ProcessResourceUsage {
+    /// Create a new resource usage record.
+    pub fn new(snap: i64) -> Self {
+        Self {
+            snap,
+            ..Default::default()
+        }
+    }
+
+    /// Set CPU time.
+    pub fn with_cpu_time_ms(mut self, ms: u64) -> Self {
+        self.cpu_time_ms = ms;
+        self
+    }
+
+    /// Set peak RSS.
+    pub fn with_peak_rss(mut self, bytes: u64) -> Self {
+        self.peak_rss_bytes = bytes;
+        self
+    }
+
+    /// Set current RSS.
+    pub fn with_current_rss(mut self, bytes: u64) -> Self {
+        self.current_rss_bytes = bytes;
+        self
+    }
+
+    /// The peak RSS in megabytes (rounded).
+    pub fn peak_rss_mb(&self) -> u64 {
+        self.peak_rss_bytes / (1024 * 1024)
+    }
+
+    /// The current RSS in megabytes (rounded).
+    pub fn current_rss_mb(&self) -> u64 {
+        self.current_rss_bytes / (1024 * 1024)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ProcessSnapshot
 // ---------------------------------------------------------------------------
 
@@ -405,6 +588,12 @@ pub struct TraceProcess {
     child_keys: Vec<i64>,
     /// The snap at which this process was attached (if via attach, not launch).
     pub attached_snap: Option<i64>,
+    /// Resource usage tracking.
+    resource_usage: Option<ProcessResourceUsage>,
+    /// Lifespan-aware name history: (snap, name).
+    name_history: Vec<(i64, String)>,
+    /// Lifespan-aware comment history: (snap, comment).
+    comment_history: Vec<(i64, String)>,
 }
 
 impl TraceProcess {
@@ -416,11 +605,14 @@ impl TraceProcess {
         snap: i64,
     ) -> Self {
         let path_str = path.into();
+        let name_str = name.into();
+        let mut name_history = Vec::new();
+        name_history.push((snap, name_str.clone()));
         Self {
             key,
             path: path_str.clone(),
             pid: None,
-            name: name.into(),
+            name: name_str,
             lifespan: Lifespan::now_on(snap),
             environment: ProcessEnvironment::new(),
             execution_state: TraceExecutionStateManager::new(path_str),
@@ -432,6 +624,9 @@ impl TraceProcess {
             parent_key: None,
             child_keys: Vec::new(),
             attached_snap: None,
+            resource_usage: None,
+            name_history,
+            comment_history: Vec::new(),
         }
     }
 
@@ -720,6 +915,108 @@ impl TraceProcess {
         self.parent_key.is_some()
     }
 
+    // -- Resource usage --
+
+    /// Get the current resource usage, if recorded.
+    pub fn resource_usage(&self) -> Option<&ProcessResourceUsage> {
+        self.resource_usage.as_ref()
+    }
+
+    /// Set the resource usage for this process.
+    pub fn set_resource_usage(&mut self, usage: ProcessResourceUsage) {
+        self.resource_usage = Some(usage);
+    }
+
+    // -- Lifespan-aware name --
+
+    /// Set the process name at a given snap (records history).
+    pub fn set_name(&mut self, snap: i64, name: impl Into<String>) {
+        let n = name.into();
+        self.name = n.clone();
+        self.name_history.push((snap, n));
+    }
+
+    /// Get the process name at a given snap (temporal lookup).
+    pub fn name_at(&self, snap: i64) -> &str {
+        self.name_history
+            .iter()
+            .rev()
+            .find(|(s, _)| *s <= snap)
+            .map(|(_, n)| n.as_str())
+            .unwrap_or(&self.name)
+    }
+
+    /// The full name history as (snap, name) pairs.
+    pub fn name_history(&self) -> &[(i64, String)] {
+        &self.name_history
+    }
+
+    // -- Lifespan-aware comment --
+
+    /// Set a comment on this process at a given snap.
+    pub fn set_comment(&mut self, snap: i64, comment: impl Into<String>) {
+        self.comment_history.push((snap, comment.into()));
+    }
+
+    /// Get the comment at a given snap.
+    pub fn comment_at(&self, snap: i64) -> Option<&str> {
+        self.comment_history
+            .iter()
+            .rev()
+            .find(|(s, _)| *s <= snap)
+            .map(|(_, c)| c.as_str())
+    }
+
+    /// The full comment history as (snap, comment) pairs.
+    pub fn comment_history(&self) -> &[(i64, String)] {
+        &self.comment_history
+    }
+
+    // -- Module queries at specific snaps --
+
+    /// Find the module containing the given address at a specific snap.
+    pub fn find_module_by_address_at(&self, addr: u64, snap: i64) -> Option<&LoadedModule> {
+        self.modules
+            .iter()
+            .find(|m| m.is_valid_at(snap) && m.contains_address(addr))
+    }
+
+    /// All modules that are active at the given snap.
+    pub fn active_modules_at(&self, snap: i64) -> Vec<&LoadedModule> {
+        self.modules
+            .iter()
+            .filter(|m| m.is_valid_at(snap))
+            .collect()
+    }
+
+    /// The number of modules active at the given snap.
+    pub fn module_count_at(&self, snap: i64) -> usize {
+        self.modules.iter().filter(|m| m.is_valid_at(snap)).count()
+    }
+
+    // -- Memory mapping queries at specific snaps --
+
+    /// Find the memory mapping containing the given address at a specific snap.
+    pub fn memory_mapping_at_snap(&self, addr: u64, snap: i64) -> Option<&ProcessMemoryMapping> {
+        self.memory_mappings
+            .iter()
+            .find(|m| {
+                m.created_snap <= snap
+                    && m.removed_snap.map_or(true, |r| snap < r)
+                    && m.contains_address(addr)
+            })
+    }
+
+    /// All memory mappings active at the given snap.
+    pub fn active_memory_mappings_at(&self, snap: i64) -> Vec<&ProcessMemoryMapping> {
+        self.memory_mappings
+            .iter()
+            .filter(|m| {
+                m.created_snap <= snap && m.removed_snap.map_or(true, |r| snap < r)
+            })
+            .collect()
+    }
+
     // -- Snapshot --
 
     /// Create a point-in-time snapshot of this process's state.
@@ -830,6 +1127,19 @@ impl ProcessBuilder {
     /// Mark this process as attached (rather than launched).
     pub fn attached(mut self) -> Self {
         self.attached = true;
+        self
+    }
+
+    /// Add multiple environment variables from an iterator of (key, value) pairs.
+    pub fn env_pairs<I, K, V>(mut self, pairs: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        for (k, v) in pairs {
+            self.env.insert(k.into(), v.into());
+        }
         self
     }
 
@@ -1095,9 +1405,9 @@ mod tests {
     fn test_loaded_module() {
         let m = LoadedModule::new("libc.so.6", "/usr/lib/libc.so.6", 0x7F000000, 0x200000, 0);
         assert_eq!(m.name, "libc.so.6");
-        assert_eq!(m.end_address(), 0x7F020000);
+        assert_eq!(m.end_address(), 0x7F200000);
         assert!(m.contains_address(0x7F010000));
-        assert!(!m.contains_address(0x7F030000));
+        assert!(!m.contains_address(0x7F210000));
         assert!(m.is_loaded());
         assert!(m.is_valid_at(0));
         assert!(m.is_valid_at(100));
@@ -1329,5 +1639,254 @@ mod tests {
         let m3 = ProcessMemoryMapping::new(0, 0x1000, "test", 0)
             .with_permissions(true, true, true);
         assert_eq!(m3.permissions_string(), "rwx");
+    }
+
+    // -- New tests for added features --
+
+    #[test]
+    fn test_process_signal_info() {
+        let info = ProcessSignalInfo::new(11, "SIGSEGV").with_fatal(true);
+        assert_eq!(info.signal, 11);
+        assert_eq!(info.name, "SIGSEGV");
+        assert!(info.fatal);
+        assert!(info.description.is_none());
+    }
+
+    #[test]
+    fn test_process_signal_info_well_known() {
+        let sigsegv = ProcessSignalInfo::well_known(11);
+        assert_eq!(sigsegv.signal, 11);
+        assert_eq!(sigsegv.name, "SIGSEGV");
+        assert!(sigsegv.fatal);
+        assert!(sigsegv.description.is_some());
+
+        let sigkill = ProcessSignalInfo::well_known(9);
+        assert_eq!(sigkill.name, "SIGKILL");
+        assert!(sigkill.fatal);
+
+        let sigstop = ProcessSignalInfo::well_known(19);
+        assert_eq!(sigstop.name, "SIGSTOP");
+        assert!(!sigstop.fatal);
+
+        // Unknown signal
+        let unknown = ProcessSignalInfo::well_known(42);
+        assert_eq!(unknown.signal, 42);
+        assert_eq!(unknown.name, "SIGNAL_42");
+    }
+
+    #[test]
+    fn test_process_exit_info_signal_detail() {
+        let info = ProcessSignalInfo::well_known(11);
+        let exit = ProcessExitInfo::SignalDetail(info);
+        assert!(exit.is_signal());
+        assert_eq!(exit.signal_number(), Some(11));
+        assert!(exit.signal_info().is_some());
+        assert!(exit.is_fatal());
+
+        let nonfatal = ProcessExitInfo::SignalDetail(
+            ProcessSignalInfo::new(19, "SIGSTOP"),
+        );
+        assert!(nonfatal.is_signal());
+        assert!(!nonfatal.is_fatal());
+    }
+
+    #[test]
+    fn test_process_exit_info_is_fatal() {
+        assert!(!ProcessExitInfo::ExitCode(0).is_fatal());
+        assert!(ProcessExitInfo::Signal(11).is_fatal());
+        assert!(ProcessExitInfo::Killed.is_fatal());
+        assert!(!ProcessExitInfo::Detached.is_fatal());
+        assert!(!ProcessExitInfo::Unknown.is_fatal());
+    }
+
+    #[test]
+    fn test_process_resource_usage() {
+        let usage = ProcessResourceUsage::new(5)
+            .with_cpu_time_ms(1500)
+            .with_peak_rss(1024 * 1024 * 100)
+            .with_current_rss(1024 * 1024 * 50);
+
+        assert_eq!(usage.snap, 5);
+        assert_eq!(usage.cpu_time_ms, 1500);
+        assert_eq!(usage.peak_rss_mb(), 100);
+        assert_eq!(usage.current_rss_mb(), 50);
+    }
+
+    #[test]
+    fn test_process_resource_usage_serde() {
+        let usage = ProcessResourceUsage::new(1)
+            .with_cpu_time_ms(500)
+            .with_peak_rss(1024 * 1024 * 200);
+
+        let json = serde_json::to_string(&usage).unwrap();
+        let back: ProcessResourceUsage = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.cpu_time_ms, 500);
+        assert_eq!(back.peak_rss_mb(), 200);
+    }
+
+    #[test]
+    fn test_process_set_resource_usage() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        assert!(p.resource_usage().is_none());
+
+        let usage = ProcessResourceUsage::new(5).with_cpu_time_ms(1000);
+        p.set_resource_usage(usage);
+        assert!(p.resource_usage().is_some());
+        assert_eq!(p.resource_usage().unwrap().cpu_time_ms, 1000);
+    }
+
+    #[test]
+    fn test_process_lifespan_aware_name() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        assert_eq!(p.name_at(0), "myapp");
+        assert_eq!(p.name_at(100), "myapp");
+
+        p.set_name(10, "renamed_app");
+        assert_eq!(p.name_at(5), "myapp");
+        assert_eq!(p.name_at(10), "renamed_app");
+        assert_eq!(p.name_at(100), "renamed_app");
+
+        assert_eq!(p.name_history().len(), 2);
+    }
+
+    #[test]
+    fn test_process_lifespan_aware_comment() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        assert!(p.comment_at(0).is_none());
+
+        p.set_comment(5, "first comment");
+        assert_eq!(p.comment_at(5), Some("first comment"));
+        assert_eq!(p.comment_at(3), None);
+
+        p.set_comment(10, "second comment");
+        assert_eq!(p.comment_at(7), Some("first comment"));
+        assert_eq!(p.comment_at(10), Some("second comment"));
+
+        assert_eq!(p.comment_history().len(), 2);
+    }
+
+    #[test]
+    fn test_process_find_module_by_address_at() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        p.add_module(LoadedModule::new("myapp", "/usr/bin/myapp", 0x400000, 0x10000, 0));
+        p.add_module(LoadedModule::new("libc.so.6", "/usr/lib/libc.so.6", 0x7F000000, 0x200000, 5));
+
+        assert!(p.find_module_by_address_at(0x400000, 0).is_some());
+        assert_eq!(p.find_module_by_address_at(0x400000, 0).unwrap().name, "myapp");
+
+        // libc not yet loaded at snap 0
+        assert!(p.find_module_by_address_at(0x7F000000, 0).is_none());
+        // libc loaded at snap 5
+        assert!(p.find_module_by_address_at(0x7F000000, 5).is_some());
+    }
+
+    #[test]
+    fn test_process_active_modules_at() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        p.add_module(LoadedModule::new("myapp", "/usr/bin/myapp", 0x400000, 0x10000, 0));
+        p.add_module(LoadedModule::new("libc.so.6", "/usr/lib/libc.so.6", 0x7F000000, 0x200000, 5));
+
+        assert_eq!(p.active_modules_at(0).len(), 1);
+        assert_eq!(p.active_modules_at(5).len(), 2);
+        assert_eq!(p.module_count_at(0), 1);
+        assert_eq!(p.module_count_at(5), 2);
+    }
+
+    #[test]
+    fn test_process_memory_mapping_at_snap() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        p.add_memory_mapping(
+            ProcessMemoryMapping::new(0x400000, 0x10000, "[heap]", 0)
+                .with_permissions(true, true, false),
+        );
+        p.add_memory_mapping(
+            ProcessMemoryMapping::new(0x7FFF0000, 0x80000, "[stack]", 5)
+                .with_permissions(true, true, false),
+        );
+
+        assert!(p.memory_mapping_at_snap(0x405000, 0).is_some());
+        assert_eq!(p.memory_mapping_at_snap(0x405000, 0).unwrap().name, "[heap]");
+
+        // Stack not yet at snap 0
+        assert!(p.memory_mapping_at_snap(0x7FFF0000, 0).is_none());
+        assert!(p.memory_mapping_at_snap(0x7FFF0000, 5).is_some());
+
+        assert_eq!(p.active_memory_mappings_at(0).len(), 1);
+        assert_eq!(p.active_memory_mappings_at(5).len(), 2);
+    }
+
+    #[test]
+    fn test_process_environment_merge() {
+        let mut env1 = ProcessEnvironment::new();
+        env1.set_env("A", "1");
+        env1.set_env("B", "2");
+
+        let mut env2 = ProcessEnvironment::new();
+        env2.set_env("B", "overwritten");
+        env2.set_env("C", "3");
+        env2.set_args(vec!["prog".into()]);
+
+        env1.merge(&env2);
+        assert_eq!(env1.get_env("A"), Some("1"));
+        assert_eq!(env1.get_env("B"), Some("overwritten"));
+        assert_eq!(env1.get_env("C"), Some("3"));
+        assert_eq!(env1.args.len(), 1);
+    }
+
+    #[test]
+    fn test_process_environment_has_env() {
+        let mut env = ProcessEnvironment::new();
+        env.set_env("PATH", "/usr/bin");
+        assert!(env.has_env("PATH"));
+        assert!(!env.has_env("MISSING"));
+    }
+
+    #[test]
+    fn test_process_environment_env_pairs() {
+        let mut env = ProcessEnvironment::new();
+        env.set_env("A", "1");
+        env.set_env("B", "2");
+
+        let pairs = env.env_pairs();
+        assert_eq!(pairs.len(), 2);
+        assert!(pairs.iter().any(|(k, v)| *k == "A" && *v == "1"));
+        assert!(pairs.iter().any(|(k, v)| *k == "B" && *v == "2"));
+    }
+
+    #[test]
+    fn test_process_builder_env_pairs() {
+        let p = TraceProcess::builder(1, "myapp", 0)
+            .env_pairs(vec![("HOME", "/home/user"), ("PATH", "/usr/bin")])
+            .build();
+
+        assert_eq!(p.get_env("HOME"), Some("/home/user"));
+        assert_eq!(p.get_env("PATH"), Some("/usr/bin"));
+    }
+
+    #[test]
+    fn test_process_signal_detail_serde() {
+        let info = ProcessSignalInfo::well_known(11);
+        let exit = ProcessExitInfo::SignalDetail(info);
+
+        let json = serde_json::to_string(&exit).unwrap();
+        let back: ProcessExitInfo = serde_json::from_str(&json).unwrap();
+        assert!(back.is_signal());
+        assert_eq!(back.signal_number(), Some(11));
+        assert!(back.signal_info().is_some());
+        assert_eq!(back.signal_info().unwrap().name, "SIGSEGV");
+    }
+
+    #[test]
+    fn test_process_signal_info_serde() {
+        let info = ProcessSignalInfo::new(6, "SIGABRT")
+            .with_fatal(true)
+            .with_description("Abort signal");
+
+        let json = serde_json::to_string(&info).unwrap();
+        let back: ProcessSignalInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.signal, 6);
+        assert_eq!(back.name, "SIGABRT");
+        assert!(back.fatal);
+        assert_eq!(back.description.as_deref(), Some("Abort signal"));
     }
 }
