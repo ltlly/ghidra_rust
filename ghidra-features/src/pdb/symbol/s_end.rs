@@ -84,6 +84,37 @@ impl SEnd {
     pub fn variant(&self) -> EndVariant {
         self.variant
     }
+
+    /// Return `true` if this is a general end-of-scope marker (`S_END`).
+    pub fn is_end(&self) -> bool {
+        self.variant == EndVariant::End
+    }
+
+    /// Return `true` if this is an end-of-argument-list marker (`S_ENDARG`).
+    pub fn is_endarg(&self) -> bool {
+        self.variant == EndVariant::EndArg
+    }
+
+    /// Return `true` if this is a procedure ID end marker (`S_PROC_ID_END`).
+    pub fn is_proc_id_end(&self) -> bool {
+        self.variant == EndVariant::ProcIdEnd
+    }
+
+    /// Parse an S_ENDARG symbol from a byte slice.
+    ///
+    /// The S_ENDARG symbol has no payload; any data present is ignored.
+    /// Always returns `Some(SEnd)` with the `EndArg` variant.
+    pub fn parse_endarg(_data: &[u8]) -> Option<Self> {
+        Some(Self::endarg())
+    }
+
+    /// Parse an S_PROC_ID_END symbol from a byte slice.
+    ///
+    /// The S_PROC_ID_END symbol has no payload; any data present is ignored.
+    /// Always returns `Some(SEnd)` with the `ProcIdEnd` variant.
+    pub fn parse_proc_id_end(_data: &[u8]) -> Option<Self> {
+        Some(Self::proc_id_end())
+    }
 }
 
 impl Default for SEnd {
@@ -235,5 +266,50 @@ mod tests {
         assert_ne!(SEnd::new().variant(), SEnd::endarg().variant());
         assert_ne!(SEnd::new().variant(), SEnd::proc_id_end().variant());
         assert_ne!(SEnd::endarg().variant(), SEnd::proc_id_end().variant());
+    }
+
+    #[test]
+    fn test_is_end() {
+        assert!(SEnd::new().is_end());
+        assert!(!SEnd::endarg().is_end());
+        assert!(!SEnd::proc_id_end().is_end());
+    }
+
+    #[test]
+    fn test_is_endarg() {
+        assert!(!SEnd::new().is_endarg());
+        assert!(SEnd::endarg().is_endarg());
+        assert!(!SEnd::proc_id_end().is_endarg());
+    }
+
+    #[test]
+    fn test_is_proc_id_end() {
+        assert!(!SEnd::new().is_proc_id_end());
+        assert!(!SEnd::endarg().is_proc_id_end());
+        assert!(SEnd::proc_id_end().is_proc_id_end());
+    }
+
+    #[test]
+    fn test_parse_endarg() {
+        let sym = SEnd::parse_endarg(&[]).unwrap();
+        assert_eq!(sym.pdb_id(), 0x000A);
+        assert_eq!(sym.symbol_type_name(), "S_ENDARG");
+        assert!(sym.is_endarg());
+    }
+
+    #[test]
+    fn test_parse_proc_id_end() {
+        let sym = SEnd::parse_proc_id_end(&[]).unwrap();
+        assert_eq!(sym.pdb_id(), 0x1040);
+        assert_eq!(sym.symbol_type_name(), "S_PROC_ID_END");
+        assert!(sym.is_proc_id_end());
+    }
+
+    #[test]
+    fn test_parse_endarg_with_data() {
+        // S_ENDARG has no payload; trailing bytes are ignored
+        let data = [0xFF, 0xFF];
+        let sym = SEnd::parse_endarg(&data).unwrap();
+        assert_eq!(sym.pdb_id(), 0x000A);
     }
 }

@@ -21,8 +21,13 @@
 //!   evaluating breakpoint conditions, `PcodeDebuggerAccessBuilder` for
 //!   constructing access instances with a fluent API, `AsyncAccessQueue`
 //!   for queueing async target read/write operations, `AccessAuditLog`
-//!   for recording an audit trail of all access operations, and
-//!   `TraceMemoryStateMap` for tracking memory state across ranges.
+//!   for recording an audit trail of all access operations,
+//!   `TraceMemoryStateMap` for tracking memory state across ranges,
+//!   `AccessStateDiff` for comparing two access states,
+//!   `PcodeDebuggerDataAccess` trait for debugger+trace data access,
+//!   `PcodeDebuggerRegistersAccessState` for concrete target register
+//!   interaction, `MemoryWriteBuffer` for buffered memory writes, and
+//!   `DataAccessError` for debugger data access errors.
 //! - **Pcode debugger registers**: Register bank abstraction, register mapping,
 //!   register groups, value transformations, calling conventions,
 //!   `RegisterSnapshot` / `RegisterBankDiff` for capturing and comparing
@@ -39,8 +44,13 @@
 //!   `RegisterValueSource` / `SourcedRegisterValue` for tracking
 //!   register value provenance, `RegisterContextTracker` for tracking
 //!   context register changes across snaps, `RegisterBankValidator`
-//!   for validating register values against constraints, and
-//!   `RegisterValueCache` for caching frequently accessed registers.
+//!   for validating register values against constraints,
+//!   `RegisterValueCache` for caching frequently accessed registers,
+//!   `RegisterBankSnapshot` for serializable bank state capture,
+//!   `RegisterBankMergeResult` / `RegisterMergeConflict` for merge
+//!   conflict tracking, `PcodeDebuggerRegistersAccess` trait for
+//!   target-synchronized register access, and `RegisterAccessError`
+//!   for register access errors.
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 

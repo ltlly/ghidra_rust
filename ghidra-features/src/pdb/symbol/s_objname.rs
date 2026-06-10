@@ -117,6 +117,35 @@ impl SObjName {
     pub fn variant(&self) -> ObjNameVariant {
         self.variant
     }
+
+    /// Parse an S_OBJNAME symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    ///
+    /// This matches the Java `reader.align4()` call in
+    /// `ObjectNameMsSymbol`.
+    pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse(data)?;
+        // signature(4) + name_len + null, aligned to 4
+        let name_data = &data[4..];
+        let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        let name_len = end + 1;
+        let total = 4 + name_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    /// Parse an S_OBJNAME_ST symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_st_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_st(data)?;
+        if data.len() < 6 {
+            return Some((sym, data.len()));
+        }
+        let st_len = u16::from_le_bytes([data[4], data[5]]) as usize;
+        let total = 6 + st_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
 }
 
 impl AbstractMsSymbol for SObjName {
@@ -336,5 +365,51 @@ mod tests {
         let sym = SObjName::new_st(0x1000, "b.obj".to_string());
         assert_eq!(sym.variant(), ObjNameVariant::ObjNameSt);
         assert_eq!(sym.symbol_type_name(), "S_OBJNAME_ST");
+    }
+
+    #[test]
+    fn test_parse_aligned_basic() {
+        // signature(4) + "abc\0"(4) = 8, aligned to 8
+        let data = make_objname_bytes(0x1000, b"abc");
+        let (sym, consumed) = SObjName::parse_aligned(&data).unwrap();
+        assert_eq!(sym.signature, 0x1000);
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_aligned_needs_padding() {
+        // signature(4) + "ab\0"(3) = 7, aligned to 8
+        let data = make_objname_bytes(0x1000, b"ab");
+        let (sym, consumed) = SObjName::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name, "ab");
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_aligned_already_aligned() {
+        // signature(4) + "abcd\0"(5) = 9, aligned to 12
+        let data = make_objname_bytes(0x1000, b"abcd");
+        let (sym, consumed) = SObjName::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name, "abcd");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_basic() {
+        // signature(4) + st_len(2) + "abc"(3) = 9, aligned to 12
+        let data = make_objname_st_bytes(0x1000, b"abc");
+        let (sym, consumed) = SObjName::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_empty() {
+        // signature(4) + st_len(2) + ""(0) = 6, aligned to 8
+        let data = make_objname_st_bytes(0x1000, b"");
+        let (sym, consumed) = SObjName::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(consumed, 8);
     }
 }

@@ -22,6 +22,34 @@ use serde::{Deserialize, Serialize};
 use crate::model::Lifespan;
 
 // ---------------------------------------------------------------------------
+// OverlapError
+// ---------------------------------------------------------------------------
+
+/// Error returned when a stack frame operation fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StackFrameError {
+    /// The requested frame level is out of bounds.
+    LevelOutOfBounds { level: i32, depth: usize },
+    /// The snap is out of the stack's lifespan.
+    InvalidSnap { snap: i64 },
+}
+
+impl std::fmt::Display for StackFrameError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::LevelOutOfBounds { level, depth } => {
+                write!(f, "frame level {level} out of bounds (depth {depth})")
+            }
+            Self::InvalidSnap { snap } => {
+                write!(f, "snap {snap} is outside the stack's lifespan")
+            }
+        }
+    }
+}
+
+impl std::error::Error for StackFrameError {}
+
+// ---------------------------------------------------------------------------
 // FrameRegisterValue
 // ---------------------------------------------------------------------------
 
@@ -228,6 +256,62 @@ impl TraceStackFrameEntry {
         self.level == 0
     }
 
+    /// Whether this is the outermost frame in a given depth.
+    pub fn is_outermost(&self, depth: usize) -> bool {
+        self.level == (depth as i32 - 1).max(0)
+    }
+
+    /// Set the program counter, effective for the given lifespan.
+    ///
+    /// Ported from `TraceStackFrame.setProgramCounter(Lifespan, Address)`.
+    pub fn set_pc(&mut self, _lifespan: &Lifespan, pc: u64) {
+        self.pc = pc;
+    }
+
+    /// Set the stack pointer, effective for the given lifespan.
+    ///
+    /// Ported from `TraceStackFrame.setStackPointer(Lifespan, Address)`.
+    pub fn set_sp(&mut self, _lifespan: &Lifespan, sp: u64) {
+        self.sp = sp;
+    }
+
+    /// Create a shallow copy of this frame with a new level.
+    ///
+    /// The registers and comments are cloned; the level is set to the given value.
+    pub fn clone_with_level(&self, level: i32) -> Self {
+        Self {
+            thread_key: self.thread_key,
+            snap: self.snap,
+            level,
+            pc: self.pc,
+            sp: self.sp,
+            fp: self.fp,
+            return_address: self.return_address,
+            function_name: self.function_name.clone(),
+            kind: self.kind,
+            source: SourceLocation {
+                file: self.source.file.clone(),
+                line: self.source.line,
+                column: self.source.column,
+            },
+            registers: self.registers.clone(),
+            comments: BTreeMap::new(),
+        }
+    }
+
+    /// The return address, or the program counter if no return address is set.
+    ///
+    /// This is a convenience for the common pattern where a debugger reports
+    /// the return address but the "display" address should be the return
+    /// address for non-innermost frames and the PC for the innermost.
+    pub fn display_address(&self) -> u64 {
+        if self.is_innermost() {
+            self.pc
+        } else {
+            self.return_address.unwrap_or(self.pc)
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Comment operations (ported from DBTraceStackFrame)
     // -----------------------------------------------------------------------
@@ -370,9 +454,52 @@ impl TraceStackEntry {
         self.frames.iter().find(|f| f.level == level)
     }
 
+    /// Get a frame by level, optionally expanding the depth to accommodate it.
+    ///
+    /// Ported from `TraceStack.getFrame(long, int, boolean)`.
+    /// If `ensure_depth` is true and the requested level exceeds the current
+    /// depth, the stack is expanded with empty frames.
+    pub fn get_frame(&mut self, level: i32, ensure_depth: bool) -> Result<(), StackFrameError> {
+        if level < 0 {
+            return Err(StackFrameError::LevelOutOfBounds {
+                level,
+                depth: self.frames.len(),
+            });
+        }
+        if ensure_depth && level as usize >= self.frames.len() {
+            let target = level as usize + 1;
+            self.set_depth(target, false);
+        }
+        if level as usize >= self.frames.len() {
+            return Err(StackFrameError::LevelOutOfBounds {
+                level,
+                depth: self.frames.len(),
+            });
+        }
+        Ok(())
+    }
+
     /// Get a mutable frame by level.
     pub fn frame_mut(&mut self, level: i32) -> Option<&mut TraceStackFrameEntry> {
         self.frames.iter_mut().find(|f| f.level == level)
+    }
+
+    /// Get a frame by level, expanding depth if necessary.
+    ///
+    /// Ported from `TraceStack.getFrame(long, int, boolean)` with `ensureDepth=true`.
+    /// Returns the frame at `level`, creating empty frames up to that level if needed.
+    pub fn frame_or_create(&mut self, level: i32) -> &mut TraceStackFrameEntry {
+        if level < 0 {
+            panic!("frame level must be non-negative, got {level}");
+        }
+        let needed = level as usize + 1;
+        if needed > self.frames.len() {
+            self.set_depth(needed, false);
+        }
+        self.frames
+            .iter_mut()
+            .find(|f| f.level == level)
+            .expect("frame should exist after ensuring depth")
     }
 
     /// Get the innermost frame (level 0).
@@ -623,6 +750,132 @@ impl TraceStackFrameManager {
                 stack.remove(snap);
             }
         }
+    }
+
+    /// Whether the manager has no stacks for any thread.
+    pub fn is_empty(&self) -> bool {
+        self.stacks.is_empty()
+    }
+
+    /// All thread keys that have stack data.
+    pub fn thread_keys(&self) -> Vec<i64> {
+        self.stacks.keys().copied().collect()
+    }
+
+    /// Get the frame at a specific level for a thread at `snap`, optionally
+    /// expanding the depth.
+    ///
+    /// Ported from `TraceStack.getFrame(long, int, boolean)`.
+    pub fn get_frame(
+        &mut self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+        ensure_depth: bool,
+    ) -> Option<&TraceStackFrameEntry> {
+        let stack = self.get_stack_mut(thread_key, snap)?;
+        if level < 0 {
+            return None;
+        }
+        if ensure_depth && level as usize >= stack.depth() {
+            stack.set_depth(level as usize + 1, false);
+        }
+        stack.frame(level)
+    }
+
+    /// Get the function name at a specific frame level for a thread at `snap`.
+    pub fn get_function_name(
+        &self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+    ) -> Option<&str> {
+        self.get_stack(thread_key, snap)
+            .and_then(|s| s.frame(level))
+            .and_then(|f| f.function_name.as_deref())
+    }
+
+    /// Get the frame pointer at a specific frame level for a thread at `snap`.
+    pub fn get_frame_pointer(
+        &self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+    ) -> Option<u64> {
+        self.get_stack(thread_key, snap)
+            .and_then(|s| s.frame(level))
+            .and_then(|f| f.fp)
+    }
+
+    /// Get the return address at a specific frame level for a thread at `snap`.
+    pub fn get_return_address(
+        &self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+    ) -> Option<u64> {
+        self.get_stack(thread_key, snap)
+            .and_then(|s| s.frame(level))
+            .and_then(|f| f.return_address)
+    }
+
+    /// Get a frame's comment at a specific level for a thread at `snap`.
+    pub fn get_frame_comment(
+        &self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+    ) -> Option<&str> {
+        self.get_stack(thread_key, snap)
+            .and_then(|s| s.frame(level))
+            .and_then(|f| f.get_comment(snap))
+    }
+
+    /// Set a frame's comment at a specific level for a thread at `snap`.
+    pub fn set_frame_comment(
+        &mut self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+        comment: impl Into<String>,
+    ) -> bool {
+        if let Some(stack) = self.get_stack_mut(thread_key, snap) {
+            if let Some(frame) = stack.frame_mut(level) {
+                frame.set_comment(snap, comment);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Set a register value on a specific frame for a thread at `snap`.
+    pub fn set_frame_register(
+        &mut self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+        reg: FrameRegisterValue,
+    ) -> bool {
+        if let Some(stack) = self.get_stack_mut(thread_key, snap) {
+            if let Some(frame) = stack.frame_mut(level) {
+                frame.set_register(reg);
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Get a register value from a specific frame for a thread at `snap`.
+    pub fn get_frame_register(
+        &self,
+        thread_key: i64,
+        snap: i64,
+        level: i32,
+        name: &str,
+    ) -> Option<&FrameRegisterValue> {
+        self.get_stack(thread_key, snap)
+            .and_then(|s| s.frame(level))
+            .and_then(|f| f.register(name))
     }
 }
 
@@ -983,5 +1236,246 @@ mod tests {
             let f = TraceStackFrameEntry::new(1, 0, 0, 0, 0).with_kind(*kind);
             assert_eq!(f.kind, *kind);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // New: is_outermost, display_address, clone_with_level, set_pc/sp
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_frame_is_outermost() {
+        let f0 = TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000);
+        let f1 = TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020);
+        let f2 = TraceStackFrameEntry::new(1, 0, 2, 0x403000, 0x7FFF0040);
+        assert!(!f0.is_outermost(3));
+        assert!(!f1.is_outermost(3));
+        assert!(f2.is_outermost(3));
+    }
+
+    #[test]
+    fn test_frame_display_address() {
+        let inner = TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000)
+            .with_return_address(0x402000);
+        // Innermost: always returns PC
+        assert_eq!(inner.display_address(), 0x401000);
+
+        let outer = TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020)
+            .with_return_address(0x403000);
+        // Non-innermost with return address
+        assert_eq!(outer.display_address(), 0x403000);
+
+        let outer_no_ra = TraceStackFrameEntry::new(1, 0, 1, 0x402000, 0x7FFF0020);
+        // Non-innermost without return address: falls back to PC
+        assert_eq!(outer_no_ra.display_address(), 0x402000);
+    }
+
+    #[test]
+    fn test_frame_clone_with_level() {
+        let mut f = TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000)
+            .with_fp(0x7FFF0010)
+            .with_function("main");
+        f.set_register(FrameRegisterValue::from_u64_le("RBP", 0x7FFF0010));
+        f.set_comment(0, "original");
+
+        let cloned = f.clone_with_level(3);
+        assert_eq!(cloned.level, 3);
+        assert_eq!(cloned.pc, 0x401000);
+        assert_eq!(cloned.sp, 0x7FFF0000);
+        assert_eq!(cloned.fp, Some(0x7FFF0010));
+        assert_eq!(cloned.function_name.as_deref(), Some("main"));
+        assert_eq!(cloned.register_count(), 1);
+        // Comments are not cloned
+        assert!(cloned.get_comment(0).is_none());
+    }
+
+    #[test]
+    fn test_frame_set_pc_sp_with_lifespan() {
+        let mut f = TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000);
+        f.set_pc(&Lifespan::now_on(0), 0x500000);
+        f.set_sp(&Lifespan::now_on(0), 0x80000000);
+        assert_eq!(f.pc, 0x500000);
+        assert_eq!(f.sp, 0x80000000);
+    }
+
+    // -----------------------------------------------------------------------
+    // New: StackFrameError
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_frame_error_display() {
+        let err = StackFrameError::LevelOutOfBounds { level: 5, depth: 3 };
+        assert!(err.to_string().contains("5"));
+        assert!(err.to_string().contains("3"));
+
+        let err2 = StackFrameError::InvalidSnap { snap: -1 };
+        assert!(err2.to_string().contains("-1"));
+    }
+
+    // -----------------------------------------------------------------------
+    // New: TraceStackEntry get_frame with ensure_depth, frame_or_create
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_entry_get_frame_ensure_depth() {
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        assert_eq!(stack.depth(), 1);
+
+        // Ask for level 3 with ensure_depth -- should expand
+        stack.get_frame(3, true).unwrap();
+        assert_eq!(stack.depth(), 4);
+    }
+
+    #[test]
+    fn test_stack_entry_get_frame_without_ensure() {
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        let err = stack.get_frame(5, false).unwrap_err();
+        assert!(matches!(err, StackFrameError::LevelOutOfBounds { .. }));
+    }
+
+    #[test]
+    fn test_stack_entry_get_frame_negative_level() {
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        let err = stack.get_frame(-1, false).unwrap_err();
+        assert!(matches!(err, StackFrameError::LevelOutOfBounds { level: -1, .. }));
+    }
+
+    #[test]
+    fn test_stack_entry_frame_or_create() {
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+
+        // Get existing frame
+        let f = stack.frame_or_create(0);
+        assert_eq!(f.pc, 0x401000);
+
+        // Create new frame at level 2
+        let f2 = stack.frame_or_create(2);
+        assert_eq!(f2.level, 2);
+        assert_eq!(stack.depth(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // New: TraceStackFrameManager extended methods
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_stack_manager_is_empty() {
+        let mut mgr = TraceStackFrameManager::new();
+        assert!(mgr.is_empty());
+        let stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        mgr.set_stack(stack);
+        assert!(!mgr.is_empty());
+    }
+
+    #[test]
+    fn test_stack_manager_thread_keys() {
+        let mut mgr = TraceStackFrameManager::new();
+        mgr.set_stack(TraceStackEntry::new(1, 0, Lifespan::at(0)));
+        mgr.set_stack(TraceStackEntry::new(2, 0, Lifespan::at(0)));
+        let keys = mgr.thread_keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&1));
+        assert!(keys.contains(&2));
+    }
+
+    #[test]
+    fn test_stack_manager_get_frame() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(stack);
+
+        // Existing frame
+        let f = mgr.get_frame(1, 0, 0, false).unwrap();
+        assert_eq!(f.pc, 0x401000);
+
+        // Non-existent thread
+        assert!(mgr.get_frame(99, 0, 0, false).is_none());
+    }
+
+    #[test]
+    fn test_stack_manager_get_frame_ensure_depth() {
+        let mut mgr = TraceStackFrameManager::new();
+        let stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        mgr.set_stack(stack);
+
+        // Frame doesn't exist yet, but ensure_depth should create it
+        let f = mgr.get_frame(1, 0, 2, true).unwrap();
+        assert_eq!(f.level, 2);
+    }
+
+    #[test]
+    fn test_stack_manager_get_function_name() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(
+            TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000)
+                .with_function("main"),
+        );
+        mgr.set_stack(stack);
+
+        assert_eq!(mgr.get_function_name(1, 0, 0), Some("main"));
+        assert_eq!(mgr.get_function_name(1, 0, 1), None);
+        assert_eq!(mgr.get_function_name(99, 0, 0), None);
+    }
+
+    #[test]
+    fn test_stack_manager_get_frame_pointer() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(
+            TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000)
+                .with_fp(0x7FFF0010),
+        );
+        mgr.set_stack(stack);
+
+        assert_eq!(mgr.get_frame_pointer(1, 0, 0), Some(0x7FFF0010));
+        assert_eq!(mgr.get_frame_pointer(1, 0, 1), None);
+    }
+
+    #[test]
+    fn test_stack_manager_get_return_address() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(
+            TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000)
+                .with_return_address(0x402000),
+        );
+        mgr.set_stack(stack);
+
+        assert_eq!(mgr.get_return_address(1, 0, 0), Some(0x402000));
+    }
+
+    #[test]
+    fn test_stack_manager_frame_comments() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(stack);
+
+        assert!(mgr.get_frame_comment(1, 0, 0).is_none());
+        assert!(mgr.set_frame_comment(1, 0, 0, "at entry"));
+        assert_eq!(mgr.get_frame_comment(1, 0, 0), Some("at entry"));
+
+        // Non-existent frame
+        assert!(!mgr.set_frame_comment(1, 0, 5, "nowhere"));
+    }
+
+    #[test]
+    fn test_stack_manager_frame_registers() {
+        let mut mgr = TraceStackFrameManager::new();
+        let mut stack = TraceStackEntry::new(1, 0, Lifespan::at(0));
+        stack.push_frame(TraceStackFrameEntry::new(1, 0, 0, 0x401000, 0x7FFF0000));
+        mgr.set_stack(stack);
+
+        let reg = FrameRegisterValue::from_u64_le("RBP", 0x7FFF0010);
+        assert!(mgr.set_frame_register(1, 0, 0, reg));
+
+        let rbp = mgr.get_frame_register(1, 0, 0, "RBP").unwrap();
+        assert_eq!(rbp.as_u64_le(), Some(0x7FFF0010));
+
+        assert!(mgr.get_frame_register(1, 0, 0, "RAX").is_none());
     }
 }

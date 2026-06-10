@@ -163,6 +163,8 @@ pub use s_manyreg::{SManyReg, ManyRegVariant};
 // Constant symbol alternate naming
 pub mod s_const;
 
+pub use s_const::{SConst, SConstExt};
+
 pub use s_block32::SBlock32;
 pub use s_with32::SWith32;
 pub use s_return::{SReturn, ReturnStyle};

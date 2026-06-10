@@ -118,6 +118,35 @@ impl SUdt {
     pub fn variant(&self) -> UdtVariant {
         self.variant
     }
+
+    /// Parse an S_UDT symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    ///
+    /// This matches the Java `reader.align4()` call in
+    /// `UserDefinedTypeMsSymbol`.
+    pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse(data)?;
+        // type_record(4) + name_len + null, aligned to 4
+        let name_data = &data[4..];
+        let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        let name_len = end + 1;
+        let total = 4 + name_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    /// Parse an S_UDT_ST symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_st_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_st(data)?;
+        if data.len() < 6 {
+            return Some((sym, data.len()));
+        }
+        let st_len = u16::from_le_bytes([data[4], data[5]]) as usize;
+        let total = 6 + st_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
 }
 
 impl AbstractMsSymbol for SUdt {
@@ -339,5 +368,68 @@ mod tests {
         );
         assert_eq!(sym.variant(), UdtVariant::UdtSt);
         assert_eq!(sym.symbol_type_name(), "S_UDT_ST");
+    }
+
+    #[test]
+    fn test_parse_aligned_basic() {
+        // type_record(4) + "abc\0"(4) = 8, aligned to 8
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1020u32.to_le_bytes());
+        data.extend_from_slice(b"abc\0");
+
+        let (sym, consumed) = SUdt::parse_aligned(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x1020);
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_aligned_needs_padding() {
+        // type_record(4) + "ab\0"(3) = 7, aligned to 8
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(b"ab\0");
+
+        let (sym, consumed) = SUdt::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name, "ab");
+        assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_parse_aligned_already_aligned() {
+        // type_record(4) + "abcd\0"(5) = 9, aligned to 12
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(b"abcd\0");
+
+        let (sym, consumed) = SUdt::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name, "abcd");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_basic() {
+        // type_record(4) + st_len(2) + "abc"(3) = 9, aligned to 12
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0100u32.to_le_bytes());
+        let name = b"abc";
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+
+        let (sym, consumed) = SUdt::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_empty() {
+        // type_record(4) + st_len(2) + ""(0) = 6, aligned to 8
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x0050u32.to_le_bytes());
+        data.extend_from_slice(&0u16.to_le_bytes());
+
+        let (sym, consumed) = SUdt::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(consumed, 8);
     }
 }

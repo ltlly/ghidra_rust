@@ -12,6 +12,10 @@
 //! - `PcodeThreadContext`: Thread-scoped execution context.
 //! - `PcodeBreakpointManager`: Management of breakpoints during pcode execution.
 //! - `PcodeStepEvent`: Events emitted during single-step operations.
+//! - `AccessStateDiff`: Diff between two access states (memory/register changes).
+//! - `PcodeDebuggerDataAccess`: Trait for debugger+trace data access.
+//! - `PcodeDebuggerRegistersAccessState`: Concrete register access with target.
+//! - `MemoryWriteBuffer`: Buffered memory writes for transactional updates.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -2938,6 +2942,333 @@ impl TraceMemoryStateMap {
 }
 
 // ============================================================================
+// AccessStateDiff -- compare two access states
+// ============================================================================
+
+/// A record of a memory write for diff tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryWriteRecord {
+    /// The address space.
+    pub space: String,
+    /// The starting offset.
+    pub offset: u64,
+    /// The bytes written.
+    pub data: Vec<u8>,
+}
+
+/// A record of a register write for diff tracking.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterWriteRecord {
+    /// The register name.
+    pub name: String,
+    /// The value written.
+    pub data: Vec<u8>,
+}
+
+/// A diff between two `PcodeDebuggerAccess` states.
+///
+/// Captures all memory and register changes between a "before"
+/// and "after" snapshot. Ported from Ghidra's state diff
+/// tracking used by the debugger's undo/redo and merge logic.
+#[derive(Debug, Clone, Default)]
+pub struct AccessStateDiff {
+    /// Memory writes that occurred.
+    pub memory_writes: Vec<MemoryWriteRecord>,
+    /// Register writes that occurred (per thread).
+    pub register_writes: BTreeMap<i64, Vec<RegisterWriteRecord>>,
+    /// Breakpoints added since the "before" state.
+    pub breakpoints_added: Vec<PcodeBreakpoint>,
+    /// Breakpoints removed since the "before" state.
+    pub breakpoints_removed: Vec<PcodeBreakpoint>,
+}
+
+impl AccessStateDiff {
+    /// Whether the diff is empty (no changes).
+    pub fn is_empty(&self) -> bool {
+        self.memory_writes.is_empty()
+            && self.register_writes.values().all(|v| v.is_empty())
+            && self.breakpoints_added.is_empty()
+            && self.breakpoints_removed.is_empty()
+    }
+
+    /// The total number of changes.
+    pub fn num_changes(&self) -> usize {
+        let reg_changes: usize = self.register_writes.values().map(|v| v.len()).sum();
+        self.memory_writes.len()
+            + reg_changes
+            + self.breakpoints_added.len()
+            + self.breakpoints_removed.len()
+    }
+}
+
+/// Compute a diff of memory writes between the dirty regions of two
+/// `PcodeMemoryView` instances, comparing bytes that differ.
+pub fn diff_memory_views(
+    before: &PcodeMemoryView,
+    after: &PcodeMemoryView,
+) -> Vec<MemoryWriteRecord> {
+    let mut records = Vec::new();
+    for &(ref space, start, end) in after.dirty_regions() {
+        let len = (end - start) as u32;
+        let old_bytes = before.read(space, start, len);
+        let new_bytes = after.read(space, start, len);
+        if old_bytes != new_bytes {
+            records.push(MemoryWriteRecord {
+                space: space.clone(),
+                offset: start,
+                data: new_bytes.unwrap_or_default(),
+            });
+        }
+    }
+    records
+}
+
+// ============================================================================
+// PcodeDebuggerDataAccess -- trait for debugger+trace data access
+// ============================================================================
+
+/// Errors from debugger data access operations.
+#[derive(Debug, Clone)]
+pub enum DataAccessError {
+    /// No active session.
+    NoSession,
+    /// The target is not connected.
+    TargetDisconnected,
+    /// The operation was cancelled.
+    Cancelled,
+    /// A generic error.
+    Other(String),
+}
+
+impl std::fmt::Display for DataAccessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoSession => write!(f, "no active session"),
+            Self::TargetDisconnected => write!(f, "target disconnected"),
+            Self::Cancelled => write!(f, "operation cancelled"),
+            Self::Other(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for DataAccessError {}
+
+/// A trait for data-access shims that combine trace access with
+/// debugger session information.
+///
+/// Ported from Ghidra's `PcodeDebuggerDataAccess` interface.
+/// Extends trace-level data access with session awareness.
+pub trait PcodeDebuggerDataAccess {
+    /// Check if the associated trace represents a live session.
+    ///
+    /// The session is live if its trace has a recorder and the
+    /// source snapshot matches the recorder's destination snapshot.
+    fn is_live(&self) -> bool;
+
+    /// Get the service provider (for accessing other debugger services).
+    fn service_provider(&self) -> Option<&str>;
+
+    /// Get the target identifier.
+    fn target_id(&self) -> Option<&str>;
+}
+
+// ============================================================================
+// PcodeDebuggerRegistersAccessState -- concrete register access with target
+// ============================================================================
+
+// Re-export register types from the registers module
+pub use super::pcode_debugger_registers::{RegisterValueSource, SourcedRegisterValue};
+
+/// A concrete implementation of debugger register access that
+/// combines a register view with target interaction capabilities.
+///
+/// Ported from Ghidra's `DefaultPcodeDebuggerRegistersAccess`.
+/// Wraps a `PcodeRegisterView` and a `TargetSimulator` to provide
+/// the full `readFromTargetRegisters` / `writeTargetRegister` workflow.
+#[derive(Debug, Clone)]
+pub struct PcodeDebuggerRegistersAccessState {
+    /// The thread key.
+    pub thread_key: i64,
+    /// The register view.
+    pub register_view: PcodeRegisterView,
+    /// The target simulator (if connected).
+    pub target: Option<TargetSimulator>,
+    /// The snap context.
+    pub snap: i64,
+    /// Access metrics.
+    pub metrics: AccessMetrics,
+}
+
+impl PcodeDebuggerRegistersAccessState {
+    /// Create a new access state for a thread.
+    pub fn new(thread_key: i64, snap: i64) -> Self {
+        Self {
+            thread_key,
+            register_view: PcodeRegisterView::new(thread_key),
+            target: None,
+            snap,
+            metrics: AccessMetrics::default(),
+        }
+    }
+
+    /// Attach a target simulator.
+    pub fn with_target(mut self, target: TargetSimulator) -> Self {
+        self.target = Some(target);
+        self
+    }
+
+    /// Read registers whose state is unknown from the target.
+    ///
+    /// For each unknown register, reads the value from the target
+    /// and records it in the register view. Returns the number of
+    /// registers successfully read.
+    pub fn read_from_target(&mut self, unknown: &[String]) -> Result<usize, DataAccessError> {
+        let target = self
+            .target
+            .as_mut()
+            .ok_or(DataAccessError::TargetDisconnected)?;
+
+        let mut count = 0;
+        for name in unknown {
+            match target.read_register(name) {
+                Ok(value) => {
+                    self.register_view.write(name, &value);
+                    count += 1;
+                    self.metrics.record_register_read();
+                }
+                Err(_) => {
+                    self.register_view.set_state(name, RegisterState::Error);
+                }
+            }
+        }
+        Ok(count)
+    }
+
+    /// Write a register value to the target.
+    pub fn write_to_target(
+        &mut self,
+        name: &str,
+        data: &[u8],
+    ) -> Result<bool, DataAccessError> {
+        let target = self
+            .target
+            .as_mut()
+            .ok_or(DataAccessError::TargetDisconnected)?;
+
+        target
+            .write_register(name, data)
+            .map_err(|e| DataAccessError::Other(e))?;
+
+        // Also update the local view
+        self.register_view.write(name, data);
+        self.metrics.record_register_write();
+        Ok(true)
+    }
+
+    /// Whether the access state is live (has a connected target).
+    pub fn is_live(&self) -> bool {
+        self.target.as_ref().map_or(false, |t| t.connected)
+    }
+
+    /// Read a register value with source annotation.
+    pub fn read_sourced(&self, name: &str) -> Option<SourcedRegisterValue> {
+        self.register_view.read(name).map(|value| {
+            let source = if self.is_live() && self.register_view.is_known(name) {
+                RegisterValueSource::Target
+            } else {
+                RegisterValueSource::Trace
+            };
+            SourcedRegisterValue::new(name, value, source, self.snap)
+        })
+    }
+}
+
+// ============================================================================
+// MemoryWriteBuffer -- buffered memory writes
+// ============================================================================
+
+/// A buffer that accumulates memory writes before committing them
+/// to the memory view.
+///
+/// Ported from Ghidra's buffered write pattern used in pcode
+/// emulation to batch multiple small writes into a single
+/// transactional update.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryWriteBuffer {
+    /// Buffered writes: (space, offset, data).
+    writes: Vec<(String, u64, Vec<u8>)>,
+}
+
+impl MemoryWriteBuffer {
+    /// Create a new empty buffer.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Buffer a memory write.
+    pub fn write(&mut self, space: impl Into<String>, offset: u64, data: Vec<u8>) {
+        self.writes.push((space.into(), offset, data));
+    }
+
+    /// Commit all buffered writes to the memory view.
+    pub fn commit_to(&self, view: &mut PcodeMemoryView) {
+        for (space, offset, data) in &self.writes {
+            view.write(space, *offset, data);
+        }
+    }
+
+    /// The number of buffered writes.
+    pub fn len(&self) -> usize {
+        self.writes.len()
+    }
+
+    /// Whether the buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.writes.is_empty()
+    }
+
+    /// Clear the buffer without committing.
+    pub fn clear(&mut self) {
+        self.writes.clear();
+    }
+
+    /// Get the total number of bytes buffered.
+    pub fn total_bytes(&self) -> usize {
+        self.writes.iter().map(|(_, _, d)| d.len()).sum()
+    }
+}
+
+// ============================================================================
+// PcodeDebuggerAccessBuilder -- fluent API for constructing access
+// ============================================================================
+
+/// A builder for constructing a `PcodeDebuggerAccess` with a fluent API.
+///
+/// This extends the existing `PcodeDebuggerAccessBuilder` with additional
+/// methods for configuring register-level target interaction.
+impl PcodeDebuggerAccessBuilder {
+    /// Add register definitions from a snapshot.
+    ///
+    /// Copies the register definitions from the snapshot into the builder
+    /// so that the constructed access will have those registers defined.
+    pub fn with_register_defs_from_snapshot(mut self, snapshot: &RegisterBankSnapshot) -> Self {
+        for def in snapshot.definitions.values() {
+            self.register_defs.push((def.name.clone(), def.bit_length));
+        }
+        self
+    }
+
+    /// Add register definitions from a list.
+    pub fn with_register_defs(mut self, defs: Vec<(String, u32)>) -> Self {
+        self.register_defs.extend(defs);
+        self
+    }
+}
+
+// Re-export RegisterBankSnapshot from the registers module for builder convenience
+use super::pcode_debugger_registers::RegisterBankSnapshot;
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -3927,5 +4258,158 @@ mod tests {
         let map = TraceMemoryStateMap::new("ram");
         assert!(map.is_empty());
         assert_eq!(map.state_at(0), TraceMemoryState::Unknown);
+    }
+
+    // -- AccessStateDiff --
+
+    #[test]
+    fn test_access_state_diff_empty() {
+        let diff = AccessStateDiff::default();
+        assert!(diff.is_empty());
+        assert_eq!(diff.num_changes(), 0);
+    }
+
+    #[test]
+    fn test_access_state_diff_with_changes() {
+        let mut diff = AccessStateDiff::default();
+        diff.memory_writes.push(MemoryWriteRecord {
+            space: "ram".into(),
+            offset: 0x1000,
+            data: vec![0xCC],
+        });
+        diff.register_writes.insert(
+            1,
+            vec![RegisterWriteRecord {
+                name: "RAX".into(),
+                data: vec![0x42; 8],
+            }],
+        );
+        assert!(!diff.is_empty());
+        assert_eq!(diff.num_changes(), 2);
+    }
+
+    // -- diff_memory_views --
+
+    #[test]
+    fn test_diff_memory_views() {
+        let mut before = PcodeMemoryView::new();
+        before.write("ram", 0x1000, &[0x01, 0x02]);
+
+        let mut after = PcodeMemoryView::new();
+        after.write("ram", 0x1000, &[0x01, 0x02]); // same
+        after.write("ram", 0x2000, &[0xFF]); // new write
+
+        let diffs = diff_memory_views(&before, &after);
+        assert_eq!(diffs.len(), 1);
+        assert_eq!(diffs[0].offset, 0x2000);
+    }
+
+    // -- DataAccessError --
+
+    #[test]
+    fn test_data_access_error_display() {
+        let e = DataAccessError::NoSession;
+        assert_eq!(format!("{}", e), "no active session");
+
+        let e2 = DataAccessError::Other("test error".into());
+        assert!(format!("{}", e2).contains("test error"));
+    }
+
+    // -- SourcedRegisterValue --
+
+    #[test]
+    fn test_sourced_register_value() {
+        let srv =
+            SourcedRegisterValue::new("RAX", vec![0x42; 8], RegisterValueSource::Target, 10);
+        assert!(srv.is_live());
+        assert_eq!(srv.name, "RAX");
+
+        let srv2 =
+            SourcedRegisterValue::new("RBX", vec![0xAA; 8], RegisterValueSource::Trace, 10);
+        assert!(!srv2.is_live());
+    }
+
+    // -- PcodeDebuggerRegistersAccessState --
+
+    #[test]
+    fn test_registers_access_state_new() {
+        let state = PcodeDebuggerRegistersAccessState::new(42, 0);
+        assert_eq!(state.thread_key, 42);
+        assert!(!state.is_live());
+    }
+
+    #[test]
+    fn test_registers_access_state_with_target() {
+        let mut target = TargetSimulator::new("test_target");
+        target.connect();
+        target.queue_register_read("RAX", vec![0x42; 8]);
+
+        let mut state = PcodeDebuggerRegistersAccessState::new(1, 0).with_target(target);
+        assert!(state.is_live());
+
+        let count = state.read_from_target(&["RAX".to_string()]).unwrap();
+        assert_eq!(count, 1);
+        assert_eq!(state.register_view.read("RAX"), Some(vec![0x42; 8]));
+    }
+
+    #[test]
+    fn test_registers_access_state_write() {
+        let mut target = TargetSimulator::new("test_target");
+        target.connect();
+
+        let mut state = PcodeDebuggerRegistersAccessState::new(1, 0).with_target(target);
+        let ok = state.write_to_target("RAX", &[0xFF; 8]).unwrap();
+        assert!(ok);
+        assert_eq!(state.register_view.read("RAX"), Some(vec![0xFF; 8]));
+    }
+
+    #[test]
+    fn test_registers_access_state_no_target() {
+        let mut state = PcodeDebuggerRegistersAccessState::new(1, 0);
+        let result = state.read_from_target(&["RAX".to_string()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_registers_access_state_read_sourced() {
+        let mut target = TargetSimulator::new("test_target");
+        target.connect();
+        target.queue_register_read("RAX", vec![0x42; 8]);
+
+        let mut state = PcodeDebuggerRegistersAccessState::new(1, 5).with_target(target);
+        state.read_from_target(&["RAX".to_string()]).unwrap();
+
+        let sourced = state.read_sourced("RAX").unwrap();
+        assert!(sourced.is_live());
+        assert_eq!(sourced.snap, 5);
+    }
+
+    // -- MemoryWriteBuffer --
+
+    #[test]
+    fn test_memory_write_buffer() {
+        let mut buf = MemoryWriteBuffer::new();
+        assert!(buf.is_empty());
+
+        buf.write("ram", 0x1000, vec![0xCC]);
+        buf.write("ram", 0x2000, vec![0x90, 0x90]);
+        assert_eq!(buf.len(), 2);
+        assert_eq!(buf.total_bytes(), 3);
+
+        let mut view = PcodeMemoryView::new();
+        buf.commit_to(&mut view);
+        assert_eq!(view.read("ram", 0x1000, 1), Some(vec![0xCC]));
+        assert_eq!(view.read("ram", 0x2000, 2), Some(vec![0x90, 0x90]));
+
+        buf.clear();
+        assert!(buf.is_empty());
+    }
+
+    // -- RegisterValueSource --
+
+    #[test]
+    fn test_register_value_source_variants() {
+        assert_ne!(RegisterValueSource::Target, RegisterValueSource::Trace);
+        assert_ne!(RegisterValueSource::Emulated, RegisterValueSource::Unknown);
     }
 }

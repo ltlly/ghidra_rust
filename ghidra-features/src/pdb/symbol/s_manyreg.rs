@@ -95,6 +95,38 @@ impl SManyReg {
         }
     }
 
+    /// Create a new S_MANYREG multiple-register variable symbol (u8 registers).
+    pub fn new_manyreg(
+        type_record_number: RecordNumber,
+        count: u8,
+        registers: Vec<u8>,
+        name: String,
+    ) -> Self {
+        Self {
+            type_record_number,
+            count: count as u16,
+            registers: registers.into_iter().map(|r| r as u16).collect(),
+            name,
+            variant: ManyRegVariant::ManyReg,
+        }
+    }
+
+    /// Create a new S_MANYREG_ST multiple-register variable symbol.
+    pub fn new_st(
+        type_record_number: RecordNumber,
+        count: u8,
+        registers: Vec<u8>,
+        name: String,
+    ) -> Self {
+        Self {
+            type_record_number,
+            count: count as u16,
+            registers: registers.into_iter().map(|r| r as u16).collect(),
+            name,
+            variant: ManyRegVariant::ManyRegSt,
+        }
+    }
+
     /// Parse an S_MANYREG2 symbol from a byte slice (16-bit type index, u16 count, u16 registers).
     ///
     /// Expects the layout: `type_record(u16) + count(u16) + registers(u16[count]) + name(NT)`.
@@ -201,6 +233,67 @@ impl SManyReg {
     /// Return the variant of this many-register symbol.
     pub fn variant(&self) -> ManyRegVariant {
         self.variant
+    }
+
+    /// Whether this was parsed from the ST string format.
+    pub fn is_st_format(&self) -> bool {
+        self.variant == ManyRegVariant::ManyRegSt
+    }
+
+    /// Parse an S_MANYREG2 symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse(data)?;
+        let consumed = Self::compute_consumed_manyreg2(data, sym.count);
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    /// Parse an S_MANYREG symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_manyreg_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_manyreg(data)?;
+        let consumed = Self::compute_consumed_manyreg(data, sym.count);
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    /// Parse an S_MANYREG_ST symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_st_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_st(data)?;
+        let consumed = Self::compute_consumed_manyreg_st(data, sym.count);
+        let aligned = (consumed + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    fn compute_consumed_manyreg2(data: &[u8], count: u16) -> usize {
+        let name_off = 4 + count as usize * 2;
+        if name_off >= data.len() {
+            return data.len();
+        }
+        let name_data = &data[name_off..];
+        let name_end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        name_off + name_end + 1 // include null terminator
+    }
+
+    fn compute_consumed_manyreg(data: &[u8], count: u16) -> usize {
+        let name_off = 5 + count as usize;
+        if name_off >= data.len() {
+            return data.len();
+        }
+        let name_data = &data[name_off..];
+        let name_end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        name_off + name_end + 1
+    }
+
+    fn compute_consumed_manyreg_st(data: &[u8], count: u16) -> usize {
+        let name_off = 5 + count as usize;
+        if name_off + 2 > data.len() {
+            return data.len();
+        }
+        let st_len = u16::from_le_bytes([data[name_off], data[name_off + 1]]) as usize;
+        name_off + 2 + st_len
     }
 }
 
@@ -468,5 +561,88 @@ mod tests {
         let sym = SManyReg::parse_st(&data).unwrap();
         assert_eq!(sym.variant(), ManyRegVariant::ManyRegSt);
         assert_eq!(sym.symbol_type_name(), "S_MANYREG_ST");
+    }
+
+    #[test]
+    fn test_new_manyreg_constructor() {
+        let sym = SManyReg::new_manyreg(
+            RecordNumber::type_record_number(0x1000),
+            2,
+            vec![17, 18],
+            "test".to_string(),
+        );
+        assert_eq!(sym.variant(), ManyRegVariant::ManyReg);
+        assert_eq!(sym.count, 2);
+        assert_eq!(sym.registers, vec![17, 18]);
+        assert_eq!(sym.pdb_id(), 0x000C);
+    }
+
+    #[test]
+    fn test_new_st_constructor() {
+        let sym = SManyReg::new_st(
+            RecordNumber::type_record_number(0x1000),
+            1,
+            vec![6],
+            "bp".to_string(),
+        );
+        assert_eq!(sym.variant(), ManyRegVariant::ManyRegSt);
+        assert_eq!(sym.count, 1);
+        assert_eq!(sym.registers, vec![6]);
+        assert_eq!(sym.pdb_id(), 0x1005);
+    }
+
+    #[test]
+    fn test_is_st_format() {
+        let sym = SManyReg::new(
+            RecordNumber::type_record_number(0x1000),
+            1,
+            vec![17],
+            "a".to_string(),
+        );
+        assert!(!sym.is_st_format());
+
+        let sym = SManyReg::new_st(
+            RecordNumber::type_record_number(0x1000),
+            1,
+            vec![17],
+            "b".to_string(),
+        );
+        assert!(sym.is_st_format());
+    }
+
+    #[test]
+    fn test_parse_aligned_manyreg2() {
+        // type(2) + count(2) + reg(2) + "ab\0"(3) = 9, aligned to 12
+        let data = make_manyreg2_bytes(0x1000, &[17], b"ab");
+        let (sym, consumed) = SManyReg::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name, "ab");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_manyreg_aligned() {
+        // type(4) + count(1) + reg(1) + "abc\0"(4) = 10, aligned to 12
+        let data = make_manyreg_bytes(0x1000, &[17], b"abc");
+        let (sym, consumed) = SManyReg::parse_manyreg_aligned(&data).unwrap();
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned() {
+        // type(4) + count(1) + reg(1) + st_len(2) + "ab"(2) = 10, aligned to 12
+        let data = make_manyreg_st_bytes(0x1000, &[17], b"ab");
+        let (sym, consumed) = SManyReg::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "ab");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_empty() {
+        // type(4) + count(1) + reg(1) + st_len(2) + ""(0) = 8, aligned to 8
+        let data = make_manyreg_st_bytes(0x1000, &[6], b"");
+        let (sym, consumed) = SManyReg::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(consumed, 8);
     }
 }

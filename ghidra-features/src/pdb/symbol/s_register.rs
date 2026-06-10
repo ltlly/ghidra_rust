@@ -207,6 +207,41 @@ impl SRegister {
     pub fn is_dual_register(&self) -> bool {
         self.variant == RegisterVariant::Register16
     }
+
+    /// Whether this was parsed from the ST string format.
+    pub fn is_st_format(&self) -> bool {
+        self.variant == RegisterVariant::RegisterSt
+    }
+
+    /// Parse an S_REGISTER symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    ///
+    /// This matches the Java `reader.align4()` call in
+    /// `RegisterMsSymbol`.
+    pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse(data)?;
+        // type_record(4) + register(2) + name_len + null, aligned to 4
+        let name_data = &data[6..];
+        let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
+        let name_len = end + 1;
+        let total = 6 + name_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
+
+    /// Parse an S_REGISTER_ST symbol and return it along with the total bytes
+    /// consumed (including 4-byte alignment padding after the name).
+    pub fn parse_st_aligned(data: &[u8]) -> Option<(Self, usize)> {
+        let sym = Self::parse_st(data)?;
+        // type_record(4) + register(2) + st_len_prefix(2) + name_bytes, aligned to 4
+        if data.len() < 8 {
+            return Some((sym, data.len()));
+        }
+        let st_len = u16::from_le_bytes([data[6], data[7]]) as usize;
+        let total = 8 + st_len;
+        let aligned = (total + 3) & !3;
+        Some((sym, aligned))
+    }
 }
 
 impl AbstractMsSymbol for SRegister {
@@ -589,5 +624,57 @@ mod tests {
         let data = make_register16_bytes(0x0100, 0x1112, b"v");
         let sym = SRegister::parse_register16(&data).unwrap();
         assert_eq!(sym.variant(), RegisterVariant::Register16);
+    }
+
+    #[test]
+    fn test_is_st_format() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011,
+            "v".to_string(),
+        );
+        assert!(!sym.is_st_format());
+
+        let data = make_register_st_bytes(0x1000, 0x0011, b"v");
+        let sym = SRegister::parse_st(&data).unwrap();
+        assert!(sym.is_st_format());
+    }
+
+    #[test]
+    fn test_parse_aligned_basic() {
+        // type_record(4) + register(2) + "abc\0"(4) = 10, aligned to 12
+        let data = make_register_bytes(0x1000, 17, b"abc");
+        let (sym, consumed) = SRegister::parse_aligned(&data).unwrap();
+        assert_eq!(sym.register_index, 17);
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_aligned_already_aligned() {
+        // type_record(4) + register(2) + "ab\0"(3) = 9, aligned to 12
+        let data = make_register_bytes(0x1000, 17, b"ab");
+        let (sym, consumed) = SRegister::parse_aligned(&data).unwrap();
+        assert_eq!(sym.name, "ab");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_basic() {
+        // type_record(4) + register(2) + st_len(2) + "abc"(3) = 11, aligned to 12
+        let data = make_register_st_bytes(0x1000, 17, b"abc");
+        let (sym, consumed) = SRegister::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.register_index, 17);
+        assert_eq!(sym.name, "abc");
+        assert_eq!(consumed, 12);
+    }
+
+    #[test]
+    fn test_parse_st_aligned_empty_name() {
+        // type_record(4) + register(2) + st_len(2) + ""(0) = 8, aligned to 8
+        let data = make_register_st_bytes(0x1000, 17, b"");
+        let (sym, consumed) = SRegister::parse_st_aligned(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(consumed, 8);
     }
 }

@@ -35,7 +35,7 @@ pub use trace_memory_region::{
     TraceMemoryRegionManager,
 };
 pub use trace_stack_frame::{
-    FrameKind, FrameRegisterValue, SourceLocation,
+    FrameKind, FrameRegisterValue, SourceLocation, StackFrameError,
     TraceStackEntry, TraceStackFrameEntry, TraceStackFrameManager,
 };
 pub use trace_dynamic_table::{

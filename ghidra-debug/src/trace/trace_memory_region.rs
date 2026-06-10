@@ -373,9 +373,17 @@ impl TraceMemoryRegionEntry {
     // Snap-based name operations (ported from Java TraceMemoryRegion)
     // -----------------------------------------------------------------------
 
-    /// Set the display name, effective from `snap` onward.
+    /// Set the display name, effective for the given lifespan.
     ///
     /// Ported from `TraceMemoryRegion.setName(Lifespan, String)`.
+    /// Sets the name to apply from `lifespan.lmin()` onward.
+    pub fn set_name_lifespan(&mut self, lifespan: &Lifespan, name: impl Into<String>) {
+        self.set_name(lifespan.lmin(), name);
+    }
+
+    /// Set the display name, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setName(long, String)`.
     pub fn set_name(&mut self, snap: i64, name: impl Into<String>) {
         let name_str = name.into();
         self.name = name_str.clone();
@@ -407,9 +415,17 @@ impl TraceMemoryRegionEntry {
     // Snap-based range operations (ported from Java TraceMemoryRegion)
     // -----------------------------------------------------------------------
 
-    /// Set the address range, effective from `snap` onward.
+    /// Set the address range, effective for the given lifespan.
     ///
     /// Ported from `TraceMemoryRegion.setRange(Lifespan, AddressRange)`.
+    /// Sets the range to apply from `lifespan.lmin()` onward.
+    pub fn set_range_lifespan(&mut self, lifespan: &Lifespan, min_address: u64, max_address: u64) {
+        self.set_range(lifespan.lmin(), min_address, max_address);
+    }
+
+    /// Set the address range, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setRange(long, AddressRange)`.
     pub fn set_range(&mut self, snap: i64, min_address: u64, max_address: u64) {
         self.min_address = min_address;
         self.max_address = max_address;
@@ -487,18 +503,33 @@ impl TraceMemoryRegionEntry {
     // Snap-based flag operations (ported from Java TraceMemoryRegion)
     // -----------------------------------------------------------------------
 
-    /// Set the complete flag set, effective from `snap` onward.
+    /// Set the complete flag set, effective for the given lifespan.
     ///
     /// Ported from `TraceMemoryRegion.setFlags(Lifespan, Collection)`.
+    /// Sets flags from `lifespan.lmin()` onward.
+    pub fn set_flags_lifespan(&mut self, lifespan: &Lifespan, flags: BTreeSet<TraceMemoryFlag>) {
+        self.set_flags(lifespan.lmin(), flags);
+    }
+
+    /// Set the complete flag set, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.setFlags(long, Collection)`.
     pub fn set_flags(&mut self, snap: i64, flags: BTreeSet<TraceMemoryFlag>) {
         self.permissions = MemoryRegionPermissions::from_flags(&flags);
         self.flags = flags.clone();
         self.flag_history.push(SnapValue { snap, value: flags });
     }
 
-    /// Add flags to the current set, effective from `snap` onward.
+    /// Add flags to the current set, effective for the given lifespan.
     ///
     /// Ported from `TraceMemoryRegion.addFlags(Lifespan, Collection)`.
+    pub fn add_flags_lifespan(&mut self, lifespan: &Lifespan, new_flags: &BTreeSet<TraceMemoryFlag>) {
+        self.add_flags(lifespan.lmin(), new_flags);
+    }
+
+    /// Add flags to the current set, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.addFlags(long, Collection)`.
     pub fn add_flags(&mut self, snap: i64, new_flags: &BTreeSet<TraceMemoryFlag>) {
         for f in new_flags {
             self.flags.insert(*f);
@@ -511,9 +542,16 @@ impl TraceMemoryRegionEntry {
             });
     }
 
-    /// Clear flags from the current set, effective from `snap` onward.
+    /// Clear flags from the current set, effective for the given lifespan.
     ///
     /// Ported from `TraceMemoryRegion.clearFlags(Lifespan, Collection)`.
+    pub fn clear_flags_lifespan(&mut self, lifespan: &Lifespan, to_clear: &BTreeSet<TraceMemoryFlag>) {
+        self.clear_flags(lifespan.lmin(), to_clear);
+    }
+
+    /// Clear flags from the current set, effective from `snap` onward.
+    ///
+    /// Ported from `TraceMemoryRegion.clearFlags(long, Collection)`.
     pub fn clear_flags(&mut self, snap: i64, to_clear: &BTreeSet<TraceMemoryFlag>) {
         for f in to_clear {
             self.flags.remove(f);
@@ -859,6 +897,108 @@ impl TraceMemoryRegionManager {
     ) -> Option<&BTreeSet<TraceMemoryFlag>> {
         self.region_containing(space, offset, snap)
             .map(|r| r.get_flags(snap))
+    }
+
+    /// Whether the manager has no regions.
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+
+    /// Find all regions with the given name at `snap`.
+    ///
+    /// Ported from region lookup by display name in `DBTraceMemoryManager`.
+    pub fn find_regions_by_name(&self, name: &str, snap: i64) -> Vec<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| r.is_valid_at(snap) && r.get_name(snap) == name)
+            .collect()
+    }
+
+    /// Find all regions in a space that overlap the given range at `snap`.
+    ///
+    /// Ported from `DBTraceMemoryManager.getRegionsContaining(AddressRange, long)`.
+    pub fn regions_overlapping_range(
+        &self,
+        space: &str,
+        min: u64,
+        max: u64,
+        snap: i64,
+    ) -> Vec<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| {
+                r.space == space
+                    && r.is_valid_at(snap)
+                    && {
+                        let (rmin, rmax) = r.get_range(snap);
+                        rmin <= max && min <= rmax
+                    }
+            })
+            .collect()
+    }
+
+    /// Get all regions sorted by their minimum address in a space at `snap`.
+    pub fn regions_sorted_by_address(
+        &self,
+        space: &str,
+        snap: i64,
+    ) -> Vec<&TraceMemoryRegionEntry> {
+        let mut regions = self.regions_in_space_at(space, snap);
+        regions.sort_by_key(|r| r.get_min_address(snap));
+        regions
+    }
+
+    /// Find the region with the largest minimum address in a space at `snap`.
+    ///
+    /// Useful for determining the upper bound of mapped memory.
+    pub fn highest_region_in_space(
+        &self,
+        space: &str,
+        snap: i64,
+    ) -> Option<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| r.space == space && r.is_valid_at(snap))
+            .max_by_key(|r| r.get_min_address(snap))
+    }
+
+    /// Find all regions in a space that are marked as executable at `snap`.
+    pub fn executable_regions_at(
+        &self,
+        space: &str,
+        snap: i64,
+    ) -> Vec<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| r.space == space && r.is_valid_at(snap) && r.is_execute_at(snap))
+            .collect()
+    }
+
+    /// Find all regions in a space that are marked as writable at `snap`.
+    pub fn writable_regions_at(
+        &self,
+        space: &str,
+        snap: i64,
+    ) -> Vec<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| r.space == space && r.is_valid_at(snap) && r.is_write_at(snap))
+            .collect()
+    }
+
+    /// Find all regions across all spaces that are alive at `snap`.
+    pub fn all_regions_at(&self, snap: i64) -> Vec<&TraceMemoryRegionEntry> {
+        self.regions
+            .values()
+            .filter(|r| r.is_valid_at(snap))
+            .collect()
+    }
+
+    /// Delete all regions in the manager.
+    ///
+    /// Ported from clearing all memory regions in `DBTraceMemoryManager`.
+    pub fn clear(&mut self) {
+        self.regions.clear();
     }
 }
 
@@ -1357,5 +1497,222 @@ mod tests {
         let json = serde_json::to_string(&mgr).unwrap();
         let back: TraceMemoryRegionManager = serde_json::from_str(&json).unwrap();
         assert_eq!(back.region_count(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Lifespan-based operations tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_set_name_lifespan() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        r.set_name_lifespan(&Lifespan::span(5, 20), ".text_v2");
+        assert_eq!(r.get_name(0), ".text");
+        assert_eq!(r.get_name(5), ".text_v2");
+        assert_eq!(r.get_name(20), ".text_v2");
+    }
+
+    #[test]
+    fn test_region_set_range_lifespan() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        r.set_range_lifespan(&Lifespan::span(5, 20), 0x200, 0x2FF);
+        assert_eq!(r.get_range(0), (0x100, 0x1FF));
+        assert_eq!(r.get_range(5), (0x200, 0x2FF));
+    }
+
+    #[test]
+    fn test_region_set_flags_lifespan() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        let rx = BTreeSet::from([TraceMemoryFlag::Read, TraceMemoryFlag::Execute]);
+        r.set_flags_lifespan(&Lifespan::span(5, 20), rx);
+        assert!(r.is_write_at(0)); // before lifespan
+        assert!(!r.is_write_at(5));
+        assert!(r.is_read_at(5));
+        assert!(r.is_execute_at(5));
+    }
+
+    #[test]
+    fn test_region_add_flags_lifespan() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", "mmio", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        // Default has RWX, now add volatile from snap 5
+        let vol = BTreeSet::from([TraceMemoryFlag::Volatile]);
+        r.add_flags_lifespan(&Lifespan::span(5, 20), &vol);
+        assert!(!r.is_volatile_at(0));
+        assert!(r.is_volatile_at(5));
+    }
+
+    #[test]
+    fn test_region_clear_flags_lifespan() {
+        let mut r = TraceMemoryRegionEntry::new(
+            0, "R[0]", ".text", "ram", 0x100, 0x1FF, Lifespan::now_on(0),
+        );
+        let write = BTreeSet::from([TraceMemoryFlag::Write]);
+        r.clear_flags_lifespan(&Lifespan::span(5, 20), &write);
+        assert!(r.is_write_at(0));
+        assert!(!r.is_write_at(5));
+    }
+
+    // -----------------------------------------------------------------------
+    // Manager extended tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_region_manager_is_empty() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        assert!(mgr.is_empty());
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        assert!(!mgr.is_empty());
+    }
+
+    #[test]
+    fn test_region_manager_find_by_name() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".text", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            2, "", ".data", "ram", 0x600000, 0x600FFF, Lifespan::now_on(0),
+        ));
+
+        let texts = mgr.find_regions_by_name(".text", 0);
+        assert_eq!(texts.len(), 2);
+
+        let data = mgr.find_regions_by_name(".data", 0);
+        assert_eq!(data.len(), 1);
+
+        let none = mgr.find_regions_by_name(".bss", 0);
+        assert_eq!(none.len(), 0);
+    }
+
+    #[test]
+    fn test_region_manager_overlapping_range() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".data", "ram", 0x402000, 0x402FFF, Lifespan::now_on(0),
+        ));
+
+        // Query range that overlaps .text only
+        let regions = mgr.regions_overlapping_range("ram", 0x400F00, 0x401100, 0);
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].name, ".text");
+
+        // Query range that overlaps both
+        let regions = mgr.regions_overlapping_range("ram", 0x400F00, 0x402100, 0);
+        assert_eq!(regions.len(), 2);
+    }
+
+    #[test]
+    fn test_region_manager_sorted_by_address() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+
+        let sorted = mgr.regions_sorted_by_address("ram", 0);
+        assert_eq!(sorted[0].name, ".text");
+        assert_eq!(sorted[1].name, ".data");
+    }
+
+    #[test]
+    fn test_region_manager_highest_region() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".stack", "ram", 0x7FFF0000, 0x7FFFFFFF, Lifespan::now_on(0),
+        ));
+
+        let highest = mgr.highest_region_in_space("ram", 0).unwrap();
+        assert_eq!(highest.name, ".stack");
+    }
+
+    #[test]
+    fn test_region_manager_executable_regions() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RX),
+        );
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                1, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RW),
+        );
+
+        let exec = mgr.executable_regions_at("ram", 0);
+        assert_eq!(exec.len(), 1);
+        assert_eq!(exec[0].name, ".text");
+    }
+
+    #[test]
+    fn test_region_manager_writable_regions() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RX),
+        );
+        mgr.add_region(
+            TraceMemoryRegionEntry::new(
+                1, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+            )
+            .with_permissions(MemoryRegionPermissions::RW),
+        );
+
+        let writable = mgr.writable_regions_at("ram", 0);
+        assert_eq!(writable.len(), 1);
+        assert_eq!(writable[0].name, ".data");
+    }
+
+    #[test]
+    fn test_region_manager_all_regions_at() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", "reg", "register", 0, 0xFF, Lifespan::now_on(0),
+        ));
+
+        assert_eq!(mgr.all_regions_at(0).len(), 2);
+    }
+
+    #[test]
+    fn test_region_manager_clear() {
+        let mut mgr = TraceMemoryRegionManager::new();
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            0, "", ".text", "ram", 0x400000, 0x400FFF, Lifespan::now_on(0),
+        ));
+        mgr.add_region(TraceMemoryRegionEntry::new(
+            1, "", ".data", "ram", 0x500000, 0x500FFF, Lifespan::now_on(0),
+        ));
+        assert_eq!(mgr.region_count(), 2);
+        mgr.clear();
+        assert_eq!(mgr.region_count(), 0);
+        assert!(mgr.is_empty());
     }
 }

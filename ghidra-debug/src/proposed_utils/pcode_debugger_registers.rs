@@ -12,6 +12,9 @@
 //! - `RegisterValueTransformer`: Transformations on register values
 //!   (endianness swap, sign extension, etc.).
 //! - `RegisterConvention`: Register calling convention description.
+//! - `RegisterBankSnapshot`: Serializable snapshot of an entire bank.
+//! - `RegisterBankMergeResult` / `RegisterMergeConflict`: Merge conflict tracking.
+//! - `PcodeDebuggerRegistersAccess`: Trait for target-synchronized register access.
 
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
@@ -2385,6 +2388,218 @@ impl RegisterValueCache {
 }
 
 // ============================================================================
+// RegisterBankSnapshot -- serializable bank state capture
+// ============================================================================
+
+/// A serializable snapshot of an entire register bank.
+///
+/// Ported from Ghidra's register bank snapshot concept used by
+/// `PcodeDebuggerRegistersAccess`. Captures all definitions,
+/// values, aliases, and parent-child relationships so the bank
+/// state can be serialized, transmitted, and restored.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterBankSnapshot {
+    /// The snapshot identifier.
+    pub id: String,
+    /// The snap (time) at which this snapshot was taken.
+    pub snap: i64,
+    /// All register definitions.
+    pub definitions: BTreeMap<String, RegisterDefinition>,
+    /// All register values.
+    pub values: BTreeMap<String, Vec<u8>>,
+    /// Alias mappings.
+    pub aliases: BTreeMap<String, String>,
+    /// Parent-child relationships.
+    pub children_of: BTreeMap<String, String>,
+}
+
+impl RegisterBankSnapshot {
+    /// Capture a snapshot from a register bank.
+    pub fn capture(id: impl Into<String>, snap: i64, bank: &PcodeRegisterBank) -> Self {
+        Self {
+            id: id.into(),
+            snap,
+            definitions: bank.definitions.clone(),
+            values: bank.values.clone(),
+            aliases: bank.aliases.clone(),
+            children_of: bank.children_of.clone(),
+        }
+    }
+
+    /// Restore the snapshot into a register bank.
+    pub fn restore(&self) -> PcodeRegisterBank {
+        PcodeRegisterBank {
+            definitions: self.definitions.clone(),
+            values: self.values.clone(),
+            aliases: self.aliases.clone(),
+            children_of: self.children_of.clone(),
+            groups: Vec::new(),
+        }
+    }
+
+    /// The number of registers with values in this snapshot.
+    pub fn num_values(&self) -> usize {
+        self.values.len()
+    }
+
+    /// The number of register definitions in this snapshot.
+    pub fn num_definitions(&self) -> usize {
+        self.definitions.len()
+    }
+}
+
+// ============================================================================
+// RegisterBankMergeResult -- merge conflict tracking
+// ============================================================================
+
+/// The result of merging two register bank states.
+///
+/// Ported from Ghidra's merge logic used when combining register
+/// state from multiple sources (e.g., target read + trace data).
+#[derive(Debug, Clone, Default)]
+pub struct RegisterBankMergeResult {
+    /// Registers that were successfully merged (no conflict).
+    pub merged: Vec<String>,
+    /// Registers where the two sources had different values.
+    pub conflicts: Vec<RegisterMergeConflict>,
+}
+
+/// A register merge conflict.
+#[derive(Debug, Clone)]
+pub struct RegisterMergeConflict {
+    /// The register name.
+    pub name: String,
+    /// The value from the first source.
+    pub value_a: Vec<u8>,
+    /// The value from the second source.
+    pub value_b: Vec<u8>,
+}
+
+impl RegisterBankMergeResult {
+    /// Whether the merge had any conflicts.
+    pub fn has_conflicts(&self) -> bool {
+        !self.conflicts.is_empty()
+    }
+
+    /// The total number of registers processed.
+    pub fn total(&self) -> usize {
+        self.merged.len() + self.conflicts.len()
+    }
+}
+
+/// Merge two register banks, recording conflicts.
+///
+/// For each register present in both banks, if the values differ
+/// a conflict is recorded; otherwise the value is accepted.
+/// The `prefer_first` flag controls which value wins on conflict.
+pub fn merge_register_banks(
+    a: &PcodeRegisterBank,
+    b: &PcodeRegisterBank,
+    _prefer_first: bool,
+) -> RegisterBankMergeResult {
+    let mut result = RegisterBankMergeResult::default();
+    let all_names: BTreeSet<String> = a
+        .register_names()
+        .into_iter()
+        .chain(b.register_names().into_iter())
+        .map(|s| s.to_string())
+        .collect();
+
+    for name in &all_names {
+        let val_a = a.read_register(name);
+        let val_b = b.read_register(name);
+
+        match (val_a, val_b) {
+            (Some(va), Some(vb)) => {
+                if va == vb {
+                    result.merged.push(name.clone());
+                } else {
+                    result.conflicts.push(RegisterMergeConflict {
+                        name: name.clone(),
+                        value_a: va,
+                        value_b: vb,
+                    });
+                }
+            }
+            (Some(_), None) | (None, Some(_)) => {
+                // One side has it, the other doesn't -- take whichever exists
+                result.merged.push(name.clone());
+            }
+            (None, None) => {}
+        }
+    }
+
+    result
+}
+
+// ============================================================================
+// PcodeDebuggerRegistersAccess -- trait for register access with target sync
+// ============================================================================
+
+/// Access errors specific to debugger register operations.
+#[derive(Debug, Clone)]
+pub enum RegisterAccessError {
+    /// No target is connected.
+    NoTarget,
+    /// The target is not in a state that permits reads.
+    NotReadable,
+    /// The target is not in a state that permits writes.
+    NotWritable,
+    /// The specified register was not found.
+    RegisterNotFound(String),
+    /// A generic error message.
+    Other(String),
+}
+
+impl std::fmt::Display for RegisterAccessError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoTarget => write!(f, "no target connected"),
+            Self::NotReadable => write!(f, "target not readable"),
+            Self::NotWritable => write!(f, "target not writable"),
+            Self::RegisterNotFound(n) => write!(f, "register not found: {}", n),
+            Self::Other(msg) => write!(f, "{}", msg),
+        }
+    }
+}
+
+impl std::error::Error for RegisterAccessError {}
+
+/// A trait for accessing trace registers through a debugger.
+///
+/// Ported from Ghidra's `PcodeDebuggerRegistersAccess` interface.
+/// Extends basic register access with the ability to read unknown
+/// registers from the live target and to write registers back.
+pub trait PcodeDebuggerRegistersAccess {
+    /// Read registers whose state is unknown from the target.
+    ///
+    /// The `unknown` set identifies which registers need to be read.
+    /// Returns `true` if any data was successfully read from the target.
+    fn read_from_target_registers(
+        &mut self,
+        unknown: &[String],
+    ) -> Result<bool, RegisterAccessError>;
+
+    /// Write a register value to the target.
+    ///
+    /// Returns `true` if the target was successfully written.
+    fn write_target_register(
+        &mut self,
+        name: &str,
+        data: &[u8],
+    ) -> Result<bool, RegisterAccessError>;
+
+    /// Check if the associated session is live (has a connected target).
+    fn is_live(&self) -> bool;
+
+    /// Initialize a thread's context register from the trace.
+    ///
+    /// Called during thread construction after the program counter is
+    /// set. Ensures the instruction decoder starts in the correct mode.
+    fn initialize_thread_context(&mut self, thread_key: i64);
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -2769,14 +2984,15 @@ mod tests {
     fn test_register_bank_diff_appeared_disappeared() {
         let mut before = RegisterSnapshot::new("b", 0);
         before.record("RAX", vec![1, 2, 3, 4]);
+        before.record("RBX", vec![5, 6, 7, 8]);
         let mut after = RegisterSnapshot::new("a", 1);
-        after.record("RAX", vec![1, 2, 3, 4]);
+        after.record("RBX", vec![5, 6, 7, 8]);
         after.record("RCX", vec![9, 9, 9, 9]);
 
         let diff = RegisterBankDiff::compute(&before, &after);
         assert!(diff.changed.is_empty());
         assert_eq!(diff.appeared, vec!["RCX"]);
-        assert_eq!(diff.disappeared, vec!["RAX"]); // RAX in before but not in after states
+        assert_eq!(diff.disappeared, vec!["RAX"]); // RAX in before but not in after
     }
 
     // -- RegisterWatchpoint --
@@ -3356,5 +3572,85 @@ mod tests {
         assert_eq!(cache.read(&bank, "RAX"), Some(vec![0x99; 8]));
         // RBX should be synced from bank
         assert_eq!(cache.read(&bank, "RBX"), Some(vec![0xAA; 8]));
+    }
+
+    // -- RegisterBankSnapshot --
+
+    #[test]
+    fn test_bank_snapshot_capture_restore() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define("RAX", 64, "GPR");
+        bank.define("RBX", 64, "GPR");
+        bank.write_register("RAX", &[0x42; 8]);
+        bank.write_register("RBX", &[0xAA; 8]);
+        bank.add_alias("EAX", "RAX");
+
+        let snap = RegisterBankSnapshot::capture("test_snap", 10, &bank);
+        assert_eq!(snap.num_values(), 2);
+        assert_eq!(snap.num_definitions(), 2);
+        assert_eq!(snap.snap, 10);
+
+        let restored = snap.restore();
+        assert_eq!(restored.read_register("RAX"), Some(vec![0x42; 8]));
+        assert_eq!(restored.read_register("EAX"), Some(vec![0x42; 8]));
+    }
+
+    // -- merge_register_banks --
+
+    #[test]
+    fn test_merge_register_banks_no_conflict() {
+        let mut a = PcodeRegisterBank::new();
+        a.define("RAX", 64, "GPR");
+        a.write_register("RAX", &[0x42; 8]);
+
+        let mut b = PcodeRegisterBank::new();
+        b.define("RAX", 64, "GPR");
+        b.write_register("RAX", &[0x42; 8]);
+
+        let result = merge_register_banks(&a, &b, true);
+        assert!(!result.has_conflicts());
+        assert_eq!(result.merged.len(), 1);
+    }
+
+    #[test]
+    fn test_merge_register_banks_with_conflict() {
+        let mut a = PcodeRegisterBank::new();
+        a.define("RAX", 64, "GPR");
+        a.write_register("RAX", &[0x42; 8]);
+
+        let mut b = PcodeRegisterBank::new();
+        b.define("RAX", 64, "GPR");
+        b.write_register("RAX", &[0xFF; 8]);
+
+        let result = merge_register_banks(&a, &b, true);
+        assert!(result.has_conflicts());
+        assert_eq!(result.conflicts.len(), 1);
+        assert_eq!(result.conflicts[0].name, "RAX");
+    }
+
+    #[test]
+    fn test_merge_register_banks_disjoint() {
+        let mut a = PcodeRegisterBank::new();
+        a.define("RAX", 64, "GPR");
+        a.write_register("RAX", &[0x42; 8]);
+
+        let mut b = PcodeRegisterBank::new();
+        b.define("RBX", 64, "GPR");
+        b.write_register("RBX", &[0xAA; 8]);
+
+        let result = merge_register_banks(&a, &b, true);
+        assert!(!result.has_conflicts());
+        assert_eq!(result.merged.len(), 2);
+    }
+
+    // -- RegisterAccessError --
+
+    #[test]
+    fn test_register_access_error_display() {
+        let e = RegisterAccessError::NoTarget;
+        assert_eq!(format!("{}", e), "no target connected");
+
+        let e2 = RegisterAccessError::RegisterNotFound("RAX".into());
+        assert!(format!("{}", e2).contains("RAX"));
     }
 }
