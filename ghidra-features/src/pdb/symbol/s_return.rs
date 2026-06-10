@@ -1,6 +1,10 @@
 //! S_RETURN -- Return value descriptor symbol.
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.ReturnDescriptionMsSymbol`.
+//!
+//! This symbol describes how a function returns its value. It records whether
+//! varargs are pushed right-to-left, whether the returnee cleans up the stack,
+//! the return style, and any remaining method data bytes.
 
 use std::fmt;
 
@@ -61,6 +65,61 @@ impl ReturnStyle {
             Self::IndirectReturneeAllocatedFar => "indirect returnee allocated far",
             Self::Unused => "unused",
         }
+    }
+
+    /// Return the raw integer value for this style.
+    ///
+    /// Returns `0xFF` for `Unknown`.
+    pub fn value(&self) -> u8 {
+        match self {
+            Self::Void => 0x00,
+            Self::ReturnDataInRegisters => 0x01,
+            Self::IndirectCallerAllocatedNear => 0x02,
+            Self::IndirectCallerAllocatedFar => 0x03,
+            Self::IndirectReturneeAllocatedNear => 0x04,
+            Self::IndirectReturneeAllocatedFar => 0x05,
+            Self::Unused => 0x06,
+            Self::Unknown => 0xFF,
+        }
+    }
+
+    /// Returns `true` if this is a void return (no value).
+    pub fn is_void(&self) -> bool {
+        *self == Self::Void
+    }
+
+    /// Returns `true` if the return value is passed in registers.
+    pub fn is_register_return(&self) -> bool {
+        *self == Self::ReturnDataInRegisters
+    }
+
+    /// Returns `true` if the return uses an indirect (pointer) mechanism.
+    pub fn is_indirect(&self) -> bool {
+        matches!(
+            self,
+            Self::IndirectCallerAllocatedNear
+                | Self::IndirectCallerAllocatedFar
+                | Self::IndirectReturneeAllocatedNear
+                | Self::IndirectReturneeAllocatedFar
+        )
+    }
+
+    /// Returns `true` if the caller is responsible for allocating the return
+    /// buffer (caller-allocated near or far).
+    pub fn is_caller_allocated(&self) -> bool {
+        matches!(
+            self,
+            Self::IndirectCallerAllocatedNear | Self::IndirectCallerAllocatedFar
+        )
+    }
+
+    /// Returns `true` if the returnee (callee) is responsible for allocating
+    /// the return buffer (returnee-allocated near or far).
+    pub fn is_returnee_allocated(&self) -> bool {
+        matches!(
+            self,
+            Self::IndirectReturneeAllocatedNear | Self::IndirectReturneeAllocatedFar
+        )
     }
 }
 
@@ -145,6 +204,33 @@ impl SReturn {
             bytes_remaining,
         })
     }
+
+    /// Return the raw flags word.
+    pub fn flags(&self) -> u16 {
+        let mut flags: u16 = 0;
+        if self.varargs_pushed_right_to_left {
+            flags |= 0x0001;
+        }
+        if self.returnee_cleans_up_stack {
+            flags |= 0x0002;
+        }
+        flags
+    }
+
+    /// Returns `true` if the return style is void.
+    pub fn is_void_return(&self) -> bool {
+        self.style.is_void()
+    }
+
+    /// Returns `true` if the return value is delivered in registers.
+    pub fn is_register_return(&self) -> bool {
+        self.style.is_register_return()
+    }
+
+    /// Returns `true` if the return uses an indirect mechanism.
+    pub fn is_indirect_return(&self) -> bool {
+        self.style.is_indirect()
+    }
 }
 
 impl AbstractMsSymbol for SReturn {
@@ -214,6 +300,49 @@ mod tests {
             format!("{}", ReturnStyle::ReturnDataInRegisters),
             "return data in registers"
         );
+    }
+
+    #[test]
+    fn test_return_style_value() {
+        assert_eq!(ReturnStyle::Void.value(), 0x00);
+        assert_eq!(ReturnStyle::ReturnDataInRegisters.value(), 0x01);
+        assert_eq!(ReturnStyle::Unknown.value(), 0xFF);
+    }
+
+    #[test]
+    fn test_return_style_is_void() {
+        assert!(ReturnStyle::Void.is_void());
+        assert!(!ReturnStyle::ReturnDataInRegisters.is_void());
+    }
+
+    #[test]
+    fn test_return_style_is_register_return() {
+        assert!(ReturnStyle::ReturnDataInRegisters.is_register_return());
+        assert!(!ReturnStyle::Void.is_register_return());
+    }
+
+    #[test]
+    fn test_return_style_is_indirect() {
+        assert!(ReturnStyle::IndirectCallerAllocatedNear.is_indirect());
+        assert!(ReturnStyle::IndirectCallerAllocatedFar.is_indirect());
+        assert!(ReturnStyle::IndirectReturneeAllocatedNear.is_indirect());
+        assert!(ReturnStyle::IndirectReturneeAllocatedFar.is_indirect());
+        assert!(!ReturnStyle::Void.is_indirect());
+        assert!(!ReturnStyle::ReturnDataInRegisters.is_indirect());
+    }
+
+    #[test]
+    fn test_return_style_is_caller_allocated() {
+        assert!(ReturnStyle::IndirectCallerAllocatedNear.is_caller_allocated());
+        assert!(ReturnStyle::IndirectCallerAllocatedFar.is_caller_allocated());
+        assert!(!ReturnStyle::IndirectReturneeAllocatedNear.is_caller_allocated());
+    }
+
+    #[test]
+    fn test_return_style_is_returnee_allocated() {
+        assert!(ReturnStyle::IndirectReturneeAllocatedNear.is_returnee_allocated());
+        assert!(ReturnStyle::IndirectReturneeAllocatedFar.is_returnee_allocated());
+        assert!(!ReturnStyle::IndirectCallerAllocatedNear.is_returnee_allocated());
     }
 
     // --- SReturn tests ---
@@ -302,5 +431,41 @@ mod tests {
         let a = SReturn::new(true, false, ReturnStyle::ReturnDataInRegisters, 4);
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_flags_roundtrip() {
+        let sym = SReturn::new(true, true, ReturnStyle::Void, 0);
+        assert_eq!(sym.flags(), 0x0003);
+
+        let sym = SReturn::new(false, false, ReturnStyle::Void, 0);
+        assert_eq!(sym.flags(), 0x0000);
+
+        let sym = SReturn::new(true, false, ReturnStyle::Void, 0);
+        assert_eq!(sym.flags(), 0x0001);
+    }
+
+    #[test]
+    fn test_is_void_return() {
+        let sym = SReturn::new(false, false, ReturnStyle::Void, 0);
+        assert!(sym.is_void_return());
+        assert!(!sym.is_register_return());
+    }
+
+    #[test]
+    fn test_is_register_return() {
+        let sym = SReturn::new(false, false, ReturnStyle::ReturnDataInRegisters, 0);
+        assert!(sym.is_register_return());
+        assert!(!sym.is_void_return());
+    }
+
+    #[test]
+    fn test_is_indirect_return() {
+        let sym = SReturn::new(false, false, ReturnStyle::IndirectCallerAllocatedNear, 0);
+        assert!(sym.is_indirect_return());
+        assert!(!sym.is_void_return());
+
+        let sym = SReturn::new(false, false, ReturnStyle::Void, 0);
+        assert!(!sym.is_indirect_return());
     }
 }

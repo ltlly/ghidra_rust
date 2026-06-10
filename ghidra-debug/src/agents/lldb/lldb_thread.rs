@@ -523,6 +523,55 @@ impl LldbThread {
         self.innermost_frame().map(|f| f.return_address).filter(|&ra| ra != 0)
     }
 
+    /// Get the effective display name for this thread.
+    ///
+    /// Priority: explicit display > thread name > queue name > TID-based fallback.
+    /// Ported from the display name resolution in the Python agent's
+    /// `put_threads` command.
+    pub fn effective_display(&self) -> String {
+        if let Some(ref disp) = self.display {
+            return disp.clone();
+        }
+        if let Some(ref name) = self.name {
+            return name.clone();
+        }
+        if let Some(ref queue) = self.queue_name {
+            return format!("Thread {} ({})", self.index, queue);
+        }
+        match self.tid {
+            Some(tid) => format!("Thread {} (TID {})", self.index, tid),
+            None => format!("Thread {}", self.index),
+        }
+    }
+
+    /// Get the display string with state suffix for trace UI.
+    ///
+    /// Ported from the Python agent's thread display construction.
+    pub fn display_with_state(&self) -> String {
+        let base = self.effective_display();
+        let state_suffix = match self.state {
+            ExecutionState::Running => " [Running]",
+            ExecutionState::Stopped => " [Stopped]",
+            ExecutionState::Exited => " [Exited]",
+            ExecutionState::NotStarted => "",
+        };
+        format!("{}{}", base, state_suffix)
+    }
+
+    /// Get the queue kind for GCD dispatch queue tracking.
+    ///
+    /// LLDB's `SBThread.GetQueueID()` can identify serial vs concurrent
+    /// queues. This returns a human-readable kind string.
+    pub fn queue_kind_str(&self) -> &'static str {
+        // If we have a queue name, infer the kind from common patterns.
+        match &self.queue_name {
+            Some(name) if name.contains("main") => "main",
+            Some(name) if name.contains("com.apple.root") => "concurrent",
+            Some(_) => "serial",
+            None => "unknown",
+        }
+    }
+
     /// Whether the thread was stopped by a breakpoint.
     pub fn stopped_at_breakpoint(&self) -> bool {
         self.stop_reason == Some(super::LldbStopReason::Breakpoint)
@@ -1333,6 +1382,202 @@ impl LldbStackFrame {
             "Processes[{}].Threads[{}].Stack[{}].Registers.{}",
             process_index, thread_index, self.level, bank_name
         )
+    }
+}
+
+/// Cached register snapshot for a thread.
+///
+/// Stores register values from the last sync to avoid redundant trace
+/// writes. Only changed registers are written on subsequent stops.
+/// Ported from the register caching in the Python agent's `putreg`
+/// command.
+#[derive(Debug, Clone, Default)]
+pub struct LldbRegisterCache {
+    /// Cached register values keyed by register name.
+    values: BTreeMap<String, Vec<u8>>,
+    /// Frame level this cache corresponds to.
+    frame_level: u32,
+}
+
+impl LldbRegisterCache {
+    /// Create a new empty cache for a frame level.
+    pub fn new(frame_level: u32) -> Self {
+        Self {
+            values: BTreeMap::new(),
+            frame_level,
+        }
+    }
+
+    /// Get the frame level.
+    pub fn frame_level(&self) -> u32 {
+        self.frame_level
+    }
+
+    /// Update the cache with new register values.
+    ///
+    /// Returns the names of registers that changed.
+    pub fn update(&mut self, regs: &[RegisterValue]) -> Vec<String> {
+        let mut changed = Vec::new();
+        for reg in regs {
+            let entry = self.values.entry(reg.name.clone()).or_default();
+            if *entry != reg.bytes {
+                changed.push(reg.name.clone());
+                entry.clear();
+                entry.extend_from_slice(&reg.bytes);
+            }
+        }
+        changed
+    }
+
+    /// Get a cached register value.
+    pub fn get(&self, name: &str) -> Option<&[u8]> {
+        self.values.get(name).map(|v| v.as_slice())
+    }
+
+    /// Check if a register has changed compared to the cached value.
+    pub fn has_changed(&self, name: &str, new_bytes: &[u8]) -> bool {
+        match self.values.get(name) {
+            Some(cached) => cached != new_bytes,
+            None => true,
+        }
+    }
+
+    /// Clear the cache.
+    pub fn clear(&mut self) {
+        self.values.clear();
+    }
+
+    /// Number of cached registers.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Check if the cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// Get all cached register names.
+    pub fn names(&self) -> Vec<&str> {
+        self.values.keys().map(|s| s.as_str()).collect()
+    }
+}
+
+/// Thread group identifier for LLDB.
+///
+/// LLDB supports thread groups for debugging multi-process targets
+/// (e.g., following forks). Each process is a thread group. Ported
+/// from the thread group handling in `hooks.py`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct LldbThreadGroup {
+    /// Group ID (typically the process index).
+    pub id: u32,
+    /// Display name (e.g., "process 1234").
+    pub name: String,
+    /// Thread indices belonging to this group.
+    pub threads: Vec<u32>,
+}
+
+impl LldbThreadGroup {
+    /// Create a new thread group.
+    pub fn new(id: u32, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            threads: Vec::new(),
+        }
+    }
+
+    /// Add a thread to this group.
+    pub fn add_thread(&mut self, thread_index: u32) {
+        if !self.threads.contains(&thread_index) {
+            self.threads.push(thread_index);
+        }
+    }
+
+    /// Remove a thread from this group.
+    pub fn remove_thread(&mut self, thread_index: u32) {
+        self.threads.retain(|&idx| idx != thread_index);
+    }
+
+    /// Number of threads in this group.
+    pub fn thread_count(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Whether this group contains the given thread.
+    pub fn contains_thread(&self, thread_index: u32) -> bool {
+        self.threads.contains(&thread_index)
+    }
+
+    /// Build the trace object path for this group.
+    pub fn trace_path(&self) -> String {
+        format!("Processes[{}]", self.id)
+    }
+}
+
+/// Tracks the focused (selected) thread for a process.
+///
+/// Ported from the thread selection tracking in `commands.py`.
+/// When the user selects a thread in the Ghidra UI, the agent
+/// records this so that subsequent operations (e.g., register reads)
+/// target the correct thread.
+#[derive(Debug, Clone, Default)]
+pub struct LldbThreadFocus {
+    /// The currently focused thread index, if any.
+    pub thread_index: Option<u32>,
+    /// The currently focused frame level within the thread.
+    pub frame_level: Option<u32>,
+}
+
+impl LldbThreadFocus {
+    /// Create a new empty focus.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Focus on a specific thread.
+    pub fn focus_thread(&mut self, thread_index: u32) {
+        self.thread_index = Some(thread_index);
+        self.frame_level = None;
+    }
+
+    /// Focus on a specific frame within the focused thread.
+    pub fn focus_frame(&mut self, thread_index: u32, frame_level: u32) {
+        self.thread_index = Some(thread_index);
+        self.frame_level = Some(frame_level);
+    }
+
+    /// Clear the focus.
+    pub fn clear(&mut self) {
+        self.thread_index = None;
+        self.frame_level = None;
+    }
+
+    /// Check if a specific thread is focused.
+    pub fn is_thread_focused(&self, thread_index: u32) -> bool {
+        self.thread_index == Some(thread_index)
+    }
+
+    /// Check if a specific frame is focused.
+    pub fn is_frame_focused(&self, thread_index: u32, frame_level: u32) -> bool {
+        self.thread_index == Some(thread_index) && self.frame_level == Some(frame_level)
+    }
+
+    /// Build the focused thread trace path.
+    pub fn thread_path(&self, process_index: u32) -> Option<String> {
+        self.thread_index
+            .map(|t| format!("Processes[{}].Threads[{}]", process_index, t))
+    }
+
+    /// Build the focused frame trace path.
+    pub fn frame_path(&self, process_index: u32) -> Option<String> {
+        match (self.thread_index, self.frame_level) {
+            (Some(t), Some(f)) => {
+                Some(format!("Processes[{}].Threads[{}].Stack[{}]", process_index, t, f))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -2363,5 +2608,282 @@ mod function_return_tests {
             .with_state(ExecutionState::Stopped)
             .with_stop_reason(super::super::LldbStopReason::Breakpoint);
         assert!(!t.stopped_at_function_return());
+    }
+}
+
+#[cfg(test)]
+mod register_cache_tests {
+    use super::*;
+
+    #[test]
+    fn test_register_cache_new() {
+        let cache = LldbRegisterCache::new(0);
+        assert_eq!(cache.frame_level(), 0);
+        assert!(cache.is_empty());
+        assert_eq!(cache.len(), 0);
+    }
+
+    #[test]
+    fn test_register_cache_update() {
+        let mut cache = LldbRegisterCache::new(0);
+        let regs = vec![
+            RegisterValue::from_u64("rax", 0x1111),
+            RegisterValue::from_u64("rbx", 0x2222),
+        ];
+        let changed = cache.update(&regs);
+        assert_eq!(changed.len(), 2); // All new
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn test_register_cache_no_change() {
+        let mut cache = LldbRegisterCache::new(0);
+        let regs = vec![
+            RegisterValue::from_u64("rax", 0x1111),
+            RegisterValue::from_u64("rbx", 0x2222),
+        ];
+        cache.update(&regs);
+        let changed = cache.update(&regs);
+        assert_eq!(changed.len(), 0); // No changes
+    }
+
+    #[test]
+    fn test_register_cache_partial_change() {
+        let mut cache = LldbRegisterCache::new(0);
+        let regs1 = vec![
+            RegisterValue::from_u64("rax", 0x1111),
+            RegisterValue::from_u64("rbx", 0x2222),
+        ];
+        cache.update(&regs1);
+
+        let regs2 = vec![
+            RegisterValue::from_u64("rax", 0x1111), // unchanged
+            RegisterValue::from_u64("rbx", 0x3333), // changed
+        ];
+        let changed = cache.update(&regs2);
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].as_str(), "rbx");
+    }
+
+    #[test]
+    fn test_register_cache_has_changed() {
+        let mut cache = LldbRegisterCache::new(0);
+        let regs = vec![RegisterValue::from_u64("rax", 0x1111)];
+        cache.update(&regs);
+
+        assert!(!cache.has_changed("rax", &0x1111u64.to_le_bytes()));
+        assert!(cache.has_changed("rax", &0x2222u64.to_le_bytes()));
+        assert!(cache.has_changed("rbx", &0x3333u64.to_le_bytes())); // not cached
+    }
+
+    #[test]
+    fn test_register_cache_get() {
+        let mut cache = LldbRegisterCache::new(0);
+        let regs = vec![RegisterValue::from_u64("rax", 0xdeadbeef)];
+        cache.update(&regs);
+
+        let val = cache.get("rax");
+        assert!(val.is_some());
+        assert_eq!(val.unwrap().len(), 8);
+        assert!(cache.get("rbx").is_none());
+    }
+
+    #[test]
+    fn test_register_cache_names() {
+        let mut cache = LldbRegisterCache::new(0);
+        let regs = vec![
+            RegisterValue::from_u64("rax", 1),
+            RegisterValue::from_u64("rbx", 2),
+            RegisterValue::from_u64("rcx", 3),
+        ];
+        cache.update(&regs);
+        let names = cache.names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"rax"));
+        assert!(names.contains(&"rbx"));
+        assert!(names.contains(&"rcx"));
+    }
+
+    #[test]
+    fn test_register_cache_clear() {
+        let mut cache = LldbRegisterCache::new(0);
+        cache.update(&[RegisterValue::from_u64("rax", 1)]);
+        assert!(!cache.is_empty());
+        cache.clear();
+        assert!(cache.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod thread_group_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_group_new() {
+        let group = LldbThreadGroup::new(0, "process 1234");
+        assert_eq!(group.id, 0);
+        assert_eq!(group.name, "process 1234");
+        assert_eq!(group.thread_count(), 0);
+    }
+
+    #[test]
+    fn test_thread_group_add_remove() {
+        let mut group = LldbThreadGroup::new(0, "process 1");
+        group.add_thread(1);
+        group.add_thread(2);
+        group.add_thread(1); // duplicate
+        assert_eq!(group.thread_count(), 2);
+        assert!(group.contains_thread(1));
+        assert!(group.contains_thread(2));
+        assert!(!group.contains_thread(3));
+
+        group.remove_thread(1);
+        assert_eq!(group.thread_count(), 1);
+        assert!(!group.contains_thread(1));
+    }
+
+    #[test]
+    fn test_thread_group_trace_path() {
+        let group = LldbThreadGroup::new(2, "process 100");
+        assert_eq!(group.trace_path(), "Processes[2]");
+    }
+}
+
+#[cfg(test)]
+mod thread_focus_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_focus_new() {
+        let focus = LldbThreadFocus::new();
+        assert!(focus.thread_index.is_none());
+        assert!(focus.frame_level.is_none());
+    }
+
+    #[test]
+    fn test_thread_focus_focus_thread() {
+        let mut focus = LldbThreadFocus::new();
+        focus.focus_thread(3);
+        assert_eq!(focus.thread_index, Some(3));
+        assert!(focus.frame_level.is_none());
+        assert!(focus.is_thread_focused(3));
+        assert!(!focus.is_thread_focused(4));
+    }
+
+    #[test]
+    fn test_thread_focus_focus_frame() {
+        let mut focus = LldbThreadFocus::new();
+        focus.focus_frame(3, 2);
+        assert_eq!(focus.thread_index, Some(3));
+        assert_eq!(focus.frame_level, Some(2));
+        assert!(focus.is_frame_focused(3, 2));
+        assert!(!focus.is_frame_focused(3, 1));
+        assert!(!focus.is_frame_focused(4, 2));
+    }
+
+    #[test]
+    fn test_thread_focus_clear() {
+        let mut focus = LldbThreadFocus::new();
+        focus.focus_frame(1, 0);
+        focus.clear();
+        assert!(focus.thread_index.is_none());
+        assert!(focus.frame_level.is_none());
+    }
+
+    #[test]
+    fn test_thread_focus_paths() {
+        let mut focus = LldbThreadFocus::new();
+        focus.focus_frame(5, 2);
+        assert_eq!(
+            focus.thread_path(1),
+            Some("Processes[1].Threads[5]".to_string())
+        );
+        assert_eq!(
+            focus.frame_path(1),
+            Some("Processes[1].Threads[5].Stack[2]".to_string())
+        );
+    }
+
+    #[test]
+    fn test_thread_focus_paths_empty() {
+        let focus = LldbThreadFocus::new();
+        assert!(focus.thread_path(0).is_none());
+        assert!(focus.frame_path(0).is_none());
+    }
+}
+
+#[cfg(test)]
+mod effective_display_tests {
+    use super::*;
+
+    #[test]
+    fn test_effective_display_explicit() {
+        let t = LldbThread::new(1, 0)
+            .with_display("My Custom Thread")
+            .with_name("main")
+            .with_tid(42);
+        assert_eq!(t.effective_display(), "My Custom Thread");
+    }
+
+    #[test]
+    fn test_effective_display_name() {
+        let t = LldbThread::new(1, 0)
+            .with_name("main")
+            .with_tid(42);
+        assert_eq!(t.effective_display(), "main");
+    }
+
+    #[test]
+    fn test_effective_display_queue() {
+        let t = LldbThread::new(2, 0)
+            .with_queue_name("com.apple.main-thread")
+            .with_tid(42);
+        assert_eq!(t.effective_display(), "Thread 2 (com.apple.main-thread)");
+    }
+
+    #[test]
+    fn test_effective_display_tid() {
+        let t = LldbThread::new(3, 0).with_tid(42);
+        assert_eq!(t.effective_display(), "Thread 3 (TID 42)");
+    }
+
+    #[test]
+    fn test_effective_display_fallback() {
+        let t = LldbThread::new(4, 0);
+        assert_eq!(t.effective_display(), "Thread 4");
+    }
+
+    #[test]
+    fn test_display_with_state() {
+        let t = LldbThread::new(1, 0)
+            .with_name("main")
+            .with_state(ExecutionState::Stopped);
+        assert_eq!(t.display_with_state(), "main [Stopped]");
+    }
+
+    #[test]
+    fn test_display_with_state_running() {
+        let t = LldbThread::new(1, 0)
+            .with_name("worker")
+            .with_state(ExecutionState::Running);
+        assert_eq!(t.display_with_state(), "worker [Running]");
+    }
+
+    #[test]
+    fn test_queue_kind_str() {
+        let t = LldbThread::new(1, 0)
+            .with_queue_name("com.apple.main-thread");
+        assert_eq!(t.queue_kind_str(), "main");
+
+        let t2 = LldbThread::new(2, 0)
+            .with_queue_name("com.apple.root.default-qos");
+        assert_eq!(t2.queue_kind_str(), "concurrent");
+
+        let t3 = LldbThread::new(3, 0)
+            .with_queue_name("com.myapp.serial");
+        assert_eq!(t3.queue_kind_str(), "serial");
+
+        let t4 = LldbThread::new(4, 0);
+        assert_eq!(t4.queue_kind_str(), "unknown");
     }
 }

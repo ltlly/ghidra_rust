@@ -19,7 +19,7 @@ use std::fmt;
 
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 
 /// Member access protection levels.
 ///
@@ -390,6 +390,8 @@ impl AbstractMsType for LfMember {
         result
     }
 }
+
+impl MsTypeField for LfMember {}
 
 impl fmt::Display for LfMember {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

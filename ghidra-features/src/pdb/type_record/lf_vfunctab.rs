@@ -19,7 +19,7 @@ use std::fmt;
 
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 use crate::pdb::pdb_byte_reader::PdbByteReader;
 use crate::pdb::pdb_exception::PdbException;
 
@@ -164,6 +164,8 @@ impl AbstractMsType for LfVfunctab {
         result
     }
 }
+
+impl MsTypeField for LfVfunctab {}
 
 impl Default for LfVfunctab {
     fn default() -> Self {
@@ -315,6 +317,8 @@ impl AbstractMsType for LfVfuncoff {
         result
     }
 }
+
+impl MsTypeField for LfVfuncoff {}
 
 impl fmt::Display for LfVfuncoff {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -17,7 +17,7 @@ use std::fmt;
 
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 
 /// Concrete PDB index type record (`LF_INDEX`).
 ///
@@ -176,6 +176,8 @@ impl AbstractMsType for LfIndex {
         )
     }
 }
+
+impl MsTypeField for LfIndex {}
 
 impl fmt::Display for LfIndex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

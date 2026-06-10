@@ -18,7 +18,7 @@ use std::fmt;
 
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 
 /// Concrete PDB bitfield type record (`LF_BITFIELD`).
 ///
@@ -192,6 +192,8 @@ impl AbstractMsType for LfBitfield {
         result
     }
 }
+
+impl MsTypeField for LfBitfield {}
 
 impl fmt::Display for LfBitfield {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

@@ -19,7 +19,7 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_member::{AccessProtection, MemberAttributes};
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 use crate::pdb::pdb_byte_reader::PdbByteReader;
 use crate::pdb::pdb_exception::PdbException;
 
@@ -217,6 +217,15 @@ impl LfBclass {
         false
     }
 
+    /// Get the name of this base class.
+    ///
+    /// Base class records do not carry their own name; the name is resolved
+    /// from the referenced base class type record. Returns `""`.
+    /// Provided for API symmetry with other field-list sub-records.
+    pub fn get_name(&self) -> &str {
+        ""
+    }
+
     /// Convert this base class into a [`FieldListEntry::BaseClass`].
     ///
     /// This is useful when constructing or manipulating field lists
@@ -265,6 +274,8 @@ impl AbstractMsType for LfBclass {
         result
     }
 }
+
+impl MsTypeField for LfBclass {}
 
 impl Default for LfBclass {
     fn default() -> Self {

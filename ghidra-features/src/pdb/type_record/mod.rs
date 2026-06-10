@@ -100,6 +100,22 @@ pub use lf_mfunc_id::LfMfuncId;
 use std::fmt;
 
 // =============================================================================
+// MsTypeField — marker trait for type records that appear inside LF_FIELDLIST
+// =============================================================================
+
+/// Marker trait for PDB type records that can appear as sub-entries within
+/// an `LF_FIELDLIST` container.
+///
+/// In the Java implementation this is the `MsTypeField` interface, which
+/// extends `IdMsParsable`. In our Rust port, this serves as a compile-time
+/// marker to identify types that participate in field list composition:
+/// members, static members, methods, base classes, nested types, vftable
+/// pointers, enumerates, and indices.
+///
+/// All types implementing this trait also implement [`AbstractMsType`].
+pub trait MsTypeField: AbstractMsType {}
+
+// =============================================================================
 // RecordNumber — a PDB type/symbol record reference
 // =============================================================================
 

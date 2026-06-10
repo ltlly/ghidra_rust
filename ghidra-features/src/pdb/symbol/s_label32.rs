@@ -1,7 +1,11 @@
 //! S_LABEL32 -- Label symbol.
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.S_Label32MsSymbol`
-//! and `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.ProcedureFlags`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.Label32MsSymbol`,
+//! `Label32StMsSymbol`, and `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.ProcedureFlags`.
+//!
+//! A label symbol represents a code label (an address within a procedure or at
+//! global scope) that has a name. Labels are used to mark targets of goto
+//! statements and other jump targets.
 
 use std::fmt;
 
@@ -41,9 +45,31 @@ impl ProcedureFlags {
     /// Debug information is present for optimized code.
     const HAS_DEBUG_INFO_FOR_OPTIMIZED_CODE: u8 = 0x80;
 
+    /// All function-related flag bits combined.
+    ///
+    /// This is used by [`has_function_indication`](Self::has_function_indication).
+    const FUNCTION_INDICATION: u8 = Self::HAS_FRAME_POINTER_PRESENT
+        | Self::HAS_INTERRUPT_RETURN
+        | Self::HAS_FAR_RETURN
+        | Self::DOES_NOT_RETURN
+        | Self::LABEL_NOT_REACHED
+        | Self::HAS_CUSTOM_CALLING_CONVENTION
+        | Self::MARKED_AS_NO_INLINE
+        | Self::HAS_DEBUG_INFO_FOR_OPTIMIZED_CODE;
+
     /// Create from a raw byte.
     pub fn new(byte: u8) -> Self {
         Self { byte }
+    }
+
+    /// Parse a ProcedureFlags from a byte slice, consuming one byte.
+    ///
+    /// Returns `None` if the slice is empty.
+    pub fn parse(data: &[u8]) -> Option<Self> {
+        if data.is_empty() {
+            return None;
+        }
+        Some(Self { byte: data[0] })
     }
 
     /// Return the raw flag byte.
@@ -92,10 +118,12 @@ impl ProcedureFlags {
     }
 
     /// Returns `true` if any procedure-related flag is set, suggesting the
-    /// label is associated with a function. This is a Ghidra heuristic, not
-    /// part of the PDB specification.
+    /// label is associated with a function.
+    ///
+    /// This is a Ghidra heuristic, not part of the PDB specification. It
+    /// checks whether any of the 8 defined flag bits are set.
     pub fn has_function_indication(&self) -> bool {
-        self.byte != 0
+        self.byte & Self::FUNCTION_INDICATION != 0
     }
 }
 
@@ -132,6 +160,21 @@ impl Default for ProcedureFlags {
 }
 
 // ---------------------------------------------------------------------------
+// LabelVariant
+// ---------------------------------------------------------------------------
+
+/// Which variant of the label symbol was parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelVariant {
+    /// `S_LABEL32` (0x0209) -- 32-bit offset, NT string (v5 PDB).
+    Label32,
+    /// `S_LABEL32_V2` (0x1105) -- 32-bit offset, NT string (v7 PDB).
+    Label32V2,
+    /// `S_LABEL32_ST` -- 32-bit offset, ST string (16-bit length prefix).
+    Label32St,
+}
+
+// ---------------------------------------------------------------------------
 // SLabel32
 // ---------------------------------------------------------------------------
 
@@ -150,8 +193,9 @@ impl Default for ProcedureFlags {
 /// name   : NT string
 /// ```
 ///
-/// This corresponds to `S_LABEL32` (0x1105) and `S_LABEL16` (0x0109) in the
-/// CodeView symbol set. After the name the stream is 4-byte aligned.
+/// This corresponds to `S_LABEL32` (0x0209 / 0x1105) and `S_LABEL16`
+/// (0x0109) in the CodeView symbol set. After the name the stream is
+/// 4-byte aligned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SLabel32 {
     /// Offset of the label within the segment.
@@ -165,16 +209,37 @@ pub struct SLabel32 {
 
     /// The label name.
     pub name: String,
+
+    /// Which variant was parsed.
+    variant: LabelVariant,
 }
 
 impl SLabel32 {
-    /// Create a new label symbol.
+    /// Create a new label symbol (v7 / v2 variant).
     pub fn new(offset: u64, segment: u16, flags: ProcedureFlags, name: String) -> Self {
         Self {
             offset,
             segment,
             flags,
             name,
+            variant: LabelVariant::Label32V2,
+        }
+    }
+
+    /// Create a label symbol with a specific variant tag.
+    pub fn with_variant(
+        offset: u64,
+        segment: u16,
+        flags: ProcedureFlags,
+        name: String,
+        variant: LabelVariant,
+    ) -> Self {
+        Self {
+            offset,
+            segment,
+            flags,
+            name,
+            variant,
         }
     }
 
@@ -182,6 +247,11 @@ impl SLabel32 {
     ///
     /// Expects the layout: `offset(u32) + segment(u16) + flags(u8) + name(NT)`.
     pub fn parse(data: &[u8]) -> Option<Self> {
+        Self::parse_as(data, LabelVariant::Label32V2)
+    }
+
+    /// Parse with an explicit variant tag.
+    pub fn parse_as(data: &[u8], variant: LabelVariant) -> Option<Self> {
         if data.len() < 7 {
             return None;
         }
@@ -194,6 +264,7 @@ impl SLabel32 {
             segment,
             flags,
             name,
+            variant,
         })
     }
 
@@ -202,7 +273,12 @@ impl SLabel32 {
     ///
     /// This matches the Java `reader.align4()` call after parsing.
     pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
-        let sym = Self::parse(data)?;
+        Self::parse_aligned_as(data, LabelVariant::Label32V2)
+    }
+
+    /// Parse with alignment and an explicit variant tag.
+    pub fn parse_aligned_as(data: &[u8], variant: LabelVariant) -> Option<(Self, usize)> {
+        let sym = Self::parse_as(data, variant)?;
         let name_data = &data[7..];
         let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
         let name_len = end + 1; // include null terminator
@@ -210,15 +286,33 @@ impl SLabel32 {
         let aligned = (total + 3) & !3;
         Some((sym, aligned))
     }
+
+    /// Return the variant of this label symbol.
+    pub fn variant(&self) -> LabelVariant {
+        self.variant
+    }
+
+    /// Return `true` if the flags suggest this label is associated with a
+    /// function (Ghidra heuristic).
+    pub fn has_function_indication(&self) -> bool {
+        self.flags.has_function_indication()
+    }
 }
 
 impl AbstractMsSymbol for SLabel32 {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_LABEL32
+        match self.variant {
+            LabelVariant::Label32 => super::super::symbol_kind::S_LABEL32,
+            LabelVariant::Label32V2 => super::super::symbol_kind::S_LABEL32_V2,
+            LabelVariant::Label32St => 0x1116, // S_LABEL32_ST (if defined)
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
-        "S_LABEL32"
+        match self.variant {
+            LabelVariant::Label32St => "S_LABEL32_ST",
+            _ => "S_LABEL32",
+        }
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -290,6 +384,21 @@ mod tests {
     }
 
     #[test]
+    fn test_procedure_flags_parse() {
+        let data = [0x09u8];
+        let f = ProcedureFlags::parse(&data).unwrap();
+        assert_eq!(f.raw(), 0x09);
+        assert!(f.has_frame_pointer_present());
+        assert!(f.does_not_return());
+    }
+
+    #[test]
+    fn test_procedure_flags_parse_empty() {
+        let data: [u8; 0] = [];
+        assert!(ProcedureFlags::parse(&data).is_none());
+    }
+
+    #[test]
     fn test_procedure_flags_individual_bits() {
         let f = ProcedureFlags::new(0x01);
         assert!(f.has_frame_pointer_present());
@@ -345,6 +454,7 @@ mod tests {
         assert_eq!(sym.segment, 1);
         assert_eq!(sym.flags.raw(), 0);
         assert_eq!(sym.name, "loop_top");
+        assert_eq!(sym.variant(), LabelVariant::Label32V2);
     }
 
     #[test]
@@ -386,7 +496,7 @@ mod tests {
     fn test_trait_impls() {
         let flags = ProcedureFlags::new(0x00);
         let sym = SLabel32::new(0x2000, 1, flags, "L1".to_string());
-        assert_eq!(sym.pdb_id(), 0x0209);
+        assert_eq!(sym.pdb_id(), 0x1105);
         assert_eq!(sym.symbol_type_name(), "S_LABEL32");
         assert_eq!(sym.name(), "L1");
         assert_eq!(sym.offset(), 0x2000);
@@ -417,5 +527,47 @@ mod tests {
         let a = SLabel32::new(0x100, 1, flags, "a".to_string());
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_variant_label32() {
+        let sym = SLabel32::with_variant(
+            0x2000, 1, ProcedureFlags::new(0), "L".to_string(),
+            LabelVariant::Label32,
+        );
+        assert_eq!(sym.pdb_id(), 0x0209);
+        assert_eq!(sym.variant(), LabelVariant::Label32);
+    }
+
+    #[test]
+    fn test_variant_label32_v2() {
+        let sym = SLabel32::new(0x2000, 1, ProcedureFlags::new(0), "L".to_string());
+        assert_eq!(sym.pdb_id(), 0x1105);
+        assert_eq!(sym.variant(), LabelVariant::Label32V2);
+    }
+
+    #[test]
+    fn test_has_function_indication() {
+        let sym = SLabel32::new(
+            0x2000, 1,
+            ProcedureFlags::new(0x01), // frame pointer present
+            "fn_label".to_string(),
+        );
+        assert!(sym.has_function_indication());
+
+        let sym = SLabel32::new(
+            0x2000, 1,
+            ProcedureFlags::new(0x00), // no flags
+            "plain".to_string(),
+        );
+        assert!(!sym.has_function_indication());
+    }
+
+    #[test]
+    fn test_parse_as_variant() {
+        let data = make_label32_bytes(0x2000, 1, 0, b"L");
+        let sym = SLabel32::parse_as(&data, LabelVariant::Label32).unwrap();
+        assert_eq!(sym.variant(), LabelVariant::Label32);
+        assert_eq!(sym.pdb_id(), 0x0209);
     }
 }

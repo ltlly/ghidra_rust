@@ -2060,6 +2060,322 @@ pub fn parse_lldb_section_line(line: &str, max_addr: u64) -> Option<LldbParsedSe
     Some(LldbParsedSection::new(name, vma_start, vma_end, 0, attrs))
 }
 
+/// Process memory operation descriptor.
+///
+/// Represents a memory read or write that the agent needs to perform
+/// on the debuggee process. Ported from the `SBProcess.ReadMemory` /
+/// `SBProcess.WriteMemory` Python calls in the LLDB agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LldbMemoryOperation {
+    /// Target address in the debuggee.
+    pub address: u64,
+    /// Byte count.
+    pub size: u64,
+    /// Operation kind.
+    pub kind: LldbMemoryOpKind,
+}
+
+/// Kind of memory operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LldbMemoryOpKind {
+    /// Read memory from the debuggee.
+    Read,
+    /// Write memory to the debuggee.
+    Write,
+}
+
+impl LldbMemoryOperation {
+    /// Create a read operation.
+    pub fn read(address: u64, size: u64) -> Self {
+        Self {
+            address,
+            size,
+            kind: LldbMemoryOpKind::Read,
+        }
+    }
+
+    /// Create a write operation.
+    pub fn write(address: u64, size: u64) -> Self {
+        Self {
+            address,
+            size,
+            kind: LldbMemoryOpKind::Write,
+        }
+    }
+
+    /// Get the address range (start, end exclusive).
+    pub fn range(&self) -> (u64, u64) {
+        (self.address, self.address.saturating_add(self.size))
+    }
+
+    /// Build the LLDB Python command for this operation.
+    ///
+    /// For reads: `process read-memory -f hex -s SIZE ADDRESS`
+    /// For writes: `process write-memory ADDRESS HEXDATA`
+    pub fn build_lldb_command(&self, hex_data: Option<&str>) -> String {
+        match self.kind {
+            LldbMemoryOpKind::Read => {
+                format!(
+                    "process read-memory -f hex -s {} 0x{:x}",
+                    self.size, self.address
+                )
+            }
+            LldbMemoryOpKind::Write => {
+                let data = hex_data.unwrap_or("");
+                format!(
+                    "process write-memory 0x{:x} {}",
+                    self.address, data
+                )
+            }
+        }
+    }
+}
+
+/// Process core dump descriptor.
+///
+/// Represents a core dump file loaded into LLDB. Ported from the
+/// `SBProcess.GetCoreFile()` and `SBTarget.LoadCore()` APIs.
+///
+/// When debugging a core dump, the process is inherently stopped
+/// (no live execution). The core file provides snapshots of memory,
+/// registers, and threads at the time of the crash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LldbCoreDump {
+    /// Path to the core dump file.
+    pub path: String,
+    /// Process ID stored in the core (may differ from live PID).
+    pub core_pid: u64,
+    /// Signal that caused the core dump, if any.
+    pub signal: Option<String>,
+    /// Timestamp of the core dump, if embedded.
+    pub timestamp: Option<u64>,
+}
+
+impl LldbCoreDump {
+    /// Create a new core dump descriptor.
+    pub fn new(path: impl Into<String>, core_pid: u64) -> Self {
+        Self {
+            path: path.into(),
+            core_pid,
+            signal: None,
+            timestamp: None,
+        }
+    }
+
+    /// Set the signal.
+    pub fn with_signal(mut self, signal: impl Into<String>) -> Self {
+        self.signal = Some(signal.into());
+        self
+    }
+
+    /// Set the timestamp.
+    pub fn with_timestamp(mut self, ts: u64) -> Self {
+        self.timestamp = Some(ts);
+        self
+    }
+
+    /// Build the LLDB command to load this core file.
+    pub fn build_load_command(&self) -> String {
+        format!("target create --core {}", self.path)
+    }
+}
+
+/// Process environment variable collection.
+///
+/// Represents the environment block of a debuggee process, mirroring
+/// LLDB's `SBProcess.GetEnvironment()`. Ported from the `put_environment`
+/// command in the Python agent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LldbProcessEnvironment {
+    vars: BTreeMap<String, String>,
+}
+
+impl LldbProcessEnvironment {
+    /// Create an empty environment.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create from an iterator of key-value pairs.
+    pub fn from_pairs(pairs: impl IntoIterator<Item = (String, String)>) -> Self {
+        Self {
+            vars: pairs.into_iter().collect(),
+        }
+    }
+
+    /// Set an environment variable.
+    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.vars.insert(key.into(), value.into());
+    }
+
+    /// Get an environment variable.
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.vars.get(key).map(|s| s.as_str())
+    }
+
+    /// Remove an environment variable.
+    pub fn remove(&mut self, key: &str) -> Option<String> {
+        self.vars.remove(key)
+    }
+
+    /// Check if a variable exists.
+    pub fn contains(&self, key: &str) -> bool {
+        self.vars.contains_key(key)
+    }
+
+    /// Get all variable names.
+    pub fn keys(&self) -> Vec<&str> {
+        self.vars.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Number of variables.
+    pub fn len(&self) -> usize {
+        self.vars.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.vars.is_empty()
+    }
+
+    /// Build trace key-value pairs for the environment node.
+    ///
+    /// Ported from `put_environment` in the Python agent.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        self.vars
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect()
+    }
+
+    /// Get standard OS, arch, endian values if present.
+    pub fn standard_info(&self) -> (&str, &str, &str) {
+        let os = self.get("OS").unwrap_or("unknown");
+        let arch = self.get("Arch").unwrap_or("unknown");
+        let endian = self.get("Endian").unwrap_or("little");
+        (os, arch, endian)
+    }
+}
+
+/// Process attachment state machine.
+///
+/// Tracks the lifecycle states of attaching to a process. In LLDB,
+/// attaching involves selecting a target, setting up the attach info,
+/// calling `SBProcess.Attach()`, and waiting for the stop event.
+/// Ported from the connection state management in `connection.py`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LldbAttachState {
+    /// Not yet started.
+    Idle,
+    /// Target is being created/configured.
+    ConfiguringTarget,
+    /// Attach request sent, waiting for stop.
+    Attaching,
+    /// Attached and stopped (ready for inspection).
+    Attached,
+    /// Detaching from process.
+    Detaching,
+    /// Detached.
+    Detached,
+    /// Attachment failed.
+    Failed,
+}
+
+impl LldbAttachState {
+    /// Whether the process is currently attached.
+    pub fn is_attached(&self) -> bool {
+        matches!(self, Self::Attached)
+    }
+
+    /// Whether the state is a terminal state.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, Self::Detached | Self::Failed)
+    }
+
+    /// Whether the attach is in progress.
+    pub fn in_progress(&self) -> bool {
+        matches!(self, Self::ConfiguringTarget | Self::Attaching)
+    }
+
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Idle => "Idle",
+            Self::ConfiguringTarget => "Configuring target",
+            Self::Attaching => "Attaching",
+            Self::Attached => "Attached",
+            Self::Detaching => "Detaching",
+            Self::Detached => "Detached",
+            Self::Failed => "Failed",
+        }
+    }
+
+    /// Build the trace string representation.
+    pub fn as_trace_str(&self) -> &'static str {
+        match self {
+            Self::Idle => "IDLE",
+            Self::ConfiguringTarget => "CONFIGURING",
+            Self::Attaching => "ATTACHING",
+            Self::Attached => "ATTACHED",
+            Self::Detaching => "DETACHING",
+            Self::Detached => "DETACHED",
+            Self::Failed => "FAILED",
+        }
+    }
+}
+
+/// Process read result containing the bytes read from the debuggee.
+///
+/// Returned by memory read operations. Contains the raw bytes plus
+/// metadata about the read. Ported from the memory reading in
+/// `commands.py`.
+#[derive(Debug, Clone)]
+pub struct LldbMemoryReadResult {
+    /// Start address of the read.
+    pub address: u64,
+    /// Raw bytes read.
+    pub data: Vec<u8>,
+    /// Number of bytes successfully read (may be less than requested
+    /// if a partial read occurred).
+    pub bytes_read: u64,
+    /// Error string, if the read partially or fully failed.
+    pub error: Option<String>,
+}
+
+impl LldbMemoryReadResult {
+    /// Create a successful read result.
+    pub fn success(address: u64, data: Vec<u8>) -> Self {
+        let len = data.len() as u64;
+        Self {
+            address,
+            data,
+            bytes_read: len,
+            error: None,
+        }
+    }
+
+    /// Create a failed/partial read result.
+    pub fn partial(address: u64, data: Vec<u8>, error: impl Into<String>) -> Self {
+        let len = data.len() as u64;
+        Self {
+            address,
+            data,
+            bytes_read: len,
+            error: Some(error.into()),
+        }
+    }
+
+    /// Whether the read was fully successful.
+    pub fn is_success(&self) -> bool {
+        self.error.is_none()
+    }
+
+    /// End address (exclusive) of the read data.
+    pub fn end_address(&self) -> u64 {
+        self.address.saturating_add(self.bytes_read)
+    }
+}
+
 /// Parse an LLDB image list module header line.
 ///
 /// LLDB's `image list` output starts each module with:
@@ -3329,6 +3645,189 @@ mod parsed_module_tests {
         assert_eq!(mod_ws.info.name, "test");
         assert_eq!(mod_ws.section_count(), 1);
         assert!(mod_ws.sections.contains_key("__TEXT.__text"));
+    }
+}
+
+#[cfg(test)]
+mod memory_operation_tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_operation_read() {
+        let op = LldbMemoryOperation::read(0x401000, 256);
+        assert_eq!(op.address, 0x401000);
+        assert_eq!(op.size, 256);
+        assert_eq!(op.kind, LldbMemoryOpKind::Read);
+        let (start, end) = op.range();
+        assert_eq!(start, 0x401000);
+        assert_eq!(end, 0x401100);
+    }
+
+    #[test]
+    fn test_memory_operation_write() {
+        let op = LldbMemoryOperation::write(0x7fff0000, 8);
+        assert_eq!(op.kind, LldbMemoryOpKind::Write);
+        let cmd = op.build_lldb_command(Some("deadbeef"));
+        assert!(cmd.contains("write-memory"));
+        assert!(cmd.contains("0x7fff0000"));
+        assert!(cmd.contains("deadbeef"));
+    }
+
+    #[test]
+    fn test_memory_operation_read_command() {
+        let op = LldbMemoryOperation::read(0x401000, 16);
+        let cmd = op.build_lldb_command(None);
+        assert!(cmd.contains("read-memory"));
+        assert!(cmd.contains("0x401000"));
+        assert!(cmd.contains("16"));
+    }
+}
+
+#[cfg(test)]
+mod core_dump_tests {
+    use super::*;
+
+    #[test]
+    fn test_core_dump_new() {
+        let core = LldbCoreDump::new("/tmp/core.1234", 1234);
+        assert_eq!(core.path, "/tmp/core.1234");
+        assert_eq!(core.core_pid, 1234);
+        assert!(core.signal.is_none());
+    }
+
+    #[test]
+    fn test_core_dump_builder() {
+        let core = LldbCoreDump::new("/tmp/core.5678", 5678)
+            .with_signal("SIGSEGV")
+            .with_timestamp(1234567890);
+        assert_eq!(core.signal.as_deref(), Some("SIGSEGV"));
+        assert_eq!(core.timestamp, Some(1234567890));
+    }
+
+    #[test]
+    fn test_core_dump_load_command() {
+        let core = LldbCoreDump::new("/tmp/core.1234", 1234);
+        assert_eq!(
+            core.build_load_command(),
+            "target create --core /tmp/core.1234"
+        );
+    }
+}
+
+#[cfg(test)]
+mod environment_tests {
+    use super::*;
+
+    #[test]
+    fn test_process_environment() {
+        let mut env = LldbProcessEnvironment::new();
+        assert!(env.is_empty());
+
+        env.set("PATH", "/usr/bin:/bin");
+        env.set("HOME", "/home/user");
+        assert_eq!(env.len(), 2);
+        assert_eq!(env.get("PATH"), Some("/usr/bin:/bin"));
+        assert!(env.contains("HOME"));
+    }
+
+    #[test]
+    fn test_process_environment_from_pairs() {
+        let env = LldbProcessEnvironment::from_pairs(vec![
+            ("OS".to_string(), "Darwin".to_string()),
+            ("Arch".to_string(), "x86_64".to_string()),
+            ("Endian".to_string(), "little".to_string()),
+        ]);
+        let (os, arch, endian) = env.standard_info();
+        assert_eq!(os, "Darwin");
+        assert_eq!(arch, "x86_64");
+        assert_eq!(endian, "little");
+    }
+
+    #[test]
+    fn test_process_environment_remove() {
+        let mut env = LldbProcessEnvironment::new();
+        env.set("KEY", "VALUE");
+        assert!(env.contains("KEY"));
+        env.remove("KEY");
+        assert!(!env.contains("KEY"));
+    }
+
+    #[test]
+    fn test_process_environment_trace_values() {
+        let mut env = LldbProcessEnvironment::new();
+        env.set("Debugger", "lldb");
+        env.set("OS", "linux");
+        let vals = env.build_trace_values();
+        assert!(vals.iter().any(|(k, v)| k == "Debugger" && v == "lldb"));
+        assert!(vals.iter().any(|(k, v)| k == "OS" && v == "linux"));
+    }
+
+    #[test]
+    fn test_process_environment_keys() {
+        let mut env = LldbProcessEnvironment::new();
+        env.set("A", "1");
+        env.set("B", "2");
+        let keys = env.keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"A"));
+        assert!(keys.contains(&"B"));
+    }
+}
+
+#[cfg(test)]
+mod attach_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_attach_state_properties() {
+        assert!(LldbAttachState::Attached.is_attached());
+        assert!(!LldbAttachState::Attaching.is_attached());
+        assert!(LldbAttachState::Detached.is_terminal());
+        assert!(LldbAttachState::Failed.is_terminal());
+        assert!(!LldbAttachState::Attached.is_terminal());
+        assert!(LldbAttachState::Attaching.in_progress());
+        assert!(LldbAttachState::ConfiguringTarget.in_progress());
+        assert!(!LldbAttachState::Attached.in_progress());
+    }
+
+    #[test]
+    fn test_attach_state_description() {
+        assert_eq!(LldbAttachState::Idle.description(), "Idle");
+        assert_eq!(LldbAttachState::Attaching.description(), "Attaching");
+        assert_eq!(LldbAttachState::Failed.description(), "Failed");
+    }
+
+    #[test]
+    fn test_attach_state_trace_str() {
+        assert_eq!(LldbAttachState::Attached.as_trace_str(), "ATTACHED");
+        assert_eq!(LldbAttachState::Failed.as_trace_str(), "FAILED");
+    }
+}
+
+#[cfg(test)]
+mod memory_read_result_tests {
+    use super::*;
+
+    #[test]
+    fn test_memory_read_success() {
+        let result = LldbMemoryReadResult::success(0x401000, vec![0xde, 0xad, 0xbe, 0xef]);
+        assert!(result.is_success());
+        assert_eq!(result.address, 0x401000);
+        assert_eq!(result.bytes_read, 4);
+        assert_eq!(result.end_address(), 0x401004);
+        assert!(result.error.is_none());
+    }
+
+    #[test]
+    fn test_memory_read_partial() {
+        let result = LldbMemoryReadResult::partial(
+            0x401000,
+            vec![0xaa, 0xbb],
+            "permission denied",
+        );
+        assert!(!result.is_success());
+        assert_eq!(result.bytes_read, 2);
+        assert!(result.error.is_some());
     }
 }
 

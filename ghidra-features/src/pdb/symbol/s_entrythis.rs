@@ -1,6 +1,12 @@
 //! S_ENTRYTHIS -- Entry "this" pointer descriptor symbol.
 //!
 //! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.EntryThisMsSymbol`.
+//!
+//! This symbol describes where the `this` pointer can be found at the entry
+//! point of a member function. It records a single byte value identifying the
+//! `this` symbol and tracks any remaining unknown data bytes. This is used by
+//! the debugger to locate the object instance when stepping into C++ member
+//! functions.
 
 use std::fmt;
 
@@ -57,6 +63,51 @@ impl SEntryThis {
             this_sym,
             bytes_remaining,
         })
+    }
+
+    /// Return the raw 'this' symbol byte.
+    pub fn this_symbol(&self) -> u8 {
+        self.this_sym
+    }
+
+    /// Return the number of remaining (unknown) data bytes.
+    pub fn bytes_remaining(&self) -> u32 {
+        self.bytes_remaining
+    }
+
+    /// Return `true` if the `this` pointer is passed via the ECX register.
+    ///
+    /// On x86/x86-64 with the MSVC `__thiscall` convention, `this` is
+    /// passed in ECX (register index 17). This is the most common case
+    /// for 32-bit Windows C++ code.
+    pub fn is_ecx_register(&self) -> bool {
+        self.this_sym == 17
+    }
+
+    /// Return `true` if the `this` pointer is passed via the RCX register.
+    ///
+    /// On x86-64 with the Microsoft x64 calling convention, `this` is
+    /// passed in RCX. Note: the Java implementation stores this as an
+    /// unsigned byte, so the register index is truncated. For 64-bit
+    /// targets, the field value cannot represent RCX (index 336) directly;
+    /// this method always returns `false` for the `u8` representation.
+    /// Provided for API symmetry with the Java `EntryThisMsSymbol`.
+    pub fn is_rcx_register(&self) -> bool {
+        // Register index 336 (RCX) does not fit in a u8.
+        // This method always returns false for the 8-bit PDB format.
+        false
+    }
+
+    /// Return the common register name for this `this` pointer location.
+    ///
+    /// Returns a static string for the most common register values:
+    /// - `17` => `"ECX"` (32-bit MSVC `__thiscall`)
+    /// - Otherwise `None`
+    pub fn register_name(&self) -> Option<&'static str> {
+        match self.this_sym {
+            17 => Some("ECX"),
+            _ => None,
+        }
     }
 }
 
@@ -116,6 +167,21 @@ mod tests {
         let data = [17u8];
         let sym = SEntryThis::parse(&data).unwrap();
         assert_eq!(sym.this_sym, 17);
+        assert!(sym.is_ecx_register());
+        assert!(!sym.is_rcx_register());
+        assert_eq!(sym.register_name(), Some("ECX"));
+    }
+
+    #[test]
+    fn test_parse_rcx_register() {
+        // RCX is register 336 on x86-64, used for `this` in MSVC x64.
+        // Note: u8 can only hold 0-255, so RCX (336) cannot be represented
+        // in the single-byte S_ENTRYTHIS format. Use 0x50 as a test value.
+        let data = [0x50u8];
+        let sym = SEntryThis::parse(&data).unwrap();
+        assert_eq!(sym.this_sym, 0x50);
+        assert!(!sym.is_rcx_register()); // RCX not representable in u8
+        assert_eq!(sym.register_name(), None);
     }
 
     #[test]
@@ -149,5 +215,41 @@ mod tests {
         let a = SEntryThis::new(0x11, 2);
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_this_symbol_accessor() {
+        let sym = SEntryThis::new(0x11, 0);
+        assert_eq!(sym.this_symbol(), 0x11);
+    }
+
+    #[test]
+    fn test_bytes_remaining_accessor() {
+        let sym = SEntryThis::new(0x01, 5);
+        assert_eq!(sym.bytes_remaining(), 5);
+    }
+
+    #[test]
+    fn test_is_ecx_register_true() {
+        let sym = SEntryThis::new(17, 0);
+        assert!(sym.is_ecx_register());
+    }
+
+    #[test]
+    fn test_is_ecx_register_false() {
+        let sym = SEntryThis::new(18, 0);
+        assert!(!sym.is_ecx_register());
+    }
+
+    #[test]
+    fn test_register_name_known() {
+        let sym = SEntryThis::new(17, 0);
+        assert_eq!(sym.register_name(), Some("ECX"));
+    }
+
+    #[test]
+    fn test_register_name_unknown() {
+        let sym = SEntryThis::new(42, 0);
+        assert_eq!(sym.register_name(), None);
     }
 }

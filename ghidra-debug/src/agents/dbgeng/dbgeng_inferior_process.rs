@@ -24,8 +24,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::dbgeng_thread::DbgEngThread;
+use super::DbgEngVersion;
 use crate::agents::{
-    BreakpointType, ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo,
+    BreakpointType, ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo, RegisterValue,
 };
 
 /// Still-active exit code sentinel from the Windows API.
@@ -1619,6 +1620,10 @@ impl Snapshot {
 ///
 /// Ported from the Python `InferiorState` class in `hooks.py`. Tracks
 /// which aspects of the process have changed and need re-sync.
+///
+/// Unlike GDB's `InferiorSyncState`, dbgeng sync state also tracks
+/// event filters and TTD positions since dbgeng manages these
+/// per-process through its native API.
 #[derive(Debug, Clone)]
 pub struct ProcessSyncState {
     /// Whether this is the first recording for this process.
@@ -1747,6 +1752,466 @@ impl ProcessSyncState {
     /// Update the stored regions.
     pub fn update_regions(&mut self, regions: Vec<MemoryRegion>) {
         self.regions = regions;
+    }
+}
+
+/// Dbgeng convenience variable state.
+///
+/// Ported from the GDB agent's `GdbConvenienceState`. Tracks
+/// dbgeng convenience variables and session-level settings that
+/// affect trace synchronization behavior.
+///
+/// Dbgeng exposes convenience pseudo-registers (e.g., `$ip`, `$sp`,
+/// `$teb`) and session settings (e.g., symbol paths, event filters).
+/// This struct tracks those that are relevant to the agent.
+#[derive(Debug, Clone)]
+pub struct DbgEngConvenienceState {
+    /// Whether the agent is actively tracing.
+    pub tracing_enabled: bool,
+    /// Current symbol path.
+    pub symbol_path: Option<String>,
+    /// Current executable image path.
+    pub executable_path: Option<String>,
+    /// Whether source mode stepping is active.
+    pub source_mode: bool,
+    /// Current default radix for display output.
+    pub radix: u32,
+    /// Whether the engine is in verbose mode.
+    pub verbose: bool,
+    /// Break-on-exception filter settings (exception code -> enabled).
+    pub exception_filters: BTreeMap<String, bool>,
+    /// Engine output log level (0=errors, 1=warnings, 2=verbose, 3=all).
+    pub output_level: u32,
+}
+
+impl Default for DbgEngConvenienceState {
+    fn default() -> Self {
+        Self {
+            tracing_enabled: false,
+            symbol_path: None,
+            executable_path: None,
+            source_mode: true,
+            radix: 16,
+            verbose: false,
+            exception_filters: BTreeMap::new(),
+            output_level: 0,
+        }
+    }
+}
+
+impl DbgEngConvenienceState {
+    /// Create a new convenience state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enable tracing.
+    pub fn enable_tracing(&mut self) {
+        self.tracing_enabled = true;
+    }
+
+    /// Disable tracing.
+    pub fn disable_tracing(&mut self) {
+        self.tracing_enabled = false;
+    }
+
+    /// Set the symbol path.
+    pub fn set_symbol_path(&mut self, path: impl Into<String>) {
+        self.symbol_path = Some(path.into());
+    }
+
+    /// Set the executable path.
+    pub fn set_executable_path(&mut self, path: impl Into<String>) {
+        self.executable_path = Some(path.into());
+    }
+
+    /// Toggle source mode.
+    pub fn set_source_mode(&mut self, enabled: bool) {
+        self.source_mode = enabled;
+    }
+
+    /// Set the default radix.
+    pub fn set_radix(&mut self, radix: u32) {
+        self.radix = radix;
+    }
+
+    /// Enable/disable an exception filter.
+    pub fn set_exception_filter(&mut self, code: impl Into<String>, enabled: bool) {
+        self.exception_filters.insert(code.into(), enabled);
+    }
+
+    /// Check if an exception code is break-enabled.
+    pub fn is_exception_break_enabled(&self, code: &str) -> bool {
+        self.exception_filters.get(code).copied().unwrap_or(false)
+    }
+
+    /// Build the dbgeng symbol path command.
+    pub fn build_sympath_command(&self) -> Option<String> {
+        self.symbol_path.as_ref().map(|p| format!(".sympath {}", p))
+    }
+
+    /// Build the dbgeng executable image command.
+    pub fn build_executable_command(&self) -> Option<String> {
+        self.executable_path.as_ref().map(|p| format!(".opendump {}", p))
+    }
+}
+
+/// Maps dbgeng register names to Ghidra register names.
+///
+/// Ported from the GDB agent's `GdbRegisterMapper`. Dbgeng uses
+/// Windows-style register names (e.g., `EAX`, `RIP`) which may differ
+/// from Ghidra's expected names. This mapper handles the translation.
+///
+/// Additionally, dbgeng uses pseudo-registers prefixed with `$`
+/// (e.g., `$ip`, `$sp`) which map to the instruction pointer and
+/// stack pointer registers.
+#[derive(Debug, Clone, Default)]
+pub struct DbgEngRegisterMapper {
+    /// Name mappings: dbgeng name -> Ghidra name.
+    name_map: BTreeMap<String, String>,
+    /// Register sizes: name -> size in bytes.
+    size_map: BTreeMap<String, usize>,
+    /// Register groups: name -> group name.
+    group_map: BTreeMap<String, String>,
+}
+
+impl DbgEngRegisterMapper {
+    /// Create a new register mapper.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create with default dbgeng-to-Ghidra mappings.
+    pub fn with_defaults() -> Self {
+        let mut mapper = Self::new();
+        mapper.register_defaults();
+        mapper
+    }
+
+    /// Register a name mapping.
+    pub fn map_name(&mut self, dbgeng_name: impl Into<String>, ghidra_name: impl Into<String>) {
+        self.name_map.insert(dbgeng_name.into(), ghidra_name.into());
+    }
+
+    /// Set register size.
+    pub fn set_size(&mut self, name: impl Into<String>, size: usize) {
+        self.size_map.insert(name.into(), size);
+    }
+
+    /// Set register group.
+    pub fn set_group(&mut self, name: impl Into<String>, group: impl Into<String>) {
+        self.group_map.insert(name.into(), group.into());
+    }
+
+    /// Map a dbgeng register name to Ghidra.
+    pub fn map_register_name(&self, dbgeng_name: &str) -> String {
+        let lower = dbgeng_name.to_lowercase();
+        self.name_map
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == lower)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_else(|| dbgeng_name.to_string())
+    }
+
+    /// Get register size by name.
+    pub fn get_size(&self, name: &str) -> Option<usize> {
+        let lower = name.to_lowercase();
+        self.size_map
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == lower)
+            .map(|(_, &v)| v)
+    }
+
+    /// Get register group by name.
+    pub fn get_group(&self, name: &str) -> Option<&str> {
+        let lower = name.to_lowercase();
+        self.group_map
+            .iter()
+            .find(|(k, _)| k.to_lowercase() == lower)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Number of registered mappings.
+    pub fn len(&self) -> usize {
+        self.name_map.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.name_map.is_empty()
+    }
+
+    /// Register default dbgeng-to-Ghidra register name mappings.
+    fn register_defaults(&mut self) {
+        // Pseudo-registers: dbgeng uses $ip, $sp, $bp
+        self.map_name("$ip", "rip");
+        self.map_name("$sp", "rsp");
+        self.map_name("$bp", "rbp");
+        self.map_name("$ea", "rax"); // effective address pseudo-reg
+        self.map_name("$exp", "rax"); // expression result pseudo-reg
+        self.map_name("$peb", "peb");
+        self.map_name("$teb", "teb");
+
+        // x64 general purpose -- dbgeng uses uppercase, Ghidra uses lowercase
+        for reg in &["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+                     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+                     "rip", "eflags"] {
+            self.map_name(reg.to_uppercase(), *reg);
+        }
+
+        // x86 general purpose (WoW64 mode)
+        for reg in &["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp",
+                     "eip", "eflags"] {
+            self.map_name(reg.to_uppercase(), *reg);
+        }
+
+        // Segment registers
+        for reg in &["cs", "ds", "es", "fs", "gs", "ss"] {
+            self.map_name(reg.to_uppercase(), *reg);
+        }
+
+        // x87 FP registers
+        for reg in &["st0", "st1", "st2", "st3", "st4", "st5", "st6", "st7"] {
+            self.map_name(reg.to_uppercase(), *reg);
+        }
+
+        // XMM registers
+        for i in 0..16 {
+            let name = format!("xmm{}", i);
+            self.map_name(name.to_uppercase(), &name);
+            // YMM upper halves
+            let ymm = format!("ymm{}", i);
+            self.map_name(ymm.to_uppercase(), &ymm);
+        }
+
+        // Debug registers
+        for reg in &["dr0", "dr1", "dr2", "dr3", "dr6", "dr7"] {
+            self.map_name(reg.to_uppercase(), *reg);
+        }
+
+        // Sizes: 64-bit regs
+        for reg in &["rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp",
+                     "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15", "rip"] {
+            self.set_size(*reg, 8);
+        }
+        // Sizes: 32-bit regs
+        for reg in &["eax", "ebx", "ecx", "edx", "esi", "edi", "ebp", "esp", "eip"] {
+            self.set_size(*reg, 4);
+        }
+        // Sizes: XMM = 16 bytes, YMM = 32 bytes
+        for i in 0..16 {
+            self.set_size(format!("xmm{}", i), 16);
+            self.set_size(format!("ymm{}", i), 32);
+        }
+    }
+}
+
+/// Top-level dbgeng session manager.
+///
+/// Wraps `DbgEngProcessManager` with per-process sync states, event
+/// thread tracking, register mapping, and convenience variable state.
+/// This is the equivalent of the GDB agent's `GdbProcessManager`.
+///
+/// The session manager is the main entry point for the dbgeng agent,
+/// coordinating between the process manager, the event hooks, and the
+/// trace commands.
+#[derive(Debug)]
+pub struct DbgEngSessionManager {
+    /// Process manager.
+    pub processes: DbgEngProcessManager,
+    /// Register name mapper.
+    pub register_mapper: DbgEngRegisterMapper,
+    /// Convenience variable state.
+    pub convenience: DbgEngConvenienceState,
+    /// Per-process sync states.
+    sync_states: BTreeMap<u32, ProcessSyncState>,
+    /// Whether the session has been initialized.
+    pub initialized: bool,
+    /// Whether the target is in kernel mode.
+    pub is_kernel: bool,
+    /// Engine version info.
+    pub engine_version: Option<DbgEngVersion>,
+}
+
+impl Default for DbgEngSessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DbgEngSessionManager {
+    /// Create a new session manager.
+    pub fn new() -> Self {
+        Self {
+            processes: DbgEngProcessManager::new(),
+            register_mapper: DbgEngRegisterMapper::with_defaults(),
+            convenience: DbgEngConvenienceState::new(),
+            sync_states: BTreeMap::new(),
+            initialized: false,
+            is_kernel: false,
+            engine_version: None,
+        }
+    }
+
+    /// Initialize the session (called when trace starts).
+    pub fn initialize(&mut self) {
+        self.convenience.enable_tracing();
+        self.initialized = true;
+    }
+
+    /// Shut down the session (called when trace stops).
+    pub fn shutdown(&mut self) {
+        self.convenience.disable_tracing();
+        self.initialized = false;
+    }
+
+    /// Set the engine version.
+    pub fn set_engine_version(&mut self, version: DbgEngVersion) {
+        self.engine_version = Some(version);
+    }
+
+    /// Get or create the sync state for a process.
+    pub fn get_or_create_sync_state(&mut self, proc_num: u32) -> &mut ProcessSyncState {
+        self.sync_states
+            .entry(proc_num)
+            .or_insert_with(ProcessSyncState::new)
+    }
+
+    /// Get the sync state for a process, if it exists.
+    pub fn get_sync_state(&self, proc_num: u32) -> Option<&ProcessSyncState> {
+        self.sync_states.get(&proc_num)
+    }
+
+    /// Add a process to the session.
+    pub fn add_process(&mut self, process: DbgEngInferiorProcess) {
+        let num = process.num;
+        self.sync_states.entry(num).or_insert_with(ProcessSyncState::new);
+        self.processes.add(process);
+    }
+
+    /// Remove a process from the session.
+    pub fn remove_process(&mut self, num: u32) -> Option<DbgEngInferiorProcess> {
+        self.sync_states.remove(&num);
+        self.processes.remove(num)
+    }
+
+    /// Get the active process's sync state.
+    pub fn active_sync_state(&mut self) -> Option<&mut ProcessSyncState> {
+        let num = self.processes.active_num()?;
+        Some(self.get_or_create_sync_state(num))
+    }
+
+    /// Map a dbgeng register name to Ghidra.
+    pub fn map_register_name(&self, dbgeng_name: &str) -> String {
+        self.register_mapper.map_register_name(dbgeng_name)
+    }
+
+    /// Build a register value with the mapped name.
+    pub fn map_register_value(&self, name: &str, bytes: &[u8]) -> RegisterValue {
+        let mapped_name = self.map_register_name(name);
+        RegisterValue::new(mapped_name, bytes.to_vec())
+    }
+
+    /// Build environment values for the session.
+    pub fn build_environment(&self, os: &str, arch: &str, endian: &str) -> Vec<(String, String)> {
+        let mut env = vec![
+            ("Debugger".to_string(), "dbgeng".to_string()),
+            ("Arch".to_string(), arch.to_string()),
+            ("OS".to_string(), os.to_string()),
+            ("Endian".to_string(), endian.to_string()),
+        ];
+        if let Some(ref ver) = self.engine_version {
+            env.push(("Engine Version".to_string(), ver.full.clone()));
+        }
+        if self.is_kernel {
+            env.push(("Mode".to_string(), "Kernel".to_string()));
+        }
+        env
+    }
+
+    /// Build the trace snapshot description for a stop event.
+    pub fn build_stop_snapshot_description(&self, stop_reason: &str) -> String {
+        match stop_reason {
+            "Breakpoint" => "Stopped at breakpoint".to_string(),
+            "Exception" => "Stopped on exception".to_string(),
+            "Step" => "Stepped".to_string(),
+            "AccessViolation" => "Access violation".to_string(),
+            "Exit" => "Process exited".to_string(),
+            "LoadModule" => "Module loaded".to_string(),
+            other => format!("Stopped: {}", other),
+        }
+    }
+
+    /// Get the total number of threads across all processes.
+    pub fn total_threads(&self) -> usize {
+        self.processes.total_thread_count()
+    }
+
+    /// Get the total number of modules across all processes.
+    pub fn total_modules(&self) -> usize {
+        self.processes.all().values().map(|p| p.modules.len()).sum()
+    }
+
+    /// Get the total number of memory regions across all processes.
+    pub fn total_memory_regions(&self) -> usize {
+        self.processes.all().values().map(|p| p.memory_regions.len()).sum()
+    }
+
+    /// Check if the session has any active (non-exited) processes.
+    pub fn has_active_processes(&self) -> bool {
+        !self.processes.alive().is_empty()
+    }
+
+    /// Build a summary of the current debugging session.
+    pub fn build_session_summary(&self) -> Vec<(String, String)> {
+        let mut summary = Vec::new();
+        summary.push(("Processes".to_string(), self.processes.len().to_string()));
+        summary.push(("Threads".to_string(), self.total_threads().to_string()));
+        summary.push(("Modules".to_string(), self.total_modules().to_string()));
+        summary.push((
+            "MemoryRegions".to_string(),
+            self.total_memory_regions().to_string(),
+        ));
+        if self.is_kernel {
+            summary.push(("Mode".to_string(), "Kernel".to_string()));
+        }
+        if let Some(ref ver) = self.engine_version {
+            summary.push(("Engine".to_string(), ver.dotted.clone()));
+        }
+        summary
+    }
+
+    /// Refresh the state of all processes from their threads.
+    pub fn refresh_all_states(&mut self) {
+        self.processes.refresh_all_states();
+    }
+
+    /// Clear all visited state for a process.
+    pub fn clear_process_visited(&mut self, proc_num: u32) {
+        if let Some(state) = self.sync_states.get_mut(&proc_num) {
+            state.clear_visited();
+        }
+    }
+
+    /// Mark modules as dirty for a process.
+    pub fn mark_modules_dirty(&mut self, proc_num: u32) {
+        if let Some(state) = self.sync_states.get_mut(&proc_num) {
+            state.mark_modules_dirty();
+        }
+    }
+
+    /// Mark threads as dirty for a process.
+    pub fn mark_threads_dirty(&mut self, proc_num: u32) {
+        if let Some(state) = self.sync_states.get_mut(&proc_num) {
+            state.mark_threads_dirty();
+        }
+    }
+
+    /// Mark breakpoints as dirty for a process.
+    pub fn mark_breaks_dirty(&mut self, proc_num: u32) {
+        if let Some(state) = self.sync_states.get_mut(&proc_num) {
+            state.mark_breaks_dirty();
+        }
     }
 }
 
@@ -2840,5 +3305,230 @@ mod tests {
             p.breakpoint_loc_path(5),
             "Processes[1].Debug.Breakpoints[5]"
         );
+    }
+
+    #[test]
+    fn test_convenience_state_default() {
+        let state = DbgEngConvenienceState::new();
+        assert!(!state.tracing_enabled);
+        assert!(state.symbol_path.is_none());
+        assert!(state.executable_path.is_none());
+        assert!(state.source_mode);
+        assert_eq!(state.radix, 16);
+        assert!(!state.verbose);
+        assert_eq!(state.output_level, 0);
+    }
+
+    #[test]
+    fn test_convenience_state_tracing() {
+        let mut state = DbgEngConvenienceState::new();
+        state.enable_tracing();
+        assert!(state.tracing_enabled);
+        state.disable_tracing();
+        assert!(!state.tracing_enabled);
+    }
+
+    #[test]
+    fn test_convenience_state_paths() {
+        let mut state = DbgEngConvenienceState::new();
+        state.set_symbol_path("C:\\Symbols");
+        state.set_executable_path("C:\\test.exe");
+        assert_eq!(state.build_sympath_command(), Some(".sympath C:\\Symbols".to_string()));
+        assert_eq!(state.build_executable_command(), Some(".opendump C:\\test.exe".to_string()));
+    }
+
+    #[test]
+    fn test_convenience_state_exception_filters() {
+        let mut state = DbgEngConvenienceState::new();
+        assert!(!state.is_exception_break_enabled("0xc0000005"));
+        state.set_exception_filter("0xc0000005", true);
+        assert!(state.is_exception_break_enabled("0xc0000005"));
+        state.set_exception_filter("0xc0000005", false);
+        assert!(!state.is_exception_break_enabled("0xc0000005"));
+    }
+
+    #[test]
+    fn test_register_mapper_default() {
+        let mapper = DbgEngRegisterMapper::with_defaults();
+        assert!(!mapper.is_empty());
+        // Pseudo-register mapping
+        assert_eq!(mapper.map_register_name("$ip"), "rip");
+        assert_eq!(mapper.map_register_name("$sp"), "rsp");
+        assert_eq!(mapper.map_register_name("$bp"), "rbp");
+        // Uppercase -> lowercase
+        assert_eq!(mapper.map_register_name("RAX"), "rax");
+        assert_eq!(mapper.map_register_name("RIP"), "rip");
+        assert_eq!(mapper.map_register_name("XMM0"), "xmm0");
+        // Unknown registers pass through
+        assert_eq!(mapper.map_register_name("custom_reg"), "custom_reg");
+        // Sizes
+        assert_eq!(mapper.get_size("rax"), Some(8));
+        assert_eq!(mapper.get_size("xmm0"), Some(16));
+        assert_eq!(mapper.get_size("ymm0"), Some(32));
+        assert_eq!(mapper.get_size("eax"), Some(4));
+    }
+
+    #[test]
+    fn test_register_mapper_custom() {
+        let mut mapper = DbgEngRegisterMapper::new();
+        mapper.map_name("myreg", "ghidra_reg");
+        mapper.set_size("myreg", 4);
+        mapper.set_group("myreg", "User");
+        assert_eq!(mapper.map_register_name("myreg"), "ghidra_reg");
+        assert_eq!(mapper.get_size("myreg"), Some(4));
+        assert_eq!(mapper.get_group("myreg"), Some("User"));
+        assert_eq!(mapper.len(), 1);
+    }
+
+    #[test]
+    fn test_session_manager_new() {
+        let mgr = DbgEngSessionManager::new();
+        assert!(!mgr.initialized);
+        assert!(!mgr.is_kernel);
+        assert!(mgr.engine_version.is_none());
+        assert_eq!(mgr.processes.len(), 0);
+    }
+
+    #[test]
+    fn test_session_manager_init_shutdown() {
+        let mut mgr = DbgEngSessionManager::new();
+        mgr.initialize();
+        assert!(mgr.initialized);
+        assert!(mgr.convenience.tracing_enabled);
+        mgr.shutdown();
+        assert!(!mgr.initialized);
+        assert!(!mgr.convenience.tracing_enabled);
+    }
+
+    #[test]
+    fn test_session_manager_processes() {
+        let mut mgr = DbgEngSessionManager::new();
+        let mut p0 = DbgEngInferiorProcess::new(0).with_pid(100);
+        p0.state = ExecutionState::Stopped;
+        p0.add_thread(DbgEngThread::new(0).with_state(ExecutionState::Stopped));
+        mgr.add_process(p0);
+
+        let mut p1 = DbgEngInferiorProcess::new(1).with_pid(200);
+        p1.state = ExecutionState::Running;
+        p1.add_thread(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        mgr.add_process(p1);
+
+        assert_eq!(mgr.processes.len(), 2);
+        assert_eq!(mgr.total_threads(), 2);
+        assert!(mgr.has_active_processes());
+
+        mgr.remove_process(0);
+        assert_eq!(mgr.processes.len(), 1);
+        assert_eq!(mgr.total_threads(), 1);
+    }
+
+    #[test]
+    fn test_session_manager_sync_states() {
+        let mut mgr = DbgEngSessionManager::new();
+        mgr.add_process(DbgEngInferiorProcess::new(0));
+
+        // Sync state is auto-created
+        let state = mgr.get_or_create_sync_state(0);
+        state.mark_recorded();
+        assert!(!state.first);
+
+        // get_sync_state for non-existent
+        assert!(mgr.get_sync_state(99).is_none());
+        assert!(mgr.get_sync_state(0).is_some());
+    }
+
+    #[test]
+    fn test_session_manager_register_mapping() {
+        let mgr = DbgEngSessionManager::new();
+        assert_eq!(mgr.map_register_name("RAX"), "rax");
+        assert_eq!(mgr.map_register_name("$ip"), "rip");
+
+        let rv = mgr.map_register_value("RAX", &0x1234u64.to_le_bytes());
+        assert_eq!(rv.name, "rax");
+        assert_eq!(rv.as_u64(), Some(0x1234));
+    }
+
+    #[test]
+    fn test_session_manager_environment() {
+        let mut mgr = DbgEngSessionManager::new();
+        mgr.is_kernel = true;
+        mgr.set_engine_version(DbgEngVersion::new("10.0.19041.1", "DbgEng", "10.0.19041.1", "x64"));
+        let env = mgr.build_environment("Windows", "x86_64", "little");
+        assert!(env.iter().any(|(k, v)| k == "Debugger" && v == "dbgeng"));
+        assert!(env.iter().any(|(k, v)| k == "Mode" && v == "Kernel"));
+        assert!(env.iter().any(|(k, v)| k == "Engine Version" && v == "10.0.19041.1"));
+    }
+
+    #[test]
+    fn test_session_manager_snapshot_description() {
+        let mgr = DbgEngSessionManager::new();
+        assert_eq!(mgr.build_stop_snapshot_description("Breakpoint"), "Stopped at breakpoint");
+        assert_eq!(mgr.build_stop_snapshot_description("Step"), "Stepped");
+        assert_eq!(mgr.build_stop_snapshot_description("AccessViolation"), "Access violation");
+        assert_eq!(mgr.build_stop_snapshot_description("Custom"), "Stopped: Custom");
+    }
+
+    #[test]
+    fn test_session_manager_summary() {
+        let mut mgr = DbgEngSessionManager::new();
+        mgr.add_process(DbgEngInferiorProcess::new(0));
+        mgr.add_process(DbgEngInferiorProcess::new(1));
+        let summary = mgr.build_session_summary();
+        assert!(summary.iter().any(|(k, v)| k == "Processes" && v == "2"));
+        assert!(summary.iter().any(|(k, v)| k == "Threads" && v == "0"));
+    }
+
+    #[test]
+    fn test_session_manager_dirty_flags() {
+        let mut mgr = DbgEngSessionManager::new();
+        mgr.add_process(DbgEngInferiorProcess::new(0));
+
+        mgr.mark_modules_dirty(0);
+        assert!(mgr.get_or_create_sync_state(0).take_modules_dirty());
+        assert!(!mgr.get_or_create_sync_state(0).take_modules_dirty());
+
+        mgr.mark_threads_dirty(0);
+        assert!(mgr.get_or_create_sync_state(0).take_threads_dirty());
+
+        mgr.mark_breaks_dirty(0);
+        assert!(mgr.get_or_create_sync_state(0).take_breaks_dirty());
+    }
+
+    #[test]
+    fn test_session_manager_refresh() {
+        let mut mgr = DbgEngSessionManager::new();
+        let mut p = DbgEngInferiorProcess::new(0);
+        p.add_thread(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DbgEngThread::new(1).with_state(ExecutionState::Stopped));
+        mgr.add_process(p);
+        mgr.refresh_all_states();
+        assert_eq!(mgr.processes.get(0).unwrap().state, ExecutionState::Running);
+    }
+
+    #[test]
+    fn test_register_mapper_case_insensitive() {
+        let mapper = DbgEngRegisterMapper::with_defaults();
+        assert_eq!(mapper.map_register_name("rax"), "rax");
+        assert_eq!(mapper.map_register_name("RAX"), "rax");
+        assert_eq!(mapper.map_register_name("Rax"), "rax");
+        assert_eq!(mapper.get_size("RAX"), Some(8));
+    }
+
+    #[test]
+    fn test_register_mapper_x86_wow64() {
+        let mapper = DbgEngRegisterMapper::with_defaults();
+        assert_eq!(mapper.map_register_name("EAX"), "eax");
+        assert_eq!(mapper.map_register_name("ESP"), "esp");
+        assert_eq!(mapper.map_register_name("EIP"), "eip");
+        assert_eq!(mapper.get_size("eax"), Some(4));
+    }
+
+    #[test]
+    fn test_register_mapper_segments() {
+        let mapper = DbgEngRegisterMapper::with_defaults();
+        assert_eq!(mapper.map_register_name("CS"), "cs");
+        assert_eq!(mapper.map_register_name("DS"), "ds");
+        assert_eq!(mapper.map_register_name("FS"), "fs");
+        assert_eq!(mapper.map_register_name("GS"), "gs");
     }
 }

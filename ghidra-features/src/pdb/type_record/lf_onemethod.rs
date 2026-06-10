@@ -20,7 +20,7 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_member::{MemberAttributes, MemberProperty};
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 use crate::pdb::pdb_byte_reader::PdbByteReader;
 use crate::pdb::pdb_exception::PdbException;
 
@@ -199,6 +199,13 @@ impl LfOnemethod {
         )
     }
 
+    /// Get the name of this method.
+    ///
+    /// Mirrors Java `AbstractOneMethodMsType.getName()`.
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
     /// Get the record number of the procedure type.
     ///
     /// Mirrors Java `AbstractOneMethodMsType.getProcedureTypeRecordNumber()`.
@@ -318,6 +325,8 @@ impl AbstractMsType for LfOnemethod {
         result
     }
 }
+
+impl MsTypeField for LfOnemethod {}
 
 impl Default for LfOnemethod {
     fn default() -> Self {

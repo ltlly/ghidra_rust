@@ -1,12 +1,28 @@
 //! S_WITH32 -- WITH statement scope symbol (32-bit).
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.S_With32MsSymbol`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.With32MsSymbol`
+//! and `With32StMsSymbol`.
+//!
+//! The WITH statement scope symbol marks the beginning of a WITH expression
+//! scope (as found in languages like BASIC or Pascal). The scope is terminated
+//! by a matching `S_END` symbol.
 
 use std::fmt;
 
 use super::abstract_ms_symbol::AbstractMsSymbol;
 use super::address_ms_symbol::AddressMsSymbol;
 use super::name_ms_symbol::NameMsSymbol;
+
+/// Which variant of the WITH symbol was parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WithVariant {
+    /// `S_WITH32` (0x0208) -- 32-bit offset, NT string (v5 PDB).
+    With32,
+    /// `S_WITH32_V2` (0x1104) -- 32-bit offset, NT string (v7 PDB).
+    With32V2,
+    /// `S_WITH32_ST` -- 32-bit offset, ST string (16-bit length prefix).
+    With32St,
+}
 
 /// A WITH statement scope symbol (`S_WITH32`).
 ///
@@ -31,8 +47,9 @@ use super::name_ms_symbol::NameMsSymbol;
 /// expression    : NT string
 /// ```
 ///
-/// This corresponds to `S_WITH32` (0x1104) and `S_WITH16` (0x0108) in the
-/// CodeView symbol set. After the expression the stream is 4-byte aligned.
+/// This corresponds to `S_WITH32` (0x0208 / 0x1104) and `S_WITH16`
+/// (0x0108) in the CodeView symbol set. After the expression the stream is
+/// 4-byte aligned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SWith32 {
     /// Offset of the enclosing parent scope.
@@ -52,10 +69,13 @@ pub struct SWith32 {
 
     /// The WITH expression (e.g., variable name or record field path).
     pub expression: String,
+
+    /// Which variant was parsed.
+    variant: WithVariant,
 }
 
 impl SWith32 {
-    /// Create a new S_WITH32 symbol.
+    /// Create a new S_WITH32 symbol (v7 / v2 variant).
     pub fn new(
         parent_offset: u32,
         end_offset: u32,
@@ -71,6 +91,28 @@ impl SWith32 {
             offset,
             segment,
             expression,
+            variant: WithVariant::With32V2,
+        }
+    }
+
+    /// Create an S_WITH32 symbol with a specific variant tag.
+    pub fn with_variant(
+        parent_offset: u32,
+        end_offset: u32,
+        length: u32,
+        offset: u32,
+        segment: u16,
+        expression: String,
+        variant: WithVariant,
+    ) -> Self {
+        Self {
+            parent_offset,
+            end_offset,
+            length,
+            offset,
+            segment,
+            expression,
+            variant,
         }
     }
 
@@ -79,6 +121,11 @@ impl SWith32 {
     /// Expects the layout:
     /// `parent_offset(u32) + end_offset(u32) + length(u32) + offset(u32) + segment(u16) + expression(NT)`.
     pub fn parse(data: &[u8]) -> Option<Self> {
+        Self::parse_as(data, WithVariant::With32V2)
+    }
+
+    /// Parse with an explicit variant tag.
+    pub fn parse_as(data: &[u8], variant: WithVariant) -> Option<Self> {
         if data.len() < 18 {
             return None;
         }
@@ -95,6 +142,7 @@ impl SWith32 {
             offset,
             segment,
             expression,
+            variant,
         })
     }
 
@@ -103,13 +151,23 @@ impl SWith32 {
     ///
     /// This matches the Java `reader.align4()` call after parsing.
     pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
-        let sym = Self::parse(data)?;
+        Self::parse_aligned_as(data, WithVariant::With32V2)
+    }
+
+    /// Parse with alignment and an explicit variant tag.
+    pub fn parse_aligned_as(data: &[u8], variant: WithVariant) -> Option<(Self, usize)> {
+        let sym = Self::parse_as(data, variant)?;
         let name_data = &data[18..];
         let end = name_data.iter().position(|&b| b == 0).unwrap_or(name_data.len());
         let name_len = end + 1; // include null terminator
         let total = 18 + name_len;
         let aligned = (total + 3) & !3;
         Some((sym, aligned))
+    }
+
+    /// Return the variant of this WITH symbol.
+    pub fn variant(&self) -> WithVariant {
+        self.variant
     }
 
     /// Return the offset of the enclosing parent scope.
@@ -131,15 +189,30 @@ impl SWith32 {
     pub fn scope_offset(&self) -> u32 {
         self.offset
     }
+
+    /// Return the WITH expression string.
+    ///
+    /// This is the expression that the WITH statement operates on, typically
+    /// a variable name or a record field path.
+    pub fn expression(&self) -> &str {
+        &self.expression
+    }
 }
 
 impl AbstractMsSymbol for SWith32 {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_WITH32
+        match self.variant {
+            WithVariant::With32 => super::super::symbol_kind::S_WITH32,
+            WithVariant::With32V2 => super::super::symbol_kind::S_WITH32_V2,
+            WithVariant::With32St => 0x1115, // S_WITH32_ST (if defined)
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
-        "S_WITH32"
+        match self.variant {
+            WithVariant::With32St => "S_WITH32_ST",
+            _ => "S_WITH32",
+        }
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -213,6 +286,7 @@ mod tests {
         assert_eq!(sym.scope_offset(), 0x50);
         assert_eq!(sym.segment, 1);
         assert_eq!(sym.expression, "myRecord");
+        assert_eq!(sym.variant(), WithVariant::With32V2);
     }
 
     #[test]
@@ -240,9 +314,10 @@ mod tests {
     #[test]
     fn test_trait_impls() {
         let sym = SWith32::new(0x1000, 0x2000, 0x100, 0x50, 1, "obj.field".to_string());
-        assert_eq!(sym.pdb_id(), 0x0208);
+        assert_eq!(sym.pdb_id(), 0x1104);
         assert_eq!(sym.symbol_type_name(), "S_WITH32");
         assert_eq!(sym.name(), "obj.field");
+        assert_eq!(sym.expression(), "obj.field");
         assert_eq!(sym.parent_offset(), 0x1000);
         assert_eq!(sym.end_offset(), 0x2000);
         assert_eq!(sym.length(), 0x100);
@@ -272,5 +347,36 @@ mod tests {
         let a = SWith32::new(0x100, 0x200, 0x100, 0x50, 1, "expr".to_string());
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_variant_with32() {
+        let sym = SWith32::with_variant(
+            0x100, 0x200, 0x100, 0x50, 1, "e".to_string(),
+            WithVariant::With32,
+        );
+        assert_eq!(sym.pdb_id(), 0x0208);
+        assert_eq!(sym.variant(), WithVariant::With32);
+    }
+
+    #[test]
+    fn test_variant_with32_v2() {
+        let sym = SWith32::new(0x100, 0x200, 0x100, 0x50, 1, "e".to_string());
+        assert_eq!(sym.pdb_id(), 0x1104);
+        assert_eq!(sym.variant(), WithVariant::With32V2);
+    }
+
+    #[test]
+    fn test_expression_accessor() {
+        let sym = SWith32::new(0x100, 0x200, 0x100, 0x50, 1, "record.field".to_string());
+        assert_eq!(sym.expression(), "record.field");
+    }
+
+    #[test]
+    fn test_parse_as_variant() {
+        let data = make_with32_bytes(0x100, 0x200, 0x100, 0x50, 1, b"e");
+        let sym = SWith32::parse_as(&data, WithVariant::With32).unwrap();
+        assert_eq!(sym.variant(), WithVariant::With32);
+        assert_eq!(sym.pdb_id(), 0x0208);
     }
 }

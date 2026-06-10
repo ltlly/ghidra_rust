@@ -1550,6 +1550,10 @@ pub mod symbol_kind {
     pub const S_UDT_V2: u16=0x1108;
     pub const S_OBJNAME_V2: u16=0x1101;
     pub const S_MANYREG_V2: u16=0x110A;
+    pub const S_BLOCK32_V2: u16=0x1103;
+    pub const S_WITH32_V2: u16=0x1104;
+    pub const S_LABEL32_V2: u16=0x1105;
+    pub const S_BPREL32_V2: u16=0x110B;
     pub const S_MANYREG2_V2: u16=0x1117;
     pub const S_MANYREG2_ST: u16=0x1014;
     pub const S_INLINED_FUNCTION_END: u16=0x114E;

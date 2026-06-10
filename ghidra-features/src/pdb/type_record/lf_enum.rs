@@ -23,7 +23,7 @@ use super::abstract_enum_ms_type::AbstractEnumMsType;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::ms_property::MsProperty;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 
 /// Concrete PDB enum type record (`LF_ENUM`).
 ///
@@ -247,6 +247,8 @@ impl AbstractMsType for LfEnum {
         self.enum_data.emit(bind)
     }
 }
+
+impl MsTypeField for LfEnum {}
 
 impl fmt::Display for LfEnum {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

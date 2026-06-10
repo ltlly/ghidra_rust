@@ -15,7 +15,7 @@ use std::fmt;
 use super::abstract_field_list_ms_type::{AbstractFieldListMsType, FieldListEntry};
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 
 /// Concrete PDB field list type record (`LF_FIELDLIST`).
 ///
@@ -295,6 +295,8 @@ impl AbstractMsType for LfFieldlist {
         self.field_list.emit(bind)
     }
 }
+
+impl MsTypeField for LfFieldlist {}
 
 impl fmt::Display for LfFieldlist {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

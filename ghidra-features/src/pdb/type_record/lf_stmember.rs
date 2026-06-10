@@ -19,7 +19,7 @@ use std::fmt;
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
 use super::lf_member::{AccessProtection, MemberAttributes};
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 use crate::pdb::pdb_byte_reader::PdbByteReader;
 use crate::pdb::pdb_exception::PdbException;
 
@@ -251,6 +251,8 @@ impl AbstractMsType for LfStmember {
         prefix
     }
 }
+
+impl MsTypeField for LfStmember {}
 
 impl Default for LfStmember {
     fn default() -> Self {

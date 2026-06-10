@@ -19,7 +19,7 @@ use std::fmt;
 
 use super::abstract_ms_type::AbstractMsType;
 use super::bind::Bind;
-use super::RecordNumber;
+use super::{MsTypeField, RecordNumber};
 use crate::pdb::pdb_byte_reader::PdbByteReader;
 use crate::pdb::pdb_exception::PdbException;
 
@@ -173,6 +173,8 @@ impl AbstractMsType for LfNesttype {
         result
     }
 }
+
+impl MsTypeField for LfNesttype {}
 
 impl Default for LfNesttype {
     fn default() -> Self {

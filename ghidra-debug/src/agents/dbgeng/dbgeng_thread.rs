@@ -1650,6 +1650,348 @@ impl DbgEngThreadCollection {
     pub fn build_thread_info_list(&self) -> Vec<ThreadInfo> {
         self.threads.values().map(|t| t.to_thread_info()).collect()
     }
+
+    /// Get the currently selected thread (first running, then first stopped).
+    pub fn selected_thread(&self) -> Option<&DbgEngThread> {
+        self.threads
+            .values()
+            .find(|t| t.state == ExecutionState::Running)
+            .or_else(|| self.threads.values().find(|t| t.state == ExecutionState::Stopped))
+    }
+
+    /// Get threads sorted by thread number.
+    pub fn sorted_threads(&self) -> Vec<&DbgEngThread> {
+        self.threads.values().collect()
+    }
+
+    /// Get the total frame count across all threads.
+    pub fn total_frame_count(&self) -> usize {
+        self.threads.values().map(|t| t.frame_count()).sum()
+    }
+
+    /// Get the count of threads in each execution state.
+    pub fn thread_state_counts(&self) -> BTreeMap<ExecutionState, usize> {
+        let mut counts = BTreeMap::new();
+        for t in self.threads.values() {
+            *counts.entry(t.state).or_insert(0) += 1;
+        }
+        counts
+    }
+}
+
+/// Dbgeng source information for a stack frame.
+///
+/// Ported from the GDB agent's `GdbFrameSourceInfo`. Captures the
+/// source-level context for a frame, including file path, line number,
+/// function name, and compilation directory. Dbgeng resolves these
+/// through the symbol engine's `GetLineByOffset` API.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DbgEngFrameSourceInfo {
+    /// Source file path (absolute or relative to compilation dir).
+    pub file: Option<String>,
+    /// Source line number.
+    pub line: Option<u32>,
+    /// Function name at this frame.
+    pub function: Option<String>,
+    /// Compilation directory (base for relative paths).
+    pub compilation_dir: Option<String>,
+    /// Module name for this frame.
+    pub module: Option<String>,
+}
+
+impl DbgEngFrameSourceInfo {
+    /// Create empty source info.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the source location.
+    pub fn with_location(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.file = Some(file.into());
+        self.line = Some(line);
+        self
+    }
+
+    /// Set the function name.
+    pub fn with_function(mut self, func: impl Into<String>) -> Self {
+        self.function = Some(func.into());
+        self
+    }
+
+    /// Set the compilation directory.
+    pub fn with_compilation_dir(mut self, dir: impl Into<String>) -> Self {
+        self.compilation_dir = Some(dir.into());
+        self
+    }
+
+    /// Set the module name.
+    pub fn with_module(mut self, module: impl Into<String>) -> Self {
+        self.module = Some(module.into());
+        self
+    }
+
+    /// Build a display string combining file and line.
+    pub fn build_display(&self) -> Option<String> {
+        match (&self.file, self.line) {
+            (Some(f), Some(l)) => Some(format!("{}:{}", f, l)),
+            (Some(f), None) => Some(f.clone()),
+            _ => None,
+        }
+    }
+
+    /// Build the full absolute path by combining compilation dir and file.
+    pub fn full_path(&self) -> Option<String> {
+        match (&self.compilation_dir, &self.file) {
+            (Some(dir), Some(file)) => {
+                if file.starts_with('/') || file.starts_with('\\') || file.contains(':') {
+                    Some(file.clone())
+                } else {
+                    Some(format!("{}{}{}", dir, std::path::MAIN_SEPARATOR, file))
+                }
+            }
+            (_, Some(file)) => Some(file.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Tracks which threads and frames have been synchronized to the trace.
+///
+/// Ported from the GDB agent's `GdbTraceSyncTracker`. During each stop
+/// event, the dbgeng agent walks all threads and frames, syncing their
+/// state to the trace. This tracker records what has already been synced
+/// to avoid redundant work within a single stop.
+#[derive(Debug, Clone, Default)]
+pub struct DbgEngTraceSyncTracker {
+    /// Synced (process_num, thread_num) pairs.
+    synced_threads: BTreeSet<(u32, u32)>,
+    /// Synced (process_num, thread_num, frame_level) tuples.
+    synced_frames: BTreeSet<(u32, u32, u32)>,
+    /// Synced (process_num, thread_num, frame_level, reg_name) tuples.
+    synced_registers: BTreeSet<(u32, u32, u32, String)>,
+}
+
+use std::collections::BTreeSet;
+
+impl DbgEngTraceSyncTracker {
+    /// Create a new sync tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Clear all sync state (call at start of each stop).
+    pub fn clear(&mut self) {
+        self.synced_threads.clear();
+        self.synced_frames.clear();
+        self.synced_registers.clear();
+    }
+
+    /// Mark a thread as synced.
+    pub fn mark_thread_synced(&mut self, process_num: u32, thread_num: u32) {
+        self.synced_threads.insert((process_num, thread_num));
+    }
+
+    /// Check if a thread has been synced.
+    pub fn is_thread_synced(&self, process_num: u32, thread_num: u32) -> bool {
+        self.synced_threads.contains(&(process_num, thread_num))
+    }
+
+    /// Mark a frame as synced.
+    pub fn mark_frame_synced(&mut self, process_num: u32, thread_num: u32, frame_level: u32) {
+        self.synced_frames.insert((process_num, thread_num, frame_level));
+    }
+
+    /// Check if a frame has been synced.
+    pub fn is_frame_synced(&self, process_num: u32, thread_num: u32, frame_level: u32) -> bool {
+        self.synced_frames.contains(&(process_num, thread_num, frame_level))
+    }
+
+    /// Mark registers for a frame as synced.
+    pub fn mark_registers_synced(&mut self, process_num: u32, thread_num: u32, frame_level: u32) {
+        // Use a sentinel entry to mark the frame's registers as synced
+        self.synced_registers.insert((process_num, thread_num, frame_level, "*".to_string()));
+    }
+
+    /// Check if registers for a frame have been synced.
+    pub fn are_registers_synced(&self, process_num: u32, thread_num: u32, frame_level: u32) -> bool {
+        self.synced_registers.contains(&(process_num, thread_num, frame_level, "*".to_string()))
+    }
+
+    /// Get all synced thread numbers for a process.
+    pub fn synced_thread_numbers(&self, process_num: u32) -> Vec<u32> {
+        self.synced_threads
+            .iter()
+            .filter(|(p, _)| *p == process_num)
+            .map(|(_, t)| *t)
+            .collect()
+    }
+
+    /// Get all synced frame levels for a thread.
+    pub fn synced_frame_levels(&self, process_num: u32, thread_num: u32) -> Vec<u32> {
+        self.synced_frames
+            .iter()
+            .filter(|(p, t, _)| *p == process_num && *t == thread_num)
+            .map(|(_, _, f)| *f)
+            .collect()
+    }
+
+    /// Total number of synced threads.
+    pub fn total_synced_threads(&self) -> usize {
+        self.synced_threads.len()
+    }
+
+    /// Total number of synced frames.
+    pub fn total_synced_frames(&self) -> usize {
+        self.synced_frames.len()
+    }
+}
+
+/// A batch of synchronization operations for a dbgeng stop event.
+///
+/// Ported from the GDB agent's `GdbSyncBatch`. When the dbgeng agent
+/// processes a stop event, it collects all the trace operations (thread
+/// upserts, frame updates, register writes) into a batch, then applies
+/// them in a single trace transaction for efficiency.
+#[derive(Debug, Default)]
+pub struct DbgEngSyncBatch {
+    /// Thread operations to apply.
+    pub thread_ops: Vec<ThreadSyncOp>,
+    /// Frame operations to apply.
+    pub frame_ops: Vec<FrameSyncOp>,
+    /// Register operations to apply.
+    pub register_ops: Vec<RegisterSyncOp>,
+}
+
+impl DbgEngSyncBatch {
+    /// Create a new empty batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Queue a thread upsert operation.
+    pub fn upsert_thread(&mut self, process_num: u32, thread: DbgEngThread) {
+        self.thread_ops.push(ThreadSyncOp::Upsert { process_num, thread });
+    }
+
+    /// Queue a thread remove operation.
+    pub fn remove_thread(&mut self, process_num: u32, thread_num: u32) {
+        self.thread_ops.push(ThreadSyncOp::Remove { process_num, thread_num });
+    }
+
+    /// Queue a frame upsert operation.
+    pub fn upsert_frame(
+        &mut self,
+        process_num: u32,
+        thread_num: u32,
+        frame: DbgEngStackFrame,
+    ) {
+        self.frame_ops.push(FrameSyncOp::Upsert {
+            process_num,
+            thread_num,
+            frame,
+        });
+    }
+
+    /// Queue a frame remove operation.
+    pub fn remove_frame(&mut self, process_num: u32, thread_num: u32, frame_level: u32) {
+        self.frame_ops.push(FrameSyncOp::Remove {
+            process_num,
+            thread_num,
+            frame_level,
+        });
+    }
+
+    /// Queue a register set operation.
+    pub fn set_register(
+        &mut self,
+        process_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+        register: RegisterValue,
+    ) {
+        self.register_ops.push(RegisterSyncOp::Set {
+            process_num,
+            thread_num,
+            frame_level,
+            register,
+        });
+    }
+
+    /// Queue a register clear operation for a frame.
+    pub fn clear_registers(&mut self, process_num: u32, thread_num: u32, frame_level: u32) {
+        self.register_ops.push(RegisterSyncOp::Clear {
+            process_num,
+            thread_num,
+            frame_level,
+        });
+    }
+
+    /// Total number of operations in this batch.
+    pub fn total_operations(&self) -> usize {
+        self.thread_ops.len() + self.frame_ops.len() + self.register_ops.len()
+    }
+
+    /// Check if the batch has no operations.
+    pub fn is_empty(&self) -> bool {
+        self.thread_ops.is_empty() && self.frame_ops.is_empty() && self.register_ops.is_empty()
+    }
+
+    /// Clear all operations.
+    pub fn clear(&mut self) {
+        self.thread_ops.clear();
+        self.frame_ops.clear();
+        self.register_ops.clear();
+    }
+}
+
+/// A thread synchronization operation.
+#[derive(Debug, Clone)]
+pub enum ThreadSyncOp {
+    /// Insert or update a thread.
+    Upsert {
+        process_num: u32,
+        thread: DbgEngThread,
+    },
+    /// Remove a thread.
+    Remove {
+        process_num: u32,
+        thread_num: u32,
+    },
+}
+
+/// A frame synchronization operation.
+#[derive(Debug, Clone)]
+pub enum FrameSyncOp {
+    /// Insert or update a frame.
+    Upsert {
+        process_num: u32,
+        thread_num: u32,
+        frame: DbgEngStackFrame,
+    },
+    /// Remove a frame.
+    Remove {
+        process_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    },
+}
+
+/// A register synchronization operation.
+#[derive(Debug, Clone)]
+pub enum RegisterSyncOp {
+    /// Set a register value.
+    Set {
+        process_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+        register: RegisterValue,
+    },
+    /// Clear all registers for a frame.
+    Clear {
+        process_num: u32,
+        thread_num: u32,
+        frame_level: u32,
+    },
 }
 
 #[cfg(test)]
@@ -2562,5 +2904,325 @@ mod tests {
 
         // clear_all_frames
         coll.clear_all_frames();
+    }
+
+    #[test]
+    fn test_thread_collection_selected_thread() {
+        let mut coll = DbgEngThreadCollection::new(1);
+        assert!(coll.selected_thread().is_none());
+
+        coll.insert(DbgEngThread::new(0).with_state(ExecutionState::Stopped));
+        let sel = coll.selected_thread();
+        assert!(sel.is_some());
+        assert_eq!(sel.unwrap().num, 0);
+
+        coll.insert(DbgEngThread::new(1).with_state(ExecutionState::Running));
+        let sel = coll.selected_thread();
+        assert!(sel.is_some());
+        assert_eq!(sel.unwrap().num, 1); // Running preferred
+    }
+
+    #[test]
+    fn test_thread_collection_sorted() {
+        let mut coll = DbgEngThreadCollection::new(1);
+        coll.insert(DbgEngThread::new(3));
+        coll.insert(DbgEngThread::new(1));
+        coll.insert(DbgEngThread::new(2));
+        let sorted = coll.sorted_threads();
+        assert_eq!(sorted.len(), 3);
+        assert_eq!(sorted[0].num, 1);
+        assert_eq!(sorted[1].num, 2);
+        assert_eq!(sorted[2].num, 3);
+    }
+
+    #[test]
+    fn test_thread_collection_state_counts() {
+        let mut coll = DbgEngThreadCollection::new(1);
+        coll.insert(DbgEngThread::new(0).with_state(ExecutionState::Running));
+        coll.insert(DbgEngThread::new(1).with_state(ExecutionState::Stopped));
+        coll.insert(DbgEngThread::new(2).with_state(ExecutionState::Running));
+        coll.insert(DbgEngThread::new(3).with_state(ExecutionState::Exited));
+        let counts = coll.thread_state_counts();
+        assert_eq!(counts.get(&ExecutionState::Running), Some(&2));
+        assert_eq!(counts.get(&ExecutionState::Stopped), Some(&1));
+        assert_eq!(counts.get(&ExecutionState::Exited), Some(&1));
+    }
+
+    #[test]
+    fn test_thread_collection_total_frames() {
+        let mut coll = DbgEngThreadCollection::new(1);
+        let mut t0 = DbgEngThread::new(0);
+        t0.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t0.add_frame(DbgEngStackFrame::new(1, 0x402000));
+        coll.insert(t0);
+        let mut t1 = DbgEngThread::new(1);
+        t1.add_frame(DbgEngStackFrame::new(0, 0x403000));
+        coll.insert(t1);
+        assert_eq!(coll.total_frame_count(), 3);
+    }
+
+    #[test]
+    fn test_frame_source_info_default() {
+        let info = DbgEngFrameSourceInfo::new();
+        assert!(info.file.is_none());
+        assert!(info.line.is_none());
+        assert!(info.function.is_none());
+        assert!(info.compilation_dir.is_none());
+        assert!(info.module.is_none());
+    }
+
+    #[test]
+    fn test_frame_source_info_builder() {
+        let info = DbgEngFrameSourceInfo::new()
+            .with_location("main.c", 42)
+            .with_function("main")
+            .with_compilation_dir("/home/user/project")
+            .with_module("test.exe");
+        assert_eq!(info.file.as_deref(), Some("main.c"));
+        assert_eq!(info.line, Some(42));
+        assert_eq!(info.function.as_deref(), Some("main"));
+        assert_eq!(info.compilation_dir.as_deref(), Some("/home/user/project"));
+        assert_eq!(info.module.as_deref(), Some("test.exe"));
+    }
+
+    #[test]
+    fn test_frame_source_info_display() {
+        let info = DbgEngFrameSourceInfo::new()
+            .with_location("main.c", 42);
+        assert_eq!(info.build_display(), Some("main.c:42".to_string()));
+
+        let info_no_line = DbgEngFrameSourceInfo::new()
+            .with_location("main.c", 0);
+        // line=0 is not None, so it should display
+        assert_eq!(info_no_line.build_display(), Some("main.c:0".to_string()));
+
+        let info_empty = DbgEngFrameSourceInfo::new();
+        assert!(info_empty.build_display().is_none());
+    }
+
+    #[test]
+    fn test_frame_source_info_full_path() {
+        let info = DbgEngFrameSourceInfo::new()
+            .with_location("main.c", 42)
+            .with_compilation_dir("/home/user/project");
+        let full = info.full_path();
+        assert!(full.is_some());
+        assert!(full.unwrap().contains("main.c"));
+
+        // Absolute path should not be modified
+        let info_abs = DbgEngFrameSourceInfo::new()
+            .with_location("/absolute/path/main.c", 42)
+            .with_compilation_dir("/home/user/project");
+        assert_eq!(info_abs.full_path(), Some("/absolute/path/main.c".to_string()));
+
+        // Windows absolute path
+        let info_win = DbgEngFrameSourceInfo::new()
+            .with_location("C:\\src\\main.c", 42)
+            .with_compilation_dir("D:\\build");
+        assert_eq!(info_win.full_path(), Some("C:\\src\\main.c".to_string()));
+    }
+
+    #[test]
+    fn test_trace_sync_tracker_new() {
+        let tracker = DbgEngTraceSyncTracker::new();
+        assert_eq!(tracker.total_synced_threads(), 0);
+        assert_eq!(tracker.total_synced_frames(), 0);
+    }
+
+    #[test]
+    fn test_trace_sync_tracker_threads() {
+        let mut tracker = DbgEngTraceSyncTracker::new();
+        assert!(!tracker.is_thread_synced(0, 1));
+
+        tracker.mark_thread_synced(0, 1);
+        tracker.mark_thread_synced(0, 2);
+        tracker.mark_thread_synced(1, 0);
+        assert!(tracker.is_thread_synced(0, 1));
+        assert!(tracker.is_thread_synced(0, 2));
+        assert!(tracker.is_thread_synced(1, 0));
+        assert!(!tracker.is_thread_synced(0, 3));
+        assert_eq!(tracker.total_synced_threads(), 3);
+
+        let nums = tracker.synced_thread_numbers(0);
+        assert!(nums.contains(&1));
+        assert!(nums.contains(&2));
+        assert_eq!(nums.len(), 2);
+    }
+
+    #[test]
+    fn test_trace_sync_tracker_frames() {
+        let mut tracker = DbgEngTraceSyncTracker::new();
+        tracker.mark_frame_synced(0, 1, 0);
+        tracker.mark_frame_synced(0, 1, 1);
+        tracker.mark_frame_synced(0, 2, 0);
+
+        assert!(tracker.is_frame_synced(0, 1, 0));
+        assert!(tracker.is_frame_synced(0, 1, 1));
+        assert!(!tracker.is_frame_synced(0, 1, 2));
+        assert_eq!(tracker.total_synced_frames(), 3);
+
+        let levels = tracker.synced_frame_levels(0, 1);
+        assert_eq!(levels, vec![0, 1]);
+    }
+
+    #[test]
+    fn test_trace_sync_tracker_registers() {
+        let mut tracker = DbgEngTraceSyncTracker::new();
+        assert!(!tracker.are_registers_synced(0, 1, 0));
+
+        tracker.mark_registers_synced(0, 1, 0);
+        assert!(tracker.are_registers_synced(0, 1, 0));
+        assert!(!tracker.are_registers_synced(0, 1, 1));
+    }
+
+    #[test]
+    fn test_trace_sync_tracker_clear() {
+        let mut tracker = DbgEngTraceSyncTracker::new();
+        tracker.mark_thread_synced(0, 1);
+        tracker.mark_frame_synced(0, 1, 0);
+        tracker.mark_registers_synced(0, 1, 0);
+        assert_eq!(tracker.total_synced_threads(), 1);
+
+        tracker.clear();
+        assert_eq!(tracker.total_synced_threads(), 0);
+        assert_eq!(tracker.total_synced_frames(), 0);
+        assert!(!tracker.are_registers_synced(0, 1, 0));
+    }
+
+    #[test]
+    fn test_sync_batch_new() {
+        let batch = DbgEngSyncBatch::new();
+        assert!(batch.is_empty());
+        assert_eq!(batch.total_operations(), 0);
+    }
+
+    #[test]
+    fn test_sync_batch_thread_ops() {
+        let mut batch = DbgEngSyncBatch::new();
+        batch.upsert_thread(0, DbgEngThread::new(1).with_state(ExecutionState::Running));
+        batch.upsert_thread(0, DbgEngThread::new(2).with_state(ExecutionState::Stopped));
+        batch.remove_thread(1, 0);
+        assert_eq!(batch.thread_ops.len(), 3);
+        assert_eq!(batch.total_operations(), 3);
+    }
+
+    #[test]
+    fn test_sync_batch_frame_ops() {
+        let mut batch = DbgEngSyncBatch::new();
+        batch.upsert_frame(0, 1, DbgEngStackFrame::new(0, 0x401000));
+        batch.upsert_frame(0, 1, DbgEngStackFrame::new(1, 0x402000));
+        batch.remove_frame(0, 1, 2);
+        assert_eq!(batch.frame_ops.len(), 3);
+    }
+
+    #[test]
+    fn test_sync_batch_register_ops() {
+        let mut batch = DbgEngSyncBatch::new();
+        batch.set_register(0, 1, 0, RegisterValue::from_u64("RAX", 0x1234));
+        batch.set_register(0, 1, 0, RegisterValue::from_u64("RBX", 0x5678));
+        batch.clear_registers(0, 1, 1);
+        assert_eq!(batch.register_ops.len(), 3);
+        assert_eq!(batch.total_operations(), 3);
+    }
+
+    #[test]
+    fn test_sync_batch_clear() {
+        let mut batch = DbgEngSyncBatch::new();
+        batch.upsert_thread(0, DbgEngThread::new(1));
+        batch.upsert_frame(0, 1, DbgEngStackFrame::new(0, 0x401000));
+        batch.set_register(0, 1, 0, RegisterValue::from_u64("RAX", 0x1234));
+        assert!(!batch.is_empty());
+
+        batch.clear();
+        assert!(batch.is_empty());
+        assert_eq!(batch.total_operations(), 0);
+    }
+
+    #[test]
+    fn test_thread_sync_op_variants() {
+        let upsert = ThreadSyncOp::Upsert {
+            process_num: 0,
+            thread: DbgEngThread::new(1),
+        };
+        match upsert {
+            ThreadSyncOp::Upsert { process_num, thread } => {
+                assert_eq!(process_num, 0);
+                assert_eq!(thread.num, 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let remove = ThreadSyncOp::Remove {
+            process_num: 0,
+            thread_num: 1,
+        };
+        match remove {
+            ThreadSyncOp::Remove { process_num, thread_num } => {
+                assert_eq!(process_num, 0);
+                assert_eq!(thread_num, 1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_frame_sync_op_variants() {
+        let upsert = FrameSyncOp::Upsert {
+            process_num: 0,
+            thread_num: 1,
+            frame: DbgEngStackFrame::new(0, 0x401000),
+        };
+        match upsert {
+            FrameSyncOp::Upsert { process_num, thread_num, frame } => {
+                assert_eq!(process_num, 0);
+                assert_eq!(thread_num, 1);
+                assert_eq!(frame.pc, 0x401000);
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let remove = FrameSyncOp::Remove {
+            process_num: 0,
+            thread_num: 1,
+            frame_level: 2,
+        };
+        match remove {
+            FrameSyncOp::Remove { process_num, thread_num, frame_level } => {
+                assert_eq!(process_num, 0);
+                assert_eq!(thread_num, 1);
+                assert_eq!(frame_level, 2);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_register_sync_op_variants() {
+        let set = RegisterSyncOp::Set {
+            process_num: 0,
+            thread_num: 1,
+            frame_level: 0,
+            register: RegisterValue::from_u64("RAX", 0x1234),
+        };
+        match set {
+            RegisterSyncOp::Set { register, .. } => {
+                assert_eq!(register.name, "RAX");
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let clear = RegisterSyncOp::Clear {
+            process_num: 0,
+            thread_num: 1,
+            frame_level: 0,
+        };
+        match clear {
+            RegisterSyncOp::Clear { process_num, thread_num, frame_level } => {
+                assert_eq!(process_num, 0);
+                assert_eq!(thread_num, 1);
+                assert_eq!(frame_level, 0);
+            }
+            _ => panic!("wrong variant"),
+        }
     }
 }

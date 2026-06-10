@@ -336,6 +336,85 @@ impl DrgnThread {
         frames
     }
 
+    /// Get the outermost frame (highest level).
+    pub fn outermost_frame(&self) -> Option<&DrgnStackFrame> {
+        self.frames.values().max_by_key(|f| f.level)
+    }
+
+    /// Build the backtrace as a list of display strings.
+    pub fn build_backtrace(&self) -> Vec<String> {
+        let mut frames: Vec<_> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames.iter().map(|f| f.build_display()).collect()
+    }
+
+    /// Build trace object key-value pairs for the stack container.
+    pub fn build_stack_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.frames.len().to_string())]
+    }
+
+    /// Collect all register names across all frames.
+    pub fn all_register_names(&self) -> Vec<String> {
+        let mut names = std::collections::BTreeSet::new();
+        for frame in self.frames.values() {
+            for reg in &frame.registers {
+                names.insert(reg.name.clone());
+            }
+        }
+        names.into_iter().collect()
+    }
+
+    /// Find the frame containing the given PC address.
+    pub fn frame_at_pc(&self, pc: u64) -> Option<&DrgnStackFrame> {
+        self.frames.values().find(|f| f.pc == pc)
+    }
+
+    /// Get the return address for the innermost frame.
+    pub fn return_address(&self) -> Option<u64> {
+        self.innermost_frame()
+            .map(|f| f.return_address)
+            .filter(|&ra| ra != 0)
+    }
+
+    /// Whether the thread is stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.state == ExecutionState::Stopped
+    }
+
+    /// Whether the thread is running.
+    pub fn is_running(&self) -> bool {
+        self.state == ExecutionState::Running
+    }
+
+    /// Whether the thread has exited.
+    pub fn is_exited(&self) -> bool {
+        self.state == ExecutionState::Exited
+    }
+
+    /// Build the retain keys for this thread's frame children.
+    pub fn build_frame_retain_keys(&self) -> Vec<String> {
+        self.frames
+            .keys()
+            .map(|level| format!("[{}]", level))
+            .collect()
+    }
+
+    /// Get the trace path for a specific frame in this thread.
+    pub fn frame_path(&self, level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}]",
+            self.process_num, self.num, level
+        )
+    }
+
+    /// Get the trace path for a specific frame's registers.
+    pub fn frame_registers_path(&self, level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Registers",
+            self.process_num, self.num, level
+        )
+    }
+
 }
 
 /// Source location information for a stack frame.
@@ -837,6 +916,597 @@ impl FrameRegisterBatch {
                 (path, r.bytes.clone())
             })
             .collect()
+    }
+}
+
+/// Stop reason for a drgn thread.
+///
+/// Captures why a thread stopped. Ported from the Python agent's
+/// state detection logic in `hooks.py`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnStopReason {
+    /// Breakpoint hit.
+    Breakpoint,
+    /// Watchpoint triggered.
+    Watchpoint,
+    /// Signal received.
+    Signal,
+    /// Step completed.
+    StepComplete,
+    /// Function finished (return).
+    FunctionFinished,
+    /// Exec (execve).
+    Exec,
+    /// Thread exiting.
+    ThreadExiting,
+    /// Unknown reason.
+    Unknown,
+}
+
+impl DrgnStopReason {
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Breakpoint => "Breakpoint",
+            Self::Watchpoint => "Watchpoint",
+            Self::Signal => "Signal",
+            Self::StepComplete => "Step complete",
+            Self::FunctionFinished => "Function finished",
+            Self::Exec => "Exec",
+            Self::ThreadExiting => "Thread exiting",
+            Self::Unknown => "Unknown",
+        }
+    }
+
+    /// Whether this stop reason implies the thread is stopped (can resume).
+    pub fn is_stopped(&self) -> bool {
+        !matches!(self, Self::ThreadExiting)
+    }
+}
+
+/// Detailed stop reason for a specific thread stop.
+///
+/// Captures why a thread stopped with more detail than the simple
+/// `DrgnStopReason` enum.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrgnDetailedStopReason {
+    /// Breakpoint hit at address.
+    Breakpoint {
+        /// Breakpoint ID.
+        bp_id: u32,
+        /// Address where breakpoint was hit.
+        address: u64,
+    },
+    /// Watchpoint triggered.
+    Watchpoint {
+        /// Watchpoint ID.
+        wp_id: u32,
+        /// Address that was watched.
+        address: u64,
+    },
+    /// Signal received.
+    Signal {
+        /// Signal name.
+        name: String,
+        /// Signal number.
+        number: i32,
+    },
+    /// Step completed.
+    StepComplete,
+    /// Function finished (return).
+    FunctionFinished {
+        /// Return value, if available.
+        return_value: Option<u64>,
+    },
+    /// Exited with code.
+    Exited {
+        /// Exit code.
+        code: i32,
+    },
+    /// Exited by signal.
+    ExitedSignal {
+        /// Signal name.
+        signal: String,
+    },
+    /// Unknown reason.
+    Unknown,
+}
+
+impl DrgnDetailedStopReason {
+    /// Human-readable description.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Breakpoint {
+                bp_id, address, ..
+            } => {
+                format!("Breakpoint {} at 0x{:x}", bp_id, address)
+            }
+            Self::Watchpoint { wp_id, .. } => format!("Watchpoint {}", wp_id),
+            Self::Signal { name, number } => format!("Signal {} ({})", name, number),
+            Self::StepComplete => "Step complete".to_string(),
+            Self::FunctionFinished { .. } => "Function finished".to_string(),
+            Self::Exited { code } => format!("Exited with code {}", code),
+            Self::ExitedSignal { signal } => format!("Exited with signal {}", signal),
+            Self::Unknown => "Unknown stop reason".to_string(),
+        }
+    }
+
+    /// Whether this stop reason implies the thread is stopped (can resume).
+    pub fn is_stopped(&self) -> bool {
+        !matches!(self, Self::Exited { .. } | Self::ExitedSignal { .. })
+    }
+
+    /// Convert to the simple `DrgnStopReason`.
+    pub fn to_simple(&self) -> DrgnStopReason {
+        match self {
+            Self::Breakpoint { .. } => DrgnStopReason::Breakpoint,
+            Self::Watchpoint { .. } => DrgnStopReason::Watchpoint,
+            Self::Signal { .. } => DrgnStopReason::Signal,
+            Self::StepComplete => DrgnStopReason::StepComplete,
+            Self::FunctionFinished { .. } => DrgnStopReason::FunctionFinished,
+            Self::Exited { .. } | Self::ExitedSignal { .. } => DrgnStopReason::Unknown,
+            Self::Unknown => DrgnStopReason::Unknown,
+        }
+    }
+}
+
+/// Thread lifecycle event for drgn.
+///
+/// Tracks thread lifecycle events that need to be synchronized to the
+/// Ghidra trace. Ported from the Python agent's thread event handling
+/// in `hooks.py`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrgnThreadEvent {
+    /// A new thread was created.
+    Created {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+    /// A thread has exited.
+    Exited {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+    /// A thread's state has changed (running/stopped/etc).
+    StateChanged {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+        /// New execution state.
+        new_state: ExecutionState,
+    },
+    /// A thread was selected by the user.
+    Selected {
+        /// Process number.
+        process_num: u32,
+        /// Thread number.
+        thread_num: u32,
+    },
+}
+
+impl DrgnThreadEvent {
+    /// Get the process number for this event.
+    pub fn process_num(&self) -> u32 {
+        match self {
+            Self::Created { process_num, .. }
+            | Self::Exited { process_num, .. }
+            | Self::StateChanged { process_num, .. }
+            | Self::Selected { process_num, .. } => *process_num,
+        }
+    }
+
+    /// Get the thread number for this event.
+    pub fn thread_num(&self) -> u32 {
+        match self {
+            Self::Created { thread_num, .. }
+            | Self::Exited { thread_num, .. }
+            | Self::StateChanged { thread_num, .. }
+            | Self::Selected { thread_num, .. } => *thread_num,
+        }
+    }
+
+    /// Human-readable description of this event.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Created {
+                process_num,
+                thread_num,
+            } => {
+                format!(
+                    "Thread {} created in process {}",
+                    thread_num, process_num
+                )
+            }
+            Self::Exited {
+                process_num,
+                thread_num,
+            } => {
+                format!(
+                    "Thread {} exited in process {}",
+                    thread_num, process_num
+                )
+            }
+            Self::StateChanged {
+                process_num,
+                thread_num,
+                new_state,
+            } => {
+                format!(
+                    "Thread {} in process {} -> {}",
+                    thread_num,
+                    process_num,
+                    new_state.as_trace_str()
+                )
+            }
+            Self::Selected {
+                process_num,
+                thread_num,
+            } => {
+                format!(
+                    "Thread {} selected in process {}",
+                    thread_num, process_num
+                )
+            }
+        }
+    }
+}
+
+/// Stepping type for drgn thread operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnStepType {
+    /// Step over (next instruction / source line).
+    Over,
+    /// Step into (step instruction / into function calls).
+    Into,
+    /// Step out (run until current function returns).
+    Out,
+    /// Single-step one instruction.
+    Instruction,
+}
+
+impl DrgnStepType {
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Over => "Step Over",
+            Self::Into => "Step Into",
+            Self::Out => "Step Out",
+            Self::Instruction => "Step Instruction",
+        }
+    }
+}
+
+/// Thread plan tracking for drgn.
+///
+/// Describes what a thread should do before stopping again. This
+/// mirrors the Python agent's stepping semantics.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnThreadPlan {
+    /// Plan description (e.g. "step over", "step until 0x401000").
+    pub description: String,
+    /// The step type, if this is a standard stepping plan.
+    pub step_type: Option<DrgnStepType>,
+    /// Target stop address (for "run to address" plans).
+    pub stop_address: Option<u64>,
+    /// Whether the plan is complete.
+    pub completed: bool,
+}
+
+impl DrgnThreadPlan {
+    /// Create a plan for a standard step.
+    pub fn step(step_type: DrgnStepType) -> Self {
+        Self {
+            description: step_type.description().to_string(),
+            step_type: Some(step_type),
+            stop_address: None,
+            completed: false,
+        }
+    }
+
+    /// Create a plan to run to an address.
+    pub fn run_to_address(addr: u64) -> Self {
+        Self {
+            description: format!("run to 0x{:x}", addr),
+            step_type: None,
+            stop_address: Some(addr),
+            completed: false,
+        }
+    }
+
+    /// Create a plan to step out of the current function.
+    pub fn step_out() -> Self {
+        Self::step(DrgnStepType::Out)
+    }
+
+    /// Mark the plan as complete.
+    pub fn mark_complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+/// Extended stack frame information for drgn.
+///
+/// Contains additional drgn-specific frame metadata beyond the basic
+/// `DrgnStackFrame`, including unwinding information and language info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnFrameDetails {
+    /// Frame level.
+    pub level: u32,
+    /// Whether this frame is an artificial/thunk frame.
+    pub is_artificial: bool,
+    /// Source file path, if known.
+    pub source_file: Option<String>,
+    /// Source line number, if known.
+    pub source_line: Option<u32>,
+    /// Language of the function (e.g. "c", "c++", "rust").
+    pub language: Option<String>,
+    /// Whether the frame corresponds to a signal handler.
+    pub is_signal_frame: bool,
+    /// Whether this is an inline frame.
+    pub is_inline: bool,
+}
+
+impl DrgnFrameDetails {
+    /// Create frame details for a given level.
+    pub fn new(level: u32) -> Self {
+        Self {
+            level,
+            is_artificial: false,
+            source_file: None,
+            source_line: None,
+            language: None,
+            is_signal_frame: false,
+            is_inline: false,
+        }
+    }
+
+    /// Mark as artificial frame.
+    pub fn with_artificial(mut self, artificial: bool) -> Self {
+        self.is_artificial = artificial;
+        self
+    }
+
+    /// Set source location.
+    pub fn with_source(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.source_file = Some(file.into());
+        self.source_line = Some(line);
+        self
+    }
+
+    /// Set language.
+    pub fn with_language(mut self, lang: impl Into<String>) -> Self {
+        self.language = Some(lang.into());
+        self
+    }
+
+    /// Mark as signal frame.
+    pub fn with_signal_frame(mut self, signal: bool) -> Self {
+        self.is_signal_frame = signal;
+        self
+    }
+
+    /// Mark as inline frame.
+    pub fn with_inline(mut self, inline: bool) -> Self {
+        self.is_inline = inline;
+        self
+    }
+
+    /// Build a display string including source location.
+    pub fn build_display(&self, pc: u64, function_name: Option<&str>) -> String {
+        let mut display = format!("#{} 0x{:x}", self.level, pc);
+        if self.is_inline {
+            display += " [inlined]";
+        }
+        if let Some(name) = function_name {
+            display += &format!(" {}", name);
+        }
+        if let (Some(file), Some(line)) = (&self.source_file, self.source_line) {
+            display += &format!(" at {}:{}", file, line);
+        }
+        display
+    }
+}
+
+/// A thread collection manager for a drgn process.
+///
+/// Manages thread lifecycle events (creation, exit) and provides
+/// bulk operations on the thread set. Ported from the Python
+/// `ProcessState` class in `hooks.py`.
+#[derive(Debug, Default)]
+pub struct DrgnThreadCollection {
+    threads: BTreeMap<u32, DrgnThread>,
+    process_num: u32,
+}
+
+impl DrgnThreadCollection {
+    /// Create a new thread collection for a process.
+    pub fn new(process_num: u32) -> Self {
+        Self {
+            threads: BTreeMap::new(),
+            process_num,
+        }
+    }
+
+    /// Add or replace a thread.
+    pub fn insert(&mut self, thread: DrgnThread) {
+        self.threads.insert(thread.num, thread);
+    }
+
+    /// Remove a thread by number.
+    pub fn remove(&mut self, num: u32) -> Option<DrgnThread> {
+        self.threads.remove(&num)
+    }
+
+    /// Get a thread by number.
+    pub fn get(&self, num: u32) -> Option<&DrgnThread> {
+        self.threads.get(&num)
+    }
+
+    /// Get a mutable thread by number.
+    pub fn get_mut(&mut self, num: u32) -> Option<&mut DrgnThread> {
+        self.threads.get_mut(&num)
+    }
+
+    /// Get the number of threads.
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
+
+    /// Get all thread numbers.
+    pub fn numbers(&self) -> Vec<u32> {
+        self.threads.keys().copied().collect()
+    }
+
+    /// Iterate over threads.
+    pub fn iter(&self) -> impl Iterator<Item = &DrgnThread> {
+        self.threads.values()
+    }
+
+    /// Mark all threads as synchronized.
+    pub fn mark_all_synced(&mut self) {
+        for t in self.threads.values_mut() {
+            t.mark_synced();
+        }
+    }
+
+    /// Remove all exited threads and return their numbers.
+    pub fn prune_exited(&mut self) -> Vec<u32> {
+        let exited: Vec<u32> = self
+            .threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Exited)
+            .map(|(&num, _)| num)
+            .collect();
+        for num in &exited {
+            self.threads.remove(num);
+        }
+        exited
+    }
+
+    /// Clear all frames from all threads (used before re-syncing).
+    pub fn clear_all_frames(&mut self) {
+        for t in self.threads.values_mut() {
+            t.clear_frames();
+        }
+    }
+
+    /// Get the process number this collection belongs to.
+    pub fn process_num(&self) -> u32 {
+        self.process_num
+    }
+
+    /// Build thread info list for the common agent interface.
+    pub fn build_thread_info_list(&self) -> Vec<ThreadInfo> {
+        self.threads.values().map(|t| t.to_thread_info()).collect()
+    }
+}
+
+/// Tracks the event thread for a trace.
+///
+/// Ported from the Python agent's event thread tracking. The event
+/// thread is the thread that caused the most recent stop event.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnEventThreadTracker {
+    /// The process number of the event thread, if any.
+    pub process_num: Option<u32>,
+    /// The thread number of the event thread, if any.
+    pub thread_num: Option<u32>,
+}
+
+impl DrgnEventThreadTracker {
+    /// Create a new tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the event thread.
+    pub fn set(&mut self, process_num: u32, thread_num: u32) {
+        self.process_num = Some(process_num);
+        self.thread_num = Some(thread_num);
+    }
+
+    /// Clear the event thread.
+    pub fn clear(&mut self) {
+        self.process_num = None;
+        self.thread_num = None;
+    }
+
+    /// Get the event thread's trace path, if set.
+    pub fn trace_path(&self) -> Option<String> {
+        match (self.process_num, self.thread_num) {
+            (Some(p), Some(t)) => Some(format!("Processes[{}].Threads[{}]", p, t)),
+            _ => None,
+        }
+    }
+
+    /// Check if a specific thread is the event thread.
+    pub fn is_event_thread(&self, process_num: u32, thread_num: u32) -> bool {
+        self.process_num == Some(process_num) && self.thread_num == Some(thread_num)
+    }
+}
+
+/// Helper for frame selection tracking.
+///
+/// Ported from the frame selection context management in `commands.py`.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnFrameSelection {
+    /// The currently selected process.
+    pub process_num: Option<u32>,
+    /// The currently selected thread.
+    pub thread_num: Option<u32>,
+    /// The currently selected frame level.
+    pub frame_level: Option<u32>,
+}
+
+impl DrgnFrameSelection {
+    /// Create a new frame selection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the complete selection.
+    pub fn set(&mut self, process_num: u32, thread_num: u32, frame_level: u32) {
+        self.process_num = Some(process_num);
+        self.thread_num = Some(thread_num);
+        self.frame_level = Some(frame_level);
+    }
+
+    /// Clear the selection.
+    pub fn clear(&mut self) {
+        self.process_num = None;
+        self.thread_num = None;
+        self.frame_level = None;
+    }
+
+    /// Get the frame trace path, if fully set.
+    pub fn frame_path(&self) -> Option<String> {
+        match (self.process_num, self.thread_num, self.frame_level) {
+            (Some(p), Some(t), Some(f)) => {
+                Some(format!(
+                    "Processes[{}].Threads[{}].Stack[{}]",
+                    p, t, f
+                ))
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the thread trace path, if set.
+    pub fn thread_path(&self) -> Option<String> {
+        match (self.process_num, self.thread_num) {
+            (Some(p), Some(t)) => Some(format!("Processes[{}].Threads[{}]", p, t)),
+            _ => None,
+        }
     }
 }
 
@@ -1494,5 +2164,276 @@ mod tests {
 
         tracker.clear();
         assert!(tracker.is_empty());
+    }
+
+    #[test]
+    fn test_thread_outermost_frame() {
+        let mut t = DrgnThread::new(0);
+        assert!(t.outermost_frame().is_none());
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        t.add_frame(DrgnStackFrame::new(2, 0x3000));
+        t.add_frame(DrgnStackFrame::new(1, 0x2000));
+        let outer = t.outermost_frame();
+        assert!(outer.is_some());
+        assert_eq!(outer.unwrap().level, 2);
+    }
+
+    #[test]
+    fn test_thread_build_backtrace() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000).with_function("main"));
+        t.add_frame(DrgnStackFrame::new(1, 0x2000).with_function("foo"));
+        let bt = t.build_backtrace();
+        assert_eq!(bt.len(), 2);
+        assert!(bt[0].contains("main"));
+        assert!(bt[1].contains("foo"));
+    }
+
+    #[test]
+    fn test_thread_stack_container_values() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        let values = t.build_stack_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "1"));
+    }
+
+    #[test]
+    fn test_thread_all_register_names() {
+        let mut t = DrgnThread::new(0);
+        let mut f = DrgnStackFrame::new(0, 0x1000);
+        f.set_register(RegisterValue::from_u64("rax", 0x1234));
+        f.set_register(RegisterValue::from_u64("rbx", 0x5678));
+        t.add_frame(f);
+        let mut f2 = DrgnStackFrame::new(1, 0x2000);
+        f2.set_register(RegisterValue::from_u64("rax", 0x9999));
+        f2.set_register(RegisterValue::from_u64("rcx", 0xaaaa));
+        t.add_frame(f2);
+        let names = t.all_register_names();
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"rax".to_string()));
+        assert!(names.contains(&"rbx".to_string()));
+        assert!(names.contains(&"rcx".to_string()));
+    }
+
+    #[test]
+    fn test_thread_frame_at_pc() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        t.add_frame(DrgnStackFrame::new(1, 0x2000));
+        assert!(t.frame_at_pc(0x1000).is_some());
+        assert!(t.frame_at_pc(0x2000).is_some());
+        assert!(t.frame_at_pc(0x3000).is_none());
+    }
+
+    #[test]
+    fn test_thread_return_address() {
+        let mut t = DrgnThread::new(0);
+        assert!(t.return_address().is_none());
+        t.add_frame(
+            DrgnStackFrame::new(0, 0x1000).with_return_address(0),
+        );
+        assert!(t.return_address().is_none());
+        t.clear_frames();
+        t.add_frame(
+            DrgnStackFrame::new(0, 0x1000).with_return_address(0x4000),
+        );
+        assert_eq!(t.return_address(), Some(0x4000));
+    }
+
+    #[test]
+    fn test_thread_state_queries() {
+        let t = DrgnThread::new(0).with_state(ExecutionState::Running);
+        assert!(t.is_running());
+        assert!(!t.is_stopped());
+        assert!(!t.is_exited());
+
+        let t = DrgnThread::new(0).with_state(ExecutionState::Stopped);
+        assert!(t.is_stopped());
+        assert!(!t.is_running());
+
+        let t = DrgnThread::new(0).with_state(ExecutionState::Exited);
+        assert!(t.is_exited());
+    }
+
+    #[test]
+    fn test_thread_frame_retain_keys() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        t.add_frame(DrgnStackFrame::new(2, 0x3000));
+        let keys = t.build_frame_retain_keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"[0]".to_string()));
+        assert!(keys.contains(&"[2]".to_string()));
+    }
+
+    #[test]
+    fn test_thread_frame_paths() {
+        let t = DrgnThread::in_process(1, 0);
+        assert_eq!(t.frame_path(2), "Processes[0].Threads[1].Stack[2]");
+        assert_eq!(
+            t.frame_registers_path(3),
+            "Processes[0].Threads[1].Stack[3].Registers"
+        );
+    }
+
+    #[test]
+    fn test_stop_reason() {
+        assert_eq!(DrgnStopReason::Breakpoint.description(), "Breakpoint");
+        assert!(DrgnStopReason::Breakpoint.is_stopped());
+        assert!(DrgnStopReason::Signal.is_stopped());
+        assert!(!DrgnStopReason::ThreadExiting.is_stopped());
+    }
+
+    #[test]
+    fn test_detailed_stop_reason() {
+        let reason = DrgnDetailedStopReason::Breakpoint {
+            bp_id: 1,
+            address: 0x401000,
+        };
+        assert!(reason.description().contains("Breakpoint"));
+        assert!(reason.is_stopped());
+        assert_eq!(reason.to_simple(), DrgnStopReason::Breakpoint);
+
+        let signal = DrgnDetailedStopReason::Signal {
+            name: "SIGSEGV".to_string(),
+            number: 11,
+        };
+        assert!(signal.description().contains("SIGSEGV"));
+        assert_eq!(signal.to_simple(), DrgnStopReason::Signal);
+
+        let exited = DrgnDetailedStopReason::Exited { code: 0 };
+        assert!(!exited.is_stopped());
+    }
+
+    #[test]
+    fn test_thread_event() {
+        let evt = DrgnThreadEvent::Created {
+            process_num: 0,
+            thread_num: 1,
+        };
+        assert_eq!(evt.process_num(), 0);
+        assert_eq!(evt.thread_num(), 1);
+        assert!(evt.description().contains("created"));
+
+        let evt2 = DrgnThreadEvent::StateChanged {
+            process_num: 0,
+            thread_num: 1,
+            new_state: ExecutionState::Stopped,
+        };
+        assert!(evt2.description().contains("STOPPED"));
+    }
+
+    #[test]
+    fn test_step_type() {
+        assert_eq!(DrgnStepType::Over.description(), "Step Over");
+        assert_eq!(DrgnStepType::Into.description(), "Step Into");
+        assert_eq!(DrgnStepType::Out.description(), "Step Out");
+        assert_eq!(
+            DrgnStepType::Instruction.description(),
+            "Step Instruction"
+        );
+    }
+
+    #[test]
+    fn test_thread_plan() {
+        let plan = DrgnThreadPlan::step(DrgnStepType::Over);
+        assert_eq!(plan.step_type, Some(DrgnStepType::Over));
+        assert!(!plan.completed);
+        assert!(plan.description.contains("Step Over"));
+
+        let plan2 = DrgnThreadPlan::run_to_address(0x401000);
+        assert!(plan2.description.contains("0x401000"));
+        assert_eq!(plan2.stop_address, Some(0x401000));
+        assert!(plan2.step_type.is_none());
+
+        let mut plan3 = DrgnThreadPlan::step_out();
+        assert!(!plan3.completed);
+        plan3.mark_complete();
+        assert!(plan3.completed);
+    }
+
+    #[test]
+    fn test_frame_details() {
+        let details = DrgnFrameDetails::new(0)
+            .with_source("fs/open.c", 1234)
+            .with_language("c")
+            .with_inline(true);
+        assert_eq!(details.level, 0);
+        assert!(details.is_inline);
+        assert_eq!(details.source_file.as_deref(), Some("fs/open.c"));
+        assert_eq!(details.source_line, Some(1234));
+        assert_eq!(details.language.as_deref(), Some("c"));
+        let display = details.build_display(0x401000, Some("do_sys_open"));
+        assert!(display.contains("inlined"));
+        assert!(display.contains("do_sys_open"));
+        assert!(display.contains("fs/open.c:1234"));
+    }
+
+    #[test]
+    fn test_thread_collection() {
+        let mut coll = DrgnThreadCollection::new(0);
+        assert!(coll.is_empty());
+        assert_eq!(coll.process_num(), 0);
+
+        coll.insert(DrgnThread::new(0).with_state(ExecutionState::Running));
+        coll.insert(DrgnThread::new(1).with_state(ExecutionState::Stopped));
+        coll.insert(DrgnThread::new(2).with_state(ExecutionState::Exited));
+        assert_eq!(coll.len(), 3);
+        assert!(coll.get(0).is_some());
+        assert!(coll.get(3).is_none());
+
+        let exited = coll.prune_exited();
+        assert_eq!(exited, vec![2]);
+        assert_eq!(coll.len(), 2);
+
+        coll.clear_all_frames();
+        coll.mark_all_synced();
+        assert!(coll.get(0).unwrap().synced);
+    }
+
+    #[test]
+    fn test_thread_collection_info() {
+        let mut coll = DrgnThreadCollection::new(0);
+        coll.insert(DrgnThread::new(0).with_tid(100).with_name("main"));
+        coll.insert(DrgnThread::new(1).with_tid(200).with_name("worker"));
+        let info = coll.build_thread_info_list();
+        assert_eq!(info.len(), 2);
+    }
+
+    #[test]
+    fn test_event_thread_tracker() {
+        let mut tracker = DrgnEventThreadTracker::new();
+        assert!(tracker.trace_path().is_none());
+
+        tracker.set(0, 1);
+        assert_eq!(
+            tracker.trace_path(),
+            Some("Processes[0].Threads[1]".to_string())
+        );
+        assert!(tracker.is_event_thread(0, 1));
+        assert!(!tracker.is_event_thread(0, 2));
+
+        tracker.clear();
+        assert!(tracker.trace_path().is_none());
+    }
+
+    #[test]
+    fn test_frame_selection() {
+        let mut sel = DrgnFrameSelection::new();
+        assert!(sel.frame_path().is_none());
+        assert!(sel.thread_path().is_none());
+
+        sel.set(0, 1, 2);
+        assert_eq!(
+            sel.frame_path(),
+            Some("Processes[0].Threads[1].Stack[2]".to_string())
+        );
+        assert_eq!(
+            sel.thread_path(),
+            Some("Processes[0].Threads[1]".to_string())
+        );
+
+        sel.clear();
+        assert!(sel.frame_path().is_none());
     }
 }

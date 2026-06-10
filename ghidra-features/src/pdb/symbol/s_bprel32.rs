@@ -1,6 +1,7 @@
 //! S_BPREL32 -- Base pointer relative symbol (32-bit).
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.BasePointerRelative32MsSymbol`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.BasePointerRelative32MsSymbol`
+//! and `BasePointerRelative32StMsSymbol`.
 //!
 //! # Binary Format
 //!
@@ -27,6 +28,17 @@ use super::abstract_ms_symbol::AbstractMsSymbol;
 use super::name_ms_symbol::NameMsSymbol;
 use super::record_number::RecordNumber;
 
+/// Which variant of the base-pointer-relative symbol was parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BpRelVariant {
+    /// `S_BPREL32` (0x0200) -- 32-bit offset, 32-bit type index, NT string (v5).
+    BpRel32,
+    /// `S_BPREL32_V2` (0x110B) -- 32-bit offset, 32-bit type index, NT string (v7).
+    BpRel32V2,
+    /// `S_BPREL32_ST` -- 32-bit offset, 32-bit type index, ST string.
+    BpRel32St,
+}
+
 /// A base pointer relative symbol (`S_BPREL32`).
 ///
 /// This symbol describes a local variable or parameter whose address is
@@ -45,19 +57,36 @@ use super::record_number::RecordNumber;
 /// name         : NT string
 /// ```
 ///
-/// This corresponds to `S_BPREL32` (0x110B) in the CodeView symbol set.
-/// After the name the stream is 4-byte aligned.
+/// This corresponds to `S_BPREL32` (0x0200 / 0x110B) in the CodeView
+/// symbol set. After the name the stream is 4-byte aligned.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SBpRel32 {
     /// The underlying base-pointer-relative data.
     pub inner: AbstractBasePointerRelative,
+
+    /// Which variant was parsed.
+    variant: BpRelVariant,
 }
 
 impl SBpRel32 {
-    /// Create a new S_BPREL32 symbol.
+    /// Create a new S_BPREL32 symbol (v7 / v2 variant).
     pub fn new(type_record_number: RecordNumber, offset: i32, name: String) -> Self {
         Self {
             inner: AbstractBasePointerRelative::new(type_record_number, offset, name),
+            variant: BpRelVariant::BpRel32V2,
+        }
+    }
+
+    /// Create an S_BPREL32 symbol with a specific variant tag.
+    pub fn with_variant(
+        type_record_number: RecordNumber,
+        offset: i32,
+        name: String,
+        variant: BpRelVariant,
+    ) -> Self {
+        Self {
+            inner: AbstractBasePointerRelative::new(type_record_number, offset, name),
+            variant,
         }
     }
 
@@ -67,8 +96,13 @@ impl SBpRel32 {
     /// The stream should be 4-byte aligned after the name (handled by the
     /// caller or via [`parse_aligned`](Self::parse_aligned)).
     pub fn parse(data: &[u8]) -> Option<Self> {
+        Self::parse_as(data, BpRelVariant::BpRel32V2)
+    }
+
+    /// Parse with an explicit variant tag.
+    pub fn parse_as(data: &[u8], variant: BpRelVariant) -> Option<Self> {
         let inner = AbstractBasePointerRelative::parse(data)?;
-        Some(Self { inner })
+        Some(Self { inner, variant })
     }
 
     /// Parse an S_BPREL32 symbol and return it along with the total bytes
@@ -77,7 +111,12 @@ impl SBpRel32 {
     /// This matches the Java `reader.align4()` call in
     /// `BasePointerRelative32MsSymbol`.
     pub fn parse_aligned(data: &[u8]) -> Option<(Self, usize)> {
-        let sym = Self::parse(data)?;
+        Self::parse_aligned_as(data, BpRelVariant::BpRel32V2)
+    }
+
+    /// Parse with alignment and an explicit variant tag.
+    pub fn parse_aligned_as(data: &[u8], variant: BpRelVariant) -> Option<(Self, usize)> {
+        let sym = Self::parse_as(data, variant)?;
         // Compute aligned consumed length:
         // offset(4) + type_record(4) + name_len + null terminator, aligned to 4
         let name_data = &data[8..];
@@ -86,6 +125,11 @@ impl SBpRel32 {
         let total = 8 + name_len;
         let aligned = (total + 3) & !3;
         Some((sym, aligned))
+    }
+
+    /// Return the variant of this base-pointer-relative symbol.
+    pub fn variant(&self) -> BpRelVariant {
+        self.variant
     }
 
     /// Return the signed offset from the base pointer.
@@ -119,15 +163,44 @@ impl SBpRel32 {
     pub fn address_from_frame_pointer(&self, frame_pointer: u64) -> u64 {
         (frame_pointer as i64 + self.inner.offset as i64) as u64
     }
+
+    /// Return `true` if the offset is negative (i.e., the variable is above
+    /// the frame pointer, typical for local variables).
+    pub fn is_above_frame_pointer(&self) -> bool {
+        self.inner.offset < 0
+    }
+
+    /// Return `true` if the offset is positive (i.e., the variable is below
+    /// the frame pointer, typical for function parameters).
+    pub fn is_below_frame_pointer(&self) -> bool {
+        self.inner.offset > 0
+    }
+
+    /// Return `true` if the offset is zero (at the frame pointer itself).
+    pub fn is_at_frame_pointer(&self) -> bool {
+        self.inner.offset == 0
+    }
+
+    /// Return `true` if the variable has no type information.
+    pub fn is_no_type(&self) -> bool {
+        self.inner.type_record_number.is_no_type()
+    }
 }
 
 impl AbstractMsSymbol for SBpRel32 {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_BPREL32
+        match self.variant {
+            BpRelVariant::BpRel32 => super::super::symbol_kind::S_BPREL32,
+            BpRelVariant::BpRel32V2 => super::super::symbol_kind::S_BPREL32_V2,
+            BpRelVariant::BpRel32St => super::super::symbol_kind::S_BPREL32_ST,
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
-        "S_BPREL32"
+        match self.variant {
+            BpRelVariant::BpRel32St => "S_BPREL32_ST",
+            _ => "S_BPREL32",
+        }
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -172,6 +245,7 @@ mod tests {
         assert_eq!(sym.offset(), -4);
         assert_eq!(sym.type_record_number().number(), 0x1020);
         assert_eq!(sym.name(), "local_x");
+        assert_eq!(sym.variant(), BpRelVariant::BpRel32V2);
     }
 
     #[test]
@@ -214,7 +288,7 @@ mod tests {
             -8,
             "param1".to_string(),
         );
-        assert_eq!(sym.pdb_id(), 0x0200);
+        assert_eq!(sym.pdb_id(), 0x110B);
         assert_eq!(sym.symbol_type_name(), "S_BPREL32");
         assert_eq!(sym.name(), "param1");
         assert_eq!(sym.offset(), -8);
@@ -299,5 +373,89 @@ mod tests {
         );
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_variant_bprel32() {
+        let sym = SBpRel32::with_variant(
+            RecordNumber::type_record_number(0x1020),
+            -4,
+            "v".to_string(),
+            BpRelVariant::BpRel32,
+        );
+        assert_eq!(sym.pdb_id(), 0x0200);
+        assert_eq!(sym.variant(), BpRelVariant::BpRel32);
+    }
+
+    #[test]
+    fn test_variant_bprel32_v2() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -4,
+            "v".to_string(),
+        );
+        assert_eq!(sym.pdb_id(), 0x110B);
+        assert_eq!(sym.variant(), BpRelVariant::BpRel32V2);
+    }
+
+    #[test]
+    fn test_is_above_frame_pointer() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -8,
+            "local".to_string(),
+        );
+        assert!(sym.is_above_frame_pointer());
+        assert!(!sym.is_below_frame_pointer());
+        assert!(!sym.is_at_frame_pointer());
+    }
+
+    #[test]
+    fn test_is_below_frame_pointer() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            8,
+            "param".to_string(),
+        );
+        assert!(!sym.is_above_frame_pointer());
+        assert!(sym.is_below_frame_pointer());
+        assert!(!sym.is_at_frame_pointer());
+    }
+
+    #[test]
+    fn test_is_at_frame_pointer() {
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            0,
+            "fp".to_string(),
+        );
+        assert!(!sym.is_above_frame_pointer());
+        assert!(!sym.is_below_frame_pointer());
+        assert!(sym.is_at_frame_pointer());
+    }
+
+    #[test]
+    fn test_is_no_type() {
+        let sym = SBpRel32::new(
+            RecordNumber::NO_TYPE,
+            -4,
+            "x".to_string(),
+        );
+        assert!(sym.is_no_type());
+
+        let sym = SBpRel32::new(
+            RecordNumber::type_record_number(0x1020),
+            -4,
+            "x".to_string(),
+        );
+        assert!(!sym.is_no_type());
+    }
+
+    #[test]
+    fn test_parse_as_variant() {
+        let data = make_bprel32_bytes(-4, 0x1020, b"v");
+        let sym = SBpRel32::parse_as(&data, BpRelVariant::BpRel32).unwrap();
+        assert_eq!(sym.variant(), BpRelVariant::BpRel32);
+        assert_eq!(sym.pdb_id(), 0x0200);
     }
 }

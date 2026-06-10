@@ -660,6 +660,96 @@ impl DrgnInferiorProcess {
             || self.breakpoints_changed
             || self.watches_changed
     }
+
+    /// Get threads sorted by number.
+    pub fn threads_sorted(&self) -> Vec<&DrgnThread> {
+        let mut threads: Vec<_> = self.threads.values().collect();
+        threads.sort_by_key(|t| t.num);
+        threads
+    }
+
+    /// Get all running threads.
+    pub fn running_threads(&self) -> Vec<&DrgnThread> {
+        self.threads
+            .values()
+            .filter(|t| t.state == ExecutionState::Running)
+            .collect()
+    }
+
+    /// Get all stopped threads.
+    pub fn stopped_threads(&self) -> Vec<&DrgnThread> {
+        self.threads
+            .values()
+            .filter(|t| t.state == ExecutionState::Stopped)
+            .collect()
+    }
+
+    /// Count threads by execution state.
+    pub fn thread_state_counts(&self) -> BTreeMap<ExecutionState, usize> {
+        let mut counts = BTreeMap::new();
+        for t in self.threads.values() {
+            *counts.entry(t.state).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Get sorted modules by base address.
+    pub fn modules_sorted(&self) -> Vec<&DrgnModuleInfo> {
+        let mut mods: Vec<_> = self.modules.iter().collect();
+        mods.sort_by_key(|m| m.base());
+        mods
+    }
+
+    /// Get total memory footprint (sum of all region sizes).
+    pub fn memory_footprint(&self) -> u64 {
+        self.memory_regions.iter().map(|r| r.size).sum()
+    }
+
+    /// Build trace object key-value pairs for the threads container.
+    pub fn build_threads_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.threads.len().to_string())]
+    }
+
+    /// Build trace object key-value pairs for the modules container.
+    pub fn build_modules_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.modules.len().to_string())]
+    }
+
+    /// Build the retain keys for process-level object children.
+    ///
+    /// Used with `retain_values` to clean up stale children in the trace.
+    pub fn build_retain_keys(&self) -> Vec<String> {
+        vec![format!("[{}]", self.num)]
+    }
+
+    /// Build the retain keys for thread children.
+    pub fn build_thread_retain_keys(&self) -> Vec<String> {
+        self.threads
+            .keys()
+            .map(|num| format!("[{}]", num))
+            .collect()
+    }
+
+    /// Build the retain keys for module children.
+    pub fn build_module_retain_keys(&self) -> Vec<String> {
+        self.modules
+            .iter()
+            .map(|m| format!("[0x{:x}]", m.base()))
+            .collect()
+    }
+
+    /// Build the retain keys for memory region children.
+    pub fn build_region_retain_keys(&self) -> Vec<String> {
+        self.memory_regions
+            .iter()
+            .map(|r| format!("[{:08x}]", r.base))
+            .collect()
+    }
+
+    /// Get a memory region by base address.
+    pub fn get_memory_region(&self, base: u64) -> Option<&MemoryRegion> {
+        self.memory_regions.iter().find(|r| r.base == base)
+    }
 }
 
 /// Snapshot descriptor for trace recording.
@@ -1520,6 +1610,518 @@ impl DrgnRelocatedSection {
     }
 }
 
+/// Target information for a drgn debug session.
+///
+/// Represents the target-level metadata: the kernel or core dump being
+/// debugged, the architecture, and platform details. Ported from the
+/// arch detection in Python `arch.py` and `commands.py`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnTargetInfo {
+    /// Target executable path (vmlinux or core dump).
+    pub executable_path: Option<String>,
+    /// Architecture name (e.g. "x86_64", "aarch64").
+    pub arch: String,
+    /// OS ABI (always "Linux" for drgn).
+    pub os: String,
+    /// Endianness.
+    pub endian: String,
+    /// Pointer size in bytes.
+    pub pointer_size: usize,
+    /// Address size in bits.
+    pub address_size: usize,
+    /// Whether this is a kernel debug session.
+    pub is_kernel: bool,
+}
+
+impl DrgnTargetInfo {
+    /// Create new target info.
+    pub fn new(arch: impl Into<String>) -> Self {
+        Self {
+            executable_path: None,
+            arch: arch.into(),
+            os: "Linux".to_string(),
+            endian: "little".to_string(),
+            pointer_size: 8,
+            address_size: 64,
+            is_kernel: false,
+        }
+    }
+
+    /// Set the executable path.
+    pub fn with_executable(mut self, path: impl Into<String>) -> Self {
+        self.executable_path = Some(path.into());
+        self
+    }
+
+    /// Set the endianness.
+    pub fn with_endian(mut self, endian: impl Into<String>) -> Self {
+        self.endian = endian.into();
+        self
+    }
+
+    /// Set the pointer size.
+    pub fn with_pointer_size(mut self, size: usize) -> Self {
+        self.pointer_size = size;
+        self.address_size = size * 8;
+        self
+    }
+
+    /// Mark as kernel debug session.
+    pub fn with_kernel(mut self, is_kernel: bool) -> Self {
+        self.is_kernel = is_kernel;
+        self
+    }
+
+    /// Build environment trace values from this target info.
+    pub fn build_environment_values(&self, kernel_version: Option<&str>) -> Vec<(String, String)> {
+        let mut values = vec![
+            ("Debugger".to_string(), "drgn".to_string()),
+            ("Arch".to_string(), self.arch.clone()),
+            ("OS".to_string(), self.os.clone()),
+            ("Endian".to_string(), self.endian.clone()),
+        ];
+        if let Some(kv) = kernel_version {
+            values.push(("KernelVersion".to_string(), kv.to_string()));
+        }
+        values
+    }
+}
+
+/// Kernel-specific debug information.
+///
+/// Tracks kernel debug state like vmlinux path, kallsyms availability,
+/// and loaded kernel modules. Ported from the Python agent's kernel
+/// detection logic in `commands.py` `ghidra_trace_create`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnKernelDebugInfo {
+    /// Path to vmlinux (if available).
+    pub vmlinux_path: Option<String>,
+    /// Kernel version string (e.g. "5.15.0-generic").
+    pub version: Option<String>,
+    /// Whether debug info was loaded successfully.
+    pub debug_info_loaded: bool,
+    /// Whether kallsyms is available.
+    pub kallsyms_available: bool,
+    /// Kernel architecture string.
+    pub arch: Option<String>,
+}
+
+impl DrgnKernelDebugInfo {
+    /// Create a new kernel debug info.
+    pub fn new() -> Self {
+        Self {
+            vmlinux_path: None,
+            version: None,
+            debug_info_loaded: false,
+            kallsyms_available: false,
+            arch: None,
+        }
+    }
+
+    /// Set the vmlinux path.
+    pub fn with_vmlinux(mut self, path: impl Into<String>) -> Self {
+        self.vmlinux_path = Some(path.into());
+        self
+    }
+
+    /// Set the kernel version.
+    pub fn with_version(mut self, version: impl Into<String>) -> Self {
+        self.version = Some(version.into());
+        self
+    }
+
+    /// Set whether debug info was loaded.
+    pub fn with_debug_info_loaded(mut self, loaded: bool) -> Self {
+        self.debug_info_loaded = loaded;
+        self
+    }
+
+    /// Set whether kallsyms is available.
+    pub fn with_kallsyms(mut self, available: bool) -> Self {
+        self.kallsyms_available = available;
+        self
+    }
+
+    /// Set the architecture.
+    pub fn with_arch(mut self, arch: impl Into<String>) -> Self {
+        self.arch = Some(arch.into());
+        self
+    }
+}
+
+impl Default for DrgnKernelDebugInfo {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Process-level breakpoint state for drgn.
+///
+/// Tracks resolved breakpoints for a single process. Ported from
+/// `put_single_breakpoint` in `commands.py` and breakpoint handling
+/// in `hooks.py`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnBreakpointState {
+    /// Breakpoint ID.
+    pub id: u32,
+    /// Resolved address in this process.
+    pub resolved_address: Option<u64>,
+    /// Whether the breakpoint is enabled.
+    pub enabled: bool,
+    /// Number of times hit.
+    pub hit_count: u32,
+    /// Condition expression (if conditional).
+    pub condition: Option<String>,
+    /// Whether this is a hardware breakpoint.
+    pub hardware: bool,
+    /// Whether this is a kernel-space breakpoint.
+    pub kernel: bool,
+}
+
+impl DrgnBreakpointState {
+    /// Create a new breakpoint entry.
+    pub fn new(id: u32) -> Self {
+        Self {
+            id,
+            resolved_address: None,
+            enabled: true,
+            hit_count: 0,
+            condition: None,
+            hardware: false,
+            kernel: false,
+        }
+    }
+
+    /// Set the resolved address.
+    pub fn with_address(mut self, addr: u64) -> Self {
+        self.resolved_address = Some(addr);
+        self
+    }
+
+    /// Set as hardware breakpoint.
+    pub fn with_hardware(mut self, hw: bool) -> Self {
+        self.hardware = hw;
+        self
+    }
+
+    /// Set as kernel breakpoint.
+    pub fn with_kernel(mut self, kernel: bool) -> Self {
+        self.kernel = kernel;
+        self
+    }
+
+    /// Set a condition expression.
+    pub fn with_condition(mut self, cond: impl Into<String>) -> Self {
+        self.condition = Some(cond.into());
+        self
+    }
+
+    /// Record a hit.
+    pub fn record_hit(&mut self) {
+        self.hit_count += 1;
+    }
+
+    /// Check if this breakpoint should stop execution.
+    pub fn should_stop(&self) -> bool {
+        self.enabled
+    }
+
+    /// Build trace object key-value pairs for this breakpoint.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            ("Enabled".to_string(), self.enabled.to_string()),
+            ("Hit Count".to_string(), self.hit_count.to_string()),
+        ];
+        if let Some(addr) = self.resolved_address {
+            values.push(("Address".to_string(), format!("0x{:x}", addr)));
+        }
+        if let Some(ref cond) = self.condition {
+            values.push(("Condition".to_string(), cond.clone()));
+        }
+        values
+    }
+}
+
+/// Watchpoint configuration for drgn.
+///
+/// Tracks data breakpoints (memory watchpoints). Ported from
+/// watchpoint handling in the Python agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnWatchpointConfig {
+    /// Watchpoint ID.
+    pub id: u32,
+    /// Watched address.
+    pub address: u64,
+    /// Size of the watched region in bytes.
+    pub size: u32,
+    /// Type of watchpoint.
+    pub watch_type: DrgnWatchpointType,
+    /// Whether this watchpoint is enabled.
+    pub enabled: bool,
+    /// Number of times hit.
+    pub hit_count: u32,
+}
+
+/// Type of drgn watchpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnWatchpointType {
+    /// Write only.
+    Write,
+    /// Read only.
+    Read,
+    /// Read and write (access).
+    Access,
+}
+
+impl DrgnWatchpointType {
+    /// Convert to the Ghidra kinds string.
+    pub fn to_kinds_str(&self) -> &'static str {
+        match self {
+            Self::Write => "w",
+            Self::Read => "r",
+            Self::Access => "a",
+        }
+    }
+}
+
+impl DrgnWatchpointConfig {
+    /// Create a new watchpoint.
+    pub fn new(id: u32, address: u64, size: u32) -> Self {
+        Self {
+            id,
+            address,
+            size,
+            watch_type: DrgnWatchpointType::Access,
+            enabled: true,
+            hit_count: 0,
+        }
+    }
+
+    /// Set the watchpoint type.
+    pub fn with_type(mut self, watch_type: DrgnWatchpointType) -> Self {
+        self.watch_type = watch_type;
+        self
+    }
+
+    /// Set enabled state.
+    pub fn with_enabled(mut self, enabled: bool) -> Self {
+        self.enabled = enabled;
+        self
+    }
+
+    /// Record a hit.
+    pub fn record_hit(&mut self) {
+        self.hit_count += 1;
+    }
+
+    /// Get the address range covered by this watchpoint.
+    pub fn address_range(&self) -> (u64, u64) {
+        (self.address, self.address + self.size as u64)
+    }
+
+    /// Build trace object key-value pairs for this watchpoint.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("Address".to_string(), format!("0x{:x}", self.address)),
+            ("Size".to_string(), format!("0x{:x}", self.size)),
+            ("Enabled".to_string(), self.enabled.to_string()),
+            ("Hit Count".to_string(), self.hit_count.to_string()),
+            ("Kinds".to_string(), self.watch_type.to_kinds_str().to_string()),
+        ]
+    }
+}
+
+/// Process lifecycle event for drgn.
+///
+/// Tracks process-level events that need to be synchronized to the
+/// Ghidra trace. Ported from the Python agent's event handling in
+/// `hooks.py`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DrgnProcessEvent {
+    /// A new process was created.
+    Created {
+        /// Process number.
+        process_num: u32,
+    },
+    /// A process has exited.
+    Exited {
+        /// Process number.
+        process_num: u32,
+        /// Exit code.
+        exit_code: i32,
+    },
+    /// A process's state has changed (running/stopped/etc).
+    StateChanged {
+        /// Process number.
+        process_num: u32,
+        /// New execution state.
+        new_state: ExecutionState,
+    },
+    /// A process was selected by the user.
+    Selected {
+        /// Process number.
+        process_num: u32,
+    },
+}
+
+impl DrgnProcessEvent {
+    /// Get the process number for this event.
+    pub fn process_num(&self) -> u32 {
+        match self {
+            Self::Created { process_num }
+            | Self::Exited { process_num, .. }
+            | Self::StateChanged { process_num, .. }
+            | Self::Selected { process_num } => *process_num,
+        }
+    }
+
+    /// Human-readable description of this event.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Created { process_num } => {
+                format!("Process {} created", process_num)
+            }
+            Self::Exited {
+                process_num,
+                exit_code,
+            } => {
+                format!("Process {} exited with code {}", process_num, exit_code)
+            }
+            Self::StateChanged {
+                process_num,
+                new_state,
+            } => {
+                format!(
+                    "Process {} -> {}",
+                    process_num,
+                    new_state.as_trace_str()
+                )
+            }
+            Self::Selected { process_num } => {
+                format!("Process {} selected", process_num)
+            }
+        }
+    }
+}
+
+/// Signal configuration for drgn kernel debugging.
+///
+/// Tracks signal state for kernel debugging sessions. Ported from
+/// signal handling in the Python agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnSignalConfig {
+    /// Signal number.
+    pub number: i32,
+    /// Signal name (e.g. "SIGSEGV").
+    pub name: String,
+    /// Whether this signal stops the process.
+    pub stop: bool,
+    /// Optional description.
+    pub description: Option<String>,
+}
+
+impl DrgnSignalConfig {
+    /// Create a new signal config.
+    pub fn new(number: i32, name: impl Into<String>) -> Self {
+        Self {
+            number,
+            name: name.into(),
+            stop: true,
+            description: None,
+        }
+    }
+
+    /// Set stop behavior.
+    pub fn with_stop(mut self, stop: bool) -> Self {
+        self.stop = stop;
+        self
+    }
+
+    /// Set description.
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = Some(desc.into());
+        self
+    }
+}
+
+/// Tracks signal configurations for a process.
+#[derive(Debug, Clone, Default)]
+pub struct DrgnSignalTable {
+    signals: BTreeMap<i32, DrgnSignalConfig>,
+}
+
+impl DrgnSignalTable {
+    /// Create an empty signal table.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add or replace a signal configuration.
+    pub fn set(&mut self, config: DrgnSignalConfig) {
+        self.signals.insert(config.number, config);
+    }
+
+    /// Get a signal configuration by number.
+    pub fn get(&self, number: i32) -> Option<&DrgnSignalConfig> {
+        self.signals.get(&number)
+    }
+
+    /// Get all signal configurations.
+    pub fn all(&self) -> &BTreeMap<i32, DrgnSignalConfig> {
+        &self.signals
+    }
+
+    /// Get signals configured to stop the process.
+    pub fn stopping_signals(&self) -> Vec<&DrgnSignalConfig> {
+        self.signals.values().filter(|s| s.stop).collect()
+    }
+
+    /// Populate with default Unix signal configurations.
+    pub fn populate_defaults(&mut self) {
+        let defaults: &[(i32, &str, &str)] = &[
+            (1, "SIGHUP", "Hangup"),
+            (2, "SIGINT", "Interrupt"),
+            (3, "SIGQUIT", "Quit"),
+            (4, "SIGILL", "Illegal instruction"),
+            (5, "SIGTRAP", "Trace/breakpoint trap"),
+            (6, "SIGABRT", "Abort"),
+            (7, "SIGBUS", "Bus error"),
+            (8, "SIGFPE", "Floating point exception"),
+            (9, "SIGKILL", "Kill"),
+            (11, "SIGSEGV", "Segmentation fault"),
+            (13, "SIGPIPE", "Broken pipe"),
+            (14, "SIGALRM", "Alarm clock"),
+            (15, "SIGTERM", "Terminated"),
+            (17, "SIGCHLD", "Child status changed"),
+            (18, "SIGCONT", "Continue"),
+            (19, "SIGSTOP", "Stop"),
+            (20, "SIGTSTP", "Terminal stop"),
+            (21, "SIGTTIN", "Background read"),
+            (22, "SIGTTOU", "Background write"),
+            (29, "SIGIO", "I/O possible"),
+            (31, "SIGSYS", "Bad system call"),
+        ];
+        for &(num, name, desc) in defaults {
+            let stop = matches!(num, 4 | 5 | 6 | 7 | 8 | 11 | 31);
+            self.set(
+                DrgnSignalConfig::new(num, name)
+                    .with_stop(stop)
+                    .with_description(desc),
+            );
+        }
+    }
+
+    /// Count of configured signals.
+    pub fn len(&self) -> usize {
+        self.signals.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.signals.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2297,5 +2899,196 @@ mod tests {
         mgr.mark_all_modules_changed();
         assert!(mgr.get_process(0).unwrap().modules_changed);
         assert!(mgr.get_process(1).unwrap().modules_changed);
+    }
+
+    #[test]
+    fn test_process_threads_sorted() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(3).with_state(ExecutionState::Stopped));
+        p.add_thread(DrgnThread::new(1).with_state(ExecutionState::Running));
+        p.add_thread(DrgnThread::new(2).with_state(ExecutionState::Stopped));
+        let sorted = p.threads_sorted();
+        assert_eq!(sorted.len(), 3);
+        assert_eq!(sorted[0].num, 1);
+        assert_eq!(sorted[1].num, 2);
+        assert_eq!(sorted[2].num, 3);
+    }
+
+    #[test]
+    fn test_process_thread_state_counts() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DrgnThread::new(1).with_state(ExecutionState::Stopped));
+        p.add_thread(DrgnThread::new(2).with_state(ExecutionState::Running));
+        let counts = p.thread_state_counts();
+        assert_eq!(counts.get(&ExecutionState::Running), Some(&2));
+        assert_eq!(counts.get(&ExecutionState::Stopped), Some(&1));
+        assert_eq!(counts.get(&ExecutionState::Exited), None);
+    }
+
+    #[test]
+    fn test_process_modules_sorted() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_module(DrgnModuleInfo {
+            name: "b".to_string(),
+            address_range: (0xb000, 0xc000),
+            build_id: None, debug_file_bias: None, debug_file_path: None,
+            debug_file_status: None, loaded_file_bias: None, loaded_file_path: None,
+            loaded_file_status: None, is_relocatable: false,
+        });
+        p.add_module(DrgnModuleInfo {
+            name: "a".to_string(),
+            address_range: (0xa000, 0xb000),
+            build_id: None, debug_file_bias: None, debug_file_path: None,
+            debug_file_status: None, loaded_file_bias: None, loaded_file_path: None,
+            loaded_file_status: None, is_relocatable: false,
+        });
+        let sorted = p.modules_sorted();
+        assert_eq!(sorted[0].base(), 0xa000);
+        assert_eq!(sorted[1].base(), 0xb000);
+    }
+
+    #[test]
+    fn test_process_memory_footprint() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_memory_region(MemoryRegion {
+            base: 0x10000, size: 0x5000, offset: 0,
+            permissions: "r--".to_string(), object_file: "a".to_string(),
+        });
+        p.add_memory_region(MemoryRegion {
+            base: 0x20000, size: 0x3000, offset: 0,
+            permissions: "r--".to_string(), object_file: "b".to_string(),
+        });
+        assert_eq!(p.memory_footprint(), 0x8000);
+    }
+
+    #[test]
+    fn test_process_retain_keys() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(0));
+        p.add_thread(DrgnThread::new(2));
+        let thread_keys = p.build_thread_retain_keys();
+        assert_eq!(thread_keys.len(), 2);
+        assert!(thread_keys.contains(&"[0]".to_string()));
+        assert!(thread_keys.contains(&"[2]".to_string()));
+
+        let proc_keys = p.build_retain_keys();
+        assert_eq!(proc_keys, vec!["[0]".to_string()]);
+    }
+
+    #[test]
+    fn test_target_info() {
+        let info = DrgnTargetInfo::new("x86_64")
+            .with_executable("/boot/vmlinux-5.15.0")
+            .with_endian("little")
+            .with_pointer_size(8)
+            .with_kernel(true);
+        assert_eq!(info.arch, "x86_64");
+        assert_eq!(info.pointer_size, 8);
+        assert_eq!(info.address_size, 64);
+        assert!(info.is_kernel);
+        let env = info.build_environment_values(Some("5.15.0"));
+        assert!(env.iter().any(|(k, v)| k == "Arch" && v == "x86_64"));
+        assert!(env.iter().any(|(k, v)| k == "KernelVersion" && v == "5.15.0"));
+    }
+
+    #[test]
+    fn test_kernel_debug_info() {
+        let info = DrgnKernelDebugInfo::new()
+            .with_vmlinux("/boot/vmlinux")
+            .with_version("5.15.0")
+            .with_debug_info_loaded(true)
+            .with_kallsyms(true)
+            .with_arch("x86_64");
+        assert!(info.debug_info_loaded);
+        assert!(info.kallsyms_available);
+        assert_eq!(info.arch.as_deref(), Some("x86_64"));
+    }
+
+    #[test]
+    fn test_breakpoint_state() {
+        let mut bp = DrgnBreakpointState::new(1)
+            .with_address(0xffffffff81234567)
+            .with_kernel(true);
+        assert_eq!(bp.id, 1);
+        assert!(bp.enabled);
+        assert!(bp.kernel);
+        assert_eq!(bp.hit_count, 0);
+        bp.record_hit();
+        assert_eq!(bp.hit_count, 1);
+        let values = bp.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Enabled" && v == "true"));
+    }
+
+    #[test]
+    fn test_watchpoint_config() {
+        let wp = DrgnWatchpointConfig::new(1, 0x1000, 8)
+            .with_type(DrgnWatchpointType::Write);
+        assert_eq!(wp.address, 0x1000);
+        assert_eq!(wp.size, 8);
+        assert_eq!(wp.watch_type, DrgnWatchpointType::Write);
+        let (start, end) = wp.address_range();
+        assert_eq!(start, 0x1000);
+        assert_eq!(end, 0x1008);
+        let values = wp.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Kinds" && v == "w"));
+    }
+
+    #[test]
+    fn test_watchpoint_type_kinds() {
+        assert_eq!(DrgnWatchpointType::Write.to_kinds_str(), "w");
+        assert_eq!(DrgnWatchpointType::Read.to_kinds_str(), "r");
+        assert_eq!(DrgnWatchpointType::Access.to_kinds_str(), "a");
+    }
+
+    #[test]
+    fn test_process_event() {
+        let evt = DrgnProcessEvent::Exited {
+            process_num: 0,
+            exit_code: 1,
+        };
+        assert_eq!(evt.process_num(), 0);
+        assert!(evt.description().contains("exited"));
+        assert!(evt.description().contains("1"));
+
+        let evt2 = DrgnProcessEvent::Created { process_num: 1 };
+        assert_eq!(evt2.process_num(), 1);
+    }
+
+    #[test]
+    fn test_signal_table() {
+        let mut table = DrgnSignalTable::new();
+        assert!(table.is_empty());
+        table.populate_defaults();
+        assert!(table.len() > 0);
+        let sigsegv = table.get(11);
+        assert!(sigsegv.is_some());
+        assert_eq!(sigsegv.unwrap().name, "SIGSEGV");
+        assert!(sigsegv.unwrap().stop);
+        let sigint = table.get(2);
+        assert!(sigint.is_some());
+        assert!(!sigint.unwrap().stop);
+        let stopping = table.stopping_signals();
+        assert!(!stopping.is_empty());
+    }
+
+    #[test]
+    fn test_process_get_memory_region() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_memory_region(MemoryRegion {
+            base: 0x10000, size: 0x5000, offset: 0,
+            permissions: "rw-".to_string(), object_file: "stack".to_string(),
+        });
+        assert!(p.get_memory_region(0x10000).is_some());
+        assert!(p.get_memory_region(0x20000).is_none());
+    }
+
+    #[test]
+    fn test_process_container_values() {
+        let p = DrgnInferiorProcess::new(0);
+        let tv = p.build_threads_container_values();
+        assert!(tv.iter().any(|(k, v)| k == "_count" && v == "0"));
+        let mv = p.build_modules_container_values();
+        assert!(mv.iter().any(|(k, v)| k == "_count" && v == "0"));
     }
 }
