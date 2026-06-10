@@ -15,8 +15,18 @@ use super::name_ms_symbol::NameMsSymbol;
 /// segment:offset address. It delegates to [`DataSymbolInternals`] for the
 /// shared fields, matching Ghidra's Java implementation.
 ///
+/// # PDB Binary Layout (32-bit, NT strings)
+///
+/// ```text
+/// type_index : u32
+/// offset     : u32
+/// segment    : u16
+/// name       : NT string
+/// ```
+///
 /// This corresponds to `S_GDATA32` (0x0202) and `S_GDATA32_ST` (0x1008) in the
-/// CodeView symbol set.
+/// CodeView symbol set. The `_ST` variant uses a 16-bit length-prefixed string
+/// instead of a null-terminated string.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SGData32 {
     /// Shared internal fields (type, offset, segment, name, emit-token flag).
@@ -31,16 +41,34 @@ impl SGData32 {
 
     /// Parse an S_GDATA32 symbol from a byte slice.
     ///
-    /// Uses [`DataSymbolInternals::parse32`] for the field layout.
+    /// Uses [`DataSymbolInternals::parse32`] for the 32-bit field layout with
+    /// NT-format strings.
     pub fn parse(data: &[u8]) -> Option<Self> {
         let (internals, _) = DataSymbolInternals::parse32(data, 0, false)?;
         Some(Self { internals })
     }
 
+    /// Parse an S_GDATA32_ST symbol from a byte slice.
+    ///
+    /// Uses [`DataSymbolInternals::parse32_st`] for the 32-bit field layout with
+    /// ST-format (length-prefixed) strings.
+    pub fn parse_st(data: &[u8]) -> Option<Self> {
+        let (internals, _) = DataSymbolInternals::parse32_st(data, 0, false)?;
+        Some(Self { internals })
+    }
+
     /// Parse an S_GDATA32 symbol with an emit token (managed metadata token).
+    ///
+    /// When `is_emit_token` is true, the type record number is treated as a
+    /// .NET ECMA-335 metadata token rather than a standard PDB type index.
     pub fn parse_emit_token(data: &[u8]) -> Option<Self> {
         let (internals, _) = DataSymbolInternals::parse32(data, 0, true)?;
         Some(Self { internals })
+    }
+
+    /// Return `true` if the type record number is a managed metadata token.
+    pub fn is_emit_token(&self) -> bool {
+        self.internals.is_emit_token
     }
 }
 
@@ -100,6 +128,20 @@ mod tests {
         data
     }
 
+    fn make_gdata32_st_bytes(type_idx: u32, offset: u32, segment: u16, name: &[u8]) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&type_idx.to_le_bytes());
+        data.extend_from_slice(&offset.to_le_bytes());
+        data.extend_from_slice(&segment.to_le_bytes());
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+        // align to 4
+        while data.len() % 4 != 0 {
+            data.push(0);
+        }
+        data
+    }
+
     #[test]
     fn test_parse_basic() {
         let data = make_gdata32_bytes(0x1020, 0x2000, 2, b"global_var");
@@ -114,6 +156,37 @@ mod tests {
     fn test_parse_truncated() {
         let data = [0x00, 0x01]; // too short
         assert!(SGData32::parse(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_empty_name() {
+        let data = make_gdata32_bytes(0x1000, 0x100, 1, b"");
+        let sym = SGData32::parse(&data).unwrap();
+        assert_eq!(sym.internals.name, "");
+        assert_eq!(sym.internals.offset, 0x100);
+    }
+
+    #[test]
+    fn test_parse_st_basic() {
+        let data = make_gdata32_st_bytes(0x1020, 0x3000, 3, b"st_global");
+        let sym = SGData32::parse_st(&data).unwrap();
+        assert_eq!(sym.internals.offset, 0x3000);
+        assert_eq!(sym.internals.segment, 3);
+        assert_eq!(sym.internals.name, "st_global");
+        assert_eq!(sym.internals.type_record_number.number(), 0x1020);
+    }
+
+    #[test]
+    fn test_parse_st_truncated() {
+        let data = [0x00, 0x01]; // too short
+        assert!(SGData32::parse_st(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_st_empty_name() {
+        let data = make_gdata32_st_bytes(0x1000, 0x100, 1, b"");
+        let sym = SGData32::parse_st(&data).unwrap();
+        assert_eq!(sym.internals.name, "");
     }
 
     #[test]
@@ -167,5 +240,57 @@ mod tests {
         let sym = SGData32::parse_emit_token(&data).unwrap();
         assert!(sym.internals.is_emit_token);
         assert_eq!(sym.internals.name, "managed");
+    }
+
+    #[test]
+    fn test_is_emit_token() {
+        let internals = DataSymbolInternals {
+            type_record_number: RecordNumber::type_record_number(0x04000001),
+            offset: 0x100,
+            segment: 1,
+            name: "token_var".to_string(),
+            is_emit_token: true,
+        };
+        let sym = SGData32::new(internals);
+        assert!(sym.is_emit_token());
+
+        let internals2 = DataSymbolInternals {
+            type_record_number: RecordNumber::type_record_number(0x1020),
+            offset: 0x100,
+            segment: 1,
+            name: "normal_var".to_string(),
+            is_emit_token: false,
+        };
+        let sym2 = SGData32::new(internals2);
+        assert!(!sym2.is_emit_token());
+    }
+
+    #[test]
+    fn test_display_emit_token() {
+        let internals = DataSymbolInternals {
+            type_record_number: RecordNumber::type_record_number(0x04000001),
+            offset: 0x1000,
+            segment: 1,
+            name: "managed_var".to_string(),
+            is_emit_token: true,
+        };
+        let sym = SGData32::new(internals);
+        let s = format!("{}", sym);
+        assert!(s.contains("Token"));
+        assert!(s.contains("managed_var"));
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let internals = DataSymbolInternals {
+            type_record_number: RecordNumber::type_record_number(0x1020),
+            offset: 0x2000,
+            segment: 1,
+            name: "clone_test".to_string(),
+            is_emit_token: false,
+        };
+        let a = SGData32::new(internals);
+        let b = a.clone();
+        assert_eq!(a, b);
     }
 }

@@ -1,0 +1,588 @@
+//! drgn thread representation.
+//!
+//! Models a drgn thread within a process. In drgn, threads are identified
+//! by a thread number and may have an OS-level TID. Each thread has
+//! associated stack frames and register values.
+//!
+//! For kernel debugging, each CPU appears as a separate thread.
+//!
+//! This corresponds to the `Processes[N].Threads[M]` node in the Ghidra
+//! trace object tree and maps to `TraceThread` on the model side.
+//!
+//! Ported from Ghidra's `Debugger-agent-drgn` Python commands (`put_threads`,
+//! `put_frames`, `put_registers`, etc.).
+
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+
+use crate::agents::{
+    ExecutionState, RegisterValue, StackFrameInfo, ThreadInfo,
+};
+
+/// Execution state of a drgn thread.
+///
+/// This extends the common `ExecutionState` with drgn-specific states.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum DrgnThreadState {
+    /// Thread is running.
+    Running,
+    /// Thread is stopped (breakpoint, signal, step).
+    Stopped,
+    /// Thread has exited.
+    Exited,
+    /// Thread is not yet started or unknown.
+    Inactive,
+}
+
+impl DrgnThreadState {
+    /// Convert to the common execution state.
+    pub fn to_execution_state(&self) -> ExecutionState {
+        match self {
+            Self::Running => ExecutionState::Running,
+            Self::Stopped => ExecutionState::Stopped,
+            Self::Exited => ExecutionState::Exited,
+            Self::Inactive => ExecutionState::NotStarted,
+        }
+    }
+
+    /// Convert to the trace string representation.
+    pub fn as_trace_str(&self) -> &'static str {
+        match self {
+            Self::Running => "RUNNING",
+            Self::Stopped => "STOPPED",
+            Self::Exited => "TERMINATED",
+            Self::Inactive => "INACTIVE",
+        }
+    }
+
+    /// Parse from drgn thread state booleans.
+    ///
+    /// drgn Python API provides `is_running()`, `is_stopped()`, `is_exited()`.
+    pub fn from_drgn_state(is_running: bool, is_stopped: bool, is_exited: bool) -> Self {
+        if is_exited {
+            Self::Exited
+        } else if is_running {
+            Self::Running
+        } else if is_stopped {
+            Self::Stopped
+        } else {
+            Self::Inactive
+        }
+    }
+}
+
+/// A drgn thread within a process.
+///
+/// Each thread in drgn has a thread number (0-based for kernel CPUs),
+/// an optional OS-level TID, and associated stack frames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnThread {
+    /// Thread number (0-based for kernel CPUs).
+    pub num: u32,
+    /// OS-level thread ID, if known.
+    pub tid: Option<i64>,
+    /// Thread name (e.g. "CPU 0", or process name for userspace).
+    pub name: Option<String>,
+    /// Current execution state.
+    pub state: ExecutionState,
+    /// Stack frames, keyed by level (0 = innermost).
+    pub frames: BTreeMap<u32, DrgnStackFrame>,
+    /// Whether this thread has been synchronized to the trace.
+    pub synced: bool,
+    /// The process number this thread belongs to.
+    pub process_num: u32,
+    /// CPU number for kernel threads (maps to thread num).
+    pub cpu: Option<u32>,
+}
+
+impl DrgnThread {
+    /// Create a new thread.
+    pub fn new(num: u32) -> Self {
+        Self {
+            num,
+            tid: None,
+            name: None,
+            state: ExecutionState::NotStarted,
+            frames: BTreeMap::new(),
+            synced: false,
+            process_num: 0,
+            cpu: None,
+        }
+    }
+
+    /// Create a kernel CPU thread.
+    pub fn cpu_thread(num: u32, cpu: u32) -> Self {
+        Self {
+            num,
+            name: Some(format!("CPU {}", cpu)),
+            cpu: Some(cpu),
+            process_num: 0,
+            ..Self::new(num)
+        }
+    }
+
+    /// Create a thread belonging to a specific process.
+    pub fn in_process(num: u32, process_num: u32) -> Self {
+        Self {
+            num,
+            process_num,
+            ..Self::new(num)
+        }
+    }
+
+    /// Set the OS thread ID.
+    pub fn with_tid(mut self, tid: i64) -> Self {
+        self.tid = Some(tid);
+        self
+    }
+
+    /// Set the thread name.
+    pub fn with_name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Set the execution state.
+    pub fn with_state(mut self, state: ExecutionState) -> Self {
+        self.state = state;
+        self
+    }
+
+    /// Get the trace object path for this thread.
+    pub fn trace_path(&self) -> String {
+        format!("Processes[{}].Threads[{}]", self.process_num, self.num)
+    }
+
+    /// Get the trace path for this thread's stack container.
+    pub fn stack_path(&self) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack",
+            self.process_num, self.num
+        )
+    }
+
+    /// Add a stack frame to this thread.
+    pub fn add_frame(&mut self, frame: DrgnStackFrame) {
+        self.frames.insert(frame.level, frame);
+    }
+
+    /// Remove a stack frame by level.
+    pub fn remove_frame(&mut self, level: u32) -> Option<DrgnStackFrame> {
+        self.frames.remove(&level)
+    }
+
+    /// Clear all frames.
+    pub fn clear_frames(&mut self) {
+        self.frames.clear();
+    }
+
+    /// Get a frame by level.
+    pub fn get_frame(&self, level: u32) -> Option<&DrgnStackFrame> {
+        self.frames.get(&level)
+    }
+
+    /// Get the innermost frame (level 0).
+    pub fn innermost_frame(&self) -> Option<&DrgnStackFrame> {
+        self.frames.get(&0)
+    }
+
+    /// Get the number of frames.
+    pub fn frame_count(&self) -> usize {
+        self.frames.len()
+    }
+
+    /// Convert to a `ThreadInfo` for the common agent interface.
+    pub fn to_thread_info(&self) -> ThreadInfo {
+        ThreadInfo {
+            id: self.num as u64,
+            name: self.name.clone(),
+            state: self.state,
+        }
+    }
+
+    /// Build trace object key-value pairs for this thread.
+    ///
+    /// These are used to populate the `Processes[N].Threads[M]` node.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![
+            ("_state".to_string(), self.state.as_trace_str().to_string()),
+        ];
+        if let Some(ref name) = self.name {
+            values.push(("_display".to_string(), name.clone()));
+        }
+        if let Some(tid) = self.tid {
+            values.push(("TID".to_string(), tid.to_string()));
+        }
+        if let Some(cpu) = self.cpu {
+            values.push(("CPU".to_string(), cpu.to_string()));
+        }
+        values
+    }
+
+    /// Build the short display string for this thread.
+    ///
+    /// Format: `[process.thread]` or `[process.thread:cpu]` for kernel threads.
+    pub fn build_short_display(&self) -> String {
+        match self.cpu {
+            Some(cpu) => format!("[{}.{}:cpu{}]", self.process_num, self.num, cpu),
+            None => format!("[{}.{}]", self.process_num, self.num),
+        }
+    }
+
+    /// Mark this thread as synchronized.
+    pub fn mark_synced(&mut self) {
+        self.synced = true;
+    }
+
+    /// Mark the thread as exited.
+    pub fn mark_exited(&mut self) {
+        self.state = ExecutionState::Exited;
+        self.frames.clear();
+    }
+
+    /// Whether the thread is alive (running or stopped).
+    pub fn is_alive(&self) -> bool {
+        matches!(
+            self.state,
+            ExecutionState::Running | ExecutionState::Stopped
+        )
+    }
+}
+
+/// A stack frame within a drgn thread.
+///
+/// Each frame represents one level of the call stack. Frame 0 is the
+/// currently executing function. Frame 1 is its caller, and so on.
+///
+/// For kernel debugging, frames correspond to kernel stack frames.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnStackFrame {
+    /// Frame level (0 = innermost / currently executing).
+    pub level: u32,
+    /// Program counter (instruction pointer) address.
+    pub pc: u64,
+    /// Stack pointer address.
+    pub sp: u64,
+    /// Frame pointer address.
+    pub fp: u64,
+    /// Return address (where the caller will resume).
+    pub return_address: u64,
+    /// Function name, if known.
+    pub function_name: Option<String>,
+    /// Register values for this frame.
+    #[serde(skip)]
+    pub registers: Vec<RegisterValue>,
+}
+
+impl DrgnStackFrame {
+    /// Create a new stack frame.
+    pub fn new(level: u32, pc: u64) -> Self {
+        Self {
+            level,
+            pc,
+            sp: 0,
+            fp: 0,
+            return_address: 0,
+            function_name: None,
+            registers: Vec::new(),
+        }
+    }
+
+    /// Set the stack pointer.
+    pub fn with_sp(mut self, sp: u64) -> Self {
+        self.sp = sp;
+        self
+    }
+
+    /// Set the frame pointer.
+    pub fn with_fp(mut self, fp: u64) -> Self {
+        self.fp = fp;
+        self
+    }
+
+    /// Set the return address.
+    pub fn with_return_address(mut self, ra: u64) -> Self {
+        self.return_address = ra;
+        self
+    }
+
+    /// Set the function name.
+    pub fn with_function(mut self, name: impl Into<String>) -> Self {
+        self.function_name = Some(name.into());
+        self
+    }
+
+    /// Get the trace path for this frame's registers.
+    pub fn registers_trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Registers",
+            process_num, thread_num, self.level
+        )
+    }
+
+    /// Convert to a `StackFrameInfo` for the common agent interface.
+    pub fn to_stack_frame_info(&self) -> StackFrameInfo {
+        StackFrameInfo {
+            level: self.level,
+            pc: self.pc,
+            sp: self.sp,
+            fp: self.fp,
+            return_address: self.return_address,
+            function_name: self.function_name.clone(),
+        }
+    }
+
+    /// Build the display string for this frame.
+    ///
+    /// Format: `#level 0xpc function_name`
+    pub fn build_display(&self) -> String {
+        match &self.function_name {
+            Some(name) => format!("#{} 0x{:x} {}", self.level, self.pc, name),
+            None => format!("#{} 0x{:x}", self.level, self.pc),
+        }
+    }
+
+    /// Set a register value. Replaces if same name exists.
+    pub fn set_register(&mut self, reg: RegisterValue) {
+        self.registers.retain(|r| r.name != reg.name);
+        self.registers.push(reg);
+    }
+
+    /// Get a register value by name.
+    pub fn get_register(&self, name: &str) -> Option<&RegisterValue> {
+        self.registers.iter().find(|r| r.name == name)
+    }
+
+    /// Get all register names.
+    pub fn register_names(&self) -> Vec<&str> {
+        self.registers.iter().map(|r| r.name.as_str()).collect()
+    }
+
+    /// Clear all register values.
+    pub fn clear_registers(&mut self) {
+        self.registers.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_state() {
+        assert_eq!(
+            DrgnThreadState::from_drgn_state(true, false, false),
+            DrgnThreadState::Running
+        );
+        assert_eq!(
+            DrgnThreadState::from_drgn_state(false, true, false),
+            DrgnThreadState::Stopped
+        );
+        assert_eq!(
+            DrgnThreadState::from_drgn_state(false, false, true),
+            DrgnThreadState::Exited
+        );
+        assert_eq!(
+            DrgnThreadState::from_drgn_state(false, false, false),
+            DrgnThreadState::Inactive
+        );
+    }
+
+    #[test]
+    fn test_thread_state_to_execution_state() {
+        assert_eq!(
+            DrgnThreadState::Running.to_execution_state(),
+            ExecutionState::Running
+        );
+        assert_eq!(
+            DrgnThreadState::Stopped.to_execution_state(),
+            ExecutionState::Stopped
+        );
+    }
+
+    #[test]
+    fn test_thread_state_trace_str() {
+        assert_eq!(DrgnThreadState::Running.as_trace_str(), "RUNNING");
+        assert_eq!(DrgnThreadState::Stopped.as_trace_str(), "STOPPED");
+        assert_eq!(DrgnThreadState::Exited.as_trace_str(), "TERMINATED");
+        assert_eq!(DrgnThreadState::Inactive.as_trace_str(), "INACTIVE");
+    }
+
+    #[test]
+    fn test_thread_new() {
+        let t = DrgnThread::new(0);
+        assert_eq!(t.num, 0);
+        assert_eq!(t.tid, None);
+        assert_eq!(t.name, None);
+        assert_eq!(t.state, ExecutionState::NotStarted);
+        assert!(t.frames.is_empty());
+        assert_eq!(t.process_num, 0);
+        assert_eq!(t.cpu, None);
+    }
+
+    #[test]
+    fn test_thread_cpu_thread() {
+        let t = DrgnThread::cpu_thread(0, 3);
+        assert_eq!(t.num, 0);
+        assert_eq!(t.cpu, Some(3));
+        assert_eq!(t.name, Some("CPU 3".to_string()));
+        assert_eq!(t.process_num, 0);
+    }
+
+    #[test]
+    fn test_thread_in_process() {
+        let t = DrgnThread::in_process(2, 1);
+        assert_eq!(t.num, 2);
+        assert_eq!(t.process_num, 1);
+    }
+
+    #[test]
+    fn test_thread_builder() {
+        let t = DrgnThread::new(0)
+            .with_tid(1234)
+            .with_name("main")
+            .with_state(ExecutionState::Running);
+        assert_eq!(t.tid, Some(1234));
+        assert_eq!(t.name, Some("main".to_string()));
+        assert_eq!(t.state, ExecutionState::Running);
+    }
+
+    #[test]
+    fn test_thread_trace_path() {
+        let t = DrgnThread::in_process(2, 0);
+        assert_eq!(t.trace_path(), "Processes[0].Threads[2]");
+        assert_eq!(t.stack_path(), "Processes[0].Threads[2].Stack");
+    }
+
+    #[test]
+    fn test_thread_frame_management() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0xffffffff81234567));
+        t.add_frame(DrgnStackFrame::new(1, 0xffffffff81234000));
+        assert_eq!(t.frame_count(), 2);
+        assert!(t.innermost_frame().is_some());
+        assert_eq!(t.innermost_frame().unwrap().pc, 0xffffffff81234567);
+
+        let removed = t.remove_frame(1);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().pc, 0xffffffff81234000);
+        assert_eq!(t.frame_count(), 1);
+
+        t.clear_frames();
+        assert_eq!(t.frame_count(), 0);
+    }
+
+    #[test]
+    fn test_thread_to_thread_info() {
+        let t = DrgnThread::cpu_thread(0, 2)
+            .with_state(ExecutionState::Stopped);
+        let info = t.to_thread_info();
+        assert_eq!(info.id, 0);
+        assert_eq!(info.name, Some("CPU 2".to_string()));
+        assert_eq!(info.state, ExecutionState::Stopped);
+    }
+
+    #[test]
+    fn test_thread_build_trace_values() {
+        let t = DrgnThread::cpu_thread(0, 1)
+            .with_tid(42)
+            .with_state(ExecutionState::Stopped);
+        let values = t.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "_state" && v == "STOPPED"));
+        assert!(values.iter().any(|(k, v)| k == "_display" && v == "CPU 1"));
+        assert!(values.iter().any(|(k, v)| k == "TID" && v == "42"));
+        assert!(values.iter().any(|(k, v)| k == "CPU" && v == "1"));
+    }
+
+    #[test]
+    fn test_thread_build_short_display() {
+        let t = DrgnThread::in_process(0, 0).with_tid(0x1234);
+        assert_eq!(t.build_short_display(), "[0.0]");
+
+        let t = DrgnThread::cpu_thread(0, 3);
+        assert_eq!(t.build_short_display(), "[0.0:cpu3]");
+    }
+
+    #[test]
+    fn test_thread_exit() {
+        let mut t = DrgnThread::new(0).with_state(ExecutionState::Running);
+        t.add_frame(DrgnStackFrame::new(0, 0xffffffff81234567));
+        assert!(t.is_alive());
+
+        t.mark_exited();
+        assert!(!t.is_alive());
+        assert_eq!(t.state, ExecutionState::Exited);
+        assert!(t.frames.is_empty());
+    }
+
+    #[test]
+    fn test_stack_frame_new() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567);
+        assert_eq!(f.level, 0);
+        assert_eq!(f.pc, 0xffffffff81234567);
+        assert_eq!(f.sp, 0);
+        assert!(f.function_name.is_none());
+    }
+
+    #[test]
+    fn test_stack_frame_builder() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_sp(0xffff888000000000)
+            .with_fp(0xffff888000001000)
+            .with_return_address(0xffffffff81234000)
+            .with_function("do_sys_open");
+        assert_eq!(f.sp, 0xffff888000000000);
+        assert_eq!(f.fp, 0xffff888000001000);
+        assert_eq!(f.return_address, 0xffffffff81234000);
+        assert_eq!(f.function_name.as_deref(), Some("do_sys_open"));
+    }
+
+    #[test]
+    fn test_stack_frame_display() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567).with_function("do_sys_open");
+        assert_eq!(f.build_display(), "#0 0xffffffff81234567 do_sys_open");
+
+        let f = DrgnStackFrame::new(1, 0xffffffff81234000);
+        assert_eq!(f.build_display(), "#1 0xffffffff81234000");
+    }
+
+    #[test]
+    fn test_stack_frame_to_info() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_sp(0xffff888000000000)
+            .with_function("do_sys_open");
+        let info = f.to_stack_frame_info();
+        assert_eq!(info.level, 0);
+        assert_eq!(info.pc, 0xffffffff81234567);
+        assert_eq!(info.sp, 0xffff888000000000);
+        assert_eq!(info.function_name.as_deref(), Some("do_sys_open"));
+    }
+
+    #[test]
+    fn test_stack_frame_registers() {
+        let mut f = DrgnStackFrame::new(0, 0xffffffff81234567);
+        f.set_register(RegisterValue::from_u64("rax", 0x1234));
+        f.set_register(RegisterValue::from_u64("rbx", 0x5678));
+
+        assert!(f.get_register("rax").is_some());
+        assert_eq!(f.get_register("rax").unwrap().as_u64(), Some(0x1234));
+        assert!(f.get_register("rcx").is_none());
+
+        let names = f.register_names();
+        assert_eq!(names.len(), 2);
+        assert!(names.contains(&"rax"));
+        assert!(names.contains(&"rbx"));
+
+        f.clear_registers();
+        assert!(f.register_names().is_empty());
+    }
+
+    #[test]
+    fn test_stack_frame_registers_trace_path() {
+        let f = DrgnStackFrame::new(2, 0xffffffff81234567);
+        assert_eq!(
+            f.registers_trace_path(0, 3),
+            "Processes[0].Threads[3].Stack[2].Registers"
+        );
+    }
+}

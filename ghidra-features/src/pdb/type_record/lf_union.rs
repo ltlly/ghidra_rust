@@ -219,6 +219,31 @@ impl LfUnion {
     pub fn mangled_name(&self) -> &str {
         self.composite.mangled_name()
     }
+
+    /// Get the type string for this composite ("union").
+    ///
+    /// Mirrors Java `AbstractComplexMsType.getTypeString()`.
+    pub fn type_name(&self) -> &'static str {
+        self.composite.type_string()
+    }
+
+    /// Whether this union has a field list assigned.
+    pub fn has_field_list(&self) -> bool {
+        !self.composite.field_list_record_number.is_no_type()
+    }
+
+    /// Compute the packed size (size with no padding).
+    ///
+    /// If the union is marked as packed, returns the recorded size directly.
+    /// Otherwise returns the recorded size (which may include alignment padding).
+    pub fn packed_size(&self) -> u64 {
+        self.composite.get_size()
+    }
+
+    /// Whether this union is sealed (cannot be inherited).
+    pub fn is_sealed(&self) -> bool {
+        self.composite.property.contains(MsProperty::SEALED)
+    }
 }
 
 impl AbstractMsType for LfUnion {
@@ -511,5 +536,45 @@ mod tests {
     fn test_union_mangled_name_accessor() {
         let u = make_test_union();
         assert!(u.mangled_name().is_empty());
+    }
+
+    #[test]
+    fn test_union_type_name() {
+        let u = make_test_union();
+        assert_eq!(u.type_name(), "union");
+    }
+
+    #[test]
+    fn test_union_has_field_list() {
+        let u = make_test_union();
+        assert!(u.has_field_list());
+
+        let u2 = LfUnion::new(
+            0,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "Fwd".to_string(),
+            String::new(),
+        );
+        assert!(!u2.has_field_list());
+    }
+
+    #[test]
+    fn test_union_packed_size() {
+        let u = make_test_union();
+        assert_eq!(u.packed_size(), 16);
+
+        let mut u2 = make_test_union();
+        u2.composite.property |= MsProperty::PACKED;
+        assert_eq!(u2.packed_size(), 16);
+    }
+
+    #[test]
+    fn test_union_is_sealed_from_new_method() {
+        let mut u = make_test_union();
+        assert!(!u.is_sealed());
+        u.composite.property |= MsProperty::SEALED;
+        assert!(u.is_sealed());
     }
 }

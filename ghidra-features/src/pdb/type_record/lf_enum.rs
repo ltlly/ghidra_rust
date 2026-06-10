@@ -169,6 +169,35 @@ impl LfEnum {
     pub fn mangled_name(&self) -> &str {
         self.enum_data.mangled_name()
     }
+
+    /// Get the type string for this type ("enum").
+    ///
+    /// Mirrors Java `AbstractComplexMsType.getTypeString()`.
+    pub fn type_name(&self) -> &'static str {
+        "enum"
+    }
+
+    /// Get the number of enumerators in this enum.
+    ///
+    /// This is an alias for `get_count()` that provides a more
+    /// semantically specific name for enum types.
+    pub fn get_num_enumerators(&self) -> i32 {
+        self.enum_data.num_elements()
+    }
+
+    /// Whether this enum has an underlying type assigned.
+    ///
+    /// Returns `true` if `underlying_type_record_number` is not `NO_TYPE`.
+    pub fn has_underlying_type(&self) -> bool {
+        !self.enum_data.underlying_type_record_number.is_no_type()
+    }
+
+    /// Whether this enum has a field list assigned.
+    ///
+    /// Returns `true` if `field_list_record_number` is not `NO_TYPE`.
+    pub fn has_field_list(&self) -> bool {
+        !self.enum_data.field_list_record_number.is_no_type()
+    }
 }
 
 impl AbstractMsType for LfEnum {
@@ -411,5 +440,49 @@ mod tests {
     fn test_enum_mangled_name_accessor() {
         let e = make_test_enum();
         assert!(e.mangled_name().is_empty());
+    }
+
+    #[test]
+    fn test_enum_type_name() {
+        let e = make_test_enum();
+        assert_eq!(e.type_name(), "enum");
+    }
+
+    #[test]
+    fn test_enum_get_num_enumerators() {
+        let e = make_test_enum();
+        assert_eq!(e.get_num_enumerators(), 4);
+    }
+
+    #[test]
+    fn test_enum_has_underlying_type() {
+        let e = make_test_enum();
+        assert!(e.has_underlying_type());
+
+        let e2 = LfEnum::new(
+            2,
+            RecordNumber::type_record(0x1001),
+            MsProperty::empty(),
+            "NoUnderlying".to_string(),
+            String::new(),
+            RecordNumber::NO_TYPE,
+        );
+        assert!(!e2.has_underlying_type());
+    }
+
+    #[test]
+    fn test_enum_has_field_list() {
+        let e = make_test_enum();
+        assert!(e.has_field_list());
+
+        let e2 = LfEnum::new(
+            -1,
+            RecordNumber::NO_TYPE,
+            MsProperty::FORWARD_REF,
+            "FwdEnum".to_string(),
+            String::new(),
+            RecordNumber::type_record(0x0074),
+        );
+        assert!(!e2.has_field_list());
     }
 }

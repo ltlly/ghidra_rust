@@ -136,6 +136,62 @@ impl LfFieldlist {
     pub fn num_methods(&self) -> usize {
         self.field_list.methods().count()
     }
+
+    /// Get the friend function entries.
+    pub fn friend_functions(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.entries().iter().filter(|e| {
+            matches!(e, FieldListEntry::FriendFunction { .. })
+        })
+    }
+
+    /// Get the virtual base class entries (LF_VBCLASS).
+    pub fn virtual_base_classes(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.entries().iter().filter(|e| {
+            matches!(e, FieldListEntry::VirtualBaseClass { .. })
+        })
+    }
+
+    /// Get the indirect virtual base class entries (LF_IVBCLASS).
+    pub fn indirect_virtual_base_classes(&self) -> impl Iterator<Item = &FieldListEntry> {
+        self.field_list.entries().iter().filter(|e| {
+            matches!(e, FieldListEntry::IndirectVirtualBaseClass { .. })
+        })
+    }
+
+    /// Count the number of static members.
+    pub fn num_static_members(&self) -> usize {
+        self.field_list.static_members().count()
+    }
+
+    /// Count the number of nested types.
+    pub fn num_nested_types(&self) -> usize {
+        self.field_list.nested_types().count()
+    }
+
+    /// Count the number of enumerates.
+    pub fn num_enumerates(&self) -> usize {
+        self.field_list.enumerates().count()
+    }
+
+    /// Count the number of vftable pointers.
+    pub fn num_vftable_pointers(&self) -> usize {
+        self.field_list.vftable_pointers().count()
+    }
+
+    /// Count the number of continuation indices.
+    pub fn num_continuation_indices(&self) -> usize {
+        self.field_list.continuation_indices().count()
+    }
+
+    /// Count the number of friend functions.
+    pub fn num_friend_functions(&self) -> usize {
+        self.friend_functions().count()
+    }
+
+    /// Count the number of virtual base classes (direct + indirect).
+    pub fn num_virtual_base_classes(&self) -> usize {
+        self.virtual_base_classes().count() + self.indirect_virtual_base_classes().count()
+    }
 }
 
 impl Default for LfFieldlist {
@@ -882,5 +938,122 @@ mod tests {
         let fl = LfFieldlist::parse(&data).unwrap();
         assert_eq!(fl.len(), 1);
         assert_eq!(fl.methods().count(), 1);
+    }
+
+    #[test]
+    fn test_fieldlist_friend_functions() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::FriendFunction {
+            type_record: RecordNumber::type_record(0x1010),
+            name: "operator+".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+
+        assert_eq!(fl.num_friend_functions(), 1);
+        assert_eq!(fl.friend_functions().count(), 1);
+    }
+
+    #[test]
+    fn test_fieldlist_virtual_base_classes() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::VirtualBaseClass {
+            base_type_record: RecordNumber::type_record(0x1000),
+            vbptr_type_record: RecordNumber::type_record(0x1001),
+            vbptr_offset: 0,
+            vbtable_offset: 4,
+            access: 3,
+        });
+        fl.add_entry(FieldListEntry::IndirectVirtualBaseClass {
+            base_type_record: RecordNumber::type_record(0x1002),
+            vbptr_type_record: RecordNumber::type_record(0x1003),
+            vbptr_offset: 0,
+            vbtable_offset: 8,
+            access: 3,
+        });
+
+        assert_eq!(fl.virtual_base_classes().count(), 1);
+        assert_eq!(fl.indirect_virtual_base_classes().count(), 1);
+        assert_eq!(fl.num_virtual_base_classes(), 2);
+    }
+
+    #[test]
+    fn test_fieldlist_num_static_members() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::StaticMember {
+            type_record: RecordNumber::type_record(0x0074),
+            access: 3,
+            name: "count".to_string(),
+        });
+        fl.add_entry(FieldListEntry::StaticMember {
+            type_record: RecordNumber::type_record(0x0074),
+            access: 3,
+            name: "total".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Member {
+            type_record: RecordNumber::type_record(0x0074),
+            offset: 0,
+            access: 3,
+            name: "x".to_string(),
+        });
+
+        assert_eq!(fl.num_static_members(), 2);
+    }
+
+    #[test]
+    fn test_fieldlist_num_nested_types() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::NestedType {
+            type_record: RecordNumber::type_record(0x3000),
+            name: "Inner".to_string(),
+        });
+        assert_eq!(fl.num_nested_types(), 1);
+    }
+
+    #[test]
+    fn test_fieldlist_num_enumerates() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::Enumerate {
+            value: 0,
+            access: 3,
+            name: "RED".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Enumerate {
+            value: 1,
+            access: 3,
+            name: "GREEN".to_string(),
+        });
+        fl.add_entry(FieldListEntry::Enumerate {
+            value: 2,
+            access: 3,
+            name: "BLUE".to_string(),
+        });
+
+        assert_eq!(fl.num_enumerates(), 3);
+    }
+
+    #[test]
+    fn test_fieldlist_num_vftable_pointers() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::VfTablePointer {
+            type_record: RecordNumber::type_record(0x2000),
+        });
+        assert_eq!(fl.num_vftable_pointers(), 1);
+    }
+
+    #[test]
+    fn test_fieldlist_num_continuation_indices() {
+        let mut fl = LfFieldlist::new();
+        fl.add_entry(FieldListEntry::Index {
+            type_record: RecordNumber::type_record(0x1005),
+        });
+        fl.add_entry(FieldListEntry::Index {
+            type_record: RecordNumber::type_record(0x1006),
+        });
+        assert_eq!(fl.num_continuation_indices(), 2);
     }
 }

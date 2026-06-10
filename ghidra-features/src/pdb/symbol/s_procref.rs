@@ -86,6 +86,14 @@ impl SProcRef {
             type_record_number: trn,
         })
     }
+
+    /// Return `true` if this is a local procedure reference (`S_LPROCREF`).
+    ///
+    /// This is determined by the symbol kind reported via [`AbstractMsSymbol::pdb_id`].
+    /// Use this method after parsing to check which variant was encountered.
+    pub fn is_local(&self, pdb_id: u16) -> bool {
+        pdb_id == super::super::symbol_kind::S_LPROCREF
+    }
 }
 
 impl AbstractMsSymbol for SProcRef {
@@ -165,6 +173,51 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_empty_name() {
+        let data = make_procref_bytes(b"", 3, 0x1000);
+        let sym = SProcRef::parse(&data).unwrap();
+        assert_eq!(sym.name, "");
+        assert_eq!(sym.module_index, 3);
+    }
+
+    #[test]
+    fn test_parse_long_name() {
+        let long_name = b"a_very_long_function_name_that_exceeds_typical_lengths";
+        let data = make_procref_bytes(long_name, 1, 0x2000);
+        let sym = SProcRef::parse(&data).unwrap();
+        assert_eq!(sym.name, "a_very_long_function_name_that_exceeds_typical_lengths");
+        assert_eq!(sym.module_index, 1);
+    }
+
+    #[test]
+    fn test_parse_alignment() {
+        // Name "abc" = 3 chars + null = 4 bytes, already aligned
+        let data = make_procref_bytes(b"abc", 2, 0x1040);
+        let sym = SProcRef::parse(&data).unwrap();
+        assert_eq!(sym.name, "abc");
+        assert_eq!(sym.module_index, 2);
+
+        // Name "ab" = 2 chars + null = 3 bytes, needs 1 byte padding
+        let data = make_procref_bytes(b"ab", 4, 0x1050);
+        let sym = SProcRef::parse(&data).unwrap();
+        assert_eq!(sym.name, "ab");
+        assert_eq!(sym.module_index, 4);
+    }
+
+    #[test]
+    fn test_is_local() {
+        let sym = SProcRef::new(
+            "printf".to_string(),
+            3,
+            RecordNumber::type_record_number(0x1020),
+        );
+        // S_PROCREF = 0x0400, S_LPROCREF = 0x0403
+        // is_local checks if the given pdb_id equals S_LPROCREF
+        assert!(!sym.is_local(sym.pdb_id())); // S_PROCREF != S_LPROCREF
+        assert!(sym.is_local(0x0403));        // S_LPROCREF matches
+    }
+
+    #[test]
     fn test_trait_impls() {
         let sym = SProcRef::new(
             "printf".to_string(),
@@ -188,5 +241,24 @@ mod tests {
         assert!(s.contains("ProcedureReference"));
         assert!(s.contains("malloc"));
         assert!(s.contains("Module: 2"));
+    }
+
+    #[test]
+    fn test_clone_eq() {
+        let a = SProcRef::new(
+            "foo".to_string(),
+            1,
+            RecordNumber::type_record_number(0x1000),
+        );
+        let b = a.clone();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_zero_module_index() {
+        let data = make_procref_bytes(b"kernel_func", 0, 0x3000);
+        let sym = SProcRef::parse(&data).unwrap();
+        assert_eq!(sym.module_index, 0);
+        assert_eq!(sym.name, "kernel_func");
     }
 }

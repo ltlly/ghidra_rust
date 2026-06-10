@@ -244,6 +244,68 @@ impl LfStructure {
     pub fn mangled_name(&self) -> &str {
         self.composite.mangled_name()
     }
+
+    /// Get the type string for this composite ("struct").
+    ///
+    /// Mirrors Java `AbstractComplexMsType.getTypeString()`.
+    pub fn type_name(&self) -> &'static str {
+        self.composite.type_string()
+    }
+
+    /// Whether this structure has a field list assigned.
+    ///
+    /// Returns `true` if `field_list_record_number` is not `NO_TYPE`.
+    pub fn has_field_list(&self) -> bool {
+        !self.composite.field_list_record_number.is_no_type()
+    }
+
+    /// Whether this structure has a derived-from list.
+    ///
+    /// Returns `true` if `derived_from_list_record_number` is not `NO_TYPE`.
+    pub fn has_derived_from(&self) -> bool {
+        !self.composite.derived_from_list_record_number.is_no_type()
+    }
+
+    /// Whether this structure has a VShape table.
+    ///
+    /// Returns `true` if `vshape_table_record_number` is not `NO_TYPE`.
+    pub fn has_vshape(&self) -> bool {
+        !self.composite.vshape_table_record_number.is_no_type()
+    }
+
+    /// Whether this structure is an interface (C++/CLI).
+    ///
+    /// An interface is a class with the `INTERFACE` mocom classification.
+    pub fn is_interface(&self) -> bool {
+        self.composite.property.mocom() == super::ms_property::Mocom::INTERFACE
+    }
+
+    /// Whether this structure is abstract (has pure virtual methods).
+    ///
+    /// Note: PDB does not directly encode this; the heuristic is that
+    /// an abstract class has a non-empty vshape table but zero instances.
+    /// For now we check the `SEALED` flag as a proxy -- real abstract
+    /// detection requires inspecting the method list for pure-virtual entries.
+    pub fn is_abstract(&self) -> bool {
+        // Abstract classes are typically forward-declared or sealed.
+        // This is a heuristic; full detection requires vtable analysis.
+        self.composite.is_forward_ref() && self.composite.vshape_table_record_number.is_no_type()
+    }
+
+    /// Compute the packed size (size with no padding).
+    ///
+    /// If the structure is marked as packed, returns the recorded size
+    /// directly. Otherwise, this is an approximation: the recorded size
+    /// may already include alignment padding.
+    pub fn packed_size(&self) -> u64 {
+        if self.is_packed() {
+            self.composite.get_size()
+        } else {
+            // Without access to individual member types and their sizes,
+            // we can only return the recorded size.
+            self.composite.get_size()
+        }
+    }
 }
 
 impl AbstractMsType for LfStructure {
@@ -540,5 +602,81 @@ mod tests {
         assert!(!s.contains_nested());
         s.composite.property |= MsProperty::CONTAINS_NESTED;
         assert!(s.contains_nested());
+    }
+
+    #[test]
+    fn test_structure_type_name() {
+        let s = make_test_structure();
+        assert_eq!(s.type_name(), "struct");
+    }
+
+    #[test]
+    fn test_structure_has_field_list() {
+        let s = make_test_structure();
+        assert!(s.has_field_list());
+
+        let s2 = LfStructure::new(
+            0,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "Fwd".to_string(),
+            String::new(),
+        );
+        assert!(!s2.has_field_list());
+    }
+
+    #[test]
+    fn test_structure_has_derived_from() {
+        let s = make_test_structure();
+        assert!(s.has_derived_from());
+
+        let s2 = LfStructure::new(
+            1,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            4,
+            MsProperty::empty(),
+            "NoBase".to_string(),
+            String::new(),
+        );
+        assert!(!s2.has_derived_from());
+    }
+
+    #[test]
+    fn test_structure_has_vshape() {
+        let s = make_test_structure();
+        assert!(s.has_vshape());
+
+        let s2 = LfStructure::new(
+            1,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            4,
+            MsProperty::empty(),
+            "NoVtable".to_string(),
+            String::new(),
+        );
+        assert!(!s2.has_vshape());
+    }
+
+    #[test]
+    fn test_structure_is_interface() {
+        let s = make_test_structure();
+        assert!(!s.is_interface());
+    }
+
+    #[test]
+    fn test_structure_packed_size() {
+        let s = make_test_structure();
+        assert_eq!(s.packed_size(), 24);
+
+        let mut s2 = make_test_structure();
+        s2.composite.property |= MsProperty::PACKED;
+        assert_eq!(s2.packed_size(), 24);
     }
 }

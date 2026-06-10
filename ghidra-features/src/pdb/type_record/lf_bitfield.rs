@@ -132,6 +132,36 @@ impl LfBitfield {
             ((1u32 << width) - 1) << self.bit_position
         }
     }
+
+    /// Compute the minimum number of bytes needed to store this bitfield.
+    ///
+    /// Returns the ceiling of `(bit_position + bit_length) / 8`.
+    /// For example, a 4-bit field at position 0 needs 1 byte;
+    /// a 3-bit field at position 5 needs 1 byte;
+    /// a 1-bit field at position 8 needs 2 bytes.
+    pub fn byte_length(&self) -> u8 {
+        let total_bits = (self.bit_position as u16) + (self.bit_length as u16);
+        ((total_bits + 7) / 8) as u8
+    }
+
+    /// Whether this bitfield is valid.
+    ///
+    /// A bitfield is valid if:
+    /// - `bit_length` is greater than 0
+    /// - `bit_length` does not exceed 32 (the maximum for a u32 storage unit)
+    /// - the underlying type record number is not NO_TYPE
+    pub fn is_valid(&self) -> bool {
+        self.bit_length > 0
+            && self.bit_length <= 32
+            && !self.underlying_type_record_number.is_no_type()
+    }
+
+    /// Get the total number of bits spanned (position + length).
+    ///
+    /// This is useful for determining the minimum storage unit size.
+    pub fn total_bits_spanned(&self) -> u16 {
+        (self.bit_position as u16) + (self.bit_length as u16)
+    }
 }
 
 impl AbstractMsType for LfBitfield {
@@ -324,5 +354,62 @@ mod tests {
         let bf = make_test_bitfield();
         // Bitfields don't have names; name() returns ""
         assert_eq!(bf.name(), "");
+    }
+
+    #[test]
+    fn test_bitfield_byte_length() {
+        // 4 bits at position 0 -> 1 byte
+        let bf = make_test_bitfield();
+        assert_eq!(bf.byte_length(), 1);
+
+        // 8 bits at position 0 -> 1 byte
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 8, 0);
+        assert_eq!(bf.byte_length(), 1);
+
+        // 1 bit at position 8 -> 2 bytes
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 1, 8);
+        assert_eq!(bf.byte_length(), 2);
+
+        // 3 bits at position 5 -> 1 byte (5+3=8 bits = 1 byte)
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 3, 5);
+        assert_eq!(bf.byte_length(), 1);
+
+        // 9 bits at position 0 -> 2 bytes
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 9, 0);
+        assert_eq!(bf.byte_length(), 2);
+    }
+
+    #[test]
+    fn test_bitfield_is_valid() {
+        let bf = make_test_bitfield();
+        assert!(bf.is_valid());
+
+        // 0-length bitfield is invalid
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 0, 0);
+        assert!(!bf.is_valid());
+
+        // No underlying type is invalid
+        let bf = LfBitfield::new(RecordNumber::NO_TYPE, 4, 0);
+        assert!(!bf.is_valid());
+
+        // 32-bit field is valid
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 32, 0);
+        assert!(bf.is_valid());
+
+        // 33-bit field is invalid
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 33, 0);
+        assert!(!bf.is_valid());
+    }
+
+    #[test]
+    fn test_bitfield_total_bits_spanned() {
+        let bf = make_test_bitfield();
+        assert_eq!(bf.total_bits_spanned(), 4);
+
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 3, 5);
+        assert_eq!(bf.total_bits_spanned(), 8);
+
+        let bf = LfBitfield::new(RecordNumber::type_record(0x0074), 1, 31);
+        assert_eq!(bf.total_bits_spanned(), 32);
     }
 }

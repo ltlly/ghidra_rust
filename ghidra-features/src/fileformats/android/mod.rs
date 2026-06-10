@@ -5,6 +5,7 @@
 //! Covers: DEX, OAT, VDEX, ART, boot image, boot loader, APEX,
 //! FBPK, LZ4, profiler, and other Android runtime formats.
 
+pub mod apk;
 pub mod art;
 pub mod bootimg;
 pub mod dex_class_def;
@@ -18,6 +19,7 @@ pub mod oat;
 pub mod vdex;
 
 // Re-exports
+pub use apk::{ApkFSBFileHandler, ApkFileSystem, EclipseProjectMetadata, ExportError};
 pub use bootimg::{
     BootImageAnalyzer, BootImageHeader, BootImageHeaderVersion, BootImageHeaderV0,
     BootImageHeaderV1, BootImageHeaderV2, BootImageHeaderV3, BootImageHeaderV4,

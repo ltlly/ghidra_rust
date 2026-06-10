@@ -234,6 +234,53 @@ impl LfClass {
     pub fn mangled_name(&self) -> &str {
         self.class_data.composite.mangled_name()
     }
+
+    /// Get the type string for this composite ("class").
+    ///
+    /// Mirrors Java `AbstractComplexMsType.getTypeString()`.
+    pub fn type_name(&self) -> &'static str {
+        self.class_data.composite.type_string()
+    }
+
+    /// Whether this class has a field list assigned.
+    pub fn has_field_list(&self) -> bool {
+        !self.class_data.composite.field_list_record_number.is_no_type()
+    }
+
+    /// Whether this class has a derived-from list (base classes).
+    pub fn has_derived_from(&self) -> bool {
+        !self.class_data.composite.derived_from_list_record_number.is_no_type()
+    }
+
+    /// Whether this class has a VShape table (virtual functions).
+    pub fn has_vshape(&self) -> bool {
+        !self.class_data.composite.vshape_table_record_number.is_no_type()
+    }
+
+    /// Whether this class is an interface (C++/CLI).
+    ///
+    /// An interface is a class with the `INTERFACE` mocom classification.
+    pub fn is_interface(&self) -> bool {
+        self.class_data.composite.property.mocom() == super::ms_property::Mocom::INTERFACE
+    }
+
+    /// Whether this class is abstract (has pure virtual methods).
+    ///
+    /// This is a heuristic: a class that is a forward reference without a
+    /// vshape table is likely abstract. Full detection requires inspecting
+    /// the method list for pure-virtual entries.
+    pub fn is_abstract(&self) -> bool {
+        self.class_data.composite.is_forward_ref()
+            && self.class_data.composite.vshape_table_record_number.is_no_type()
+    }
+
+    /// Compute the packed size (size with no padding).
+    ///
+    /// If the class is marked as packed, returns the recorded size directly.
+    /// Otherwise returns the recorded size (which may include alignment padding).
+    pub fn packed_size(&self) -> u64 {
+        self.class_data.composite.get_size()
+    }
 }
 
 impl AbstractMsType for LfClass {
@@ -592,5 +639,97 @@ mod tests {
     fn test_class_mangled_name_accessor() {
         let c = make_test_class();
         assert!(c.mangled_name().is_empty());
+    }
+
+    #[test]
+    fn test_class_type_name() {
+        let c = make_test_class();
+        assert_eq!(c.type_name(), "class");
+    }
+
+    #[test]
+    fn test_class_has_field_list() {
+        let c = make_test_class();
+        assert!(c.has_field_list());
+
+        let c2 = LfClass::new(
+            0,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "Fwd".to_string(),
+            String::new(),
+        );
+        assert!(!c2.has_field_list());
+    }
+
+    #[test]
+    fn test_class_has_derived_from() {
+        let c = make_test_class();
+        // The test class has derived_from = 0x0000, which is NO_TYPE
+        assert!(!c.has_derived_from());
+
+        let c2 = LfClass::new(
+            3,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::type_record(0x2001),
+            RecordNumber::NO_TYPE,
+            24,
+            MsProperty::empty(),
+            "Derived".to_string(),
+            String::new(),
+        );
+        assert!(c2.has_derived_from());
+    }
+
+    #[test]
+    fn test_class_has_vshape() {
+        let c = make_test_class();
+        assert!(c.has_vshape());
+
+        let c2 = LfClass::new(
+            1,
+            RecordNumber::type_record(0x1001),
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            4,
+            MsProperty::empty(),
+            "NoVtable".to_string(),
+            String::new(),
+        );
+        assert!(!c2.has_vshape());
+    }
+
+    #[test]
+    fn test_class_is_interface() {
+        let c = make_test_class();
+        assert!(!c.is_interface());
+    }
+
+    #[test]
+    fn test_class_is_abstract() {
+        let c = make_test_class();
+        assert!(!c.is_abstract());
+
+        // A forward-ref class with no vshape could be abstract
+        let c2 = LfClass::new(
+            0,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            RecordNumber::NO_TYPE,
+            0,
+            MsProperty::FORWARD_REF,
+            "AbstractBase".to_string(),
+            String::new(),
+        );
+        assert!(c2.is_abstract());
+    }
+
+    #[test]
+    fn test_class_packed_size() {
+        let c = make_test_class();
+        assert_eq!(c.packed_size(), 32);
     }
 }
