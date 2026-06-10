@@ -74,6 +74,21 @@ pub trait SConstExt {
     fn parse_managed_aligned(data: &[u8]) -> Option<(Self, usize)>
     where
         Self: Sized;
+
+    /// Return the constant value as an `i64`, interpreting it as a signed value.
+    ///
+    /// This is useful for constants that represent signed integers. Returns
+    /// `None` if the value cannot be represented as a signed 64-bit integer
+    /// (e.g., floating-point values).
+    fn value_as_i64(&self) -> Option<i64>;
+
+    /// Return `true` if the constant value is zero.
+    fn is_zero(&self) -> bool;
+
+    /// Return `true` if the constant value is negative (when interpreted as signed).
+    ///
+    /// Returns `false` for non-integer values or zero.
+    fn is_negative(&self) -> bool;
 }
 
 impl SConstExt for SConstant {
@@ -168,6 +183,36 @@ impl SConstExt for SConstant {
         };
         let aligned = (consumed + 3) & !3;
         Some((sym, aligned))
+    }
+
+    fn value_as_i64(&self) -> Option<i64> {
+        self.value().as_u64().map(|v| v as i64)
+    }
+
+    fn is_zero(&self) -> bool {
+        self.value().as_u64() == Some(0)
+    }
+
+    fn is_negative(&self) -> bool {
+        // Check if the value is a signed integer type and the high bit is set.
+        // For literals (< 0x8000 sub-type), values are always non-negative.
+        // For explicit integer types, check the numeric value.
+        // PDB Numeric signed sub-types:
+        //   0x8000 = char (i8), 0x8001 = short (i16), 0x8003 = int32,
+        //   0x8009 = int64
+        match self.value().as_u64() {
+            Some(v) => {
+                let sub_type = self.value().sub_type_index();
+                match sub_type {
+                    0x8000 => ((v as u8) as i8) < 0,   // char (signed i8)
+                    0x8001 => ((v as u16) as i16) < 0,  // short (signed i16)
+                    0x8003 => ((v as u32) as i32) < 0,  // int32
+                    0x8009 => (v as i64) < 0,            // int64
+                    _ => false,
+                }
+            }
+            None => false,
+        }
     }
 }
 
@@ -400,5 +445,98 @@ mod tests {
         );
         // from_numeric_bytes creates a non-managed variant
         assert_eq!(sym.constant_variant(), ConstantVariant::Constant);
+    }
+
+    #[test]
+    fn test_value_as_i64_literal() {
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &[42, 0x00], // literal 42
+            "ANSWER".to_string(),
+        );
+        assert_eq!(sym.value_as_i64(), Some(42));
+    }
+
+    #[test]
+    fn test_value_as_i64_none_for_float() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x8005u16.to_le_bytes());
+        bytes.extend_from_slice(&1.0f32.to_le_bytes());
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &bytes,
+            "PI".to_string(),
+        );
+        assert_eq!(sym.value_as_i64(), None);
+    }
+
+    #[test]
+    fn test_is_zero() {
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &[0, 0x00], // literal 0
+            "ZERO".to_string(),
+        );
+        assert!(sym.is_zero());
+
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &[1, 0x00], // literal 1
+            "ONE".to_string(),
+        );
+        assert!(!sym.is_zero());
+    }
+
+    #[test]
+    fn test_is_negative_literal() {
+        // Literals are always non-negative
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &[5, 0x00],
+            "TINY".to_string(),
+        );
+        assert!(!sym.is_negative());
+    }
+
+    #[test]
+    fn test_is_negative_int8() {
+        // char type (0x8000) with value 0xFF = -1
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x8000u16.to_le_bytes());
+        bytes.extend_from_slice(&0xFFu8.to_le_bytes());
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &bytes,
+            "NEG".to_string(),
+        );
+        assert!(sym.is_negative());
+    }
+
+    #[test]
+    fn test_is_negative_int32() {
+        // int32 type (0x8003) with value -1
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x8003u16.to_le_bytes());
+        bytes.extend_from_slice(&(-1i32).to_le_bytes());
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &bytes,
+            "NEG32".to_string(),
+        );
+        assert!(sym.is_negative());
+    }
+
+    #[test]
+    fn test_is_negative_uint32() {
+        // unsigned int32 type (0x8004) with value 0xFFFFFFFF should not be negative
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&0x8004u16.to_le_bytes());
+        bytes.extend_from_slice(&0xFFFFFFFFu32.to_le_bytes());
+        let sym = SConstant::from_numeric_bytes(
+            RecordNumber::type_record_number(0x1000),
+            &bytes,
+            "BIG".to_string(),
+        );
+        assert!(!sym.is_negative());
     }
 }

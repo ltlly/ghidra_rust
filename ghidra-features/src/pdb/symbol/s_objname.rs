@@ -173,6 +173,31 @@ impl SObjName {
         self.name.ends_with(".lib")
     }
 
+    /// Return `true` if the object name ends with `.pdb`.
+    pub fn is_pdb_file(&self) -> bool {
+        self.name.ends_with(".pdb")
+    }
+
+    /// Return `true` if the object name is an import library (`.lib` file).
+    ///
+    /// Import libraries typically have a non-zero signature that identifies
+    /// the import set. This combines the signature check with the file
+    /// extension check.
+    pub fn is_import_library(&self) -> bool {
+        self.is_lib_file() && self.has_signature()
+    }
+
+    /// Return the base file name without directory path components.
+    ///
+    /// For `"C:\\path\\to\\test.obj"` returns `"test.obj"`.
+    /// For `"test.obj"` returns `"test.obj"`.
+    pub fn file_name(&self) -> &str {
+        self.name.rsplit_once('\\')
+            .or_else(|| self.name.rsplit_once('/'))
+            .map(|(_, name)| name)
+            .unwrap_or(&self.name)
+    }
+
     /// Parse an S_OBJNAME symbol and return it along with the total bytes
     /// consumed (including 4-byte alignment padding after the name).
     ///
@@ -579,5 +604,44 @@ mod tests {
         assert!(!sym.is_obj_file());
         assert!(!sym.is_lib_file());
         assert_eq!(sym.file_extension(), None);
+    }
+
+    #[test]
+    fn test_is_pdb_file() {
+        let sym = SObjName::new(0x1000, "test.pdb".to_string());
+        assert!(sym.is_pdb_file());
+
+        let sym = SObjName::new(0x1000, "test.obj".to_string());
+        assert!(!sym.is_pdb_file());
+    }
+
+    #[test]
+    fn test_is_import_library() {
+        // Import library: .lib file with non-zero signature
+        let sym = SObjName::new(0xDEADBEEF, "kernel32.lib".to_string());
+        assert!(sym.is_import_library());
+
+        // .lib file without signature is not an import library
+        let sym = SObjName::new(0, "kernel32.lib".to_string());
+        assert!(!sym.is_import_library());
+
+        // Non-.lib file is not an import library
+        let sym = SObjName::new(0xDEADBEEF, "test.obj".to_string());
+        assert!(!sym.is_import_library());
+    }
+
+    #[test]
+    fn test_file_name() {
+        let sym = SObjName::new(0x1000, "C:\\path\\to\\test.obj".to_string());
+        assert_eq!(sym.file_name(), "test.obj");
+
+        let sym = SObjName::new(0x1000, "/unix/path/test.obj".to_string());
+        assert_eq!(sym.file_name(), "test.obj");
+
+        let sym = SObjName::new(0x1000, "test.obj".to_string());
+        assert_eq!(sym.file_name(), "test.obj");
+
+        let sym = SObjName::new(0x1000, "dir\\file.lib".to_string());
+        assert_eq!(sym.file_name(), "file.lib");
     }
 }

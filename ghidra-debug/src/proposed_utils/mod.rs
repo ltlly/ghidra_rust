@@ -37,8 +37,15 @@
 //!   `ThreadAccessCache` for caching per-thread data access shims,
 //!   `ViewportStateTracker` for tracking memory viewport state,
 //!   `PcodeTraceDataAccess` trait for low-level trace data operations,
-//!   and `AbstractPcodeTraceAccessBuilder` for constructing trace
-//!   access instances with cached shim management.
+//!   `AbstractPcodeTraceAccessBuilder` for constructing trace
+//!   access instances with cached shim management,
+//!   `PcodeDebuggerTargetAccess` trait for abstracting debug target
+//!   communication, `MemoryAccessPolicy` for configurable memory
+//!   read/write behavior with chunking and fallback control,
+//!   `AccessSessionTracker` for tracking debug session lifecycle
+//!   (connect, resume, pause, terminate, disconnect),
+//!   and `PcodeTraceThreadAccess` for combined memory+register
+//!   access shims scoped to a specific thread.
 //! - **Pcode debugger registers**: Register bank abstraction, register mapping,
 //!   register groups, value transformations, calling conventions,
 //!   `RegisterSnapshot` / `RegisterBankDiff` for capturing and comparing
@@ -73,7 +80,13 @@
 //!   execution contexts, `RegisterConcurrencyGuard` for thread-safe
 //!   register access with deadlock prevention,
 //!   and `RegisterWatchpointCondition` for conditional watchpoint
-//!   evaluation on register value changes.
+//!   evaluation on register value changes,
+//!   `RegisterDependencyEdge` for data-flow dependency edges between
+//!   registers, `RegisterAliasGraph` for graph-based multi-level
+//!   alias resolution with fan-in/fan-out queries,
+//!   `RegisterBankView` for filtered/selected views of a register
+//!   bank, and `RegisterValueFormatter` for configurable register
+//!   value display formatting (hex, decimal, binary, octal, signed).
 //! - **General utilities**: Observable collections, lock holds, pairing iterators,
 //!   merging spliterators, and dependent service resolution.
 

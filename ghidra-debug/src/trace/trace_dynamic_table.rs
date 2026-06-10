@@ -1027,6 +1027,193 @@ impl TraceDynamicTableManager {
     pub fn is_empty(&self) -> bool {
         self.tables.is_empty()
     }
+
+    /// Find all tables matching a predicate.
+    pub fn find_tables<F>(&self, predicate: F) -> Vec<&DynamicTableEntry>
+    where
+        F: Fn(&DynamicTableEntry) -> bool,
+    {
+        self.tables
+            .values()
+            .filter(|t| predicate(t))
+            .collect()
+    }
+
+    /// Find all tables that have data at the given snap.
+    pub fn tables_with_data_at(&self, snap: i64) -> Vec<&DynamicTableEntry> {
+        self.tables
+            .values()
+            .filter(|t| t.row_at(snap).is_some())
+            .collect()
+    }
+
+    /// Get aggregate statistics across all tables.
+    pub fn statistics(&self) -> DynamicTableStatistics {
+        let mut stats = DynamicTableStatistics::default();
+        stats.table_count = self.tables.len();
+        for table in self.tables.values() {
+            stats.total_rows += table.row_count();
+            stats.total_columns += table.column_count();
+            stats.total_keys += table.key_count();
+            stats.total_non_null_values += table.count_non_null();
+        }
+        stats
+    }
+
+    /// Export all tables as a flat vector of (path, snap, key, value) tuples.
+    pub fn export_entries(&self) -> Vec<(String, i64, String, DynamicValue)> {
+        let mut result = Vec::new();
+        for (path, table) in &self.tables {
+            for (snap, row) in table.rows() {
+                for (key, value) in &row.values {
+                    result.push((path.clone(), *snap, key.clone(), value.clone()));
+                }
+            }
+        }
+        result
+    }
+
+    /// Import entries from a flat vector, creating tables as needed.
+    pub fn import_entries(&mut self, entries: &[(String, i64, String, DynamicValue)]) {
+        for (path, snap, key, value) in entries {
+            let table = self.get_or_create(path, path);
+            table.set(*snap, key.as_str(), value.clone());
+        }
+    }
+
+    /// Get a combined snapshot across multiple tables at a given snap,
+    /// flattening all tables into a single key-value map with path-prefixed keys.
+    pub fn flat_snapshot_at(&self, snap: i64) -> BTreeMap<String, DynamicValue> {
+        let mut result = BTreeMap::new();
+        for (path, table) in &self.tables {
+            for (key, value) in table.snapshot_at(snap) {
+                result.insert(format!("{}.{}", path, key), value.clone());
+            }
+        }
+        result
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DynamicTableStatistics -- aggregate stats for the manager
+// ---------------------------------------------------------------------------
+
+/// Aggregate statistics for all dynamic tables managed by a
+/// [`TraceDynamicTableManager`].
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DynamicTableStatistics {
+    /// Number of tables.
+    pub table_count: usize,
+    /// Total rows across all tables.
+    pub total_rows: usize,
+    /// Total column definitions across all tables.
+    pub total_columns: usize,
+    /// Total distinct keys across all tables.
+    pub total_keys: usize,
+    /// Total non-null values across all tables.
+    pub total_non_null_values: usize,
+}
+
+// ---------------------------------------------------------------------------
+// DynamicTableSnapshot -- materialized point-in-time view
+// ---------------------------------------------------------------------------
+
+/// A materialized point-in-time view of a dynamic table.
+///
+/// Ported from Ghidra's snapshot concept for property maps. Captures all
+/// values at a given snap as a simple key-value map, useful for serialization,
+/// comparison, and passing to emulators.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DynamicTableSnapshot {
+    /// The path of the source table.
+    pub path: String,
+    /// The snap at which this snapshot was taken.
+    pub snap: i64,
+    /// The materialized key-value pairs.
+    pub values: BTreeMap<String, DynamicValue>,
+}
+
+impl DynamicTableSnapshot {
+    /// Create a snapshot from a table at the given snap.
+    pub fn from_table(table: &DynamicTableEntry, snap: i64) -> Self {
+        let values: BTreeMap<String, DynamicValue> = table
+            .snapshot_at(snap)
+            .into_iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        Self {
+            path: table.path.clone(),
+            snap,
+            values,
+        }
+    }
+
+    /// Get a value by key.
+    pub fn get(&self, key: &str) -> Option<&DynamicValue> {
+        self.values.get(key)
+    }
+
+    /// The number of values in this snapshot.
+    pub fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    /// Whether the snapshot is empty.
+    pub fn is_empty(&self) -> bool {
+        self.values.is_empty()
+    }
+
+    /// Iterate over key-value pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &DynamicValue)> {
+        self.values.iter().map(|(k, v)| (k.as_str(), v))
+    }
+
+    /// Compare this snapshot with another, returning keys that differ.
+    pub fn diff(&self, other: &DynamicTableSnapshot) -> DynamicTableDiff {
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut changed = Vec::new();
+        let mut unchanged = Vec::new();
+
+        let mut all_keys: BTreeMap<String, ()> = BTreeMap::new();
+        for k in self.values.keys() {
+            all_keys.insert(k.clone(), ());
+        }
+        for k in other.values.keys() {
+            all_keys.insert(k.clone(), ());
+        }
+
+        for key in all_keys.keys() {
+            let val_a = self.values.get(key);
+            let val_b = other.values.get(key);
+            match (val_a, val_b) {
+                (None, None) => {}
+                (None, Some(b)) => added.push((key.clone(), b.clone())),
+                (Some(a), None) => removed.push((key.clone(), a.clone())),
+                (Some(a), Some(b)) => {
+                    if a == b {
+                        unchanged.push((key.clone(), a.clone()));
+                    } else {
+                        changed.push((key.clone(), a.clone(), b.clone()));
+                    }
+                }
+            }
+        }
+
+        DynamicTableDiff {
+            added,
+            removed,
+            changed,
+            unchanged,
+        }
+    }
+
+    /// Apply this snapshot's values to a table at its snap.
+    pub fn apply_to(&self, table: &mut DynamicTableEntry) {
+        for (key, value) in &self.values {
+            table.set(self.snap, key.as_str(), value.clone());
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2095,5 +2282,196 @@ mod tests {
 
         mgr.get_or_create("P[0]", "state");
         assert!(!mgr.is_empty());
+    }
+
+    // -- New tests for DynamicTableSnapshot --
+
+    #[test]
+    fn test_dynamic_table_snapshot_from_table() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        table.set(0, "sp", DynamicValue::U64(0x7FFF0000));
+        table.set(5, "pc", DynamicValue::U64(0x2000));
+
+        let snap = DynamicTableSnapshot::from_table(&table, 3);
+        assert_eq!(snap.path, "P[0]");
+        assert_eq!(snap.snap, 3);
+        assert_eq!(snap.len(), 2);
+        assert_eq!(snap.get("pc").unwrap().as_u64(), Some(0x1000));
+        assert_eq!(snap.get("sp").unwrap().as_u64(), Some(0x7FFF0000));
+        assert!(snap.get("missing").is_none());
+    }
+
+    #[test]
+    fn test_dynamic_table_snapshot_empty() {
+        let table = DynamicTableEntry::new("P[0]", "empty");
+        let snap = DynamicTableSnapshot::from_table(&table, 0);
+        assert!(snap.is_empty());
+        assert_eq!(snap.len(), 0);
+    }
+
+    #[test]
+    fn test_dynamic_table_snapshot_iter() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "a", DynamicValue::I64(1));
+        table.set(0, "b", DynamicValue::I64(2));
+
+        let snap = DynamicTableSnapshot::from_table(&table, 0);
+        let pairs: Vec<_> = snap.iter().collect();
+        assert_eq!(pairs.len(), 2);
+    }
+
+    #[test]
+    fn test_dynamic_table_snapshot_diff() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        table.set(0, "sp", DynamicValue::U64(0x7FFF0000));
+        table.set(0, "keep", DynamicValue::Bool(true));
+        table.set(5, "pc", DynamicValue::U64(0x2000));
+        table.set(5, "new_key", DynamicValue::I64(42));
+        table.set(5, "keep", DynamicValue::Bool(true));
+
+        let snap0 = DynamicTableSnapshot::from_table(&table, 0);
+        let snap5 = DynamicTableSnapshot::from_table(&table, 5);
+
+        let diff = snap0.diff(&snap5);
+        assert_eq!(diff.added.len(), 1); // new_key
+        assert_eq!(diff.removed.len(), 1); // sp
+        assert_eq!(diff.changed.len(), 1); // pc
+        assert_eq!(diff.unchanged.len(), 1); // keep
+    }
+
+    #[test]
+    fn test_dynamic_table_snapshot_apply_to() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+
+        let mut snap = DynamicTableSnapshot {
+            path: "P[0]".into(),
+            snap: 10,
+            values: BTreeMap::new(),
+        };
+        snap.values.insert("pc".into(), DynamicValue::U64(0x9999));
+        snap.values.insert("sp".into(), DynamicValue::U64(0x7FFF));
+
+        snap.apply_to(&mut table);
+        assert_eq!(table.get_exact(10, "pc").unwrap().as_u64(), Some(0x9999));
+        assert_eq!(table.get_exact(10, "sp").unwrap().as_u64(), Some(0x7FFF));
+    }
+
+    #[test]
+    fn test_dynamic_table_snapshot_serde() {
+        let mut table = DynamicTableEntry::new("P[0]", "state");
+        table.set(0, "pc", DynamicValue::U64(0x1000));
+        let snap = DynamicTableSnapshot::from_table(&table, 0);
+
+        let json = serde_json::to_string(&snap).unwrap();
+        let back: DynamicTableSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.path, "P[0]");
+        assert_eq!(back.snap, 0);
+        assert_eq!(back.get("pc").unwrap().as_u64(), Some(0x1000));
+    }
+
+    // -- New tests for manager extended methods --
+
+    #[test]
+    fn test_manager_find_tables() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "pc", DynamicValue::U64(0x1000));
+        mgr.get_or_create("P[1]", "state"); // empty
+        mgr.get_or_create("P[2]", "regs")
+            .set(0, "RAX", DynamicValue::U64(1));
+
+        let non_empty = mgr.find_tables(|t| !t.is_empty());
+        assert_eq!(non_empty.len(), 2);
+    }
+
+    #[test]
+    fn test_manager_tables_with_data_at() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "pc", DynamicValue::U64(0x1000));
+        mgr.get_or_create("P[1]", "state")
+            .set(5, "pc", DynamicValue::U64(0x2000));
+
+        let at_0 = mgr.tables_with_data_at(0);
+        assert_eq!(at_0.len(), 1);
+
+        let at_5 = mgr.tables_with_data_at(5);
+        assert_eq!(at_5.len(), 1);
+
+        let at_10 = mgr.tables_with_data_at(10);
+        assert_eq!(at_10.len(), 0);
+    }
+
+    #[test]
+    fn test_manager_statistics() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "pc", DynamicValue::U64(0x1000));
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "sp", DynamicValue::U64(0x7FFF));
+        mgr.get_or_create("P[1]", "state")
+            .set(0, "a", DynamicValue::Null);
+
+        let stats = mgr.statistics();
+        assert_eq!(stats.table_count, 2);
+        assert_eq!(stats.total_non_null_values, 2); // pc and sp, not Null
+    }
+
+    #[test]
+    fn test_manager_export_import() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "pc", DynamicValue::U64(0x1000));
+        mgr.get_or_create("P[1]", "state")
+            .set(5, "sp", DynamicValue::U64(0x7FFF));
+
+        let entries = mgr.export_entries();
+        assert_eq!(entries.len(), 2);
+
+        let mut mgr2 = TraceDynamicTableManager::new();
+        mgr2.import_entries(&entries);
+        assert_eq!(mgr2.table_count(), 2);
+        assert_eq!(
+            mgr2.table("P[0]").unwrap().get_exact(0, "pc").unwrap().as_u64(),
+            Some(0x1000)
+        );
+        assert_eq!(
+            mgr2.table("P[1]").unwrap().get_exact(5, "sp").unwrap().as_u64(),
+            Some(0x7FFF)
+        );
+    }
+
+    #[test]
+    fn test_manager_flat_snapshot_at() {
+        let mut mgr = TraceDynamicTableManager::new();
+        mgr.get_or_create("P[0]", "state")
+            .set(0, "pc", DynamicValue::U64(0x1000));
+        mgr.get_or_create("P[1]", "state")
+            .set(0, "sp", DynamicValue::U64(0x7FFF));
+
+        let flat = mgr.flat_snapshot_at(0);
+        assert_eq!(flat.len(), 2);
+        assert_eq!(flat.get("P[0].pc").unwrap().as_u64(), Some(0x1000));
+        assert_eq!(flat.get("P[1].sp").unwrap().as_u64(), Some(0x7FFF));
+    }
+
+    // -- New tests for DynamicTableStatistics --
+
+    #[test]
+    fn test_dynamic_table_statistics_serde() {
+        let stats = DynamicTableStatistics {
+            table_count: 3,
+            total_rows: 10,
+            total_columns: 5,
+            total_keys: 8,
+            total_non_null_values: 7,
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let back: DynamicTableStatistics = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.table_count, 3);
+        assert_eq!(back.total_rows, 10);
     }
 }

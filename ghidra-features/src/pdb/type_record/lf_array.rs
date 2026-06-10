@@ -438,8 +438,9 @@ mod tests {
     fn test_array_emit_none() {
         let a = make_test_array();
         let emitted = a.emit(Bind::NONE);
-        assert!(emitted.contains("[40]"));
-        assert!(emitted.contains("<0x0075>"));
+        // Java format: [size<indexType>]elementType
+        assert!(emitted.contains("[40<0x0075>]"));
+        assert!(emitted.contains("0x0074")); // element type
         assert!(!emitted.contains('(')); // no parens at NONE level
     }
 

@@ -791,6 +791,81 @@ impl GdbInferiorProcess {
     pub fn memory_footprint(&self) -> u64 {
         self.memory_regions.iter().map(|r| r.size).sum()
     }
+
+    /// Find a module by base address.
+    ///
+    /// Ported from `put_modules` which iterates modules by base.
+    pub fn find_module_by_base(&self, base: u64) -> Option<&ModuleWithSections> {
+        self.modules.iter().find(|m| m.info.base == base)
+    }
+
+    /// Get a sorted list of all thread numbers.
+    ///
+    /// Ported from the thread iteration in `put_threads`.
+    pub fn sorted_thread_numbers(&self) -> Vec<u32> {
+        let mut nums: Vec<u32> = self.threads.keys().copied().collect();
+        nums.sort();
+        nums
+    }
+
+    /// Get a sorted list of all module base addresses.
+    pub fn sorted_module_bases(&self) -> Vec<u64> {
+        let mut bases: Vec<u64> = self.modules.iter().map(|m| m.info.base).collect();
+        bases.sort();
+        bases
+    }
+
+    /// Build the display string for this inferior.
+    ///
+    /// Ported from `compute_name` in `commands.py`. The GDB format is
+    /// `'{pid} [{infnum}]'` when a PID is known, or `'{display}'` otherwise.
+    pub fn build_display_string(&self) -> String {
+        match self.pid {
+            Some(pid) => format!("{} [{}]", pid, self.num),
+            None => self.display.clone(),
+        }
+    }
+
+    /// Build extended trace values including PID and display string.
+    ///
+    /// Ported from `put_inferior_state` in `commands.py`.
+    pub fn build_trace_values_extended(&self) -> Vec<(String, String)> {
+        let state = self.compute_state();
+        let mut values = vec![
+            ("State".to_string(), state.as_trace_str().to_string()),
+            ("_display".to_string(), self.build_display_string()),
+        ];
+        if let Some(pid) = self.pid {
+            values.push(("PID".to_string(), format!("{}", pid)));
+        }
+        if let Some(code) = self.exit_code {
+            values.push(("Exit Code".to_string(), code.to_string()));
+        }
+        values
+    }
+
+    /// Count the total number of stack frames across all threads.
+    pub fn total_frame_count(&self) -> usize {
+        self.threads.values().map(|t| t.frame_count()).sum()
+    }
+
+    /// Get all running thread numbers.
+    pub fn running_thread_numbers(&self) -> Vec<u32> {
+        self.threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Running)
+            .map(|(&num, _)| num)
+            .collect()
+    }
+
+    /// Get all stopped thread numbers.
+    pub fn stopped_thread_numbers(&self) -> Vec<u32> {
+        self.threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Stopped)
+            .map(|(&num, _)| num)
+            .collect()
+    }
 }
 
 /// Signal configuration for a GDB inferior.
@@ -2508,6 +2583,95 @@ mod tests {
             object_file: "libc.so".to_string(),
         });
         assert_eq!(inf.memory_footprint(), 0x3000);
+    }
+
+    #[test]
+    fn test_inferior_find_module_by_base() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_module(ModuleInfo {
+            name: "libc.so.6".to_string(),
+            base: 0x7ffff7a00000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        assert!(inf.find_module_by_base(0x7ffff7a00000).is_some());
+        assert!(inf.find_module_by_base(0x100000).is_none());
+    }
+
+    #[test]
+    fn test_inferior_sorted_thread_numbers() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_thread(GdbThread::new(3));
+        inf.add_thread(GdbThread::new(1));
+        inf.add_thread(GdbThread::new(2));
+        assert_eq!(inf.sorted_thread_numbers(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_inferior_sorted_module_bases() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_module(ModuleInfo {
+            name: "b.so".to_string(),
+            base: 0x3000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        inf.add_module(ModuleInfo {
+            name: "a.so".to_string(),
+            base: 0x1000,
+            size: 0x1000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        assert_eq!(inf.sorted_module_bases(), vec![0x1000, 0x3000]);
+    }
+
+    #[test]
+    fn test_inferior_build_display_string() {
+        let inf = GdbInferiorProcess::new(2);
+        assert_eq!(inf.build_display_string(), "Process 2");
+
+        let inf_pid = GdbInferiorProcess::new(2).with_pid(1234);
+        assert_eq!(inf_pid.build_display_string(), "1234 [2]");
+    }
+
+    #[test]
+    fn test_inferior_build_trace_values_extended() {
+        let mut inf = GdbInferiorProcess::new(1).with_pid(42);
+        inf.state = ExecutionState::Stopped;
+        let values = inf.build_trace_values_extended();
+        assert!(values.iter().any(|(k, v)| k == "State" && v == "STOPPED"));
+        assert!(values.iter().any(|(k, v)| k == "PID" && v == "42"));
+        assert!(values.iter().any(|(k, v)| k == "_display" && v == "42 [1]"));
+    }
+
+    #[test]
+    fn test_inferior_total_frame_count() {
+        let mut inf = GdbInferiorProcess::new(1);
+        let mut t1 = GdbThread::new(1);
+        t1.add_frame(GdbStackFrame::new(0, 0x401000));
+        t1.add_frame(GdbStackFrame::new(1, 0x402000));
+        let mut t2 = GdbThread::new(2);
+        t2.add_frame(GdbStackFrame::new(0, 0x501000));
+        inf.add_thread(t1);
+        inf.add_thread(t2);
+        assert_eq!(inf.total_frame_count(), 3);
+    }
+
+    #[test]
+    fn test_inferior_running_stopped_thread_numbers() {
+        let mut inf = GdbInferiorProcess::new(1);
+        inf.add_thread(GdbThread::new(1).with_state(ExecutionState::Running));
+        inf.add_thread(GdbThread::new(2).with_state(ExecutionState::Stopped));
+        inf.add_thread(GdbThread::new(3).with_state(ExecutionState::Running));
+        inf.add_thread(GdbThread::new(4).with_state(ExecutionState::Exited));
+        assert_eq!(inf.running_thread_numbers(), vec![1, 3]);
+        assert_eq!(inf.stopped_thread_numbers(), vec![2]);
     }
 }
 

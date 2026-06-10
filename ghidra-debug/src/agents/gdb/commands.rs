@@ -8,7 +8,7 @@
 
 use super::paths;
 use crate::agents::{
-    BreakpointInfo, BreakpointType, ExecutionState, MemoryRegion, ModuleInfo, ProcessInfo,
+    BreakpointInfo, BreakpointType, MemoryRegion, ModuleInfo, ProcessInfo,
     RegisterValue, StackFrameInfo, ThreadInfo,
 };
 

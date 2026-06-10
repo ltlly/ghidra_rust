@@ -481,6 +481,23 @@ impl SManyReg {
         &self.type_record_number
     }
 
+    /// Return the total number of bytes occupied by the register indices.
+    ///
+    /// For u8-register variants (S_MANYREG, S_MANYREG_V2, S_MANYREG_ST) this
+    /// equals `count`. For u16-register variants (S_MANYREG2, S_MANYREG2_V2)
+    /// this equals `count * 2`.
+    ///
+    /// This is useful for computing binary layout sizes and alignment.
+    pub fn register_bytes(&self) -> usize {
+        match self.variant {
+            ManyRegVariant::ManyReg
+            | ManyRegVariant::ManyRegV2
+            | ManyRegVariant::ManyRegSt => self.count as usize,
+            ManyRegVariant::ManyReg2
+            | ManyRegVariant::ManyReg2V2 => self.count as usize * 2,
+        }
+    }
+
     /// Parse an S_MANYREG_V2 symbol and return it along with the total bytes
     /// consumed (including 4-byte alignment padding after the name).
     pub fn parse_manyreg_v2_aligned(data: &[u8]) -> Option<(Self, usize)> {
@@ -1059,5 +1076,62 @@ mod tests {
         let (sym, consumed) = SManyReg::parse_manyreg_v2_aligned(&data).unwrap();
         assert_eq!(sym.name, "");
         assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_register_bytes_manyreg2() {
+        // u16 registers: 3 registers = 6 bytes
+        let sym = SManyReg::new(
+            RecordNumber::type_record_number(0x1000),
+            3,
+            vec![17, 18, 20],
+            "triple".to_string(),
+        );
+        assert_eq!(sym.register_bytes(), 6);
+    }
+
+    #[test]
+    fn test_register_bytes_manyreg() {
+        // u8 registers: 3 registers = 3 bytes
+        let sym = SManyReg::new_manyreg(
+            RecordNumber::type_record_number(0x1000),
+            3,
+            vec![17, 18, 20],
+            "triple".to_string(),
+        );
+        assert_eq!(sym.register_bytes(), 3);
+    }
+
+    #[test]
+    fn test_register_bytes_manyreg_st() {
+        let sym = SManyReg::new_st(
+            RecordNumber::type_record_number(0x1000),
+            2,
+            vec![17, 18],
+            "pair".to_string(),
+        );
+        assert_eq!(sym.register_bytes(), 2);
+    }
+
+    #[test]
+    fn test_register_bytes_manyreg2_v2() {
+        let sym = SManyReg::new_manyreg2_v2(
+            RecordNumber::type_record_number(0x1000),
+            4,
+            vec![17, 18, 20, 21],
+            "quad".to_string(),
+        );
+        assert_eq!(sym.register_bytes(), 8);
+    }
+
+    #[test]
+    fn test_register_bytes_empty() {
+        let sym = SManyReg::new(
+            RecordNumber::type_record_number(0x1000),
+            0,
+            vec![],
+            "none".to_string(),
+        );
+        assert_eq!(sym.register_bytes(), 0);
     }
 }

@@ -853,19 +853,70 @@ impl LfPointer {
         Ok(ptr)
     }
 
+    /// Create from the 16-bit attribute layout (two separate bytes).
+    ///
+    /// The 16-bit pointer variant (`Pointer16MsType`) uses a different
+    /// attribute layout than the 32-bit variant:
+    /// - byte1: bits 0-4 = pointerType, bits 5-7 = pointerMode
+    /// - byte2: bit 0 = isFlat, bit 1 = isVolatile, bit 2 = isConst, bit 3 = isUnaligned
+    ///
+    /// The 16-bit variant does not have size, mocom, lref, rref, or unk fields.
+    pub fn from_parsed_16(
+        underlying_type_index: u32,
+        attr_byte1: u8,
+        attr_byte2: u8,
+    ) -> Self {
+        let pt_val = attr_byte1 & 0x1F;
+        let pm_val = (attr_byte1 >> 5) & 0x07;
+
+        let is_flat = (attr_byte2 & 0x01) != 0;
+        let is_volatile = (attr_byte2 & 0x02) != 0;
+        let is_const = (attr_byte2 & 0x04) != 0;
+        let is_unaligned = (attr_byte2 & 0x08) != 0;
+
+        let pointer_type = PointerType::from_value(pt_val);
+        let pointer_mode = PointerMode::from_value(pm_val);
+
+        Self {
+            record_number: RecordNumber::NO_TYPE,
+            underlying_record_number: RecordNumber::type_record(underlying_type_index),
+            pointer_type,
+            pointer_mode,
+            is_flat,
+            is_volatile,
+            is_const,
+            is_unaligned,
+            is_restrict: false,
+            size: 2, // 16-bit pointers are 2 bytes
+            is_mocom: false,
+            is_lref: false,
+            is_rref: false,
+            is_unknown: false,
+            member_pointer_containing_class_record_number: RecordNumber::NO_TYPE,
+            member_pointer_type: None,
+            base_segment: 0,
+            pointer_base_type_record_number: RecordNumber::NO_TYPE,
+            base_symbol: String::new(),
+            pointer_name: String::new(),
+        }
+    }
+
     /// Parse the core fields from a 16-bit variant byte reader.
     ///
     /// This mirrors the Java `Pointer16MsType` constructor which reads
-    /// a 16-bit underlying type index and a u16 attributes field (with
-    /// a smaller attribute layout).
+    /// two attribute bytes first, then the 16-bit underlying type index.
+    /// The attribute layout is different from the 32-bit variant:
+    /// - byte1: bits 0-4 = pointerType, bits 5-7 = pointerMode
+    /// - byte2: bit 0 = isFlat, bit 1 = isVolatile, bit 2 = isConst, bit 3 = isUnaligned
     ///
     /// # Errors
     ///
     /// Returns [`PdbException`] if the reader does not have enough data.
     pub fn parse_from_reader_16(reader: &mut PdbByteReader) -> Result<Self, PdbException> {
+        let attr_byte1 = reader.read_u8()?;
+        let attr_byte2 = reader.read_u8()?;
         let underlying_type_index = reader.read_u16()? as u32;
-        let attributes = reader.read_u16()? as u32;
-        Ok(Self::from_parsed(underlying_type_index, attributes))
+        Ok(Self::from_parsed_16(underlying_type_index, attr_byte1, attr_byte2))
     }
 }
 
@@ -1842,18 +1893,19 @@ mod tests {
 
     #[test]
     fn test_pointer_parse_from_reader_16() {
-        // underlyingType=0x0074(u16), attributes with ptrType=10(near32),
-        // mode=0(*), size=4
-        let attrs: u32 = 10 | (0 << 5) | (0 << 8) | (0 << 9) | (0 << 10)
-            | (0 << 11) | (0 << 12) | (4u32 << 13);
+        // Java Pointer16MsType: attrs first (2 bytes), then underlyingType(u16).
+        // byte1: ptrType=10(near32), mode=0(*) => 10 | (0 << 5) = 0x0A
+        // byte2: no qualifiers => 0x00
         let mut data = Vec::new();
-        data.extend_from_slice(&0x0074u16.to_le_bytes());
-        data.extend_from_slice(&(attrs as u16).to_le_bytes());
+        data.push(0x0Au8);  // attr_byte1: ptrType=10, mode=0
+        data.push(0x00u8);  // attr_byte2: no qualifiers
+        data.extend_from_slice(&0x0074u16.to_le_bytes()); // underlyingType
         let mut reader = PdbByteReader::new(&data);
         let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
         assert_eq!(p.underlying_record_number, RecordNumber::type_record(0x0074));
         assert_eq!(p.pointer_type, PointerType::Near32);
         assert_eq!(p.pointer_mode, PointerMode::Pointer);
+        assert_eq!(p.size, 2); // 16-bit pointer size
     }
 
     #[test]
@@ -1866,14 +1918,88 @@ mod tests {
 
     #[test]
     fn test_pointer_parse_from_reader_16_ref() {
-        // ptrType=10(near32), mode=1(lvalue ref), size=4
-        let attrs: u32 = 10 | (1 << 5) | (4u32 << 13);
+        // byte1: ptrType=10(near32), mode=1(lvalue ref) => 10 | (1 << 5) = 0x2A
+        // byte2: no qualifiers => 0x00
         let mut data = Vec::new();
+        data.push(0x2Au8);  // attr_byte1: ptrType=10, mode=1
+        data.push(0x00u8);  // attr_byte2: no qualifiers
         data.extend_from_slice(&0x0074u16.to_le_bytes());
-        data.extend_from_slice(&(attrs as u16).to_le_bytes());
         let mut reader = PdbByteReader::new(&data);
         let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
         assert_eq!(p.pointer_mode, PointerMode::LValueReference);
         assert!(p.is_reference());
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_16_const() {
+        // byte1: ptrType=10(near32), mode=0(*) => 0x0A
+        // byte2: const (bit 2) => 0x04
+        let mut data = Vec::new();
+        data.push(0x0Au8);
+        data.push(0x04u8); // const
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
+        assert!(p.is_const);
+        assert!(!p.is_volatile);
+        assert!(!p.is_unaligned);
+        assert!(!p.is_flat);
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_16_volatile() {
+        // byte1: ptrType=10(near32), mode=0(*) => 0x0A
+        // byte2: volatile (bit 1) => 0x02
+        let mut data = Vec::new();
+        data.push(0x0Au8);
+        data.push(0x02u8); // volatile
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
+        assert!(!p.is_const);
+        assert!(p.is_volatile);
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_16_flat() {
+        // byte1: ptrType=10(near32), mode=0(*) => 0x0A
+        // byte2: flat (bit 0) => 0x01
+        let mut data = Vec::new();
+        data.push(0x0Au8);
+        data.push(0x01u8); // flat
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
+        assert!(p.is_flat);
+        assert!(!p.is_const);
+    }
+
+    #[test]
+    fn test_pointer_parse_from_reader_16_all_qualifiers() {
+        // byte1: ptrType=10(near32), mode=0(*) => 0x0A
+        // byte2: flat(0) | volatile(1) | const(2) | unaligned(3) => 0x0F
+        let mut data = Vec::new();
+        data.push(0x0Au8);
+        data.push(0x0Fu8); // all qualifiers
+        data.extend_from_slice(&0x0074u16.to_le_bytes());
+        let mut reader = PdbByteReader::new(&data);
+        let p = LfPointer::parse_from_reader_16(&mut reader).unwrap();
+        assert!(p.is_flat);
+        assert!(p.is_volatile);
+        assert!(p.is_const);
+        assert!(p.is_unaligned);
+    }
+
+    #[test]
+    fn test_pointer_from_parsed_16() {
+        // byte1: ptrType=10(near32), mode=0(*) => 0x0A
+        // byte2: const only => 0x04
+        let p = LfPointer::from_parsed_16(0x0074, 0x0A, 0x04);
+        assert_eq!(p.pointer_type, PointerType::Near32);
+        assert_eq!(p.pointer_mode, PointerMode::Pointer);
+        assert!(p.is_const);
+        assert!(!p.is_volatile);
+        assert_eq!(p.size, 2);
+        assert_eq!(p.underlying_record_number, RecordNumber::type_record(0x0074));
     }
 }

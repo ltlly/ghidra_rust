@@ -50,6 +50,12 @@ pub enum EndVariant {
 pub struct SEnd {
     /// Which variant was specified.
     variant: EndVariant,
+    /// The remaining record length after the symbol kind field.
+    ///
+    /// For `S_ENDARG` (0x000A), Ghidra's `EndArgumentsListMsSymbol` records
+    /// this value as `reader.getLimit() - reader.getIndex()`. For other
+    /// end variants this is always 0.
+    record_length: u32,
 }
 
 impl SEnd {
@@ -57,6 +63,7 @@ impl SEnd {
     pub fn new() -> Self {
         Self {
             variant: EndVariant::End,
+            record_length: 0,
         }
     }
 
@@ -78,6 +85,20 @@ impl SEnd {
     pub fn endarg() -> Self {
         Self {
             variant: EndVariant::EndArg,
+            record_length: 0,
+        }
+    }
+
+    /// Create an S_ENDARG symbol with a specific record length.
+    ///
+    /// The `record_length` parameter corresponds to the remaining bytes in the
+    /// symbol record after the symbol kind field, matching Ghidra's
+    /// `EndArgumentsListMsSymbol` which stores
+    /// `reader.getLimit() - reader.getIndex()`.
+    pub fn endarg_with_length(record_length: u32) -> Self {
+        Self {
+            variant: EndVariant::EndArg,
+            record_length,
         }
     }
 
@@ -87,6 +108,7 @@ impl SEnd {
     pub fn proc_id_end() -> Self {
         Self {
             variant: EndVariant::ProcIdEnd,
+            record_length: 0,
         }
     }
 
@@ -96,6 +118,7 @@ impl SEnd {
     pub fn inline_site_end() -> Self {
         Self {
             variant: EndVariant::InlineSiteEnd,
+            record_length: 0,
         }
     }
 
@@ -105,6 +128,7 @@ impl SEnd {
     pub fn inlined_function_end() -> Self {
         Self {
             variant: EndVariant::InlinedFunctionEnd,
+            record_length: 0,
         }
     }
 
@@ -114,12 +138,22 @@ impl SEnd {
     pub fn procedure_id_end() -> Self {
         Self {
             variant: EndVariant::ProcedureIdEnd,
+            record_length: 0,
         }
     }
 
     /// Return the variant of this end symbol.
     pub fn variant(&self) -> EndVariant {
         self.variant
+    }
+
+    /// Return the record length stored for this end symbol.
+    ///
+    /// For `S_ENDARG`, this is the remaining byte count after the symbol kind
+    /// field (matching Ghidra's `EndArgumentsListMsSymbol.recordLength`).
+    /// For all other variants this is 0.
+    pub fn record_length(&self) -> u32 {
+        self.record_length
     }
 
     /// Return `true` if this is a general end-of-scope marker (`S_END`).
@@ -174,6 +208,17 @@ impl SEnd {
         Some(Self::endarg())
     }
 
+    /// Parse an S_ENDARG symbol from a byte slice, recording the remaining
+    /// payload length.
+    ///
+    /// The `remaining_length` parameter is the number of bytes remaining in
+    /// the symbol record after the symbol kind field. This matches Ghidra's
+    /// `EndArgumentsListMsSymbol` which stores
+    /// `reader.getLimit() - reader.getIndex()`.
+    pub fn parse_endarg_with_length(_data: &[u8], remaining_length: u32) -> Option<Self> {
+        Some(Self::endarg_with_length(remaining_length))
+    }
+
     /// Parse an S_PROC_ID_END symbol from a byte slice.
     ///
     /// The S_PROC_ID_END symbol has no payload; any data present is ignored.
@@ -212,7 +257,10 @@ impl Default for SEnd {
 
 impl From<EndVariant> for SEnd {
     fn from(variant: EndVariant) -> Self {
-        Self { variant }
+        Self {
+            variant,
+            record_length: 0,
+        }
     }
 }
 
@@ -255,7 +303,14 @@ impl AbstractMsSymbol for SEnd {
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.variant {
             EndVariant::End => write!(f, "End"),
-            EndVariant::EndArg => write!(f, "EndArg"),
+            EndVariant::EndArg => {
+                if self.record_length != 0 {
+                    // Match Java EndArgumentsListMsSymbol: "ENDARG, Length = 0x%X"
+                    write!(f, "EndArg, Length = 0x{:X}", self.record_length)
+                } else {
+                    write!(f, "EndArg")
+                }
+            }
             EndVariant::ProcIdEnd => write!(f, "ProcIdEnd"),
             EndVariant::InlineSiteEnd => write!(f, "InlineSiteEnd"),
             EndVariant::InlinedFunctionEnd => write!(f, "InlinedFunctionEnd"),
@@ -549,5 +604,52 @@ mod tests {
         assert_eq!(format!("{}", EndVariant::InlineSiteEnd), "InlineSiteEnd");
         assert_eq!(format!("{}", EndVariant::InlinedFunctionEnd), "InlinedFunctionEnd");
         assert_eq!(format!("{}", EndVariant::ProcedureIdEnd), "ProcedureIdEnd");
+    }
+
+    #[test]
+    fn test_record_length_default_zero() {
+        let sym = SEnd::new();
+        assert_eq!(sym.record_length(), 0);
+
+        let sym = SEnd::endarg();
+        assert_eq!(sym.record_length(), 0);
+    }
+
+    #[test]
+    fn test_endarg_with_length() {
+        let sym = SEnd::endarg_with_length(0x10);
+        assert_eq!(sym.variant(), EndVariant::EndArg);
+        assert_eq!(sym.record_length(), 0x10);
+        assert_eq!(sym.pdb_id(), 0x000A);
+    }
+
+    #[test]
+    fn test_parse_endarg_with_length() {
+        let sym = SEnd::parse_endarg_with_length(&[], 0x20).unwrap();
+        assert_eq!(sym.variant(), EndVariant::EndArg);
+        assert_eq!(sym.record_length(), 0x20);
+    }
+
+    #[test]
+    fn test_endarg_with_length_display() {
+        let sym = SEnd::endarg_with_length(0x10);
+        let s = format!("{}", sym);
+        assert!(s.contains("EndArg"));
+        assert!(s.contains("Length = 0x10"));
+    }
+
+    #[test]
+    fn test_endarg_without_length_display() {
+        let sym = SEnd::endarg();
+        let s = format!("{}", sym);
+        assert_eq!(s, "EndArg");
+    }
+
+    #[test]
+    fn test_record_length_other_variants_zero() {
+        assert_eq!(SEnd::proc_id_end().record_length(), 0);
+        assert_eq!(SEnd::inline_site_end().record_length(), 0);
+        assert_eq!(SEnd::inlined_function_end().record_length(), 0);
+        assert_eq!(SEnd::procedure_id_end().record_length(), 0);
     }
 }

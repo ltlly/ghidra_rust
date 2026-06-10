@@ -90,6 +90,9 @@ pub enum CallingConvention {
 
 impl CallingConvention {
     /// The C-style ABI label (e.g. `"__cdecl"`, `"__stdcall"`).
+    ///
+    /// Mirrors the Java `CallingConvention.label` field. Returns empty
+    /// string for calling conventions that have no standard label.
     pub fn label(&self) -> &'static str {
         match self {
             Self::NearC | Self::FarC => "__cdecl",
@@ -99,18 +102,18 @@ impl CallingConvention {
             Self::NearStd | Self::FarStd => "__stdcall",
             Self::NearSys | Self::FarSys => "__syscall",
             Self::ThisCall => "__thiscall",
-            Self::MipsCall => "mips",
-            Self::Generic => "generic",
-            Self::AlphaCall => "alpha",
-            Self::PpcCall => "ppc",
-            Self::ShCall => "sh",
-            Self::ArmCall => "arm",
-            Self::Am33Call => "am33",
-            Self::TriCall => "tricore",
-            Self::Sh5Call => "sh5",
-            Self::M32rCall => "m32r",
-            Self::ClrCall => "clrcall",
-            Self::Inline => "inline",
+            Self::MipsCall => "",
+            Self::Generic => "",
+            Self::AlphaCall => "",
+            Self::PpcCall => "",
+            Self::ShCall => "",
+            Self::ArmCall => "",
+            Self::Am33Call => "",
+            Self::TriCall => "",
+            Self::Sh5Call => "",
+            Self::M32rCall => "",
+            Self::ClrCall => "",
+            Self::Inline => "",
             Self::NearVector => "__vectorcall",
             Self::Reserved => "",
         }
@@ -627,6 +630,10 @@ mod tests {
         assert_eq!(CallingConvention::ThisCall.label(), "__thiscall");
         assert_eq!(CallingConvention::NearVector.label(), "__vectorcall");
         assert_eq!(CallingConvention::Skipped.label(), "");
+        // Non-ABI conventions have empty labels (matching Java).
+        assert_eq!(CallingConvention::MipsCall.label(), "");
+        assert_eq!(CallingConvention::Generic.label(), "");
+        assert_eq!(CallingConvention::Inline.label(), "");
     }
 
     #[test]
@@ -826,7 +833,7 @@ mod tests {
             RecordNumber::type_record(0x1001),
         );
         assert!(p.is_inline());
-        assert_eq!(p.calling_convention.label(), "inline");
+        assert_eq!(p.calling_convention.label(), ""); // Java Inline has empty label
 
         let p = make_test_procedure();
         assert!(!p.is_inline());

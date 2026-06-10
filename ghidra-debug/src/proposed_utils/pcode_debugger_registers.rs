@@ -4669,6 +4669,461 @@ fn read_u64_le(bytes: &[u8]) -> u64 {
 }
 
 // ============================================================================
+// RegisterDependencyEdge -- data-flow edge between registers
+// ============================================================================
+
+/// An edge in a register dependency graph representing a data-flow
+/// relationship.
+///
+/// Ported from Ghidra's register dependency analysis support. Each
+/// edge records that the source register's value flows into the
+/// destination register, optionally through a p-code operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDependencyEdge {
+    /// The source register name (producer).
+    pub source: String,
+    /// The destination register name (consumer).
+    pub destination: String,
+    /// The p-code operation through which data flows (if known).
+    pub via_op: Option<String>,
+    /// Byte-level detail: which bytes of the source contribute.
+    pub source_range: Option<(u16, u16)>,
+    /// Byte-level detail: which bytes of the destination are affected.
+    pub dest_range: Option<(u16, u16)>,
+}
+
+impl RegisterDependencyEdge {
+    /// Create a simple dependency edge.
+    pub fn new(source: impl Into<String>, destination: impl Into<String>) -> Self {
+        Self {
+            source: source.into(),
+            destination: destination.into(),
+            via_op: None,
+            source_range: None,
+            dest_range: None,
+        }
+    }
+
+    /// Set the p-code operation.
+    pub fn with_op(mut self, op: impl Into<String>) -> Self {
+        self.via_op = Some(op.into());
+        self
+    }
+
+    /// Set byte ranges for source and destination.
+    pub fn with_ranges(
+        mut self,
+        src_lo: u16,
+        src_hi: u16,
+        dst_lo: u16,
+        dst_hi: u16,
+    ) -> Self {
+        self.source_range = Some((src_lo, src_hi));
+        self.dest_range = Some((dst_lo, dst_hi));
+        self
+    }
+}
+
+// ============================================================================
+// RegisterAliasGraph -- multi-level alias resolution with graph traversal
+// ============================================================================
+
+/// A directed graph for resolving register aliases across multiple
+/// levels.
+///
+/// Ported from Ghidra's alias-chain graph traversal. Unlike
+/// `RegisterAliasChain` which resolves a single chain, this graph
+/// supports fan-in and fan-out: a register can have multiple aliases
+/// (e.g., AL, AH, AX, EAX, RAX) and the graph can answer questions
+/// like "which registers are sub-parts of RAX?" or "what is the
+/// widest alias containing AL?".
+#[derive(Debug, Clone, Default)]
+pub struct RegisterAliasGraph {
+    /// Edges: alias -> canonical (child -> parent in the alias hierarchy).
+    child_to_parent: BTreeMap<String, String>,
+    /// Reverse edges: canonical -> set of aliases.
+    parent_to_children: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl RegisterAliasGraph {
+    /// Create a new empty alias graph.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Register an alias relationship: `child` is part of `parent`.
+    pub fn add_alias(&mut self, child: impl Into<String>, parent: impl Into<String>) {
+        let child = child.into();
+        let parent = parent.into();
+        self.child_to_parent.insert(child.clone(), parent.clone());
+        self.parent_to_children
+            .entry(parent)
+            .or_default()
+            .insert(child);
+    }
+
+    /// Get the immediate parent (wider register) of the given register.
+    pub fn parent_of(&self, register: &str) -> Option<&str> {
+        self.child_to_parent.get(register).map(|s| s.as_str())
+    }
+
+    /// Get the immediate children (narrower registers) of the given register.
+    pub fn children_of(&self, register: &str) -> Vec<&str> {
+        self.parent_to_children
+            .get(register)
+            .map(|set| set.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Walk up the alias chain to find the widest register.
+    pub fn widest_alias<'a>(&'a self, register: &'a str) -> &'a str {
+        let mut current = register;
+        while let Some(parent) = self.child_to_parent.get(current) {
+            current = parent;
+        }
+        current
+    }
+
+    /// Collect the full chain from the given register up to the widest.
+    pub fn chain_to_widest(&self, register: &str) -> Vec<String> {
+        let mut chain = vec![register.to_string()];
+        let mut current = register;
+        while let Some(parent) = self.child_to_parent.get(current) {
+            chain.push(parent.clone());
+            current = parent;
+        }
+        chain
+    }
+
+    /// Collect all descendants (recursively) of a register.
+    pub fn all_descendants(&self, register: &str) -> BTreeSet<String> {
+        let mut result = BTreeSet::new();
+        let mut stack = vec![register.to_string()];
+        while let Some(node) = stack.pop() {
+            if let Some(children) = self.parent_to_children.get(&node) {
+                for child in children {
+                    if result.insert(child.clone()) {
+                        stack.push(child.clone());
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    /// Check whether `candidate` is an ancestor (wider register) of `register`.
+    pub fn is_ancestor_of(&self, register: &str, candidate: &str) -> bool {
+        let mut current = register;
+        while let Some(parent) = self.child_to_parent.get(current) {
+            if parent == candidate {
+                return true;
+            }
+            current = parent;
+        }
+        false
+    }
+
+    /// The total number of alias relationships.
+    pub fn len(&self) -> usize {
+        self.child_to_parent.len()
+    }
+
+    /// Whether the graph has no aliases.
+    pub fn is_empty(&self) -> bool {
+        self.child_to_parent.is_empty()
+    }
+}
+
+// ============================================================================
+// RegisterBankView -- filtered/selected view of a register bank
+// ============================================================================
+
+/// A read-only, filtered view over a `PcodeRegisterBank`.
+///
+/// Provides a window into a register bank showing only registers
+/// that match a set of names or belong to a specific group.
+/// Useful for displaying subsets of register state in UI panels.
+#[derive(Debug, Clone)]
+pub struct RegisterBankView<'a> {
+    bank: &'a PcodeRegisterBank,
+    filter_names: BTreeSet<String>,
+    group_name: Option<String>,
+}
+
+impl<'a> RegisterBankView<'a> {
+    /// Create a view showing only the named registers.
+    pub fn by_names(bank: &'a PcodeRegisterBank, names: &[&str]) -> Self {
+        Self {
+            bank,
+            filter_names: names.iter().map(|s| s.to_string()).collect(),
+            group_name: None,
+        }
+    }
+
+    /// Create a view showing registers in a specific group.
+    pub fn by_group(bank: &'a PcodeRegisterBank, group_name: impl Into<String>) -> Self {
+        Self {
+            bank,
+            filter_names: BTreeSet::new(),
+            group_name: Some(group_name.into()),
+        }
+    }
+
+    /// Create a view showing all registers.
+    pub fn all(bank: &'a PcodeRegisterBank) -> Self {
+        Self {
+            bank,
+            filter_names: BTreeSet::new(),
+            group_name: None,
+        }
+    }
+
+    /// Iterate over visible register names and their values.
+    pub fn entries(&self) -> Vec<(&str, Option<&[u8]>)> {
+        self.bank
+            .definitions
+            .keys()
+            .filter(|name| self.is_visible(name))
+            .map(|name| {
+                let val = self.bank.values.get(name.as_str()).map(|v| v.as_slice());
+                (name.as_str(), val)
+            })
+            .collect()
+    }
+
+    /// Get the value of a specific register if it is visible.
+    pub fn get_value(&self, name: &str) -> Option<&[u8]> {
+        if self.is_visible(name) {
+            self.bank.values.get(name).map(|v| v.as_slice())
+        } else {
+            None
+        }
+    }
+
+    /// The number of visible registers.
+    pub fn len(&self) -> usize {
+        self.bank
+            .definitions
+            .keys()
+            .filter(|name| self.is_visible(name))
+            .count()
+    }
+
+    /// Whether the view has no visible registers.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn is_visible(&self, name: &str) -> bool {
+        if !self.filter_names.is_empty() {
+            return self.filter_names.contains(name);
+        }
+        if let Some(ref group) = self.group_name {
+            return self
+                .bank
+                .groups
+                .iter()
+                .any(|g| g.name == *group && g.members.contains(&name.to_string()));
+        }
+        true // "all" view
+    }
+}
+
+// ============================================================================
+// RegisterValueFormatter -- configurable register value display
+// ============================================================================
+
+/// Format for displaying register values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RegisterDisplayFormat {
+    /// Display as hexadecimal (e.g., "0x00000000DEADBEEF").
+    Hex,
+    /// Display as decimal (unsigned).
+    Decimal,
+    /// Display as decimal (signed, two's complement).
+    SignedDecimal,
+    /// Display as binary.
+    Binary,
+    /// Display as octal.
+    Octal,
+    /// Display as raw bytes.
+    RawBytes,
+}
+
+/// A configurable formatter for register values.
+///
+/// Supports multiple display formats and can handle endianness
+/// conversion for display purposes.
+#[derive(Debug, Clone)]
+pub struct RegisterValueFormatter {
+    /// The display format.
+    pub format: RegisterDisplayFormat,
+    /// Whether to include a prefix (e.g., "0x" for hex).
+    pub show_prefix: bool,
+    /// Whether to zero-pad to the register's full size.
+    pub zero_pad: bool,
+    /// Whether to show the value in big-endian display order.
+    pub big_endian_display: bool,
+}
+
+impl RegisterValueFormatter {
+    /// Create a formatter with default settings (hex, prefixed, zero-padded).
+    pub fn hex() -> Self {
+        Self {
+            format: RegisterDisplayFormat::Hex,
+            show_prefix: true,
+            zero_pad: true,
+            big_endian_display: false,
+        }
+    }
+
+    /// Create a formatter for decimal display.
+    pub fn decimal() -> Self {
+        Self {
+            format: RegisterDisplayFormat::Decimal,
+            show_prefix: false,
+            zero_pad: false,
+            big_endian_display: false,
+        }
+    }
+
+    /// Create a formatter for signed decimal display.
+    pub fn signed_decimal() -> Self {
+        Self {
+            format: RegisterDisplayFormat::SignedDecimal,
+            show_prefix: false,
+            zero_pad: false,
+            big_endian_display: false,
+        }
+    }
+
+    /// Create a formatter for binary display.
+    pub fn binary() -> Self {
+        Self {
+            format: RegisterDisplayFormat::Binary,
+            show_prefix: true,
+            zero_pad: false,
+            big_endian_display: false,
+        }
+    }
+
+    /// Create an octal formatter.
+    pub fn octal() -> Self {
+        Self {
+            format: RegisterDisplayFormat::Octal,
+            show_prefix: true,
+            zero_pad: false,
+            big_endian_display: false,
+        }
+    }
+
+    /// Set whether to show the prefix.
+    pub fn with_prefix(mut self, show: bool) -> Self {
+        self.show_prefix = show;
+        self
+    }
+
+    /// Set whether to zero-pad.
+    pub fn with_zero_pad(mut self, pad: bool) -> Self {
+        self.zero_pad = pad;
+        self
+    }
+
+    /// Set big-endian display order.
+    pub fn with_big_endian_display(mut self, big_endian: bool) -> Self {
+        self.big_endian_display = big_endian;
+        self
+    }
+
+    /// Format a register value for display.
+    pub fn format_value(&self, value: &[u8]) -> String {
+        if value.is_empty() {
+            return String::new();
+        }
+
+        let display_bytes = if self.big_endian_display {
+            let mut reversed = value.to_vec();
+            reversed.reverse();
+            reversed
+        } else {
+            value.to_vec()
+        };
+
+        match self.format {
+            RegisterDisplayFormat::Hex => self.format_hex(&display_bytes),
+            RegisterDisplayFormat::Decimal => self.format_decimal_unsigned(&display_bytes),
+            RegisterDisplayFormat::SignedDecimal => self.format_decimal_signed(&display_bytes),
+            RegisterDisplayFormat::Binary => self.format_binary(&display_bytes),
+            RegisterDisplayFormat::Octal => self.format_octal(&display_bytes),
+            RegisterDisplayFormat::RawBytes => self.format_raw(&display_bytes),
+        }
+    }
+
+    fn format_hex(&self, bytes: &[u8]) -> String {
+        let hex: String = bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        let trimmed = hex.trim_start_matches('0');
+        let digits = if trimmed.is_empty() { "0" } else { trimmed };
+        if self.zero_pad {
+            if self.show_prefix {
+                format!("0x{:0>width$}", digits, width = bytes.len() * 2)
+            } else {
+                format!("{:0>width$}", digits, width = bytes.len() * 2)
+            }
+        } else if self.show_prefix {
+            format!("0x{}", digits)
+        } else {
+            digits.to_string()
+        }
+    }
+
+    fn format_decimal_unsigned(&self, bytes: &[u8]) -> String {
+        let val = read_u64_le(bytes);
+        val.to_string()
+    }
+
+    fn format_decimal_signed(&self, bytes: &[u8]) -> String {
+        let val = read_u64_le(bytes);
+        let bits = bytes.len() * 8;
+        if bits >= 64 {
+            return (val as i64).to_string();
+        }
+        let sign_bit = 1u64 << (bits - 1);
+        if val & sign_bit != 0 {
+            let adjusted = val as i64 - (1i64 << bits);
+            adjusted.to_string()
+        } else {
+            (val as i64).to_string()
+        }
+    }
+
+    fn format_binary(&self, bytes: &[u8]) -> String {
+        let bin: String = bytes.iter().map(|b| format!("{:08b}", b)).collect();
+        if self.show_prefix {
+            format!("0b{}", bin.trim_start_matches('0'))
+        } else {
+            bin.trim_start_matches('0').to_string()
+        }
+    }
+
+    fn format_octal(&self, bytes: &[u8]) -> String {
+        let val = read_u64_le(bytes);
+        if self.show_prefix {
+            format!("0o{:o}", val)
+        } else {
+            format!("{:o}", val)
+        }
+    }
+
+    fn format_raw(&self, bytes: &[u8]) -> String {
+        bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -6586,5 +7041,202 @@ mod tests {
         };
         assert!(cond.evaluate(None, &[0x06, 0x00, 0x00, 0x00]));
         assert!(!cond.evaluate(None, &[0x04, 0x00, 0x00, 0x00]));
+    }
+
+    // -- RegisterDependencyEdge --
+
+    #[test]
+    fn test_dependency_edge_basic() {
+        let edge = RegisterDependencyEdge::new("RAX", "RBX");
+        assert_eq!(edge.source, "RAX");
+        assert_eq!(edge.destination, "RBX");
+        assert!(edge.via_op.is_none());
+    }
+
+    #[test]
+    fn test_dependency_edge_with_op() {
+        let edge = RegisterDependencyEdge::new("RAX", "RBX").with_op("INT_ADD");
+        assert_eq!(edge.via_op.as_deref(), Some("INT_ADD"));
+    }
+
+    #[test]
+    fn test_dependency_edge_with_ranges() {
+        let edge = RegisterDependencyEdge::new("RAX", "EAX").with_ranges(0, 7, 0, 3);
+        assert_eq!(edge.source_range, Some((0, 7)));
+        assert_eq!(edge.dest_range, Some((0, 3)));
+    }
+
+    // -- RegisterAliasGraph --
+
+    #[test]
+    fn test_alias_graph_basic() {
+        let mut graph = RegisterAliasGraph::new();
+        graph.add_alias("AL", "AX");
+        graph.add_alias("AH", "AX");
+        graph.add_alias("AX", "EAX");
+        graph.add_alias("EAX", "RAX");
+
+        assert_eq!(graph.parent_of("AL"), Some("AX"));
+        assert_eq!(graph.parent_of("RAX"), None);
+    }
+
+    #[test]
+    fn test_alias_graph_children() {
+        let mut graph = RegisterAliasGraph::new();
+        graph.add_alias("AL", "AX");
+        graph.add_alias("AH", "AX");
+        graph.add_alias("AX", "EAX");
+
+        let children = graph.children_of("AX");
+        assert_eq!(children.len(), 2);
+        assert!(children.contains(&"AL"));
+        assert!(children.contains(&"AH"));
+    }
+
+    #[test]
+    fn test_alias_graph_widest() {
+        let mut graph = RegisterAliasGraph::new();
+        graph.add_alias("AL", "AX");
+        graph.add_alias("AX", "EAX");
+        graph.add_alias("EAX", "RAX");
+
+        assert_eq!(graph.widest_alias("AL"), "RAX");
+        assert_eq!(graph.widest_alias("EAX"), "RAX");
+        assert_eq!(graph.widest_alias("RAX"), "RAX");
+    }
+
+    #[test]
+    fn test_alias_graph_chain() {
+        let mut graph = RegisterAliasGraph::new();
+        graph.add_alias("AL", "AX");
+        graph.add_alias("AX", "EAX");
+
+        let chain = graph.chain_to_widest("AL");
+        assert_eq!(chain, vec!["AL", "AX", "EAX"]);
+    }
+
+    #[test]
+    fn test_alias_graph_descendants() {
+        let mut graph = RegisterAliasGraph::new();
+        graph.add_alias("AL", "AX");
+        graph.add_alias("AH", "AX");
+        graph.add_alias("AX", "EAX");
+        graph.add_alias("EAX", "RAX");
+
+        let desc = graph.all_descendants("RAX");
+        assert_eq!(desc.len(), 4);
+        assert!(desc.contains("AL"));
+        assert!(desc.contains("AH"));
+        assert!(desc.contains("AX"));
+        assert!(desc.contains("EAX"));
+    }
+
+    #[test]
+    fn test_alias_graph_is_ancestor() {
+        let mut graph = RegisterAliasGraph::new();
+        graph.add_alias("AL", "AX");
+        graph.add_alias("AX", "EAX");
+
+        assert!(graph.is_ancestor_of("AL", "AX"));
+        assert!(graph.is_ancestor_of("AL", "EAX"));
+        assert!(!graph.is_ancestor_of("AX", "AL"));
+    }
+
+    // -- RegisterBankView --
+
+    #[test]
+    fn test_bank_view_by_names() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define_register(RegisterDefinition::new("RAX", 64));
+        bank.define_register(RegisterDefinition::new("RBX", 64));
+        bank.define_register(RegisterDefinition::new("RCX", 64));
+        bank.write_register("RAX", &[0xAA; 8]);
+        bank.write_register("RBX", &[0xBB; 8]);
+
+        let view = RegisterBankView::by_names(&bank, &["RAX", "RBX"]);
+        assert_eq!(view.len(), 2);
+        assert_eq!(view.get_value("RAX"), Some(vec![0xAA; 8].as_slice()));
+        assert!(view.get_value("RCX").is_none());
+    }
+
+    #[test]
+    fn test_bank_view_all() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define_register(RegisterDefinition::new("RAX", 64));
+        bank.define_register(RegisterDefinition::new("RBX", 64));
+
+        let view = RegisterBankView::all(&bank);
+        assert_eq!(view.len(), 2);
+    }
+
+    #[test]
+    fn test_bank_view_by_group() {
+        let mut bank = PcodeRegisterBank::new();
+        bank.define_register(RegisterDefinition::new("RAX", 64));
+        bank.define_register(RegisterDefinition::new("RBX", 64));
+
+        let mut group = RegisterGroup::new("General Purpose");
+        group.add_member("RAX");
+        bank.add_group(group);
+
+        let view = RegisterBankView::by_group(&bank, "General Purpose");
+        assert_eq!(view.len(), 1);
+        assert!(view.get_value("RAX").is_some() || view.entries().len() == 1);
+    }
+
+    // -- RegisterValueFormatter --
+
+    #[test]
+    fn test_formatter_hex() {
+        let fmt = RegisterValueFormatter::hex();
+        assert_eq!(fmt.format_value(&[0xDE, 0xAD, 0xBE, 0xEF]), "0xdeadbeef");
+    }
+
+    #[test]
+    fn test_formatter_hex_no_prefix() {
+        let fmt = RegisterValueFormatter::hex().with_prefix(false);
+        assert_eq!(fmt.format_value(&[0xFF, 0x01]), "ff01");
+    }
+
+    #[test]
+    fn test_formatter_decimal() {
+        let fmt = RegisterValueFormatter::decimal();
+        assert_eq!(fmt.format_value(&[0x0A, 0x00, 0x00, 0x00]), "10");
+    }
+
+    #[test]
+    fn test_formatter_signed_negative() {
+        let fmt = RegisterValueFormatter::signed_decimal();
+        // -1 as i32 in LE
+        assert_eq!(fmt.format_value(&[0xFF, 0xFF, 0xFF, 0xFF]), "-1");
+    }
+
+    #[test]
+    fn test_formatter_binary() {
+        let fmt = RegisterValueFormatter::binary();
+        assert_eq!(fmt.format_value(&[0x05]), "0b101");
+    }
+
+    #[test]
+    fn test_formatter_raw_bytes() {
+        let fmt = RegisterValueFormatter {
+            format: RegisterDisplayFormat::RawBytes,
+            show_prefix: false,
+            zero_pad: false,
+            big_endian_display: false,
+        };
+        assert_eq!(fmt.format_value(&[0xAB, 0xCD]), "ab cd");
+    }
+
+    #[test]
+    fn test_formatter_big_endian_display() {
+        let fmt = RegisterValueFormatter::hex().with_big_endian_display(true);
+        assert_eq!(fmt.format_value(&[0x01, 0x02, 0x03, 0x04]), "0x04030201");
+    }
+
+    #[test]
+    fn test_formatter_empty() {
+        let fmt = RegisterValueFormatter::hex();
+        assert_eq!(fmt.format_value(&[]), "");
     }
 }

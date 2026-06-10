@@ -40,6 +40,16 @@ pub struct RegisterName {
     pub name: &'static str,
 }
 
+impl RegisterName {
+    /// Return `true` if this register name represents "no register" (index 0).
+    ///
+    /// This mirrors the Java `RegisterName.isRegNone()` method which checks
+    /// `register == 0`.
+    pub fn is_reg_none(&self) -> bool {
+        self.index == 0
+    }
+}
+
 impl fmt::Display for RegisterName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} ({:#X})", self.name, self.index)
@@ -232,6 +242,14 @@ impl SRegister {
         registers::register_name(self.register_index2 as u32)
     }
 
+    /// Return `true` if the primary register index is zero (no register).
+    ///
+    /// This mirrors the Java `RegisterName.isRegNone()` check used in
+    /// `Register16MsSymbol.emitRegisterInformation()`.
+    pub fn is_reg_none(&self) -> bool {
+        self.register_index == 0
+    }
+
     /// Whether this is the dual-register 16-bit variant.
     pub fn is_dual_register(&self) -> bool {
         self.variant == RegisterVariant::Register16
@@ -355,17 +373,29 @@ impl AbstractMsSymbol for SRegister {
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.variant == RegisterVariant::Register16 {
-            // Dual-register format: emit both register names
-            write!(
-                f,
-                "Register16: {} ({:#X}):{} ({:#X}), Type: {}, {}",
-                self.register_name(),
-                self.register_index,
-                self.register_name2(),
-                self.register_index2,
-                self.type_record_number,
-                self.name
-            )
+            // Dual-register format: match Java Register16MsSymbol which skips
+            // the primary register when it is 0 (isRegNone).
+            if self.register_index != 0 {
+                write!(
+                    f,
+                    "Register16: {} ({:#X}):{} ({:#X}), Type: {}, {}",
+                    self.register_name(),
+                    self.register_index,
+                    self.register_name2(),
+                    self.register_index2,
+                    self.type_record_number,
+                    self.name
+                )
+            } else {
+                write!(
+                    f,
+                    "Register16: {} ({:#X}), Type: {}, {}",
+                    self.register_name2(),
+                    self.register_index2,
+                    self.type_record_number,
+                    self.name
+                )
+            }
         } else {
             write!(
                 f,
@@ -903,5 +933,52 @@ mod tests {
         let (sym, consumed) = SRegister::parse_st_aligned(&data).unwrap();
         assert_eq!(sym.name, "");
         assert_eq!(consumed, 8);
+    }
+
+    #[test]
+    fn test_is_reg_none() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011,
+            "v".to_string(),
+        );
+        assert!(!sym.is_reg_none());
+
+        let sym_zero = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0,
+            "v".to_string(),
+        );
+        assert!(sym_zero.is_reg_none());
+    }
+
+    #[test]
+    fn test_register_name_is_reg_none() {
+        let rn = RegisterName {
+            index: 0x0011,
+            name: "EAX",
+        };
+        assert!(!rn.is_reg_none());
+
+        let rn_none = RegisterName {
+            index: 0,
+            name: "None",
+        };
+        assert!(rn_none.is_reg_none());
+    }
+
+    #[test]
+    fn test_register16_emit_skips_primary_when_zero() {
+        // When primary register is 0, emit should skip it (matching Java behavior)
+        let sym = SRegister::new_register16(
+            RecordNumber::type_record_number(0x0100),
+            0x0012, // primary=0x00, secondary=0x12 (ECX)
+            "dual".to_string(),
+        );
+        let s = format!("{}", sym);
+        assert!(s.contains("Register16"));
+        assert!(s.contains("ECX"));
+        // The primary "None" should not appear since it's 0
+        assert!(!s.contains("None (0x0)"));
     }
 }

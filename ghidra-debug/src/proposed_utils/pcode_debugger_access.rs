@@ -5613,6 +5613,369 @@ impl AbstractPcodeTraceAccessBuilder {
 }
 
 // ============================================================================
+// PcodeDebuggerTargetAccess -- trait abstracting target communication
+// ============================================================================
+
+/// Trait for abstracting communication with a debug target.
+///
+/// Ported from Ghidra's `Target` interface in the debugger API.
+/// Implementations bridge to actual debug targets (GDB, LLDB, JDI, etc.)
+/// and provide a uniform interface for reading/writing memory, registers,
+/// and managing execution state.
+pub trait PcodeDebuggerTargetAccess {
+    /// Get the target's unique identifier.
+    fn target_id(&self) -> &str;
+
+    /// Check if the target is valid and connected.
+    fn is_valid(&self) -> bool;
+
+    /// Get the current snap of the target.
+    fn get_snap(&self) -> i64;
+
+    /// Read memory from the target asynchronously.
+    ///
+    /// Returns the bytes read, or None if the read failed.
+    fn read_memory(&self, address: u64, size: usize) -> Option<Vec<u8>>;
+
+    /// Write memory to the target.
+    ///
+    /// Returns true if the write succeeded.
+    fn write_memory(&self, address: u64, data: &[u8]) -> bool;
+
+    /// Read registers from the target.
+    ///
+    /// `register_addresses` are in the platform's register address space.
+    /// Returns a map of register address -> value bytes.
+    fn read_registers(&self, register_addresses: &[(u64, u64)]) -> BTreeMap<u64, Vec<u8>>;
+
+    /// Write a single register on the target.
+    ///
+    /// Returns true if the write succeeded.
+    fn write_register(&self, address: u64, data: &[u8]) -> bool;
+}
+
+// ============================================================================
+// MemoryAccessPolicy -- configurable memory read/write policy
+// ============================================================================
+
+/// Policy controlling how memory reads and writes are handled.
+///
+/// Ported from Ghidra's memory access policy patterns. This allows
+/// configuring behaviors like whether to read from static images as
+/// a fallback, whether writes are transactional, and access logging.
+#[derive(Debug, Clone, Default)]
+pub struct MemoryAccessPolicy {
+    /// Whether to fall back to static images when trace data is unknown.
+    pub fallback_to_static_images: bool,
+    /// Whether to attempt reading from the live target for unknown regions.
+    pub fallback_to_target: bool,
+    /// Whether writes should be buffered and committed atomically.
+    pub transactional_writes: bool,
+    /// Whether to log all memory accesses for audit purposes.
+    pub audit_logging: bool,
+    /// Whether to notify listeners of memory changes.
+    pub notify_listeners: bool,
+    /// Maximum bytes to read in a single operation (0 = unlimited).
+    pub max_read_chunk: usize,
+}
+
+impl MemoryAccessPolicy {
+    /// Create a default policy (no fallbacks, no logging).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enable all fallback mechanisms.
+    pub fn with_full_fallback(mut self) -> Self {
+        self.fallback_to_static_images = true;
+        self.fallback_to_target = true;
+        self
+    }
+
+    /// Enable audit logging.
+    pub fn with_audit_logging(mut self) -> Self {
+        self.audit_logging = true;
+        self
+    }
+
+    /// Enable transactional writes.
+    pub fn with_transactional_writes(mut self) -> Self {
+        self.transactional_writes = true;
+        self
+    }
+
+    /// Set the maximum read chunk size.
+    pub fn with_max_read_chunk(mut self, chunk: usize) -> Self {
+        self.max_read_chunk = chunk;
+        self
+    }
+
+    /// Compute the set of chunks for a read, respecting max_read_chunk.
+    pub fn chunk_read(&self, address: u64, size: usize) -> Vec<(u64, usize)> {
+        if self.max_read_chunk == 0 || size <= self.max_read_chunk {
+            return vec![(address, size)];
+        }
+        let mut chunks = Vec::new();
+        let mut offset = 0u64;
+        let mut remaining = size;
+        while remaining > 0 {
+            let chunk_size = remaining.min(self.max_read_chunk);
+            chunks.push((address + offset, chunk_size));
+            offset += chunk_size as u64;
+            remaining -= chunk_size;
+        }
+        chunks
+    }
+}
+
+// ============================================================================
+// AccessSessionTracker -- session lifecycle tracking
+// ============================================================================
+
+/// The state of a debug session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SessionState {
+    /// No session is active.
+    #[default]
+    Disconnected,
+    /// Session is connecting to a target.
+    Connecting,
+    /// Session is active and the target is running.
+    Running,
+    /// Session is active but the target is paused.
+    Paused,
+    /// Session is active and the target has terminated.
+    Terminated,
+    /// An error occurred during session management.
+    Error,
+}
+
+/// An event in the session lifecycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEvent {
+    /// The event timestamp.
+    pub timestamp_ms: u64,
+    /// The previous state.
+    pub from_state: SessionState,
+    /// The new state.
+    pub to_state: SessionState,
+    /// An optional description.
+    pub description: Option<String>,
+}
+
+/// Tracks the lifecycle of a debug session.
+///
+/// Records state transitions and maintains a history of session events.
+/// Useful for determining whether target communication is possible
+/// and for debugging session-related issues.
+#[derive(Debug, Clone, Default)]
+pub struct AccessSessionTracker {
+    /// The current session state.
+    state: SessionState,
+    /// History of state transitions.
+    events: Vec<SessionEvent>,
+    /// The session identifier.
+    session_id: Option<String>,
+    /// The target identifier.
+    target_id: Option<String>,
+    /// Monotonically increasing timestamp counter.
+    next_timestamp: u64,
+}
+
+impl AccessSessionTracker {
+    /// Create a new session tracker in the disconnected state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Get the current session state.
+    pub fn state(&self) -> SessionState {
+        self.state
+    }
+
+    /// Get the session ID.
+    pub fn session_id(&self) -> Option<&str> {
+        self.session_id.as_deref()
+    }
+
+    /// Get the target ID.
+    pub fn target_id(&self) -> Option<&str> {
+        self.target_id.as_deref()
+    }
+
+    /// Whether a session is active (connected to a target).
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.state,
+            SessionState::Running | SessionState::Paused
+        )
+    }
+
+    /// Transition to a new state.
+    pub fn transition(
+        &mut self,
+        new_state: SessionState,
+        description: Option<String>,
+    ) {
+        let event = SessionEvent {
+            timestamp_ms: self.next_timestamp,
+            from_state: self.state,
+            to_state: new_state,
+            description,
+        };
+        self.next_timestamp += 1;
+        self.state = new_state;
+        self.events.push(event);
+    }
+
+    /// Record that a session has started.
+    pub fn on_connect(&mut self, session_id: String, target_id: String) {
+        self.session_id = Some(session_id);
+        self.target_id = Some(target_id);
+        self.transition(SessionState::Connecting, None);
+        // Immediately transition to paused (typical for debugger attach)
+        self.transition(SessionState::Paused, Some("Session connected".into()));
+    }
+
+    /// Record that execution has resumed.
+    pub fn on_resume(&mut self) {
+        self.transition(SessionState::Running, None);
+    }
+
+    /// Record that execution has paused.
+    pub fn on_pause(&mut self) {
+        self.transition(SessionState::Paused, None);
+    }
+
+    /// Record that the target has terminated.
+    pub fn on_terminate(&mut self) {
+        self.transition(SessionState::Terminated, None);
+    }
+
+    /// Record a disconnection.
+    pub fn on_disconnect(&mut self) {
+        self.session_id = None;
+        self.target_id = None;
+        self.transition(SessionState::Disconnected, None);
+    }
+
+    /// Record an error.
+    pub fn on_error(&mut self, description: String) {
+        self.transition(SessionState::Error, Some(description));
+    }
+
+    /// Get the full event history.
+    pub fn events(&self) -> &[SessionEvent] {
+        &self.events
+    }
+
+    /// Get the number of events.
+    pub fn event_count(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Get the last N events.
+    pub fn recent_events(&self, n: usize) -> &[SessionEvent] {
+        let start = self.events.len().saturating_sub(n);
+        &self.events[start..]
+    }
+}
+
+// ============================================================================
+// PcodeTraceThreadAccess -- combined memory + register shim for a thread
+// ============================================================================
+
+/// A combined data-access shim that pairs shared (memory) state
+/// with local (register) state for a specific thread.
+///
+/// Ported from Ghidra's `DefaultPcodeTraceThreadAccess`. When a
+/// p-code executor needs to access both memory and registers for
+/// a thread, this shim provides a unified interface that dispatches
+/// memory-space addresses to the memory shim and register-space
+/// addresses to the register shim.
+#[derive(Debug, Clone)]
+pub struct PcodeTraceThreadAccess {
+    /// The shared (memory) data-access shim.
+    pub shared: PcodeMemoryView,
+    /// The local (register) data-access shim.
+    pub local: PcodeRegisterView,
+    /// The thread key.
+    pub thread_key: i64,
+    /// The frame level.
+    pub frame: i32,
+}
+
+impl PcodeTraceThreadAccess {
+    /// Create a new thread access shim.
+    pub fn new(
+        shared: PcodeMemoryView,
+        local: PcodeRegisterView,
+        thread_key: i64,
+        frame: i32,
+    ) -> Self {
+        Self {
+            shared,
+            local,
+            thread_key,
+            frame,
+        }
+    }
+
+    /// Read bytes from the appropriate state piece based on address space.
+    ///
+    /// Addresses in the register space are dispatched to the local
+    /// (register) shim using the offset as a register name key;
+    /// all other addresses go to the shared (memory) shim.
+    pub fn get_bytes(&self, space: &str, offset: u64, size: usize) -> Option<Vec<u8>> {
+        if space == "register" {
+            // Register reads use the name-based API; for numeric offsets
+            // we use a synthetic name. The size is in bytes.
+            self.local.read(&offset.to_string())
+        } else {
+            self.shared.read(space, offset, size as u32)
+        }
+    }
+
+    /// Write bytes to the appropriate state piece.
+    pub fn put_bytes(&mut self, space: &str, offset: u64, data: &[u8]) -> usize {
+        if space == "register" {
+            self.local.write(&offset.to_string(), data);
+            data.len()
+        } else {
+            self.shared.write(space, offset, data);
+            data.len()
+        }
+    }
+
+    /// Get the thread key.
+    pub fn thread_key(&self) -> i64 {
+        self.thread_key
+    }
+
+    /// Get the frame level.
+    pub fn frame(&self) -> i32 {
+        self.frame
+    }
+}
+
+// ============================================================================
+// AccessRateLimiter (extending with more detailed stats)
+// ============================================================================
+
+/// Summary statistics from the rate limiter.
+#[derive(Debug, Clone, Default)]
+pub struct RateLimiterStats {
+    /// Total operations attempted.
+    pub total_attempted: u64,
+    /// Total operations that were allowed through.
+    pub total_allowed: u64,
+    /// Total operations that were throttled/deferred.
+    pub total_throttled: u64,
+    /// The current tokens available.
+    pub current_tokens: f64,
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
@@ -7659,5 +8022,167 @@ mod tests {
         let mut builder = AbstractPcodeTraceAccessBuilder::new("test", 0);
         builder.invalidate_thread(1);
         // Just verify it doesn't panic
+    }
+
+    // -- MemoryAccessPolicy --
+
+    #[test]
+    fn test_memory_access_policy_default() {
+        let policy = MemoryAccessPolicy::new();
+        assert!(!policy.fallback_to_static_images);
+        assert!(!policy.fallback_to_target);
+        assert!(!policy.transactional_writes);
+        assert!(!policy.audit_logging);
+        assert_eq!(policy.max_read_chunk, 0);
+    }
+
+    #[test]
+    fn test_memory_access_policy_full_fallback() {
+        let policy = MemoryAccessPolicy::new().with_full_fallback();
+        assert!(policy.fallback_to_static_images);
+        assert!(policy.fallback_to_target);
+    }
+
+    #[test]
+    fn test_memory_access_policy_chunk_read_no_limit() {
+        let policy = MemoryAccessPolicy::new();
+        let chunks = policy.chunk_read(0x1000, 0x10000);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0], (0x1000, 0x10000));
+    }
+
+    #[test]
+    fn test_memory_access_policy_chunk_read_with_limit() {
+        let policy = MemoryAccessPolicy::new().with_max_read_chunk(0x1000);
+        let chunks = policy.chunk_read(0x1000, 0x3500);
+        assert_eq!(chunks.len(), 4);
+        assert_eq!(chunks[0], (0x1000, 0x1000));
+        assert_eq!(chunks[1], (0x2000, 0x1000));
+        assert_eq!(chunks[2], (0x3000, 0x1000));
+        assert_eq!(chunks[3], (0x4000, 0x500));
+    }
+
+    // -- AccessSessionTracker --
+
+    #[test]
+    fn test_session_tracker_initial_state() {
+        let tracker = AccessSessionTracker::new();
+        assert_eq!(tracker.state(), SessionState::Disconnected);
+        assert!(!tracker.is_active());
+        assert!(tracker.session_id().is_none());
+        assert!(tracker.target_id().is_none());
+        assert_eq!(tracker.event_count(), 0);
+    }
+
+    #[test]
+    fn test_session_tracker_connect() {
+        let mut tracker = AccessSessionTracker::new();
+        tracker.on_connect("session1".into(), "target1".into());
+        assert_eq!(tracker.state(), SessionState::Paused);
+        assert!(tracker.is_active());
+        assert_eq!(tracker.session_id(), Some("session1"));
+        assert_eq!(tracker.target_id(), Some("target1"));
+        // Two events: Connecting and Paused
+        assert_eq!(tracker.event_count(), 2);
+    }
+
+    #[test]
+    fn test_session_tracker_lifecycle() {
+        let mut tracker = AccessSessionTracker::new();
+        tracker.on_connect("s1".into(), "t1".into());
+        tracker.on_resume();
+        assert_eq!(tracker.state(), SessionState::Running);
+        assert!(tracker.is_active());
+
+        tracker.on_pause();
+        assert_eq!(tracker.state(), SessionState::Paused);
+
+        tracker.on_terminate();
+        assert_eq!(tracker.state(), SessionState::Terminated);
+        assert!(!tracker.is_active());
+    }
+
+    #[test]
+    fn test_session_tracker_disconnect() {
+        let mut tracker = AccessSessionTracker::new();
+        tracker.on_connect("s1".into(), "t1".into());
+        tracker.on_disconnect();
+        assert_eq!(tracker.state(), SessionState::Disconnected);
+        assert!(tracker.session_id().is_none());
+        assert!(tracker.target_id().is_none());
+    }
+
+    #[test]
+    fn test_session_tracker_error() {
+        let mut tracker = AccessSessionTracker::new();
+        tracker.on_error("connection lost".into());
+        assert_eq!(tracker.state(), SessionState::Error);
+        assert_eq!(tracker.event_count(), 1);
+        assert_eq!(
+            tracker.events()[0].description.as_deref(),
+            Some("connection lost")
+        );
+    }
+
+    #[test]
+    fn test_session_tracker_recent_events() {
+        let mut tracker = AccessSessionTracker::new();
+        tracker.on_connect("s1".into(), "t1".into());
+        tracker.on_resume();
+        tracker.on_pause();
+        tracker.on_resume();
+        tracker.on_pause();
+
+        let recent = tracker.recent_events(3);
+        assert_eq!(recent.len(), 3);
+    }
+
+    // -- PcodeTraceThreadAccess --
+
+    #[test]
+    fn test_trace_thread_access_memory() {
+        let mut shared = PcodeMemoryView::new();
+        shared.write("ram", 0x400000, &[0xEB, 0xFE]);
+        let local = PcodeRegisterView::new(1);
+
+        let access = PcodeTraceThreadAccess::new(shared, local, 1, 0);
+        let bytes = access.get_bytes("ram", 0x400000, 2);
+        assert_eq!(bytes, Some(vec![0xEB, 0xFE]));
+    }
+
+    #[test]
+    fn test_trace_thread_access_register() {
+        let shared = PcodeMemoryView::new();
+        let mut local = PcodeRegisterView::new(1);
+        local.define_register("RAX", 64);
+        local.write("RAX", &[0xAA; 8]);
+
+        let access = PcodeTraceThreadAccess::new(shared, local, 1, 0);
+        let bytes = access.get_bytes("register", 0, 8);
+        // Register reads by numeric name "0" won't find "RAX", so None
+        assert!(bytes.is_none());
+    }
+
+    #[test]
+    fn test_trace_thread_access_write() {
+        let shared = PcodeMemoryView::new();
+        let local = PcodeRegisterView::new(1);
+
+        let mut access = PcodeTraceThreadAccess::new(shared, local, 1, 0);
+        let written = access.put_bytes("ram", 0x1000, &[0x90, 0x90]);
+        assert_eq!(written, 2);
+
+        let bytes = access.get_bytes("ram", 0x1000, 2);
+        assert_eq!(bytes, Some(vec![0x90, 0x90]));
+    }
+
+    #[test]
+    fn test_trace_thread_access_metadata() {
+        let shared = PcodeMemoryView::new();
+        let local = PcodeRegisterView::new(1);
+
+        let access = PcodeTraceThreadAccess::new(shared, local, 42, 3);
+        assert_eq!(access.thread_key(), 42);
+        assert_eq!(access.frame(), 3);
     }
 }

@@ -197,6 +197,16 @@ impl SUdt {
         &self.name
     }
 
+    /// Return `true` if this UDT is a typedef (no struct/class/union/enum prefix).
+    ///
+    /// In PDB convention, UDT names that don't start with a category prefix
+    /// are typically typedefs or type aliases. This is a heuristic check;
+    /// the actual category is determined by the referenced type record.
+    pub fn is_typedef(&self) -> bool {
+        !self.is_struct_name() && !self.is_class_name()
+            && !self.is_union_name() && !self.is_enum_name()
+    }
+
     /// Parse an S_UDT symbol and return it along with the total bytes
     /// consumed (including 4-byte alignment padding after the name).
     ///
@@ -691,5 +701,40 @@ mod tests {
         assert!(!sym.is_union_name());
         assert!(!sym.is_enum_name());
         assert_eq!(sym.bare_name(), "SimpleType");
+    }
+
+    #[test]
+    fn test_is_typedef() {
+        // Names without prefixes are treated as typedefs
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "DWORD".to_string(),
+        );
+        assert!(sym.is_typedef());
+
+        // Names with prefixes are not typedefs
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "struct Point".to_string(),
+        );
+        assert!(!sym.is_typedef());
+
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "class MyClass".to_string(),
+        );
+        assert!(!sym.is_typedef());
+
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "union Variant".to_string(),
+        );
+        assert!(!sym.is_typedef());
+
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "enum Color".to_string(),
+        );
+        assert!(!sym.is_typedef());
     }
 }

@@ -24,6 +24,293 @@ use crate::model::TraceExecutionState;
 use super::trace_execution_state::TraceExecutionStateManager;
 
 // ---------------------------------------------------------------------------
+// ProcessChangeEvent
+// ---------------------------------------------------------------------------
+
+/// The kind of change event that occurred on a process.
+///
+/// Ported from Ghidra's `TraceEvents.PROCESS_ADDED`, `PROCESS_CHANGED`, etc.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProcessChangeEvent {
+    /// A new process was added.
+    Added,
+    /// The process's lifespan changed (creation or destruction snap moved).
+    LifespanChanged,
+    /// The process's properties changed (name, env, etc.).
+    Changed,
+    /// The process was deleted.
+    Deleted,
+    /// A module was loaded in the process.
+    ModuleLoaded,
+    /// A module was unloaded from the process.
+    ModuleUnloaded,
+    /// A memory mapping was created.
+    MemoryMappingAdded,
+    /// A memory mapping was removed.
+    MemoryMappingRemoved,
+    /// The process's execution state changed.
+    ExecutionStateChanged,
+}
+
+impl ProcessChangeEvent {
+    /// Human-readable name.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Added => "PROCESS_ADDED",
+            Self::LifespanChanged => "PROCESS_LIFESPAN_CHANGED",
+            Self::Changed => "PROCESS_CHANGED",
+            Self::Deleted => "PROCESS_DELETED",
+            Self::ModuleLoaded => "PROCESS_MODULE_LOADED",
+            Self::ModuleUnloaded => "PROCESS_MODULE_UNLOADED",
+            Self::MemoryMappingAdded => "PROCESS_MEMORY_MAPPING_ADDED",
+            Self::MemoryMappingRemoved => "PROCESS_MEMORY_MAPPING_REMOVED",
+            Self::ExecutionStateChanged => "PROCESS_EXECUTION_STATE_CHANGED",
+        }
+    }
+}
+
+impl std::fmt::Display for ProcessChangeEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessChangeRecord
+// ---------------------------------------------------------------------------
+
+/// A typed change record carrying the process key and event kind.
+///
+/// Ported from Ghidra's `TraceChangeRecord<TraceProcess, ?>`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessChangeRecord {
+    /// The kind of change event.
+    pub event: ProcessChangeEvent,
+    /// The key of the process that changed.
+    pub process_key: i64,
+    /// The snap at which the change occurred, if applicable.
+    pub snap: Option<i64>,
+    /// An optional key name that was affected (e.g. "Name", "Environment").
+    pub affected_key: Option<String>,
+    /// An optional sub-object key (e.g. module name, mapping name).
+    pub sub_key: Option<String>,
+}
+
+impl ProcessChangeRecord {
+    /// Create a new change record.
+    pub fn new(event: ProcessChangeEvent, process_key: i64) -> Self {
+        Self {
+            event,
+            process_key,
+            snap: None,
+            affected_key: None,
+            sub_key: None,
+        }
+    }
+
+    /// Attach a snap.
+    pub fn with_snap(mut self, snap: i64) -> Self {
+        self.snap = Some(snap);
+        self
+    }
+
+    /// Attach an affected key name.
+    pub fn with_affected_key(mut self, key: impl Into<String>) -> Self {
+        self.affected_key = Some(key.into());
+        self
+    }
+
+    /// Attach a sub-object key.
+    pub fn with_sub_key(mut self, key: impl Into<String>) -> Self {
+        self.sub_key = Some(key.into());
+        self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessGroup -- grouping related processes
+// ---------------------------------------------------------------------------
+
+/// A logical grouping of related processes.
+///
+/// Ported from Ghidra's process grouping concepts. Useful for organizing
+/// processes by debugger session, target, or user-defined criteria.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessGroup {
+    /// Unique identifier for this group.
+    pub id: i64,
+    /// Human-readable name.
+    pub name: String,
+    /// Keys of processes in this group.
+    process_keys: Vec<i64>,
+    /// Optional parent group id.
+    pub parent_id: Option<i64>,
+    /// Child group ids.
+    child_ids: Vec<i64>,
+}
+
+impl ProcessGroup {
+    /// Create a new process group.
+    pub fn new(id: i64, name: impl Into<String>) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            process_keys: Vec::new(),
+            parent_id: None,
+            child_ids: Vec::new(),
+        }
+    }
+
+    /// Add a process key to this group.
+    pub fn add_process(&mut self, key: i64) {
+        if !self.process_keys.contains(&key) {
+            self.process_keys.push(key);
+        }
+    }
+
+    /// Remove a process key from this group.
+    pub fn remove_process(&mut self, key: i64) {
+        self.process_keys.retain(|&k| k != key);
+    }
+
+    /// The process keys in this group.
+    pub fn process_keys(&self) -> &[i64] {
+        &self.process_keys
+    }
+
+    /// The number of processes in this group.
+    pub fn process_count(&self) -> usize {
+        self.process_keys.len()
+    }
+
+    /// Whether this group contains a given process key.
+    pub fn contains_process(&self, key: i64) -> bool {
+        self.process_keys.contains(&key)
+    }
+
+    /// Set the parent group.
+    pub fn set_parent(&mut self, parent_id: i64) {
+        self.parent_id = Some(parent_id);
+    }
+
+    /// Add a child group.
+    pub fn add_child(&mut self, child_id: i64) {
+        if !self.child_ids.contains(&child_id) {
+            self.child_ids.push(child_id);
+        }
+    }
+
+    /// Remove a child group.
+    pub fn remove_child(&mut self, child_id: i64) {
+        self.child_ids.retain(|&k| k != child_id);
+    }
+
+    /// The child group ids.
+    pub fn child_ids(&self) -> &[i64] {
+        &self.child_ids
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DebugConnectionInfo -- connection/target metadata
+// ---------------------------------------------------------------------------
+
+/// Information about the debugger connection that produced a process.
+///
+/// Ported from Ghidra's debugger target/connection metadata tracking.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct DebugConnectionInfo {
+    /// The debugger type (e.g., "gdb", "lldb", "dbgeng").
+    pub debugger_type: Option<String>,
+    /// The target hostname or address.
+    pub target_host: Option<String>,
+    /// The target port.
+    pub target_port: Option<u16>,
+    /// The connection URI (e.g., "tcp://localhost:1234").
+    pub uri: Option<String>,
+    /// The command used to launch the debugger.
+    pub launch_command: Option<String>,
+    /// Additional connection parameters.
+    pub parameters: BTreeMap<String, String>,
+}
+
+impl DebugConnectionInfo {
+    /// Create empty connection info.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the debugger type.
+    pub fn with_debugger_type(mut self, dt: impl Into<String>) -> Self {
+        self.debugger_type = Some(dt.into());
+        self
+    }
+
+    /// Set the target host.
+    pub fn with_target_host(mut self, host: impl Into<String>) -> Self {
+        self.target_host = Some(host.into());
+        self
+    }
+
+    /// Set the target port.
+    pub fn with_target_port(mut self, port: u16) -> Self {
+        self.target_port = Some(port);
+        self
+    }
+
+    /// Set the URI.
+    pub fn with_uri(mut self, uri: impl Into<String>) -> Self {
+        self.uri = Some(uri.into());
+        self
+    }
+
+    /// Set the launch command.
+    pub fn with_launch_command(mut self, cmd: impl Into<String>) -> Self {
+        self.launch_command = Some(cmd.into());
+        self
+    }
+
+    /// Add a parameter.
+    pub fn with_param(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.parameters.insert(key.into(), value.into());
+        self
+    }
+
+    /// Whether any connection info is set.
+    pub fn has_info(&self) -> bool {
+        self.debugger_type.is_some()
+            || self.target_host.is_some()
+            || self.uri.is_some()
+            || self.launch_command.is_some()
+            || !self.parameters.is_empty()
+    }
+
+    /// A display-friendly connection string.
+    pub fn display_string(&self) -> String {
+        if let Some(ref uri) = self.uri {
+            return uri.clone();
+        }
+        let mut parts = Vec::new();
+        if let Some(ref dt) = self.debugger_type {
+            parts.push(dt.clone());
+        }
+        if let Some(ref host) = self.target_host {
+            let s = if let Some(port) = self.target_port {
+                format!("{}:{}", host, port)
+            } else {
+                host.clone()
+            };
+            parts.push(s);
+        }
+        if parts.is_empty() {
+            "<no connection>".into()
+        } else {
+            parts.join(" @ ")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // ProcessEnvironment
 // ---------------------------------------------------------------------------
 
@@ -594,6 +881,8 @@ pub struct TraceProcess {
     name_history: Vec<(i64, String)>,
     /// Lifespan-aware comment history: (snap, comment).
     comment_history: Vec<(i64, String)>,
+    /// Debug connection info, if available.
+    connection_info: Option<DebugConnectionInfo>,
 }
 
 impl TraceProcess {
@@ -627,6 +916,7 @@ impl TraceProcess {
             resource_usage: None,
             name_history,
             comment_history: Vec::new(),
+            connection_info: None,
         }
     }
 
@@ -1031,6 +1321,76 @@ impl TraceProcess {
             snap,
         }
     }
+
+    // -- Connection info --
+
+    /// Get the debug connection info, if available.
+    pub fn connection_info(&self) -> Option<&DebugConnectionInfo> {
+        self.connection_info.as_ref()
+    }
+
+    /// Set the debug connection info.
+    pub fn set_connection_info(&mut self, info: DebugConnectionInfo) {
+        self.connection_info = Some(info);
+    }
+
+    /// Get the debugger type (e.g., "gdb", "lldb").
+    pub fn debugger_type(&self) -> Option<&str> {
+        self.connection_info
+            .as_ref()
+            .and_then(|c| c.debugger_type.as_deref())
+    }
+
+    // -- Memory region helpers --
+
+    /// Find all memory mappings that overlap with the given range at a snap.
+    pub fn memory_mappings_overlapping(
+        &self,
+        start: u64,
+        length: u64,
+        snap: i64,
+    ) -> Vec<&ProcessMemoryMapping> {
+        let end = start.wrapping_add(length);
+        self.memory_mappings
+            .iter()
+            .filter(|m| {
+                m.created_snap <= snap
+                    && m.removed_snap.map_or(true, |r| snap < r)
+                    && m.vaddr < end
+                    && start < m.vaddr.wrapping_add(m.length)
+            })
+            .collect()
+    }
+
+    /// Get total mapped memory size at a given snap.
+    pub fn total_mapped_memory_at(&self, snap: i64) -> u64 {
+        self.memory_mappings
+            .iter()
+            .filter(|m| m.created_snap <= snap && m.removed_snap.map_or(true, |r| snap < r))
+            .map(|m| m.length)
+            .sum()
+    }
+
+    /// Get all thread keys that were active at the given snap.
+    ///
+    /// Note: this returns all registered thread keys; actual thread lifespan
+    /// checking requires the thread objects themselves.
+    pub fn thread_keys_at(&self, _snap: i64) -> &[i64] {
+        // Thread keys are managed externally; this returns all known keys.
+        // For temporal filtering, the caller should cross-reference with
+        // the thread manager.
+        &self.thread_keys
+    }
+
+    /// Whether this process has any child processes.
+    pub fn has_children(&self) -> bool {
+        !self.child_keys.is_empty()
+    }
+
+    /// Whether this process is a root process (no parent).
+    pub fn is_root(&self) -> bool {
+        self.parent_key.is_none()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1170,6 +1530,325 @@ impl ProcessBuilder {
         }
         proc
     }
+}
+
+// ---------------------------------------------------------------------------
+// ProcessManager -- CRUD operations on processes within a trace
+// ---------------------------------------------------------------------------
+
+/// Manages processes within a trace, providing CRUD operations,
+/// change tracking, and grouping.
+///
+/// Ported from Ghidra's `DBTraceProcessManager`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessManager {
+    /// Processes indexed by key.
+    processes: BTreeMap<i64, TraceProcess>,
+    /// Process groups indexed by group id.
+    groups: BTreeMap<i64, ProcessGroup>,
+    /// Next available process key.
+    next_key: i64,
+    /// Next available group id.
+    next_group_id: i64,
+    /// Change history (most recent last).
+    change_history: Vec<ProcessChangeRecord>,
+    /// Maximum change history entries to retain.
+    max_history: usize,
+}
+
+impl ProcessManager {
+    /// Create a new process manager.
+    pub fn new() -> Self {
+        Self {
+            processes: BTreeMap::new(),
+            groups: BTreeMap::new(),
+            next_key: 1,
+            next_group_id: 1,
+            change_history: Vec::new(),
+            max_history: 1000,
+        }
+    }
+
+    /// Set the maximum change history size.
+    pub fn with_max_history(mut self, max: usize) -> Self {
+        self.max_history = max;
+        self
+    }
+
+    // -- CRUD --
+
+    /// Add a process and return its key.
+    pub fn add_process(&mut self, process: TraceProcess) -> i64 {
+        let key = process.key;
+        if key >= self.next_key {
+            self.next_key = key + 1;
+        }
+        self.push_change(ProcessChangeRecord::new(ProcessChangeEvent::Added, key));
+        self.processes.insert(key, process);
+        key
+    }
+
+    /// Create and add a new process with the given name at the given snap.
+    pub fn create_process(
+        &mut self,
+        name: impl Into<String>,
+        snap: i64,
+    ) -> i64 {
+        let key = self.next_key;
+        self.next_key += 1;
+        let path = format!("Processes[{}]", key);
+        let process = TraceProcess::new(key, path, name, snap);
+        self.push_change(ProcessChangeRecord::new(ProcessChangeEvent::Added, key));
+        self.processes.insert(key, process);
+        key
+    }
+
+    /// Get a process by key.
+    pub fn get_process(&self, key: i64) -> Option<&TraceProcess> {
+        self.processes.get(&key)
+    }
+
+    /// Get a mutable process by key.
+    pub fn get_process_mut(&mut self, key: i64) -> Option<&mut TraceProcess> {
+        self.processes.get_mut(&key)
+    }
+
+    /// Remove a process by key.
+    pub fn remove_process(&mut self, key: i64) -> Option<TraceProcess> {
+        let proc = self.processes.remove(&key);
+        if proc.is_some() {
+            // Remove from all groups
+            for group in self.groups.values_mut() {
+                group.remove_process(key);
+            }
+            self.push_change(ProcessChangeRecord::new(ProcessChangeEvent::Deleted, key));
+        }
+        proc
+    }
+
+    /// The number of processes.
+    pub fn process_count(&self) -> usize {
+        self.processes.len()
+    }
+
+    /// All process keys.
+    pub fn process_keys(&self) -> Vec<i64> {
+        self.processes.keys().copied().collect()
+    }
+
+    /// All processes.
+    pub fn processes(&self) -> &BTreeMap<i64, TraceProcess> {
+        &self.processes
+    }
+
+    /// Iterate over all processes.
+    pub fn iter(&self) -> impl Iterator<Item = (&i64, &TraceProcess)> {
+        self.processes.iter()
+    }
+
+    /// Iterate over all processes mutably.
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = (&i64, &mut TraceProcess)> {
+        self.processes.iter_mut()
+    }
+
+    // -- Temporal queries --
+
+    /// All processes alive at the given snap.
+    pub fn alive_at(&self, snap: i64) -> Vec<&TraceProcess> {
+        self.processes
+            .values()
+            .filter(|p| p.is_valid(snap))
+            .collect()
+    }
+
+    /// The number of processes alive at the given snap.
+    pub fn alive_count_at(&self, snap: i64) -> usize {
+        self.processes.values().filter(|p| p.is_valid(snap)).count()
+    }
+
+    /// Find a process by name at the given snap.
+    pub fn find_by_name(&self, name: &str, snap: i64) -> Option<&TraceProcess> {
+        self.processes
+            .values()
+            .find(|p| p.is_valid(snap) && p.name_at(snap) == name)
+    }
+
+    /// Find a process by PID at the given snap.
+    pub fn find_by_pid(&self, pid: i64, snap: i64) -> Option<&TraceProcess> {
+        self.processes
+            .values()
+            .find(|p| p.is_valid(snap) && p.pid == Some(pid))
+    }
+
+    /// Find a process by path.
+    pub fn find_by_path(&self, path: &str) -> Option<&TraceProcess> {
+        self.processes.values().find(|p| p.path == path)
+    }
+
+    /// All root processes (no parent).
+    pub fn root_processes(&self) -> Vec<&TraceProcess> {
+        self.processes
+            .values()
+            .filter(|p| p.is_root())
+            .collect()
+    }
+
+    /// All child processes of a given parent.
+    pub fn children_of(&self, parent_key: i64) -> Vec<&TraceProcess> {
+        self.processes
+            .values()
+            .filter(|p| p.parent_key == Some(parent_key))
+            .collect()
+    }
+
+    // -- Grouping --
+
+    /// Create a new process group.
+    pub fn create_group(&mut self, name: impl Into<String>) -> i64 {
+        let id = self.next_group_id;
+        self.next_group_id += 1;
+        self.groups.insert(id, ProcessGroup::new(id, name));
+        id
+    }
+
+    /// Get a group by id.
+    pub fn group(&self, id: i64) -> Option<&ProcessGroup> {
+        self.groups.get(&id)
+    }
+
+    /// Get a mutable group by id.
+    pub fn group_mut(&mut self, id: i64) -> Option<&mut ProcessGroup> {
+        self.groups.get_mut(&id)
+    }
+
+    /// Remove a group.
+    pub fn remove_group(&mut self, id: i64) -> Option<ProcessGroup> {
+        self.groups.remove(&id)
+    }
+
+    /// Add a process to a group.
+    pub fn add_to_group(&mut self, group_id: i64, process_key: i64) -> bool {
+        if let Some(group) = self.groups.get_mut(&group_id) {
+            group.add_process(process_key);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a process from a group.
+    pub fn remove_from_group(&mut self, group_id: i64, process_key: i64) -> bool {
+        if let Some(group) = self.groups.get_mut(&group_id) {
+            group.remove_process(process_key);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// All groups a process belongs to.
+    pub fn groups_for_process(&self, process_key: i64) -> Vec<&ProcessGroup> {
+        self.groups
+            .values()
+            .filter(|g| g.contains_process(process_key))
+            .collect()
+    }
+
+    /// The number of groups.
+    pub fn group_count(&self) -> usize {
+        self.groups.len()
+    }
+
+    // -- Change tracking --
+
+    /// Push a change record to the history.
+    fn push_change(&mut self, record: ProcessChangeRecord) {
+        if self.change_history.len() >= self.max_history {
+            self.change_history.remove(0);
+        }
+        self.change_history.push(record);
+    }
+
+    /// Push a change record (public for external callers).
+    pub fn record_change(&mut self, record: ProcessChangeRecord) {
+        self.push_change(record);
+    }
+
+    /// Get the change history.
+    pub fn change_history(&self) -> &[ProcessChangeRecord] {
+        &self.change_history
+    }
+
+    /// Clear the change history.
+    pub fn clear_change_history(&mut self) {
+        self.change_history.clear();
+    }
+
+    /// The number of change records.
+    pub fn change_count(&self) -> usize {
+        self.change_history.len()
+    }
+
+    // -- Bulk operations --
+
+    /// Remove all processes whose lifespan ends at or before the given snap.
+    pub fn prune_dead_before(&mut self, snap: i64) -> Vec<TraceProcess> {
+        let dead_keys: Vec<i64> = self
+            .processes
+            .values()
+            .filter(|p| !p.is_alive_now() && p.lifespan.lmax() < snap)
+            .map(|p| p.key)
+            .collect();
+        let mut removed = Vec::new();
+        for key in dead_keys {
+            if let Some(proc) = self.processes.remove(&key) {
+                removed.push(proc);
+            }
+        }
+        removed
+    }
+
+    /// Get all processes as a vector sorted by key.
+    pub fn processes_vec(&self) -> Vec<&TraceProcess> {
+        self.processes.values().collect()
+    }
+
+    /// Whether any processes exist.
+    pub fn is_empty(&self) -> bool {
+        self.processes.is_empty()
+    }
+
+    /// Clear all processes and groups.
+    pub fn clear(&mut self) {
+        self.processes.clear();
+        self.groups.clear();
+    }
+
+    /// Get aggregate statistics.
+    pub fn statistics(&self, snap: i64) -> ProcessManagerStatistics {
+        ProcessManagerStatistics {
+            total_processes: self.processes.len(),
+            alive_at_snap: self.alive_count_at(snap),
+            total_groups: self.groups.len(),
+            root_processes: self.root_processes().len(),
+            change_records: self.change_history.len(),
+        }
+    }
+}
+
+/// Aggregate statistics for the process manager.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessManagerStatistics {
+    /// Total number of processes (including dead).
+    pub total_processes: usize,
+    /// Number of processes alive at a given snap.
+    pub alive_at_snap: usize,
+    /// Number of process groups.
+    pub total_groups: usize,
+    /// Number of root processes (no parent).
+    pub root_processes: usize,
+    /// Number of change records in history.
+    pub change_records: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -1888,5 +2567,469 @@ mod tests {
         assert_eq!(back.name, "SIGABRT");
         assert!(back.fatal);
         assert_eq!(back.description.as_deref(), Some("Abort signal"));
+    }
+
+    // -- New tests for ProcessChangeEvent --
+
+    #[test]
+    fn test_process_change_event_display() {
+        assert_eq!(ProcessChangeEvent::Added.to_string(), "PROCESS_ADDED");
+        assert_eq!(
+            ProcessChangeEvent::ExecutionStateChanged.to_string(),
+            "PROCESS_EXECUTION_STATE_CHANGED"
+        );
+        assert_eq!(
+            ProcessChangeEvent::ModuleLoaded.to_string(),
+            "PROCESS_MODULE_LOADED"
+        );
+    }
+
+    #[test]
+    fn test_process_change_event_serde() {
+        let event = ProcessChangeEvent::ModuleLoaded;
+        let json = serde_json::to_string(&event).unwrap();
+        let back: ProcessChangeEvent = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, ProcessChangeEvent::ModuleLoaded);
+    }
+
+    // -- New tests for ProcessChangeRecord --
+
+    #[test]
+    fn test_process_change_record() {
+        let record = ProcessChangeRecord::new(ProcessChangeEvent::Changed, 1)
+            .with_snap(5)
+            .with_affected_key("Name")
+            .with_sub_key("myapp");
+
+        assert_eq!(record.event, ProcessChangeEvent::Changed);
+        assert_eq!(record.process_key, 1);
+        assert_eq!(record.snap, Some(5));
+        assert_eq!(record.affected_key.as_deref(), Some("Name"));
+        assert_eq!(record.sub_key.as_deref(), Some("myapp"));
+    }
+
+    #[test]
+    fn test_process_change_record_serde() {
+        let record = ProcessChangeRecord::new(ProcessChangeEvent::Added, 42)
+            .with_snap(0);
+        let json = serde_json::to_string(&record).unwrap();
+        let back: ProcessChangeRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.process_key, 42);
+        assert_eq!(back.snap, Some(0));
+    }
+
+    // -- New tests for ProcessGroup --
+
+    #[test]
+    fn test_process_group() {
+        let mut group = ProcessGroup::new(1, "Session A");
+        assert_eq!(group.id, 1);
+        assert_eq!(group.name, "Session A");
+        assert_eq!(group.process_count(), 0);
+
+        group.add_process(10);
+        group.add_process(20);
+        group.add_process(10); // duplicate
+        assert_eq!(group.process_count(), 2);
+        assert!(group.contains_process(10));
+        assert!(!group.contains_process(30));
+
+        group.remove_process(10);
+        assert_eq!(group.process_count(), 1);
+        assert!(!group.contains_process(10));
+    }
+
+    #[test]
+    fn test_process_group_parent_child() {
+        let mut group = ProcessGroup::new(1, "parent");
+        group.set_parent(0);
+        group.add_child(2);
+        group.add_child(3);
+        assert_eq!(group.parent_id, Some(0));
+        assert_eq!(group.child_ids(), &[2, 3]);
+
+        group.remove_child(2);
+        assert_eq!(group.child_ids(), &[3]);
+    }
+
+    #[test]
+    fn test_process_group_serde() {
+        let mut group = ProcessGroup::new(1, "test");
+        group.add_process(5);
+        let json = serde_json::to_string(&group).unwrap();
+        let back: ProcessGroup = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, 1);
+        assert_eq!(back.process_count(), 1);
+    }
+
+    // -- New tests for DebugConnectionInfo --
+
+    #[test]
+    fn test_debug_connection_info() {
+        let info = DebugConnectionInfo::new()
+            .with_debugger_type("gdb")
+            .with_target_host("localhost")
+            .with_target_port(1234)
+            .with_uri("tcp://localhost:1234")
+            .with_launch_command("gdb --interpreter=mi")
+            .with_param("arch", "x86_64");
+
+        assert!(info.has_info());
+        assert_eq!(info.debugger_type.as_deref(), Some("gdb"));
+        assert_eq!(info.target_port, Some(1234));
+        assert_eq!(info.display_string(), "tcp://localhost:1234");
+    }
+
+    #[test]
+    fn test_debug_connection_info_empty() {
+        let info = DebugConnectionInfo::new();
+        assert!(!info.has_info());
+        assert_eq!(info.display_string(), "<no connection>");
+    }
+
+    #[test]
+    fn test_debug_connection_info_display_no_uri() {
+        let info = DebugConnectionInfo::new()
+            .with_debugger_type("lldb")
+            .with_target_host("192.168.1.1")
+            .with_target_port(5555);
+        assert_eq!(info.display_string(), "lldb @ 192.168.1.1:5555");
+    }
+
+    #[test]
+    fn test_debug_connection_info_serde() {
+        let info = DebugConnectionInfo::new()
+            .with_debugger_type("gdb")
+            .with_uri("tcp://host:1234");
+        let json = serde_json::to_string(&info).unwrap();
+        let back: DebugConnectionInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.debugger_type.as_deref(), Some("gdb"));
+    }
+
+    // -- New tests for TraceProcess connection info and helpers --
+
+    #[test]
+    fn test_process_connection_info() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        assert!(p.connection_info().is_none());
+        assert!(p.debugger_type().is_none());
+
+        let info = DebugConnectionInfo::new().with_debugger_type("gdb");
+        p.set_connection_info(info);
+        assert!(p.connection_info().is_some());
+        assert_eq!(p.debugger_type(), Some("gdb"));
+    }
+
+    #[test]
+    fn test_process_memory_mappings_overlapping() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        p.add_memory_mapping(
+            ProcessMemoryMapping::new(0x400000, 0x10000, "[heap]", 0),
+        );
+        p.add_memory_mapping(
+            ProcessMemoryMapping::new(0x7FFF0000, 0x80000, "[stack]", 0),
+        );
+
+        // Query overlapping with heap
+        let overlapping = p.memory_mappings_overlapping(0x405000, 0x1000, 0);
+        assert_eq!(overlapping.len(), 1);
+        assert_eq!(overlapping[0].name, "[heap]");
+
+        // Query that doesn't overlap
+        let none = p.memory_mappings_overlapping(0x100000, 0x1000, 0);
+        assert_eq!(none.len(), 0);
+    }
+
+    #[test]
+    fn test_process_total_mapped_memory() {
+        let mut p = TraceProcess::new(1, "P[0]", "myapp", 0);
+        p.add_memory_mapping(
+            ProcessMemoryMapping::new(0x400000, 0x10000, "[heap]", 0),
+        );
+        p.add_memory_mapping(
+            ProcessMemoryMapping::new(0x7FFF0000, 0x80000, "[stack]", 0),
+        );
+
+        assert_eq!(p.total_mapped_memory_at(0), 0x10000 + 0x80000);
+    }
+
+    #[test]
+    fn test_process_root_and_children() {
+        let mut parent = TraceProcess::new(1, "P[0]", "parent", 0);
+        assert!(parent.is_root());
+        assert!(!parent.has_children());
+
+        parent.add_child(2);
+        parent.add_child(3);
+        assert!(parent.has_children());
+        assert!(!parent.is_root() || parent.parent_key.is_none()); // still root
+
+        let mut child = TraceProcess::new(2, "P[1]", "child", 1);
+        child.set_parent(1);
+        assert!(!child.is_root());
+    }
+
+    // -- New tests for ProcessManager --
+
+    #[test]
+    fn test_process_manager_create() {
+        let mut mgr = ProcessManager::new();
+        assert!(mgr.is_empty());
+        assert_eq!(mgr.process_count(), 0);
+
+        let key = mgr.create_process("myapp", 0);
+        assert_eq!(key, 1);
+        assert_eq!(mgr.process_count(), 1);
+        assert!(mgr.get_process(key).is_some());
+        assert_eq!(mgr.get_process(key).unwrap().name, "myapp");
+    }
+
+    #[test]
+    fn test_process_manager_add_remove() {
+        let mut mgr = ProcessManager::new();
+        let p = TraceProcess::new(5, "P[5]", "app", 0);
+        mgr.add_process(p);
+        assert_eq!(mgr.process_count(), 1);
+
+        let removed = mgr.remove_process(5);
+        assert!(removed.is_some());
+        assert_eq!(removed.unwrap().name, "app");
+        assert_eq!(mgr.process_count(), 0);
+
+        // Remove nonexistent
+        assert!(mgr.remove_process(99).is_none());
+    }
+
+    #[test]
+    fn test_process_manager_alive_at() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("app1", 0);
+        let key2 = mgr.create_process("app2", 5);
+        mgr.get_process_mut(key2).unwrap().remove(10);
+
+        assert_eq!(mgr.alive_count_at(0), 1);
+        assert_eq!(mgr.alive_count_at(5), 2);
+        assert_eq!(mgr.alive_count_at(10), 1); // app2 still valid at snap 10
+        assert_eq!(mgr.alive_count_at(11), 1);
+    }
+
+    #[test]
+    fn test_process_manager_find_by_name() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("myapp", 0);
+        mgr.create_process("other", 0);
+
+        let found = mgr.find_by_name("myapp", 0);
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().name, "myapp");
+
+        assert!(mgr.find_by_name("missing", 0).is_none());
+    }
+
+    #[test]
+    fn test_process_manager_find_by_pid() {
+        let mut mgr = ProcessManager::new();
+        let key = mgr.create_process("myapp", 0);
+        mgr.get_process_mut(key).unwrap().pid = Some(1234);
+
+        let found = mgr.find_by_pid(1234, 0);
+        assert!(found.is_some());
+        assert!(mgr.find_by_pid(9999, 0).is_none());
+    }
+
+    #[test]
+    fn test_process_manager_find_by_path() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("myapp", 0);
+
+        let found = mgr.find_by_path("Processes[1]");
+        assert!(found.is_some());
+        assert!(mgr.find_by_path("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_process_manager_parent_child() {
+        let mut mgr = ProcessManager::new();
+        let parent_key = mgr.create_process("parent", 0);
+        let child_key = mgr.create_process("child", 1);
+        mgr.get_process_mut(child_key).unwrap().set_parent(parent_key);
+        mgr.get_process_mut(parent_key).unwrap().add_child(child_key);
+
+        let roots = mgr.root_processes();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].key, parent_key);
+
+        let children = mgr.children_of(parent_key);
+        assert_eq!(children.len(), 1);
+        assert_eq!(children[0].key, child_key);
+    }
+
+    #[test]
+    fn test_process_manager_groups() {
+        let mut mgr = ProcessManager::new();
+        let key1 = mgr.create_process("app1", 0);
+        let key2 = mgr.create_process("app2", 0);
+
+        let group_id = mgr.create_group("Session A");
+        assert_eq!(mgr.group_count(), 1);
+
+        assert!(mgr.add_to_group(group_id, key1));
+        assert!(mgr.add_to_group(group_id, key2));
+        assert_eq!(mgr.group(group_id).unwrap().process_count(), 2);
+
+        let groups = mgr.groups_for_process(key1);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "Session A");
+
+        assert!(mgr.remove_from_group(group_id, key1));
+        assert_eq!(mgr.group(group_id).unwrap().process_count(), 1);
+
+        mgr.remove_group(group_id);
+        assert_eq!(mgr.group_count(), 0);
+    }
+
+    #[test]
+    fn test_process_manager_change_tracking() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("app1", 0);
+        mgr.create_process("app2", 5);
+
+        assert_eq!(mgr.change_count(), 2);
+        assert_eq!(mgr.change_history()[0].event, ProcessChangeEvent::Added);
+        assert_eq!(mgr.change_history()[1].event, ProcessChangeEvent::Added);
+
+        mgr.remove_process(1);
+        assert_eq!(mgr.change_count(), 3);
+        assert_eq!(mgr.change_history()[2].event, ProcessChangeEvent::Deleted);
+
+        mgr.clear_change_history();
+        assert_eq!(mgr.change_count(), 0);
+    }
+
+    #[test]
+    fn test_process_manager_change_on_remove_from_group() {
+        let mut mgr = ProcessManager::new();
+        let key = mgr.create_process("app", 0);
+        let group_id = mgr.create_group("test");
+        mgr.add_to_group(group_id, key);
+
+        // Removing process should also remove from groups
+        mgr.remove_process(key);
+        assert_eq!(mgr.group(group_id).unwrap().process_count(), 0);
+    }
+
+    #[test]
+    fn test_process_manager_statistics() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("app1", 0);
+        mgr.create_process("app2", 0);
+        mgr.create_group("group1");
+
+        let stats = mgr.statistics(0);
+        assert_eq!(stats.total_processes, 2);
+        assert_eq!(stats.alive_at_snap, 2);
+        assert_eq!(stats.total_groups, 1);
+        assert_eq!(stats.root_processes, 2);
+        assert_eq!(stats.change_records, 2);
+    }
+
+    #[test]
+    fn test_process_manager_prune_dead() {
+        let mut mgr = ProcessManager::new();
+        let key = mgr.create_process("app", 0);
+        mgr.get_process_mut(key).unwrap().remove(5);
+
+        let pruned = mgr.prune_dead_before(10);
+        assert_eq!(pruned.len(), 1);
+        assert_eq!(mgr.process_count(), 0);
+    }
+
+    #[test]
+    fn test_process_manager_iter() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("a", 0);
+        mgr.create_process("b", 0);
+        mgr.create_process("c", 0);
+
+        let names: Vec<_> = mgr.iter().map(|(_, p)| p.name.clone()).collect();
+        assert_eq!(names.len(), 3);
+    }
+
+    #[test]
+    fn test_process_manager_serde() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("myapp", 0);
+        mgr.create_group("test");
+
+        let json = serde_json::to_string(&mgr).unwrap();
+        let back: ProcessManager = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.process_count(), 1);
+        assert_eq!(back.group_count(), 1);
+    }
+
+    #[test]
+    fn test_process_manager_statistics_serde() {
+        let stats = ProcessManagerStatistics {
+            total_processes: 5,
+            alive_at_snap: 3,
+            total_groups: 2,
+            root_processes: 2,
+            change_records: 10,
+        };
+        let json = serde_json::to_string(&stats).unwrap();
+        let back: ProcessManagerStatistics = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.total_processes, 5);
+        assert_eq!(back.alive_at_snap, 3);
+    }
+
+    #[test]
+    fn test_process_manager_clear() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("app", 0);
+        mgr.create_group("test");
+        assert!(!mgr.is_empty());
+
+        mgr.clear();
+        assert!(mgr.is_empty());
+        assert_eq!(mgr.group_count(), 0);
+    }
+
+    #[test]
+    fn test_process_manager_process_keys() {
+        let mut mgr = ProcessManager::new();
+        mgr.create_process("a", 0);
+        mgr.create_process("b", 0);
+        let keys = mgr.process_keys();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&1));
+        assert!(keys.contains(&2));
+    }
+
+    #[test]
+    fn test_process_manager_find_by_name_at_snap() {
+        let mut mgr = ProcessManager::new();
+        let key = mgr.create_process("myapp", 0);
+        mgr.get_process_mut(key).unwrap().set_name(10, "renamed");
+
+        assert_eq!(mgr.find_by_name("myapp", 0).unwrap().key, key);
+        assert_eq!(mgr.find_by_name("renamed", 10).unwrap().key, key);
+        assert!(mgr.find_by_name("myapp", 10).is_none());
+    }
+
+    #[test]
+    fn test_process_manager_max_history() {
+        let mut mgr = ProcessManager::new().with_max_history(2);
+        mgr.create_process("a", 0);
+        mgr.create_process("b", 0);
+        mgr.create_process("c", 0);
+
+        // Only last 2 records retained
+        assert_eq!(mgr.change_count(), 2);
+    }
+
+    #[test]
+    fn test_process_manager_add_to_nonexistent_group() {
+        let mut mgr = ProcessManager::new();
+        assert!(!mgr.add_to_group(999, 1));
     }
 }

@@ -768,6 +768,94 @@ impl GdbThread {
             Some(ThreadStopReason::FunctionFinished { .. })
         )
     }
+
+    /// Build extended trace values including TID in hex format.
+    ///
+    /// Ported from the `put_threads` function which writes TID, Name,
+    /// State, and both `_display` and `_short_display`.
+    pub fn build_trace_values_extended(&self, radix: u32) -> Vec<(String, String)> {
+        let mut values = vec![
+            ("State".to_string(), self.state.as_trace_str().to_string()),
+        ];
+        if let Some(ref name) = self.name {
+            values.push(("Name".to_string(), name.clone()));
+        }
+        if let Some(tid) = self.tid {
+            values.push(("TID".to_string(), tid.to_string()));
+        }
+        values.push(("_short_display".to_string(), self.build_short_display(radix)));
+        if let Some(ref display) = self.display {
+            values.push(("_display".to_string(), display.clone()));
+        }
+        values
+    }
+
+    /// Build an extended display string including source info.
+    ///
+    /// Format: `[inf.thread:tid] name` or includes function name if known.
+    pub fn build_display_extended(&self) -> String {
+        let tid = self.tid.unwrap_or(0);
+        let base = format!("[{}.{}:0x{:x}]", self.inferior_num, self.num, tid);
+        match &self.name {
+            Some(name) => format!("{} {}", base, name),
+            None => base,
+        }
+    }
+
+    /// Get the program counter for the innermost frame.
+    ///
+    /// Convenience method that returns the PC of frame 0, or None
+    /// if no frames exist.
+    pub fn pc(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.pc)
+    }
+
+    /// Get the stack pointer for the innermost frame.
+    ///
+    /// Convenience method that returns the SP of frame 0, or None
+    /// if no frames exist.
+    pub fn sp(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.sp)
+    }
+
+    /// Get all frames sorted by level (alias for `frames_sorted`).
+    ///
+    /// Provided for API consistency with the dbgeng agent.
+    pub fn sorted_frames(&self) -> Vec<&GdbStackFrame> {
+        self.frames_sorted()
+    }
+
+    /// Get the trace path for the stack frames container.
+    pub fn stack_frames_path(&self) -> String {
+        format!(
+            "Inferiors[{}].Threads[{}].Stack",
+            self.inferior_num, self.num
+        )
+    }
+
+    /// Get the trace path for this thread's registers container
+    /// (frame 0 registers shorthand).
+    pub fn registers_path(&self) -> String {
+        self.frame_registers_path(0)
+    }
+
+    /// Get the trace path for user registers at frame 0.
+    ///
+    /// GDB organizes registers into groups. The "general" registers
+    /// are the user-visible ones (rax, rbx, rip, etc.).
+    pub fn user_registers_path(&self) -> String {
+        format!(
+            "Inferiors[{}].Threads[{}].Stack[0].Registers",
+            self.inferior_num, self.num
+        )
+    }
+
+    /// Check if the thread was stopped by a signal.
+    ///
+    /// Alias for `stopped_by_signal` for API consistency with dbgeng.
+    pub fn stopped_by_exception(&self) -> bool {
+        self.stopped_by_signal()
+    }
 }
 
 /// Stepping type for GDB thread operations.
@@ -1034,6 +1122,37 @@ impl GdbThreadCollection {
     /// Build thread info list for the common agent interface.
     pub fn build_thread_info_list(&self) -> Vec<ThreadInfo> {
         self.threads.values().map(|t| t.to_thread_info()).collect()
+    }
+
+    /// Get the selected thread (first running, then first stopped).
+    ///
+    /// Ported from the Python thread selection logic.
+    pub fn selected_thread(&self) -> Option<&GdbThread> {
+        self.threads
+            .values()
+            .find(|t| t.state == ExecutionState::Running)
+            .or_else(|| self.threads.values().find(|t| t.state == ExecutionState::Stopped))
+    }
+
+    /// Get all threads sorted by number.
+    pub fn sorted_threads(&self) -> Vec<&GdbThread> {
+        let mut threads: Vec<_> = self.threads.values().collect();
+        threads.sort_by_key(|t| t.num);
+        threads
+    }
+
+    /// Count the total number of stack frames across all threads.
+    pub fn total_frame_count(&self) -> usize {
+        self.threads.values().map(|t| t.frame_count()).sum()
+    }
+
+    /// Get a count of threads in each execution state.
+    pub fn thread_state_counts(&self) -> BTreeMap<ExecutionState, usize> {
+        let mut counts = BTreeMap::new();
+        for t in self.threads.values() {
+            *counts.entry(t.state).or_insert(0) += 1;
+        }
+        counts
     }
 }
 
@@ -2147,6 +2266,82 @@ mod tests {
             });
         assert!(t.stopped_at_function_return());
     }
+
+    #[test]
+    fn test_thread_build_trace_values_extended() {
+        let t = GdbThread::new(1)
+            .with_tid(42)
+            .with_name("main")
+            .with_state(ExecutionState::Stopped)
+            .with_display("Thread 1 main");
+        let values = t.build_trace_values_extended(16);
+        assert!(values.iter().any(|(k, v)| k == "State" && v == "STOPPED"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "main"));
+        assert!(values.iter().any(|(k, v)| k == "TID" && v == "42"));
+        assert!(values.iter().any(|(k, _v)| k == "_short_display"));
+        assert!(values.iter().any(|(k, v)| k == "_display" && v == "Thread 1 main"));
+    }
+
+    #[test]
+    fn test_thread_build_display_extended() {
+        let t = GdbThread::in_inferior(1, 1)
+            .with_tid(0x1234)
+            .with_name("main");
+        let display = t.build_display_extended();
+        assert!(display.contains("[1.1:0x1234]"));
+        assert!(display.contains("main"));
+
+        let t_no_name = GdbThread::in_inferior(2, 1).with_tid(0xABCD);
+        let display = t_no_name.build_display_extended();
+        assert!(display.contains("[1.2:0xabcd]"));
+    }
+
+    #[test]
+    fn test_thread_pc_sp() {
+        let mut t = GdbThread::new(1);
+        assert!(t.pc().is_none());
+        assert!(t.sp().is_none());
+
+        t.add_frame(GdbStackFrame::new(0, 0x401000).with_sp(0x7fff00));
+        assert_eq!(t.pc(), Some(0x401000));
+        assert_eq!(t.sp(), Some(0x7fff00));
+    }
+
+    #[test]
+    fn test_thread_sorted_frames() {
+        let mut t = GdbThread::new(1);
+        t.add_frame(GdbStackFrame::new(2, 0x403000));
+        t.add_frame(GdbStackFrame::new(0, 0x401000));
+        t.add_frame(GdbStackFrame::new(1, 0x402000));
+        let sorted = t.sorted_frames();
+        assert_eq!(sorted[0].level, 0);
+        assert_eq!(sorted[1].level, 1);
+        assert_eq!(sorted[2].level, 2);
+    }
+
+    #[test]
+    fn test_thread_stack_frames_path() {
+        let t = GdbThread::in_inferior(2, 1);
+        assert_eq!(t.stack_frames_path(), "Inferiors[1].Threads[2].Stack");
+    }
+
+    #[test]
+    fn test_thread_registers_path() {
+        let t = GdbThread::in_inferior(3, 1);
+        assert_eq!(t.registers_path(), "Inferiors[1].Threads[3].Stack[0].Registers");
+        assert_eq!(t.user_registers_path(), "Inferiors[1].Threads[3].Stack[0].Registers");
+    }
+
+    #[test]
+    fn test_thread_stopped_by_exception() {
+        let t = GdbThread::new(1)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(ThreadStopReason::Signal {
+                name: "SIGSEGV".to_string(),
+                number: 11,
+            });
+        assert!(t.stopped_by_exception());
+    }
 }
 
 #[cfg(test)]
@@ -2331,6 +2526,58 @@ mod collection_tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, 1); // GDB uses thread num as id
         assert_eq!(list[0].name.as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn test_thread_collection_selected_thread() {
+        let mut coll = GdbThreadCollection::new(1);
+        assert!(coll.selected_thread().is_none());
+
+        coll.insert(GdbThread::new(1).with_state(ExecutionState::Stopped));
+        let sel = coll.selected_thread();
+        assert!(sel.is_some());
+        assert_eq!(sel.unwrap().num, 1);
+
+        coll.insert(GdbThread::new(2).with_state(ExecutionState::Running));
+        let sel = coll.selected_thread();
+        assert!(sel.is_some());
+        assert_eq!(sel.unwrap().num, 2); // Running preferred
+    }
+
+    #[test]
+    fn test_thread_collection_sorted_threads() {
+        let mut coll = GdbThreadCollection::new(1);
+        coll.insert(GdbThread::new(3));
+        coll.insert(GdbThread::new(1));
+        coll.insert(GdbThread::new(2));
+        let sorted = coll.sorted_threads();
+        assert_eq!(sorted[0].num, 1);
+        assert_eq!(sorted[1].num, 2);
+        assert_eq!(sorted[2].num, 3);
+    }
+
+    #[test]
+    fn test_thread_collection_total_frame_count() {
+        let mut coll = GdbThreadCollection::new(1);
+        let mut t1 = GdbThread::new(1);
+        t1.add_frame(GdbStackFrame::new(0, 0x401000));
+        t1.add_frame(GdbStackFrame::new(1, 0x402000));
+        let mut t2 = GdbThread::new(2);
+        t2.add_frame(GdbStackFrame::new(0, 0x501000));
+        coll.insert(t1);
+        coll.insert(t2);
+        assert_eq!(coll.total_frame_count(), 3);
+    }
+
+    #[test]
+    fn test_thread_collection_state_counts() {
+        let mut coll = GdbThreadCollection::new(1);
+        coll.insert(GdbThread::new(1).with_state(ExecutionState::Running));
+        coll.insert(GdbThread::new(2).with_state(ExecutionState::Running));
+        coll.insert(GdbThread::new(3).with_state(ExecutionState::Stopped));
+        let counts = coll.thread_state_counts();
+        assert_eq!(counts.get(&ExecutionState::Running), Some(&2));
+        assert_eq!(counts.get(&ExecutionState::Stopped), Some(&1));
     }
 }
 

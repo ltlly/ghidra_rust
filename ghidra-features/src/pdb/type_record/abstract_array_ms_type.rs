@@ -95,14 +95,16 @@ impl AbstractMsType for AbstractArrayMsType {
             result.push('(');
         }
 
-        // Emit index type as "<indexType>".
+        // Emit array size with index type ref: "[size<indexType>]"
+        // Mirrors Java AbstractArrayMsType.emit():
+        //   builder.append("["); builder.append(size);
+        //   myBuilder.append("<"); myBuilder.append(indexType); myBuilder.append(">");
+        //   builder.append(myBuilder); builder.append("]");
+        result.push('[');
+        result.push_str(&self.size.to_string());
         result.push('<');
         result.push_str(&self.index_type_record_number.to_string());
         result.push('>');
-
-        // Emit array size.
-        result.push('[');
-        result.push_str(&self.size.to_string());
         result.push(']');
 
         // Emit element type (recursive, with ARRAY precedence).
@@ -170,8 +172,9 @@ mod tests {
         );
 
         let emitted = arr.emit(Bind::NONE);
-        assert!(emitted.contains("[40]"));
-        assert!(emitted.contains("<0x0075>"));
+        // Java format: [size<indexType>]elementType
+        assert!(emitted.contains("[40<0x0075>]"));
+        assert!(emitted.contains("0x0074")); // element type
         assert!(!emitted.contains('(')); // no parens at NONE level
     }
 
