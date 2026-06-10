@@ -374,6 +374,46 @@ impl LfProcedure {
             | ((self.function_attributes.is_instance_constructor_virtual_bases as u8) << 2)
     }
 
+    /// Get the return type record number.
+    ///
+    /// Alias for [`return_record_number`] for consistency with
+    /// Java's `AbstractProcedureMsType.getReturnRecordNumber()`.
+    pub fn get_return_type_record_number(&self) -> RecordNumber {
+        self.return_value_record_number
+    }
+
+    /// Get the argument list type record number.
+    ///
+    /// Alias for [`arg_list_record_number`] for consistency with
+    /// Java's `AbstractProcedureMsType.getArgListRecordNumber()`.
+    pub fn get_arg_list_type_record_number(&self) -> RecordNumber {
+        self.arg_list_record_number
+    }
+
+    /// Get the number of parameters.
+    ///
+    /// Alias for [`num_params`] returning `usize` for convenience.
+    pub fn get_num_parameters(&self) -> usize {
+        self.num_parameters as usize
+    }
+
+    /// Get the raw number of parameters as `u16`.
+    pub fn get_num_parameters_raw(&self) -> u16 {
+        self.num_parameters
+    }
+
+    /// Whether this procedure takes no parameters.
+    pub fn is_no_params(&self) -> bool {
+        self.num_parameters == 0
+    }
+
+    /// Get the calling convention label string.
+    ///
+    /// Returns the ABI label (e.g., `"__cdecl"`, `"__stdcall"`).
+    pub fn calling_convention_label(&self) -> &'static str {
+        self.calling_convention.label()
+    }
+
     /// Parse a procedure type record from a byte reader (32-bit MsType variant).
     ///
     /// Reads the return type index, calling convention byte, function
@@ -809,6 +849,73 @@ mod tests {
             RecordNumber::type_record(0x1001),
         );
         assert_eq!(p.attributes_byte(), 0x07);
+    }
+
+    // =========================================================================
+    // Additional accessor tests
+    // =========================================================================
+
+    #[test]
+    fn test_procedure_get_return_type_record_number() {
+        let p = make_test_procedure();
+        assert_eq!(
+            p.get_return_type_record_number(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_procedure_get_arg_list_type_record_number() {
+        let p = make_test_procedure();
+        assert_eq!(
+            p.get_arg_list_type_record_number(),
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_procedure_get_num_parameters() {
+        let p = make_test_procedure();
+        assert_eq!(p.get_num_parameters(), 2);
+    }
+
+    #[test]
+    fn test_procedure_get_num_parameters_raw() {
+        let p = make_test_procedure();
+        assert_eq!(p.get_num_parameters_raw(), 2);
+    }
+
+    #[test]
+    fn test_procedure_is_no_params_true() {
+        let p = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::NearC,
+            FunctionAttributes::empty(),
+            0,
+            RecordNumber::type_record(0x1001),
+        );
+        assert!(p.is_no_params());
+    }
+
+    #[test]
+    fn test_procedure_is_no_params_false() {
+        let p = make_test_procedure(); // 2 params
+        assert!(!p.is_no_params());
+    }
+
+    #[test]
+    fn test_procedure_calling_convention_label() {
+        let p = make_test_procedure();
+        assert_eq!(p.calling_convention_label(), "__cdecl");
+
+        let p2 = LfProcedure::new(
+            RecordNumber::type_record(0x0074),
+            CallingConvention::NearStd,
+            FunctionAttributes::empty(),
+            1,
+            RecordNumber::type_record(0x1001),
+        );
+        assert_eq!(p2.calling_convention_label(), "__stdcall");
     }
 
     // =========================================================================

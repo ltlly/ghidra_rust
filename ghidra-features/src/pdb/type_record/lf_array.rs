@@ -199,6 +199,54 @@ impl LfArray {
         self.array.name()
     }
 
+    /// Get the element type record number.
+    ///
+    /// Alias for [`element_type_record_number`] for consistency with
+    /// Java's `AbstractArrayMsType.getElementTypeRecordNumber()`.
+    pub fn get_element_type_record_number(&self) -> RecordNumber {
+        self.array.element_type_record_number
+    }
+
+    /// Get the index type record number.
+    ///
+    /// Alias for [`index_type_record_number`] for consistency with
+    /// Java's `AbstractArrayMsType.getIndexTypeRecordNumber()`.
+    pub fn get_index_type_record_number(&self) -> RecordNumber {
+        self.array.index_type_record_number
+    }
+
+    /// Whether this array is variadic (represents `...` arguments).
+    ///
+    /// A more precise check than [`is_variadic_heuristic`]. Returns `true`
+    /// if the array has zero size AND the element type is `T_NOTYPE` (0x0003).
+    /// This matches the Java convention for variadic argument representation.
+    pub fn is_variadic(&self) -> bool {
+        self.array.size == 0
+            && self.array.element_type_record_number == RecordNumber::type_record(0x0003)
+    }
+
+    /// Get the element size as a `u64`, or a default value if stride is not specified.
+    ///
+    /// Returns the stride value if available, otherwise returns `default_size`.
+    pub fn element_size_or(&self, default_size: u64) -> u64 {
+        if self.array.stride > 0 {
+            self.array.stride as u64
+        } else {
+            default_size
+        }
+    }
+
+    /// Compute the number of elements, using the given element size if stride is not specified.
+    ///
+    /// Unlike [`num_elements`] which returns `None` when stride is unavailable,
+    /// this method accepts a fallback element size to compute the count.
+    pub fn num_elements_with(&self, element_size: u64) -> u64 {
+        if self.array.size == 0 || element_size == 0 {
+            return 0;
+        }
+        self.array.size / element_size
+    }
+
     /// Parse an array type record from a byte reader (32-bit MsType variant).
     ///
     /// Reads the element type index, index type index, a `Numeric`-encoded
@@ -573,6 +621,108 @@ mod tests {
     fn test_array_array_name_from_parsed() {
         let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
         assert_eq!(a.array_name(), "float[4]");
+    }
+
+    // =========================================================================
+    // Additional accessor tests
+    // =========================================================================
+
+    #[test]
+    fn test_array_get_element_type_record_number() {
+        let a = make_test_array();
+        assert_eq!(
+            a.get_element_type_record_number(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_array_get_index_type_record_number() {
+        let a = make_test_array();
+        assert_eq!(
+            a.get_index_type_record_number(),
+            RecordNumber::type_record(0x0075)
+        );
+    }
+
+    #[test]
+    fn test_array_is_variadic_true() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0003), // void element
+            RecordNumber::type_record(0x0075),
+            0,
+            "".to_string(),
+            -1,
+        );
+        assert!(a.is_variadic());
+    }
+
+    #[test]
+    fn test_array_is_variadic_false_nonzero_size() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0003),
+            RecordNumber::type_record(0x0075),
+            4,
+            "".to_string(),
+            4,
+        );
+        assert!(!a.is_variadic());
+    }
+
+    #[test]
+    fn test_array_is_variadic_false_non_void() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0074), // int, not void
+            RecordNumber::type_record(0x0075),
+            0,
+            "".to_string(),
+            -1,
+        );
+        assert!(!a.is_variadic());
+    }
+
+    #[test]
+    fn test_array_element_size_or_with_stride() {
+        let a = make_test_array(); // stride=4
+        assert_eq!(a.element_size_or(8), 4);
+    }
+
+    #[test]
+    fn test_array_element_size_or_without_stride() {
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        // stride=-1, so should return default
+        assert_eq!(a.element_size_or(8), 8);
+    }
+
+    #[test]
+    fn test_array_num_elements_with_stride() {
+        let a = make_test_array(); // size=40, stride=4
+        assert_eq!(a.num_elements_with(4), 10);
+    }
+
+    #[test]
+    fn test_array_num_elements_with_fallback() {
+        let a = LfArray::from_parsed(0x0074, 0x0075, 16, "float[4]".to_string());
+        // size=16, stride=-1, fallback element_size=4
+        assert_eq!(a.num_elements_with(4), 4);
+    }
+
+    #[test]
+    fn test_array_num_elements_with_zero_size() {
+        let a = LfArray::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0075),
+            0,
+            "empty".to_string(),
+            4,
+        );
+        assert_eq!(a.num_elements_with(4), 0);
+    }
+
+    #[test]
+    fn test_array_num_elements_with_zero_element_size() {
+        let a = make_test_array();
+        assert_eq!(a.num_elements_with(0), 0);
     }
 
     // =========================================================================

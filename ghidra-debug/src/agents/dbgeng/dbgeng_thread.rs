@@ -11,6 +11,13 @@
 //! (`put_threads`, `put_frames`, etc.). Dbgeng provides the
 //! `_DEBUG_STACK_FRAME` structure with instruction offset, stack offset,
 //! frame offset, and return offset for each frame.
+//!
+//! ## Additional features ported from Python agent
+//! - TEB (Thread Environment Block) address tracking
+//! - Short display format with configurable radix (`[proc.thread:tid]`)
+//! - Thread list/snapshot support matching Python `put_threads`
+//! - Register group model with case-insensitive dbgeng register names
+//! - Frame `_DEBUG_STACK_FRAME` offset details for the trace tree
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -111,6 +118,8 @@ pub struct DbgEngThread {
     pub synced: bool,
     /// The process number this thread belongs to.
     pub process_num: u32,
+    /// Thread Environment Block address, if known.
+    pub teb: Option<u64>,
 }
 
 impl DbgEngThread {
@@ -124,6 +133,7 @@ impl DbgEngThread {
             frames: BTreeMap::new(),
             synced: false,
             process_num: 0,
+            teb: None,
         }
     }
 
@@ -151,6 +161,12 @@ impl DbgEngThread {
     /// Set the execution state.
     pub fn with_state(mut self, state: ExecutionState) -> Self {
         self.state = state;
+        self
+    }
+
+    /// Set the TEB address.
+    pub fn with_teb(mut self, teb: u64) -> Self {
+        self.teb = Some(teb);
         self
     }
 
@@ -253,6 +269,101 @@ impl DbgEngThread {
         matches!(
             self.state,
             ExecutionState::Running | ExecutionState::Stopped
+        )
+    }
+
+    /// Build trace object key-value pairs including TEB.
+    ///
+    /// Extended version matching the Python agent's `put_threads`.
+    pub fn build_trace_values_extended(&self, radix: u32, is_kernel: bool) -> Vec<(String, String)> {
+        let mut values = vec![
+            ("State".to_string(), self.state.as_trace_str().to_string()),
+            ("TID".to_string(), format!("{}", self.tid.unwrap_or(0))),
+            (
+                "_short_display".to_string(),
+                self.build_short_display(radix),
+            ),
+        ];
+        let display = self.build_display_extended(radix, is_kernel);
+        values.push(("_display".to_string(), display));
+        if let Some(teb) = self.teb {
+            values.push(("TEB".to_string(), format!("0x{:x}", teb)));
+        }
+        if let Some(ref name) = self.name {
+            values.push(("Name".to_string(), name.clone()));
+        }
+        values
+    }
+
+    /// Build the extended display string matching the Python agent.
+    ///
+    /// Format for kernel: `'{tnum:x} {tid:x}'`
+    /// Format for user: `'{tnum:x} {pid:x}:{tid:x} {name}'`
+    pub fn build_display_extended(&self, radix: u32, is_kernel: bool) -> String {
+        let pid = self.process_num;
+        let tid = self.tid.unwrap_or(0);
+        let tid_str = match radix {
+            16 => format!("{:x}", tid),
+            8 => format!("{:o}", tid),
+            _ => format!("{}", tid),
+        };
+        let pid_str = match radix {
+            16 => format!("{:x}", pid),
+            8 => format!("{:o}", pid),
+            _ => format!("{}", pid),
+        };
+        if is_kernel {
+            format!("[{}:{}]", self.num, tid_str)
+        } else {
+            match &self.name {
+                Some(n) if !n.is_empty() => {
+                    format!("{} {}:{} {}", self.num, pid_str, tid_str, n)
+                }
+                _ => {
+                    format!("{} {}:{}", self.num, pid_str, tid_str)
+                }
+            }
+        }
+    }
+
+    /// Get the innermost PC (program counter), if any frame exists.
+    pub fn pc(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.pc)
+    }
+
+    /// Get the innermost SP (stack pointer), if any frame exists.
+    pub fn sp(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.sp)
+    }
+
+    /// Get all frames sorted by level (innermost first).
+    pub fn sorted_frames(&self) -> Vec<&DbgEngStackFrame> {
+        let mut frames: Vec<&DbgEngStackFrame> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames
+    }
+
+    /// Build the stack container path for this thread.
+    pub fn stack_frames_path(&self) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack.Frames",
+            self.process_num, self.num
+        )
+    }
+
+    /// Build the registers path for this thread.
+    pub fn registers_path(&self) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Registers",
+            self.process_num, self.num
+        )
+    }
+
+    /// Build the user registers path for this thread.
+    pub fn user_registers_path(&self) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Registers.User",
+            self.process_num, self.num
         )
     }
 }
@@ -394,6 +505,41 @@ impl DbgEngStackFrame {
     pub fn clear_registers(&mut self) {
         self.registers.clear();
     }
+
+    /// Build the trace object key-value pairs for this frame.
+    ///
+    /// Matches the Python agent's `put_frames` output with all four offsets.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        let mut values = vec![(
+            "_display".to_string(),
+            format!("#{} 0x{:08x}", self.level, self.pc),
+        )];
+        values.push((
+            "Instruction Offset".to_string(),
+            format!("0x{:x}", self.pc),
+        ));
+        values.push((
+            "Stack Offset".to_string(),
+            format!("0x{:x}", self.sp),
+        ));
+        values.push((
+            "Return Offset".to_string(),
+            format!("0x{:x}", self.return_address),
+        ));
+        values.push((
+            "Frame Offset".to_string(),
+            format!("0x{:x}", self.fp),
+        ));
+        values
+    }
+
+    /// Build the trace path for this frame.
+    pub fn trace_path(&self, process_num: u32, thread_num: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack.Frames[{}]",
+            process_num, thread_num, self.level
+        )
+    }
 }
 
 #[cfg(test)]
@@ -453,6 +599,7 @@ mod tests {
         assert_eq!(t.state, ExecutionState::NotStarted);
         assert!(t.frames.is_empty());
         assert_eq!(t.process_num, 0);
+        assert!(t.teb.is_none());
     }
 
     #[test]
@@ -624,6 +771,116 @@ mod tests {
         assert_eq!(
             f.registers_trace_path(1, 3),
             "Processes[1].Threads[3].Stack[2].Registers"
+        );
+    }
+
+    #[test]
+    fn test_thread_teb() {
+        let t = DbgEngThread::new(1).with_teb(0x7ffde000);
+        assert_eq!(t.teb, Some(0x7ffde000));
+    }
+
+    #[test]
+    fn test_thread_build_trace_values_extended() {
+        let t = DbgEngThread::new(1)
+            .with_tid(0x1234)
+            .with_name("main")
+            .with_state(ExecutionState::Stopped)
+            .with_teb(0x7ffde000);
+        let values = t.build_trace_values_extended(16, false);
+        assert!(values.iter().any(|(k, v)| k == "State" && v == "STOPPED"));
+        assert!(values.iter().any(|(k, v)| k == "TID" && v == "4660"));
+        assert!(values.iter().any(|(k, v)| k == "TEB" && v == "0x7ffde000"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "main"));
+    }
+
+    #[test]
+    fn test_thread_build_display_extended_user() {
+        let t = DbgEngThread::in_process(1, 0)
+            .with_tid(0x1234)
+            .with_name("main");
+        let disp = t.build_display_extended(16, false);
+        assert!(disp.contains("1234"));
+        assert!(disp.contains("main"));
+    }
+
+    #[test]
+    fn test_thread_build_display_extended_kernel() {
+        let t = DbgEngThread::in_process(1, 0).with_tid(0x1234);
+        let disp = t.build_display_extended(16, true);
+        assert!(disp.contains("1234"));
+    }
+
+    #[test]
+    fn test_thread_pc_sp() {
+        let mut t = DbgEngThread::new(1);
+        assert!(t.pc().is_none());
+        assert!(t.sp().is_none());
+
+        t.add_frame(
+            DbgEngStackFrame::new(0, 0x401000)
+                .with_sp(0x7fff00)
+                .with_fp(0x7fff10)
+                .with_return_address(0x402000),
+        );
+        assert_eq!(t.pc(), Some(0x401000));
+        assert_eq!(t.sp(), Some(0x7fff00));
+    }
+
+    #[test]
+    fn test_thread_sorted_frames() {
+        let mut t = DbgEngThread::new(1);
+        t.add_frame(DbgEngStackFrame::new(2, 0x403000));
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t.add_frame(DbgEngStackFrame::new(1, 0x402000));
+        let sorted = t.sorted_frames();
+        assert_eq!(sorted.len(), 3);
+        assert_eq!(sorted[0].level, 0);
+        assert_eq!(sorted[1].level, 1);
+        assert_eq!(sorted[2].level, 2);
+    }
+
+    #[test]
+    fn test_thread_stack_frames_path() {
+        let t = DbgEngThread::in_process(2, 1);
+        assert_eq!(
+            t.stack_frames_path(),
+            "Processes[1].Threads[2].Stack.Frames"
+        );
+    }
+
+    #[test]
+    fn test_thread_registers_path() {
+        let t = DbgEngThread::in_process(2, 1);
+        assert_eq!(
+            t.registers_path(),
+            "Processes[1].Threads[2].Registers"
+        );
+        assert_eq!(
+            t.user_registers_path(),
+            "Processes[1].Threads[2].Registers.User"
+        );
+    }
+
+    #[test]
+    fn test_stack_frame_build_trace_values() {
+        let f = DbgEngStackFrame::new(0, 0x401000)
+            .with_sp(0x7fff00)
+            .with_fp(0x7fff10)
+            .with_return_address(0x402000);
+        let values = f.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Instruction Offset" && v == "0x401000"));
+        assert!(values.iter().any(|(k, v)| k == "Stack Offset" && v == "0x7fff00"));
+        assert!(values.iter().any(|(k, v)| k == "Return Offset" && v == "0x402000"));
+        assert!(values.iter().any(|(k, v)| k == "Frame Offset" && v == "0x7fff10"));
+    }
+
+    #[test]
+    fn test_stack_frame_trace_path() {
+        let f = DbgEngStackFrame::new(3, 0x401000);
+        assert_eq!(
+            f.trace_path(1, 2),
+            "Processes[1].Threads[2].Stack.Frames[3]"
         );
     }
 }

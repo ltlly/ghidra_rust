@@ -279,6 +279,330 @@ impl LldbThread {
             ExecutionState::Running | ExecutionState::Stopped
         )
     }
+
+    /// Whether this thread is suspended.
+    ///
+    /// In LLDB, a suspended thread will not resume when the process
+    /// continues -- it is effectively paused independently.
+    pub fn is_suspended(&self) -> bool {
+        self.state == ExecutionState::Stopped && self.stop_reason == Some(super::LldbStopReason::Unknown)
+    }
+
+    /// Get all frames sorted by level (innermost first).
+    pub fn frames_sorted(&self) -> Vec<&LldbStackFrame> {
+        let mut frames: Vec<_> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames
+    }
+
+    /// Get the outermost frame (highest level).
+    pub fn outermost_frame(&self) -> Option<&LldbStackFrame> {
+        self.frames.values().max_by_key(|f| f.level)
+    }
+
+    /// Build the backtrace as a list of display strings.
+    pub fn build_backtrace(&self) -> Vec<String> {
+        let mut frames: Vec<_> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames.iter().map(|f| f.build_display()).collect()
+    }
+
+    /// Build trace object key-value pairs for the stack container.
+    pub fn build_stack_container_values(&self) -> Vec<(String, String)> {
+        vec![("_count".to_string(), self.frames.len().to_string())]
+    }
+
+    /// Collect all register names across all frames.
+    pub fn all_register_names(&self) -> Vec<String> {
+        let mut names = std::collections::BTreeSet::new();
+        for frame in self.frames.values() {
+            for reg in &frame.registers {
+                names.insert(reg.name.clone());
+            }
+        }
+        names.into_iter().collect()
+    }
+
+    /// Find the frame containing the given PC address.
+    pub fn frame_at_pc(&self, pc: u64) -> Option<&LldbStackFrame> {
+        self.frames.values().find(|f| f.pc == pc)
+    }
+
+    /// Get the return address for the innermost frame.
+    pub fn return_address(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.return_address).filter(|&ra| ra != 0)
+    }
+
+    /// Whether the thread was stopped by a breakpoint.
+    pub fn stopped_at_breakpoint(&self) -> bool {
+        self.stop_reason == Some(super::LldbStopReason::Breakpoint)
+    }
+
+    /// Whether the thread was stopped by a signal.
+    pub fn stopped_by_signal(&self) -> bool {
+        self.stop_reason == Some(super::LldbStopReason::Signal)
+    }
+
+    /// Whether the thread finished a step operation.
+    pub fn stopped_at_step(&self) -> bool {
+        self.stop_reason == Some(super::LldbStopReason::PlanComplete)
+    }
+}
+
+/// Stepping type for LLDB thread operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum LldbStepType {
+    /// Step over (next instruction / source line).
+    Over,
+    /// Step into (step instruction / into function calls).
+    Into,
+    /// Step out (run until current function returns).
+    Out,
+    /// Single-step one instruction.
+    Instruction,
+}
+
+impl LldbStepType {
+    /// Convert to the LLDB Python command prefix.
+    pub fn as_lldb_command(&self) -> &'static str {
+        match self {
+            Self::Over => "thread step-over",
+            Self::Into => "thread step-in",
+            Self::Out => "thread step-out",
+            Self::Instruction => "thread step-inst",
+        }
+    }
+
+    /// Human-readable description.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Over => "Step Over",
+            Self::Into => "Step Into",
+            Self::Out => "Step Out",
+            Self::Instruction => "Step Instruction",
+        }
+    }
+}
+
+/// Thread plan tracking for LLDB.
+///
+/// LLDB uses "thread plans" to manage stepping operations. A plan
+/// describes what a thread should do before stopping again. This struct
+/// mirrors the SBThread plan state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LldbThreadPlan {
+    /// Plan description (e.g. "step over", "step until 0x401000").
+    pub description: String,
+    /// The step type, if this is a standard stepping plan.
+    pub step_type: Option<LldbStepType>,
+    /// Target stop address (for "run to address" plans).
+    pub stop_address: Option<u64>,
+    /// Whether the plan is complete.
+    pub completed: bool,
+}
+
+impl LldbThreadPlan {
+    /// Create a plan for a standard step.
+    pub fn step(step_type: LldbStepType) -> Self {
+        Self {
+            description: step_type.description().to_string(),
+            step_type: Some(step_type),
+            stop_address: None,
+            completed: false,
+        }
+    }
+
+    /// Create a plan to run to an address.
+    pub fn run_to_address(addr: u64) -> Self {
+        Self {
+            description: format!("run to 0x{:x}", addr),
+            step_type: None,
+            stop_address: Some(addr),
+            completed: false,
+        }
+    }
+
+    /// Create a plan to step out of the current function.
+    pub fn step_out() -> Self {
+        Self::step(LldbStepType::Out)
+    }
+
+    /// Mark the plan as complete.
+    pub fn mark_complete(&mut self) {
+        self.completed = true;
+    }
+}
+
+/// Extended stack frame information for LLDB.
+///
+/// Contains additional LLDB-specific frame metadata beyond the basic
+/// `LldbStackFrame`, including unwinding information and language info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LldbFrameDetails {
+    /// Frame level.
+    pub level: u32,
+    /// Whether this frame is an artificial/thunk frame.
+    pub is_artificial: bool,
+    /// Source file path, if known.
+    pub source_file: Option<String>,
+    /// Source line number, if known.
+    pub source_line: Option<u32>,
+    /// Language of the function (e.g. "c", "c++", "rust", "swift").
+    pub language: Option<String>,
+    /// Whether the frame corresponds to a signal handler.
+    pub is_signal_frame: bool,
+    /// Compiler-specific frame flags.
+    pub flags: u32,
+}
+
+impl LldbFrameDetails {
+    /// Create frame details for a given level.
+    pub fn new(level: u32) -> Self {
+        Self {
+            level,
+            is_artificial: false,
+            source_file: None,
+            source_line: None,
+            language: None,
+            is_signal_frame: false,
+            flags: 0,
+        }
+    }
+
+    /// Mark as artificial frame.
+    pub fn with_artificial(mut self, artificial: bool) -> Self {
+        self.is_artificial = artificial;
+        self
+    }
+
+    /// Set source location.
+    pub fn with_source(mut self, file: impl Into<String>, line: u32) -> Self {
+        self.source_file = Some(file.into());
+        self.source_line = Some(line);
+        self
+    }
+
+    /// Set language.
+    pub fn with_language(mut self, lang: impl Into<String>) -> Self {
+        self.language = Some(lang.into());
+        self
+    }
+
+    /// Mark as signal frame.
+    pub fn with_signal_frame(mut self, signal: bool) -> Self {
+        self.is_signal_frame = signal;
+        self
+    }
+
+    /// Build a display string including source location.
+    pub fn build_display(&self, pc: u64, function_name: Option<&str>) -> String {
+        let mut display = format!("#{} 0x{:x}", self.level, pc);
+        if let Some(name) = function_name {
+            display += &format!(" {}", name);
+        }
+        if let (Some(file), Some(line)) = (&self.source_file, self.source_line) {
+            display += &format!(" at {}:{}", file, line);
+        }
+        display
+    }
+}
+
+/// A thread collection manager for an LLDB process.
+///
+/// Manages thread lifecycle events (creation, exit) and provides
+/// bulk operations on the thread set.
+#[derive(Debug, Default)]
+pub struct LldbThreadCollection {
+    threads: BTreeMap<u32, LldbThread>,
+    process_index: u32,
+}
+
+impl LldbThreadCollection {
+    /// Create a new thread collection for a process.
+    pub fn new(process_index: u32) -> Self {
+        Self {
+            threads: BTreeMap::new(),
+            process_index,
+        }
+    }
+
+    /// Add or replace a thread.
+    pub fn insert(&mut self, thread: LldbThread) {
+        self.threads.insert(thread.index, thread);
+    }
+
+    /// Remove a thread by index.
+    pub fn remove(&mut self, index: u32) -> Option<LldbThread> {
+        self.threads.remove(&index)
+    }
+
+    /// Get a thread by index.
+    pub fn get(&self, index: u32) -> Option<&LldbThread> {
+        self.threads.get(&index)
+    }
+
+    /// Get a mutable thread by index.
+    pub fn get_mut(&mut self, index: u32) -> Option<&mut LldbThread> {
+        self.threads.get_mut(&index)
+    }
+
+    /// Get the number of threads.
+    pub fn len(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.threads.is_empty()
+    }
+
+    /// Get all thread indices.
+    pub fn indices(&self) -> Vec<u32> {
+        self.threads.keys().copied().collect()
+    }
+
+    /// Iterate over threads.
+    pub fn iter(&self) -> impl Iterator<Item = &LldbThread> {
+        self.threads.values()
+    }
+
+    /// Mark all threads as synchronized.
+    pub fn mark_all_synced(&mut self) {
+        for t in self.threads.values_mut() {
+            t.mark_synced();
+        }
+    }
+
+    /// Remove all exited threads and return their indices.
+    pub fn prune_exited(&mut self) -> Vec<u32> {
+        let exited: Vec<u32> = self
+            .threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Exited)
+            .map(|(&idx, _)| idx)
+            .collect();
+        for idx in &exited {
+            self.threads.remove(idx);
+        }
+        exited
+    }
+
+    /// Clear all frames from all threads (used before re-syncing).
+    pub fn clear_all_frames(&mut self) {
+        for t in self.threads.values_mut() {
+            t.clear_frames();
+        }
+    }
+
+    /// Get the process index this collection belongs to.
+    pub fn process_index(&self) -> u32 {
+        self.process_index
+    }
+
+    /// Build thread info list for the common agent interface.
+    pub fn build_thread_info_list(&self) -> Vec<ThreadInfo> {
+        self.threads.values().map(|t| t.to_thread_info()).collect()
+    }
 }
 
 /// A stack frame within an LLDB thread.
@@ -681,5 +1005,280 @@ mod tests {
             f.registers_trace_path(1, 3),
             "Processes[1].Threads[3].Stack[2].Registers"
         );
+    }
+
+    #[test]
+    fn test_thread_frames_sorted() {
+        let mut t = LldbThread::new(1, 0);
+        t.add_frame(LldbStackFrame::new(2, 0x403000));
+        t.add_frame(LldbStackFrame::new(0, 0x401000));
+        t.add_frame(LldbStackFrame::new(1, 0x402000));
+        let sorted = t.frames_sorted();
+        assert_eq!(sorted[0].level, 0);
+        assert_eq!(sorted[1].level, 1);
+        assert_eq!(sorted[2].level, 2);
+    }
+
+    #[test]
+    fn test_thread_outermost_frame() {
+        let mut t = LldbThread::new(1, 0);
+        t.add_frame(LldbStackFrame::new(0, 0x401000));
+        t.add_frame(LldbStackFrame::new(1, 0x402000));
+        t.add_frame(LldbStackFrame::new(2, 0x403000));
+        let outer = t.outermost_frame();
+        assert!(outer.is_some());
+        assert_eq!(outer.unwrap().level, 2);
+        assert_eq!(outer.unwrap().pc, 0x403000);
+    }
+
+    #[test]
+    fn test_thread_build_backtrace() {
+        let mut t = LldbThread::new(1, 0);
+        t.add_frame(LldbStackFrame::new(0, 0x401000).with_function("main"));
+        t.add_frame(LldbStackFrame::new(1, 0x402000).with_function("foo"));
+        let bt = t.build_backtrace();
+        assert_eq!(bt.len(), 2);
+        assert!(bt[0].contains("main"));
+        assert!(bt[1].contains("foo"));
+    }
+
+    #[test]
+    fn test_thread_build_stack_container_values() {
+        let mut t = LldbThread::new(1, 0);
+        t.add_frame(LldbStackFrame::new(0, 0x401000));
+        t.add_frame(LldbStackFrame::new(1, 0x402000));
+        let values = t.build_stack_container_values();
+        assert!(values.iter().any(|(k, v)| k == "_count" && v == "2"));
+    }
+
+    #[test]
+    fn test_thread_all_register_names() {
+        let mut t = LldbThread::new(1, 0);
+        let mut f0 = LldbStackFrame::new(0, 0x401000);
+        f0.set_register(RegisterValue::from_u64("x0", 1));
+        f0.set_register(RegisterValue::from_u64("x1", 2));
+        t.add_frame(f0);
+        let mut f1 = LldbStackFrame::new(1, 0x402000);
+        f1.set_register(RegisterValue::from_u64("x0", 3));
+        f1.set_register(RegisterValue::from_u64("pc", 4));
+        t.add_frame(f1);
+
+        let names = t.all_register_names();
+        assert_eq!(names.len(), 3); // x0, x1, pc
+        assert!(names.contains(&"x0".to_string()));
+        assert!(names.contains(&"x1".to_string()));
+        assert!(names.contains(&"pc".to_string()));
+    }
+
+    #[test]
+    fn test_thread_frame_at_pc() {
+        let mut t = LldbThread::new(1, 0);
+        t.add_frame(LldbStackFrame::new(0, 0x401000));
+        t.add_frame(LldbStackFrame::new(1, 0x402000));
+        assert!(t.frame_at_pc(0x401000).is_some());
+        assert!(t.frame_at_pc(0x403000).is_none());
+    }
+
+    #[test]
+    fn test_thread_return_address() {
+        let mut t = LldbThread::new(1, 0);
+        assert!(t.return_address().is_none());
+
+        t.add_frame(LldbStackFrame::new(0, 0x401000).with_return_address(0x401100));
+        assert_eq!(t.return_address(), Some(0x401100));
+    }
+
+    #[test]
+    fn test_thread_stopped_at_breakpoint() {
+        let t = LldbThread::new(1, 0)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(LldbStopReason::Breakpoint);
+        assert!(t.stopped_at_breakpoint());
+        assert!(!t.stopped_by_signal());
+        assert!(!t.stopped_at_step());
+    }
+
+    #[test]
+    fn test_thread_stopped_by_signal() {
+        let t = LldbThread::new(1, 0)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(LldbStopReason::Signal);
+        assert!(t.stopped_by_signal());
+        assert!(!t.stopped_at_breakpoint());
+    }
+
+    #[test]
+    fn test_thread_stopped_at_step() {
+        let t = LldbThread::new(1, 0)
+            .with_state(ExecutionState::Stopped)
+            .with_stop_reason(LldbStopReason::PlanComplete);
+        assert!(t.stopped_at_step());
+    }
+}
+
+#[cfg(test)]
+mod step_tests {
+    use super::*;
+
+    #[test]
+    fn test_step_type_commands() {
+        assert_eq!(LldbStepType::Over.as_lldb_command(), "thread step-over");
+        assert_eq!(LldbStepType::Into.as_lldb_command(), "thread step-in");
+        assert_eq!(LldbStepType::Out.as_lldb_command(), "thread step-out");
+        assert_eq!(LldbStepType::Instruction.as_lldb_command(), "thread step-inst");
+    }
+
+    #[test]
+    fn test_step_type_descriptions() {
+        assert_eq!(LldbStepType::Over.description(), "Step Over");
+        assert_eq!(LldbStepType::Into.description(), "Step Into");
+    }
+}
+
+#[cfg(test)]
+mod plan_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_plan_step() {
+        let plan = LldbThreadPlan::step(LldbStepType::Over);
+        assert_eq!(plan.step_type, Some(LldbStepType::Over));
+        assert!(!plan.completed);
+        assert!(plan.stop_address.is_none());
+    }
+
+    #[test]
+    fn test_thread_plan_run_to_address() {
+        let plan = LldbThreadPlan::run_to_address(0x401000);
+        assert_eq!(plan.stop_address, Some(0x401000));
+        assert!(plan.step_type.is_none());
+        assert!(plan.description.contains("0x401000"));
+    }
+
+    #[test]
+    fn test_thread_plan_completion() {
+        let mut plan = LldbThreadPlan::step_out();
+        assert!(!plan.completed);
+        plan.mark_complete();
+        assert!(plan.completed);
+    }
+}
+
+#[cfg(test)]
+mod frame_details_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_details() {
+        let details = LldbFrameDetails::new(0)
+            .with_source("/path/to/main.c", 42)
+            .with_language("c")
+            .with_signal_frame(false);
+        assert_eq!(details.level, 0);
+        assert_eq!(details.source_file.as_deref(), Some("/path/to/main.c"));
+        assert_eq!(details.source_line, Some(42));
+        assert_eq!(details.language.as_deref(), Some("c"));
+        assert!(!details.is_signal_frame);
+    }
+
+    #[test]
+    fn test_frame_details_display() {
+        let details = LldbFrameDetails::new(0).with_source("main.c", 10);
+        let display = details.build_display(0x401000, Some("main"));
+        assert!(display.contains("#0"));
+        assert!(display.contains("0x401000"));
+        assert!(display.contains("main"));
+        assert!(display.contains("main.c:10"));
+    }
+
+    #[test]
+    fn test_frame_details_no_source() {
+        let details = LldbFrameDetails::new(1);
+        let display = details.build_display(0x402000, Some("foo"));
+        assert!(display.contains("#1"));
+        assert!(display.contains("foo"));
+        assert!(!display.contains("at"));
+    }
+}
+
+#[cfg(test)]
+mod collection_tests {
+    use super::*;
+
+    #[test]
+    fn test_thread_collection() {
+        let mut coll = LldbThreadCollection::new(0);
+        assert!(coll.is_empty());
+        assert_eq!(coll.process_index(), 0);
+
+        coll.insert(LldbThread::new(1, 0).with_state(ExecutionState::Running));
+        coll.insert(LldbThread::new(2, 0).with_state(ExecutionState::Stopped));
+        assert_eq!(coll.len(), 2);
+        assert_eq!(coll.indices(), vec![1, 2]);
+    }
+
+    #[test]
+    fn test_thread_collection_prune() {
+        let mut coll = LldbThreadCollection::new(0);
+        coll.insert(LldbThread::new(1, 0).with_state(ExecutionState::Running));
+        coll.insert(LldbThread::new(2, 0).with_state(ExecutionState::Exited));
+        coll.insert(LldbThread::new(3, 0).with_state(ExecutionState::Exited));
+
+        let pruned = coll.prune_exited();
+        assert_eq!(pruned.len(), 2);
+        assert!(pruned.contains(&2));
+        assert!(pruned.contains(&3));
+        assert_eq!(coll.len(), 1);
+        assert!(coll.get(1).is_some());
+    }
+
+    #[test]
+    fn test_thread_collection_clear_all_frames() {
+        let mut coll = LldbThreadCollection::new(0);
+        let mut t1 = LldbThread::new(1, 0);
+        t1.add_frame(LldbStackFrame::new(0, 0x401000));
+        let mut t2 = LldbThread::new(2, 0);
+        t2.add_frame(LldbStackFrame::new(0, 0x402000));
+        t2.add_frame(LldbStackFrame::new(1, 0x403000));
+        coll.insert(t1);
+        coll.insert(t2);
+
+        coll.clear_all_frames();
+        assert_eq!(coll.get(1).unwrap().frame_count(), 0);
+        assert_eq!(coll.get(2).unwrap().frame_count(), 0);
+    }
+
+    #[test]
+    fn test_thread_collection_mark_all_synced() {
+        let mut coll = LldbThreadCollection::new(0);
+        coll.insert(LldbThread::new(1, 0));
+        coll.insert(LldbThread::new(2, 0));
+        coll.mark_all_synced();
+        assert!(coll.get(1).unwrap().synced);
+        assert!(coll.get(2).unwrap().synced);
+    }
+
+    #[test]
+    fn test_thread_collection_iter() {
+        let mut coll = LldbThreadCollection::new(0);
+        coll.insert(LldbThread::new(1, 0));
+        coll.insert(LldbThread::new(2, 0));
+        let count = coll.iter().count();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn test_thread_collection_build_info_list() {
+        let mut coll = LldbThreadCollection::new(0);
+        coll.insert(
+            LldbThread::new(1, 0)
+                .with_tid(100)
+                .with_name("main")
+                .with_state(ExecutionState::Running),
+        );
+        let list = coll.build_thread_info_list();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, 100);
+        assert_eq!(list[0].name.as_deref(), Some("main"));
     }
 }

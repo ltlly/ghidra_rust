@@ -1528,6 +1528,8 @@ pub mod symbol_kind {
     pub const S_UNAMESPACE_ST: u16=0x1029;
     pub const S_UNAMESPACE: u16=0x1124;
     pub const S_PECOFF_SECTION: u16=0x1136;
+    pub const S_PE_COFFGROUP: u16=0x1137;
+    pub const S_ANNOTATIONREF: u16=0x1128;
     pub const S_INDIRECT_CALLSITEINFO: u16=0x1139;
     pub const S_ENVBLOCK_V2: u16=0x113D;
     pub const S_BUILDINFO_V2: u16=0x114C;
@@ -1609,12 +1611,14 @@ pub enum SymbolRecord {
     Thunk(ThunkSymbol),
     ProcedureReference { name: String, module_index: u16, type_index: u32 },
     DataReference { name: String, module_index: u16, type_index: u32 },
-    Annotation { offset: u32, segment: u16, strings: Vec<String> },
+    Annotation { offset: u32, segment: u16, count: u16, strings: Vec<String> },
     CallSiteInfo { offset: u32, section: u16, type_index: u32 },
     InlineSite { parent_offset: u32, end_offset: u32, inlinee_type_index: u32, annotations: Vec<u8> },
     InlineSiteEnd,
     Section { section_number: u16, alignment: u8, rva: u32, size: u32, characteristics: u32, name: String },
     CoffGroup { size: u32, characteristics: u32, offset: u32, segment: u16, name: String },
+    PeCoffGroup { length: u32, characteristics: u32, offset: u32, segment: u16, name: String },
+    AnnotationReference { name: String, module_index: u16, sum_name: u32, offset_actual_symbol: u32 },
     BuildInfo { item_id: u32 },
     SeparatedCode { parent_offset: u32, end_offset: u32, length: u32, separated_code_segment: u16, separated_code_offset: u32, parent_segment: u16 },
     Trampoline { trampoline_type: u16, size: u16, thunk_offset: u32, target_offset: u32, thunk_section: u16, target_section: u16 },
@@ -1683,7 +1687,8 @@ fn parse_symbol_payload(kind: u16, payload: &[u8]) -> SymbolRecord {
         symbol_kind::S_ANNOTATION => parse_annotation(payload),
         symbol_kind::S_TRAMPOLINE => parse_trampoline(payload),
         symbol_kind::S_SECTION => parse_section_sym(payload),
-        symbol_kind::S_COFFGROUP => parse_coffgroup(payload),
+        symbol_kind::S_COFFGROUP|symbol_kind::S_PE_COFFGROUP => parse_coffgroup(kind, payload),
+        symbol_kind::S_ANNOTATIONREF => parse_annotationref(payload),
         symbol_kind::S_SEPCODE => parse_sepcode(payload),
         symbol_kind::S_BUILDINFO => parse_buildinfo_sym(payload),
         symbol_kind::S_INLINESITE => parse_inlinesite(payload),
@@ -1842,16 +1847,28 @@ fn parse_dataref(payload: &[u8]) -> SymbolRecord {
 }
 
 fn parse_annotation(payload: &[u8]) -> SymbolRecord {
-    if payload.len()<6 { return SymbolRecord::Unknown{kind:symbol_kind::S_ANNOTATION}; }
+    if payload.len()<8 { return SymbolRecord::Unknown{kind:symbol_kind::S_ANNOTATION}; }
     let off = le_u32_at(payload,0);
     let seg = u16::from_le_bytes([payload[4],payload[5]]);
-    let mut strings = Vec::new(); let mut pos=6;
-    while pos+2<=payload.len() {
+    let count = u16::from_le_bytes([payload[6],payload[7]]) as usize;
+    let mut strings = Vec::new(); let mut pos=8;
+    for _ in 0..count {
+        if pos+2>payload.len(){break;}
         let len = u16::from_le_bytes([payload[pos],payload[pos+1]]) as usize; pos+=2;
         if len==0||pos+len>payload.len(){break;}
         strings.push(String::from_utf8_lossy(&payload[pos..pos+len]).to_string()); pos+=len;
     }
-    SymbolRecord::Annotation{offset:off,segment:seg,strings}
+    SymbolRecord::Annotation{offset:off,segment:seg,count:count as u16,strings}
+}
+
+fn parse_annotationref(payload: &[u8]) -> SymbolRecord {
+    // V2 format: sum_name(u32) + sym_offset(u32) + module_index(u16) + name(NT)
+    if payload.len()<10 { return SymbolRecord::Unknown{kind:symbol_kind::S_ANNOTATIONREF}; }
+    let sum_name = le_u32_at(payload,0);
+    let offset_actual_symbol = le_u32_at(payload,4);
+    let module_index = u16::from_le_bytes([payload[8],payload[9]]);
+    let name = if payload.len()>10 { parse_null_terminated_string(&payload[10..]) } else { String::new() };
+    SymbolRecord::AnnotationReference{name,module_index,sum_name,offset_actual_symbol}
 }
 
 fn parse_trampoline(payload: &[u8]) -> SymbolRecord {
@@ -1864,9 +1881,18 @@ fn parse_section_sym(payload: &[u8]) -> SymbolRecord {
     SymbolRecord::Section{section_number:u16::from_le_bytes([payload[0],payload[1]]),alignment:payload[2],rva:le_u32_at(payload,4),size:le_u32_at(payload,8),characteristics:le_u32_at(payload,12),name:parse_null_terminated_string(&payload[16..])}
 }
 
-fn parse_coffgroup(payload: &[u8]) -> SymbolRecord {
-    if payload.len()<14 { return SymbolRecord::Unknown{kind:symbol_kind::S_COFFGROUP}; }
-    SymbolRecord::CoffGroup{size:le_u32_at(payload,0),characteristics:le_u32_at(payload,4),offset:le_u32_at(payload,8),segment:u16::from_le_bytes([payload[12],payload[13]]),name:parse_null_terminated_string(&payload[14..])}
+fn parse_coffgroup(kind: u16, payload: &[u8]) -> SymbolRecord {
+    if payload.len()<14 { return SymbolRecord::Unknown{kind}; }
+    let size = le_u32_at(payload,0);
+    let characteristics = le_u32_at(payload,4);
+    let offset = le_u32_at(payload,8);
+    let segment = u16::from_le_bytes([payload[12],payload[13]]);
+    let name = parse_null_terminated_string(&payload[14..]);
+    if kind == symbol_kind::S_PE_COFFGROUP {
+        SymbolRecord::PeCoffGroup{length:size,characteristics,offset,segment,name}
+    } else {
+        SymbolRecord::CoffGroup{size,characteristics,offset,segment,name}
+    }
 }
 
 fn parse_sepcode(payload: &[u8]) -> SymbolRecord {

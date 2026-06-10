@@ -316,7 +316,7 @@ mod tests {
         );
         let s = format!("{}", sym);
         assert!(s.contains("12345678"));
-        assert!(s.contains("abcdef00"));
+        assert!(s.contains("ABCDEF00"));
         assert!(s.contains("helper"));
     }
 

@@ -72,7 +72,7 @@ pub mod paths {
 }
 
 /// The execution state of a debugged process.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ExecutionState {
     /// Process is running.
     Running,

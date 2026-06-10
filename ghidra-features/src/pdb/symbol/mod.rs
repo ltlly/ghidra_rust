@@ -150,7 +150,8 @@ pub use s_lprocia64::SLProcIA64;
 pub use s_gprocref::SGProcRef;
 pub use s_lprocref::SLProcRef;
 pub use s_dataref::SDataRef;
-pub use s_annotation::SAnnotation;
+pub use s_annotation::{SAnnotation, SAnnotationRef};
+pub use s_coffgroup::SPeCoffGroup;
 
 // Register-related symbol types ported from Ghidra Java
 pub mod s_register;

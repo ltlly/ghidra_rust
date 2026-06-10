@@ -129,6 +129,37 @@ impl LfFuncId {
         let data_size = 4 + 4 + self.name.len() + 1; // +1 for null terminator
         (data_size + 3) & !3 // align to 4
     }
+
+    /// Parse an `LF_FUNC_ID` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `FunctionIdMsType(AbstractPdb, PdbByteReader)` constructor.
+    /// The `data` slice should start at the `scopeId` field (after the
+    /// 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u32   scopeId              Record number of the scope (0 if global)
+    /// +4  u32   functionType         Type index of the LF_PROCEDURE/LF_MFUNCTION
+    /// +8  char[] name                Null-terminated function name string
+    ///     ...  padding               Align to 4-byte boundary
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 8 {
+            return Err(format!(
+                "LF_FUNC_ID payload too short: need >= 8 bytes, got {}",
+                data.len()
+            ));
+        }
+        let scope_id = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let function_type = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let name = if data.len() > 8 {
+            crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[8..])
+        } else {
+            String::new()
+        };
+        Ok(Self::from_parsed(scope_id, function_type, name))
+    }
 }
 
 impl AbstractMsType for LfFuncId {
@@ -312,5 +343,59 @@ mod tests {
         // 4 + 4 + 1 (just null terminator) = 9, aligned to 4 = 12
         let fid = LfFuncId::global(0x1005, String::new());
         assert_eq!(fid.total_record_size(), 12);
+    }
+
+    #[test]
+    fn test_func_id_parse() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x2000u32.to_le_bytes()); // scopeId
+        data.extend_from_slice(&0x1005u32.to_le_bytes()); // functionType
+        data.extend_from_slice(b"myFunc\0");
+
+        let fid = LfFuncId::parse(&data).unwrap();
+        assert_eq!(fid.pdb_id(), 0x1601);
+        assert_eq!(fid.name(), "myFunc");
+        assert_eq!(fid.scope_id(), RecordNumber::symbol_record(0x2000));
+        assert_eq!(fid.function_type(), RecordNumber::type_record(0x1005));
+        assert!(!fid.is_global());
+    }
+
+    #[test]
+    fn test_func_id_parse_global() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u32.to_le_bytes());     // scopeId = 0 (but symbol_record(0) != NO_TYPE)
+        data.extend_from_slice(&0x1005u32.to_le_bytes()); // functionType
+        data.extend_from_slice(b"main\0");
+
+        let fid = LfFuncId::parse(&data).unwrap();
+        assert_eq!(fid.name(), "main");
+        assert_eq!(fid.function_type(), RecordNumber::type_record(0x1005));
+    }
+
+    #[test]
+    fn test_func_id_parse_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&0x1005u32.to_le_bytes());
+        data.push(0); // empty null-terminated string
+
+        let fid = LfFuncId::parse(&data).unwrap();
+        assert!(fid.name().is_empty());
+    }
+
+    #[test]
+    fn test_func_id_parse_no_name_bytes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0u32.to_le_bytes());
+        data.extend_from_slice(&0x1005u32.to_le_bytes());
+
+        let fid = LfFuncId::parse(&data).unwrap();
+        assert!(fid.name().is_empty());
+    }
+
+    #[test]
+    fn test_func_id_parse_too_short() {
+        let data = [0u8; 6];
+        assert!(LfFuncId::parse(&data).is_err());
     }
 }

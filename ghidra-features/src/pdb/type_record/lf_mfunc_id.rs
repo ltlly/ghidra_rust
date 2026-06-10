@@ -120,6 +120,37 @@ impl LfMfuncId {
         let data_size = 4 + 4 + self.name.len() + 1; // +1 for null terminator
         (data_size + 3) & !3 // align to 4
     }
+
+    /// Parse an `LF_MFUNC_ID` record from raw bytes (payload after leaf ID).
+    ///
+    /// Mirrors the Java `MemberFunctionIdMsType(AbstractPdb, PdbByteReader)`
+    /// constructor. The `data` slice should start at the `parentType` field
+    /// (after the 2-byte leaf ID).
+    ///
+    /// # Binary layout consumed
+    ///
+    /// ```text
+    /// +0  u32   parentType           Type index of the containing class
+    /// +4  u32   functionType         Type index of the LF_MFUNCTION record
+    /// +8  char[] name                Null-terminated function name string
+    ///     ...  padding               Align to 4-byte boundary
+    /// ```
+    pub fn parse(data: &[u8]) -> Result<Self, String> {
+        if data.len() < 8 {
+            return Err(format!(
+                "LF_MFUNC_ID payload too short: need >= 8 bytes, got {}",
+                data.len()
+            ));
+        }
+        let parent_type = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let function_type = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let name = if data.len() > 8 {
+            crate::pdb::pdb_byte_reader::parse_null_terminated_string(&data[8..])
+        } else {
+            String::new()
+        };
+        Ok(Self::from_parsed(parent_type, function_type, name))
+    }
 }
 
 impl AbstractMsType for LfMfuncId {
@@ -290,5 +321,61 @@ mod tests {
             "f".to_string(),
         );
         assert_eq!(mf.total_record_size(), 12);
+    }
+
+    #[test]
+    fn test_mfunc_id_parse() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes()); // parentType
+        data.extend_from_slice(&0x1005u32.to_le_bytes()); // functionType
+        data.extend_from_slice(b"doSomething\0");
+
+        let mf = LfMfuncId::parse(&data).unwrap();
+        assert_eq!(mf.pdb_id(), 0x1602);
+        assert_eq!(mf.name(), "doSomething");
+        assert_eq!(mf.parent_type(), RecordNumber::type_record(0x1000));
+        assert_eq!(mf.function_type(), RecordNumber::type_record(0x1005));
+    }
+
+    #[test]
+    fn test_mfunc_id_parse_empty_name() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x1005u32.to_le_bytes());
+        data.push(0); // empty null-terminated string
+
+        let mf = LfMfuncId::parse(&data).unwrap();
+        assert!(mf.name().is_empty());
+    }
+
+    #[test]
+    fn test_mfunc_id_parse_no_name_bytes() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&0x1000u32.to_le_bytes());
+        data.extend_from_slice(&0x1005u32.to_le_bytes());
+
+        let mf = LfMfuncId::parse(&data).unwrap();
+        assert!(mf.name().is_empty());
+    }
+
+    #[test]
+    fn test_mfunc_id_parse_too_short() {
+        let data = [0u8; 6];
+        assert!(LfMfuncId::parse(&data).is_err());
+    }
+
+    #[test]
+    fn test_mfunc_id_parse_roundtrip() {
+        let mf = LfMfuncId::from_parsed(0x2000, 0x2005, "method".to_string());
+        let mut data = Vec::new();
+        data.extend_from_slice(&mf.parent_type_record_number.index().to_le_bytes());
+        data.extend_from_slice(&mf.function_type_record_number.index().to_le_bytes());
+        data.extend_from_slice(mf.name.as_bytes());
+        data.push(0); // null terminator
+
+        let mf2 = LfMfuncId::parse(&data).unwrap();
+        assert_eq!(mf2.parent_type(), mf.parent_type());
+        assert_eq!(mf2.function_type(), mf.function_type());
+        assert_eq!(mf2.name(), mf.name());
     }
 }

@@ -217,6 +217,67 @@ impl LfMfunction {
             && self.num_parameters == 0
     }
 
+    /// Get the return type record number.
+    ///
+    /// Alias for [`return_record_number`] for consistency with
+    /// Java's `AbstractMemberFunctionMsType.getReturnRecordNumber()`.
+    pub fn get_return_type_record_number(&self) -> RecordNumber {
+        self.return_value_record_number
+    }
+
+    /// Get the containing class type record number.
+    ///
+    /// Alias for [`containing_class_record_number`] for consistency with
+    /// Java's `AbstractMemberFunctionMsType.getContainingClassRecordNumber()`.
+    pub fn get_containing_class_record_number(&self) -> RecordNumber {
+        self.class_record_number
+    }
+
+    /// Get the this-pointer type record number.
+    ///
+    /// Alias for [`this_pointer_record_number`] for consistency with
+    /// Java's `AbstractMemberFunctionMsType.getThisPointerRecordNumber()`.
+    pub fn get_this_pointer_record_number(&self) -> RecordNumber {
+        self.this_record_number
+    }
+
+    /// Get the argument list type record number.
+    ///
+    /// Alias for [`arg_list_record_number`] for consistency with
+    /// Java's `AbstractMemberFunctionMsType.getArgListRecordNumber()`.
+    pub fn get_arg_list_type_record_number(&self) -> RecordNumber {
+        self.arg_list_record_number
+    }
+
+    /// Get the number of parameters.
+    ///
+    /// Alias for [`num_params`] returning `usize` for convenience.
+    pub fn get_num_parameters(&self) -> usize {
+        self.num_parameters as usize
+    }
+
+    /// Get the raw number of parameters as `u16`.
+    pub fn get_num_parameters_raw(&self) -> u16 {
+        self.num_parameters
+    }
+
+    /// Get the raw this-pointer adjustment value as `u32`.
+    pub fn get_this_adjustment_raw(&self) -> u32 {
+        self.this_adjustment
+    }
+
+    /// Whether this member function takes no parameters (excluding `this`).
+    pub fn is_no_params(&self) -> bool {
+        self.num_parameters == 0
+    }
+
+    /// Get the calling convention label string.
+    ///
+    /// Returns the ABI label (e.g., `"__thiscall"`, `"__cdecl"`).
+    pub fn calling_convention_label(&self) -> &'static str {
+        self.calling_convention.label()
+    }
+
     /// Parse a member function type record from a byte reader (32-bit MsType).
     ///
     /// Reads the return type index, class type index, this-pointer type
@@ -712,6 +773,115 @@ mod tests {
         let emitted = mf.emit(Bind::NONE);
         assert!(emitted.contains("virtual base"));
         assert!(emitted.contains(",12,"));
+    }
+
+    // =========================================================================
+    // Additional accessor tests
+    // =========================================================================
+
+    #[test]
+    fn test_mfunction_get_return_type_record_number() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_return_type_record_number(),
+            RecordNumber::type_record(0x0074)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_containing_class_record_number() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_containing_class_record_number(),
+            RecordNumber::type_record(0x1000)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_this_pointer_record_number() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_this_pointer_record_number(),
+            RecordNumber::type_record(0x1001)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_arg_list_type_record_number() {
+        let mf = make_test_mfunction();
+        assert_eq!(
+            mf.get_arg_list_type_record_number(),
+            RecordNumber::type_record(0x1002)
+        );
+    }
+
+    #[test]
+    fn test_mfunction_get_num_parameters() {
+        let mf = make_test_mfunction();
+        assert_eq!(mf.get_num_parameters(), 2);
+    }
+
+    #[test]
+    fn test_mfunction_get_num_parameters_raw() {
+        let mf = make_test_mfunction();
+        assert_eq!(mf.get_num_parameters_raw(), 2);
+    }
+
+    #[test]
+    fn test_mfunction_get_this_adjustment_raw() {
+        let mf = make_test_mfunction();
+        assert_eq!(mf.get_this_adjustment_raw(), 0);
+
+        let mf2 = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::empty(),
+            1,
+            RecordNumber::type_record(0x1002),
+            8,
+        );
+        assert_eq!(mf2.get_this_adjustment_raw(), 8);
+    }
+
+    #[test]
+    fn test_mfunction_is_no_params_true() {
+        let mf = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::ThisCall,
+            FunctionAttributes::empty(),
+            0,
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert!(mf.is_no_params());
+    }
+
+    #[test]
+    fn test_mfunction_is_no_params_false() {
+        let mf = make_test_mfunction(); // 2 params
+        assert!(!mf.is_no_params());
+    }
+
+    #[test]
+    fn test_mfunction_calling_convention_label() {
+        let mf = make_test_mfunction();
+        assert_eq!(mf.calling_convention_label(), "__thiscall");
+
+        let mf2 = LfMfunction::new(
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x1000),
+            RecordNumber::type_record(0x1001),
+            CallingConvention::NearC,
+            FunctionAttributes::empty(),
+            1,
+            RecordNumber::type_record(0x1002),
+            0,
+        );
+        assert_eq!(mf2.calling_convention_label(), "__cdecl");
     }
 
     // =========================================================================

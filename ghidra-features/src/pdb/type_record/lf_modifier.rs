@@ -154,6 +154,33 @@ impl LfModifier {
         self.is_const || self.is_volatile || self.is_unaligned
     }
 
+    /// Whether no qualifiers are applied (passthrough).
+    ///
+    /// Returns `true` if the modifier has no const, volatile, or unaligned
+    /// flags set, meaning the modified type is passed through unchanged.
+    pub fn is_passthrough(&self) -> bool {
+        !self.is_const && !self.is_volatile && !self.is_unaligned
+    }
+
+    /// Get a compact flag string for the qualifiers.
+    ///
+    /// Returns a string like `"cv"` for const+volatile, `"c"` for const only,
+    /// `"v"` for volatile only, `"u"` for unaligned.
+    /// Returns an empty string if no qualifiers are set.
+    pub fn qualifier_flags(&self) -> String {
+        let mut flags = String::new();
+        if self.is_const {
+            flags.push('c');
+        }
+        if self.is_volatile {
+            flags.push('v');
+        }
+        if self.is_unaligned {
+            flags.push('u');
+        }
+        flags
+    }
+
     /// Get the modifier qualifier string (e.g., "const volatile ").
     ///
     /// Returns a space-terminated string with all active qualifiers.
@@ -748,6 +775,57 @@ mod tests {
             true,
         );
         assert_eq!(m.modifier_string(), "const volatile __unaligned ");
+    }
+
+    #[test]
+    fn test_modifier_is_passthrough_true() {
+        let m = LfModifier::new(
+            RecordNumber::type_record(0x0074),
+            false,
+            false,
+            false,
+        );
+        assert!(m.is_passthrough());
+    }
+
+    #[test]
+    fn test_modifier_is_passthrough_false() {
+        let m = LfModifier::const_modifier(0x0074);
+        assert!(!m.is_passthrough());
+    }
+
+    #[test]
+    fn test_modifier_qualifier_flags_empty() {
+        let m = LfModifier::new(
+            RecordNumber::type_record(0x0074),
+            false,
+            false,
+            false,
+        );
+        assert_eq!(m.qualifier_flags(), "");
+    }
+
+    #[test]
+    fn test_modifier_qualifier_flags_const() {
+        let m = LfModifier::const_modifier(0x0074);
+        assert_eq!(m.qualifier_flags(), "c");
+    }
+
+    #[test]
+    fn test_modifier_qualifier_flags_volatile() {
+        let m = LfModifier::volatile_modifier(0x0074);
+        assert_eq!(m.qualifier_flags(), "v");
+    }
+
+    #[test]
+    fn test_modifier_qualifier_flags_all() {
+        let m = LfModifier::new(
+            RecordNumber::type_record(0x0074),
+            true,
+            true,
+            true,
+        );
+        assert_eq!(m.qualifier_flags(), "cvu");
     }
 
     #[test]

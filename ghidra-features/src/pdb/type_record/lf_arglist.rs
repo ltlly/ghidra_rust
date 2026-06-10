@@ -86,6 +86,41 @@ impl LfArglist {
         self.argument_record_numbers.iter().copied()
     }
 
+    /// Whether this argument list has any arguments.
+    ///
+    /// Returns `true` if the argument list is non-empty.
+    pub fn has_arguments(&self) -> bool {
+        !self.argument_record_numbers.is_empty()
+    }
+
+    /// Whether this argument list is empty.
+    ///
+    /// Returns `true` if there are no arguments.
+    pub fn is_empty(&self) -> bool {
+        self.argument_record_numbers.is_empty()
+    }
+
+    /// Get the number of arguments.
+    ///
+    /// Alias for [`num_arguments`] for consistency with other APIs.
+    pub fn arg_count(&self) -> usize {
+        self.argument_record_numbers.len()
+    }
+
+    /// Get the first argument's record number.
+    ///
+    /// Returns `None` if the argument list is empty.
+    pub fn first_argument(&self) -> Option<RecordNumber> {
+        self.argument_record_numbers.first().copied()
+    }
+
+    /// Get the last argument's record number.
+    ///
+    /// Returns `None` if the argument list is empty.
+    pub fn last_argument(&self) -> Option<RecordNumber> {
+        self.argument_record_numbers.last().copied()
+    }
+
     /// Check whether this argument list represents a variadic function.
     ///
     /// In PDB, a variadic function is indicated by a single argument of type
@@ -427,6 +462,85 @@ mod tests {
     fn test_arglist_is_variadic_from_parsed() {
         let al = LfArglist::from_parsed(vec![0x0003]);
         assert!(al.is_variadic());
+    }
+
+    // =========================================================================
+    // Additional accessor tests
+    // =========================================================================
+
+    #[test]
+    fn test_arglist_has_arguments_true() {
+        let al = LfArglist::new(vec![RecordNumber::type_record(0x0074)]);
+        assert!(al.has_arguments());
+    }
+
+    #[test]
+    fn test_arglist_has_arguments_false() {
+        let al = LfArglist::new(vec![]);
+        assert!(!al.has_arguments());
+    }
+
+    #[test]
+    fn test_arglist_is_empty_true() {
+        let al = LfArglist::new(vec![]);
+        assert!(al.is_empty());
+    }
+
+    #[test]
+    fn test_arglist_is_empty_false() {
+        let al = LfArglist::new(vec![RecordNumber::type_record(0x0074)]);
+        assert!(!al.is_empty());
+    }
+
+    #[test]
+    fn test_arglist_arg_count() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+        ]);
+        assert_eq!(al.arg_count(), 2);
+    }
+
+    #[test]
+    fn test_arglist_arg_count_empty() {
+        let al = LfArglist::new(vec![]);
+        assert_eq!(al.arg_count(), 0);
+    }
+
+    #[test]
+    fn test_arglist_first_argument_some() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+        ]);
+        assert_eq!(al.first_argument(), Some(RecordNumber::type_record(0x0074)));
+    }
+
+    #[test]
+    fn test_arglist_first_argument_none() {
+        let al = LfArglist::new(vec![]);
+        assert!(al.first_argument().is_none());
+    }
+
+    #[test]
+    fn test_arglist_last_argument_some() {
+        let al = LfArglist::new(vec![
+            RecordNumber::type_record(0x0074),
+            RecordNumber::type_record(0x0040),
+        ]);
+        assert_eq!(al.last_argument(), Some(RecordNumber::type_record(0x0040)));
+    }
+
+    #[test]
+    fn test_arglist_last_argument_none() {
+        let al = LfArglist::new(vec![]);
+        assert!(al.last_argument().is_none());
+    }
+
+    #[test]
+    fn test_arglist_last_argument_single() {
+        let al = LfArglist::new(vec![RecordNumber::type_record(0x0074)]);
+        assert_eq!(al.last_argument(), Some(RecordNumber::type_record(0x0074)));
     }
 
     // =========================================================================
