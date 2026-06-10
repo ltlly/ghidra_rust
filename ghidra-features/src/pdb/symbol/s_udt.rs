@@ -9,26 +9,35 @@ use super::abstract_ms_symbol::AbstractMsSymbol;
 use super::name_ms_symbol::NameMsSymbol;
 use super::record_number::{RecordCategory, RecordNumber};
 
+/// Which variant of the UDT symbol was parsed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UdtVariant {
+    /// `S_UDT` (0x1108) -- 32-bit type index, NT string.
+    Udt,
+    /// `S_UDT_ST` (0x1003) -- 32-bit type index, ST string.
+    UdtSt,
+}
+
 /// A user-defined type symbol (`S_UDT`).
 ///
 /// This symbol associates a name with a type index, defining a named
 /// user-defined type (struct, class, union, enum, typedef) in the PDB.
 ///
-/// # PDB Binary Layout (S_UDT, 32-bit type index)
+/// # PDB Binary Layout (S_UDT, 32-bit type index, NT string)
 ///
 /// ```text
 /// type_index : u32
 /// name       : NT string
 /// ```
 ///
-/// # PDB Binary Layout (S_UDT_ST, 16-bit type index)
+/// # PDB Binary Layout (S_UDT_ST, 32-bit type index, ST string)
 ///
 /// ```text
-/// type_index : u16
-/// name       : NT string (ST format)
+/// type_index : u32
+/// name       : ST string (16-bit length prefix)
 /// ```
 ///
-/// This corresponds to `S_UDT` (0x0004) and `S_UDT_ST` (0x1003) in the
+/// This corresponds to `S_UDT` (0x1108) and `S_UDT_ST` (0x1003) in the
 /// CodeView symbol set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SUdt {
@@ -37,22 +46,35 @@ pub struct SUdt {
 
     /// The type name.
     pub name: String,
+
+    /// Which variant was parsed.
+    variant: UdtVariant,
 }
 
 impl SUdt {
-    /// Create a new user-defined type symbol.
+    /// Create a new user-defined type symbol (S_UDT variant).
     pub fn new(type_record_number: RecordNumber, name: String) -> Self {
         Self {
             type_record_number,
             name,
+            variant: UdtVariant::Udt,
         }
     }
 
-    /// Parse an S_UDT symbol from a byte slice (32-bit type index).
+    /// Create a new S_UDT_ST user-defined type symbol.
+    pub fn new_st(type_record_number: RecordNumber, name: String) -> Self {
+        Self {
+            type_record_number,
+            name,
+            variant: UdtVariant::UdtSt,
+        }
+    }
+
+    /// Parse an S_UDT symbol from a byte slice (32-bit type index, NT string).
     ///
     /// Expects the layout: `type_index(u32) + name(NT)`.
     ///
-    /// This handles `S_UDT` (0x0004).
+    /// This handles `S_UDT` (0x1108).
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 5 {
             return None;
@@ -62,6 +84,7 @@ impl SUdt {
         Some(Self {
             type_record_number: trn,
             name,
+            variant: UdtVariant::Udt,
         })
     }
 
@@ -82,6 +105,7 @@ impl SUdt {
         Some(Self {
             type_record_number: trn,
             name,
+            variant: UdtVariant::UdtSt,
         })
     }
 
@@ -89,15 +113,26 @@ impl SUdt {
     pub fn type_record_number(&self) -> &RecordNumber {
         &self.type_record_number
     }
+
+    /// Return the variant of this UDT symbol.
+    pub fn variant(&self) -> UdtVariant {
+        self.variant
+    }
 }
 
 impl AbstractMsSymbol for SUdt {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_UDT
+        match self.variant {
+            UdtVariant::Udt => super::super::symbol_kind::S_UDT,
+            UdtVariant::UdtSt => super::super::symbol_kind::S_UDT_ST,
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
-        "S_UDT"
+        match self.variant {
+            UdtVariant::Udt => "S_UDT",
+            UdtVariant::UdtSt => "S_UDT_ST",
+        }
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -156,6 +191,7 @@ mod tests {
         let sym = SUdt::parse(&data).unwrap();
         assert_eq!(sym.type_record_number.number(), 0x1020);
         assert_eq!(sym.name, "MyStruct");
+        assert_eq!(sym.variant, UdtVariant::Udt);
     }
 
     #[test]
@@ -186,6 +222,7 @@ mod tests {
         let sym = SUdt::parse_st(&data).unwrap();
         assert_eq!(sym.type_record_number.number(), 0x0100);
         assert_eq!(sym.name, "StStruct");
+        assert_eq!(sym.variant, UdtVariant::UdtSt);
     }
 
     #[test]
@@ -214,6 +251,17 @@ mod tests {
         assert_eq!(sym.pdb_id(), 0x0004);
         assert_eq!(sym.symbol_type_name(), "S_UDT");
         assert_eq!(sym.name(), "MyClass");
+    }
+
+    #[test]
+    fn test_trait_impls_st() {
+        let sym = SUdt::new_st(
+            RecordNumber::type_record_number(0x1020),
+            "StClass".to_string(),
+        );
+        assert_eq!(sym.pdb_id(), 0x1003);
+        assert_eq!(sym.symbol_type_name(), "S_UDT_ST");
+        assert_eq!(sym.name(), "StClass");
     }
 
     #[test]
@@ -272,5 +320,24 @@ mod tests {
         );
         let b = a.clone();
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_variant_consistency() {
+        // S_UDT
+        let sym = SUdt::new(
+            RecordNumber::type_record_number(0x1000),
+            "A".to_string(),
+        );
+        assert_eq!(sym.variant(), UdtVariant::Udt);
+        assert_eq!(sym.symbol_type_name(), "S_UDT");
+
+        // S_UDT_ST
+        let sym = SUdt::new_st(
+            RecordNumber::type_record_number(0x1000),
+            "B".to_string(),
+        );
+        assert_eq!(sym.variant(), UdtVariant::UdtSt);
+        assert_eq!(sym.symbol_type_name(), "S_UDT_ST");
     }
 }

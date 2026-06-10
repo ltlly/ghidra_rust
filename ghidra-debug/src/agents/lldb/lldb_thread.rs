@@ -93,6 +93,126 @@ impl LldbThreadState {
             _ => Self::Inactive,
         }
     }
+
+    /// Create from a trace state string.
+    pub fn from_trace_str(s: &str) -> Self {
+        match s {
+            "RUNNING" => Self::Running,
+            "STOPPED" => Self::Stopped,
+            "TERMINATED" => Self::Exited,
+            "SUSPENDED" => Self::Suspended,
+            "INACTIVE" => Self::Inactive,
+            _ => Self::Inactive,
+        }
+    }
+
+    /// Whether this state implies the thread can be resumed.
+    pub fn is_resumable(&self) -> bool {
+        matches!(self, Self::Stopped)
+    }
+
+    /// Whether this state implies the thread is alive.
+    pub fn is_alive(&self) -> bool {
+        matches!(self, Self::Running | Self::Stopped | Self::Suspended)
+    }
+}
+
+/// Detailed stop reason for a specific thread stop.
+///
+/// Captures why a thread stopped with more detail than the simple
+/// `LldbStopReason` enum. This mirrors `SBThread.GetStopReasonData()`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LldbDetailedStopReason {
+    /// Breakpoint hit at address.
+    Breakpoint {
+        bp_id: u32,
+        bp_location_id: u32,
+        address: u64,
+    },
+    /// Watchpoint triggered.
+    Watchpoint {
+        wp_id: u32,
+        address: u64,
+    },
+    /// Signal received.
+    Signal {
+        name: String,
+        number: i32,
+    },
+    /// Step completed (plan complete).
+    StepComplete,
+    /// Function finished (return).
+    FunctionFinished {
+        return_value: Option<u64>,
+    },
+    /// Exec (execve).
+    Exec,
+    /// Exited with code.
+    Exited {
+        code: i32,
+    },
+    /// Exited by signal.
+    ExitedSignal {
+        signal: String,
+    },
+    /// Thread exiting.
+    ThreadExiting,
+    /// Instrumentation.
+    Instrumentation,
+    /// Processor trace.
+    ProcessorTrace,
+    /// Fork.
+    Fork,
+    /// VFork.
+    VFork,
+    /// Unknown reason.
+    Unknown,
+}
+
+impl LldbDetailedStopReason {
+    /// Human-readable description.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Breakpoint { bp_id, address, .. } => {
+                format!("Breakpoint {} at 0x{:x}", bp_id, address)
+            }
+            Self::Watchpoint { wp_id, .. } => format!("Watchpoint {}", wp_id),
+            Self::Signal { name, number } => format!("Signal {} ({})", name, number),
+            Self::StepComplete => "Step complete".to_string(),
+            Self::FunctionFinished { .. } => "Function finished".to_string(),
+            Self::Exec => "Exec".to_string(),
+            Self::Exited { code } => format!("Exited with code {}", code),
+            Self::ExitedSignal { signal } => format!("Exited with signal {}", signal),
+            Self::ThreadExiting => "Thread exiting".to_string(),
+            Self::Instrumentation => "Instrumentation".to_string(),
+            Self::ProcessorTrace => "Processor trace".to_string(),
+            Self::Fork => "Fork".to_string(),
+            Self::VFork => "VFork".to_string(),
+            Self::Unknown => "Unknown stop reason".to_string(),
+        }
+    }
+
+    /// Whether this stop reason implies the thread is stopped (can resume).
+    pub fn is_stopped(&self) -> bool {
+        !matches!(self, Self::Exited { .. } | Self::ExitedSignal { .. })
+    }
+
+    /// Convert to the simple `LldbStopReason`.
+    pub fn to_simple(&self) -> super::LldbStopReason {
+        match self {
+            Self::Breakpoint { .. } => super::LldbStopReason::Breakpoint,
+            Self::Watchpoint { .. } => super::LldbStopReason::Watchpoint,
+            Self::Signal { .. } => super::LldbStopReason::Signal,
+            Self::StepComplete => super::LldbStopReason::PlanComplete,
+            Self::Exec => super::LldbStopReason::Exec,
+            Self::ThreadExiting => super::LldbStopReason::ThreadExiting,
+            Self::Instrumentation => super::LldbStopReason::Instrumentation,
+            Self::ProcessorTrace => super::LldbStopReason::ProcessorTrace,
+            Self::Fork => super::LldbStopReason::Fork,
+            Self::VFork => super::LldbStopReason::VFork,
+            _ => super::LldbStopReason::Unknown,
+        }
+    }
 }
 
 /// An LLDB thread within a process.
@@ -118,8 +238,14 @@ pub struct LldbThread {
     pub process_index: u32,
     /// The stop reason for this thread, if any.
     pub stop_reason: Option<super::LldbStopReason>,
+    /// Detailed stop reason with breakpoint/signal specifics.
+    pub detailed_stop_reason: Option<LldbDetailedStopReason>,
     /// Queue name (GCD/com.apple thread naming, from `SBThread.GetQueueName()`).
     pub queue_name: Option<String>,
+    /// Cached display string.
+    pub display: Option<String>,
+    /// Cached short display string.
+    pub short_display: Option<String>,
 }
 
 impl LldbThread {
@@ -134,7 +260,10 @@ impl LldbThread {
             synced: false,
             process_index,
             stop_reason: None,
+            detailed_stop_reason: None,
             queue_name: None,
+            display: None,
+            short_display: None,
         }
     }
 
@@ -162,6 +291,18 @@ impl LldbThread {
         self
     }
 
+    /// Set the detailed stop reason.
+    pub fn with_detailed_stop_reason(mut self, reason: LldbDetailedStopReason) -> Self {
+        self.detailed_stop_reason = Some(reason);
+        self
+    }
+
+    /// Set the display string.
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        self.display = Some(display.into());
+        self
+    }
+
     /// Set the queue name.
     pub fn with_queue_name(mut self, name: impl Into<String>) -> Self {
         self.queue_name = Some(name.into());
@@ -181,6 +322,22 @@ impl LldbThread {
         format!(
             "Processes[{}].Threads[{}].Stack",
             self.process_index, self.index
+        )
+    }
+
+    /// Get the trace path for a specific frame in this thread.
+    pub fn frame_path(&self, level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}]",
+            self.process_index, self.index, level
+        )
+    }
+
+    /// Get the trace path for a specific frame's registers.
+    pub fn frame_registers_path(&self, level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Registers",
+            self.process_index, self.index, level
         )
     }
 
@@ -286,6 +443,39 @@ impl LldbThread {
     /// continues -- it is effectively paused independently.
     pub fn is_suspended(&self) -> bool {
         self.state == ExecutionState::Stopped && self.stop_reason == Some(super::LldbStopReason::Unknown)
+    }
+
+    /// Whether the thread is stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.state == ExecutionState::Stopped
+    }
+
+    /// Whether the thread is running.
+    pub fn is_running(&self) -> bool {
+        self.state == ExecutionState::Running
+    }
+
+    /// Whether the thread has exited.
+    pub fn is_exited(&self) -> bool {
+        self.state == ExecutionState::Exited
+    }
+
+    /// Get the detailed stop reason description, if any.
+    pub fn detailed_stop_reason_description(&self) -> Option<String> {
+        self.detailed_stop_reason.as_ref().map(|r| r.description())
+    }
+
+    /// Update cached short display string.
+    pub fn update_short_display(&mut self, radix: u32) {
+        self.short_display = Some(self.build_short_display(radix));
+    }
+
+    /// Build the retain keys for this thread's frame children.
+    pub fn build_frame_retain_keys(&self) -> Vec<String> {
+        self.frames
+            .keys()
+            .map(|level| format!("[{}]", level))
+            .collect()
     }
 
     /// Get all frames sorted by level (innermost first).
@@ -605,6 +795,104 @@ impl LldbThreadCollection {
     }
 }
 
+/// Tracks the event thread for a trace.
+///
+/// Ported from `put_event_thread` in `commands.py`. The event thread
+/// is the thread that caused the most recent stop event.
+#[derive(Debug, Clone, Default)]
+pub struct LldbEventThreadTracker {
+    /// The process index of the event thread, if any.
+    pub process_index: Option<u32>,
+    /// The thread index of the event thread, if any.
+    pub thread_index: Option<u32>,
+}
+
+impl LldbEventThreadTracker {
+    /// Create a new tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the event thread.
+    pub fn set(&mut self, process_index: u32, thread_index: u32) {
+        self.process_index = Some(process_index);
+        self.thread_index = Some(thread_index);
+    }
+
+    /// Clear the event thread.
+    pub fn clear(&mut self) {
+        self.process_index = None;
+        self.thread_index = None;
+    }
+
+    /// Get the event thread's trace path, if set.
+    pub fn trace_path(&self) -> Option<String> {
+        match (self.process_index, self.thread_index) {
+            (Some(proc_idx), Some(t_idx)) => {
+                Some(format!("Processes[{}].Threads[{}]", proc_idx, t_idx))
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if a specific thread is the event thread.
+    pub fn is_event_thread(&self, process_index: u32, thread_index: u32) -> bool {
+        self.process_index == Some(process_index) && self.thread_index == Some(thread_index)
+    }
+}
+
+/// Helper for frame selection tracking.
+///
+/// Ported from the `restore_frame` context manager in `commands.py`.
+#[derive(Debug, Clone, Default)]
+pub struct LldbFrameSelection {
+    /// The currently selected process.
+    pub process_index: Option<u32>,
+    /// The currently selected thread.
+    pub thread_index: Option<u32>,
+    /// The currently selected frame level.
+    pub frame_level: Option<u32>,
+}
+
+impl LldbFrameSelection {
+    /// Create a new frame selection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the complete selection.
+    pub fn set(&mut self, process_index: u32, thread_index: u32, frame_level: u32) {
+        self.process_index = Some(process_index);
+        self.thread_index = Some(thread_index);
+        self.frame_level = Some(frame_level);
+    }
+
+    /// Clear the selection.
+    pub fn clear(&mut self) {
+        self.process_index = None;
+        self.thread_index = None;
+        self.frame_level = None;
+    }
+
+    /// Get the frame trace path, if fully set.
+    pub fn frame_path(&self) -> Option<String> {
+        match (self.process_index, self.thread_index, self.frame_level) {
+            (Some(p), Some(t), Some(f)) => {
+                Some(format!("Processes[{}].Threads[{}].Stack[{}]", p, t, f))
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the thread trace path, if set.
+    pub fn thread_path(&self) -> Option<String> {
+        match (self.process_index, self.thread_index) {
+            (Some(p), Some(t)) => Some(format!("Processes[{}].Threads[{}]", p, t)),
+            _ => None,
+        }
+    }
+}
+
 /// A stack frame within an LLDB thread.
 ///
 /// Each frame represents one level of the call stack. Frame 0 is the
@@ -735,6 +1023,14 @@ impl LldbStackFrame {
     pub fn clear_registers(&mut self) {
         self.registers.clear();
     }
+
+    /// Build the retain keys for register names.
+    pub fn build_register_retain_keys(&self) -> Vec<String> {
+        self.registers
+            .iter()
+            .map(|r| r.name.clone())
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -816,6 +1112,27 @@ mod tests {
     }
 
     #[test]
+    fn test_thread_state_from_trace_str() {
+        assert_eq!(LldbThreadState::from_trace_str("RUNNING"), LldbThreadState::Running);
+        assert_eq!(LldbThreadState::from_trace_str("STOPPED"), LldbThreadState::Stopped);
+        assert_eq!(LldbThreadState::from_trace_str("TERMINATED"), LldbThreadState::Exited);
+        assert_eq!(LldbThreadState::from_trace_str("SUSPENDED"), LldbThreadState::Suspended);
+        assert_eq!(LldbThreadState::from_trace_str("INACTIVE"), LldbThreadState::Inactive);
+        assert_eq!(LldbThreadState::from_trace_str("UNKNOWN"), LldbThreadState::Inactive);
+    }
+
+    #[test]
+    fn test_thread_state_properties() {
+        assert!(LldbThreadState::Stopped.is_resumable());
+        assert!(!LldbThreadState::Running.is_resumable());
+        assert!(LldbThreadState::Running.is_alive());
+        assert!(LldbThreadState::Stopped.is_alive());
+        assert!(LldbThreadState::Suspended.is_alive());
+        assert!(!LldbThreadState::Exited.is_alive());
+        assert!(!LldbThreadState::Inactive.is_alive());
+    }
+
+    #[test]
     fn test_thread_new() {
         let t = LldbThread::new(1, 0);
         assert_eq!(t.index, 1);
@@ -825,7 +1142,10 @@ mod tests {
         assert!(t.frames.is_empty());
         assert_eq!(t.process_index, 0);
         assert!(t.stop_reason.is_none());
+        assert!(t.detailed_stop_reason.is_none());
         assert!(t.queue_name.is_none());
+        assert!(t.display.is_none());
+        assert!(t.short_display.is_none());
     }
 
     #[test]
@@ -844,10 +1164,26 @@ mod tests {
     }
 
     #[test]
+    fn test_thread_builder_detailed_stop() {
+        let reason = LldbDetailedStopReason::Breakpoint {
+            bp_id: 1,
+            bp_location_id: 1,
+            address: 0x401000,
+        };
+        let t = LldbThread::new(1, 0)
+            .with_detailed_stop_reason(reason.clone())
+            .with_display("Thread 1 main");
+        assert_eq!(t.detailed_stop_reason, Some(reason));
+        assert_eq!(t.display, Some("Thread 1 main".to_string()));
+    }
+
+    #[test]
     fn test_thread_trace_path() {
         let t = LldbThread::new(2, 1);
         assert_eq!(t.trace_path(), "Processes[1].Threads[2]");
         assert_eq!(t.stack_path(), "Processes[1].Threads[2].Stack");
+        assert_eq!(t.frame_path(0), "Processes[1].Threads[2].Stack[0]");
+        assert_eq!(t.frame_registers_path(1), "Processes[1].Threads[2].Stack[1].Registers");
     }
 
     #[test]
@@ -1114,6 +1450,66 @@ mod tests {
             .with_stop_reason(LldbStopReason::PlanComplete);
         assert!(t.stopped_at_step());
     }
+
+    #[test]
+    fn test_thread_state_queries() {
+        let t_running = LldbThread::new(1, 0).with_state(ExecutionState::Running);
+        assert!(t_running.is_running());
+        assert!(!t_running.is_stopped());
+        assert!(!t_running.is_exited());
+        assert!(t_running.is_alive());
+
+        let t_stopped = LldbThread::new(2, 0).with_state(ExecutionState::Stopped);
+        assert!(!t_stopped.is_running());
+        assert!(t_stopped.is_stopped());
+        assert!(t_stopped.is_alive());
+
+        let t_exited = LldbThread::new(3, 0).with_state(ExecutionState::Exited);
+        assert!(t_exited.is_exited());
+        assert!(!t_exited.is_alive());
+    }
+
+    #[test]
+    fn test_thread_frame_retain_keys() {
+        let mut t = LldbThread::new(1, 0);
+        t.add_frame(LldbStackFrame::new(0, 0x401000));
+        t.add_frame(LldbStackFrame::new(2, 0x403000));
+        let keys = t.build_frame_retain_keys();
+        assert!(keys.contains(&"[0]".to_string()));
+        assert!(keys.contains(&"[2]".to_string()));
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn test_thread_update_short_display() {
+        let mut t = LldbThread::new(1, 0).with_tid(0x1234);
+        t.update_short_display(16);
+        assert_eq!(t.short_display, Some("[0.1:0x1234]".to_string()));
+    }
+
+    #[test]
+    fn test_thread_detailed_stop_reason_description() {
+        let t = LldbThread::new(1, 0).with_detailed_stop_reason(
+            LldbDetailedStopReason::Breakpoint {
+                bp_id: 1,
+                bp_location_id: 1,
+                address: 0x401000,
+            },
+        );
+        let desc = t.detailed_stop_reason_description();
+        assert!(desc.is_some());
+        assert!(desc.unwrap().contains("Breakpoint"));
+    }
+
+    #[test]
+    fn test_stack_frame_register_retain_keys() {
+        let mut f = LldbStackFrame::new(0, 0x401000);
+        f.set_register(RegisterValue::from_u64("x0", 0x1234));
+        f.set_register(RegisterValue::from_u64("x1", 0x5678));
+        let retain = f.build_register_retain_keys();
+        assert!(retain.contains(&"x0".to_string()));
+        assert!(retain.contains(&"x1".to_string()));
+    }
 }
 
 #[cfg(test)]
@@ -1280,5 +1676,96 @@ mod collection_tests {
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, 100);
         assert_eq!(list[0].name.as_deref(), Some("main"));
+    }
+}
+
+#[cfg(test)]
+mod detailed_stop_reason_tests {
+    use super::*;
+
+    #[test]
+    fn test_detailed_stop_reason_breakpoint() {
+        let reason = LldbDetailedStopReason::Breakpoint {
+            bp_id: 1,
+            bp_location_id: 1,
+            address: 0x401000,
+        };
+        assert!(reason.is_stopped());
+        assert!(reason.description().contains("Breakpoint"));
+        assert_eq!(reason.to_simple(), super::super::LldbStopReason::Breakpoint);
+    }
+
+    #[test]
+    fn test_detailed_stop_reason_signal() {
+        let reason = LldbDetailedStopReason::Signal {
+            name: "SIGSEGV".to_string(),
+            number: 11,
+        };
+        assert!(reason.is_stopped());
+        assert!(reason.description().contains("SIGSEGV"));
+        assert_eq!(reason.to_simple(), super::super::LldbStopReason::Signal);
+    }
+
+    #[test]
+    fn test_detailed_stop_reason_exited() {
+        let reason = LldbDetailedStopReason::Exited { code: 0 };
+        assert!(!reason.is_stopped());
+    }
+
+    #[test]
+    fn test_detailed_stop_reason_exited_signal() {
+        let reason = LldbDetailedStopReason::ExitedSignal {
+            signal: "SIGKILL".to_string(),
+        };
+        assert!(!reason.is_stopped());
+    }
+}
+
+#[cfg(test)]
+mod event_thread_tests {
+    use super::*;
+
+    #[test]
+    fn test_event_thread_tracker() {
+        let mut tracker = LldbEventThreadTracker::new();
+        assert!(tracker.trace_path().is_none());
+        assert!(!tracker.is_event_thread(1, 1));
+
+        tracker.set(1, 2);
+        assert_eq!(
+            tracker.trace_path(),
+            Some("Processes[1].Threads[2]".to_string())
+        );
+        assert!(tracker.is_event_thread(1, 2));
+        assert!(!tracker.is_event_thread(1, 3));
+        assert!(!tracker.is_event_thread(2, 2));
+
+        tracker.clear();
+        assert!(tracker.trace_path().is_none());
+    }
+}
+
+#[cfg(test)]
+mod frame_selection_tests {
+    use super::*;
+
+    #[test]
+    fn test_frame_selection() {
+        let mut sel = LldbFrameSelection::new();
+        assert!(sel.frame_path().is_none());
+        assert!(sel.thread_path().is_none());
+
+        sel.set(1, 2, 3);
+        assert_eq!(
+            sel.frame_path(),
+            Some("Processes[1].Threads[2].Stack[3]".to_string())
+        );
+        assert_eq!(
+            sel.thread_path(),
+            Some("Processes[1].Threads[2]".to_string())
+        );
+
+        sel.clear();
+        assert!(sel.frame_path().is_none());
     }
 }

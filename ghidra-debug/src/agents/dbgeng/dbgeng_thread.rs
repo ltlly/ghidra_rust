@@ -62,6 +62,27 @@ impl DbgEngThreadState {
         }
     }
 
+    /// Create from a trace state string.
+    pub fn from_trace_str(s: &str) -> Self {
+        match s {
+            "RUNNING" => Self::Running,
+            "STOPPED" => Self::Stopped,
+            "TERMINATED" => Self::Exited,
+            "INACTIVE" => Self::Inactive,
+            _ => Self::Inactive,
+        }
+    }
+
+    /// Whether this state implies the thread can be resumed.
+    pub fn is_resumable(&self) -> bool {
+        matches!(self, Self::Stopped)
+    }
+
+    /// Whether this state implies the thread is alive.
+    pub fn is_alive_state(&self) -> bool {
+        matches!(self, Self::Running | Self::Stopped)
+    }
+
     /// Parse from dbgeng execution status.
     ///
     /// The dbgeng `GetExecutionStatus()` returns one of several constants.
@@ -96,6 +117,63 @@ impl DbgEngThreadState {
     }
 }
 
+/// Stop reason for a specific thread stop in dbgeng.
+///
+/// Captures why a thread stopped, corresponding to dbgeng's event
+/// callback information (exception codes, breakpoints, etc.).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DbgEngStopReason {
+    /// Breakpoint hit at address.
+    Breakpoint { bp_number: u32, address: u64 },
+    /// Hardware breakpoint hit.
+    HardwareBreakpoint { bp_number: u32, address: u64 },
+    /// Exception received.
+    Exception { code: u64, name: Option<String> },
+    /// Step completed (single-step, step-over, step-into).
+    StepComplete,
+    /// Access violation.
+    AccessViolation { address: u64 },
+    /// Module loaded.
+    ModuleLoaded { name: String },
+    /// Thread created.
+    ThreadCreated,
+    /// Process exited with code.
+    Exited { code: i32 },
+    /// Unknown reason.
+    Unknown,
+}
+
+impl DbgEngStopReason {
+    /// Human-readable description.
+    pub fn description(&self) -> String {
+        match self {
+            Self::Breakpoint { bp_number, address } => {
+                format!("Breakpoint {} at 0x{:x}", bp_number, address)
+            }
+            Self::HardwareBreakpoint { bp_number, address } => {
+                format!("Hardware breakpoint {} at 0x{:x}", bp_number, address)
+            }
+            Self::Exception { code, name } => match name {
+                Some(n) => format!("Exception 0x{:x} ({})", code, n),
+                None => format!("Exception 0x{:x}", code),
+            },
+            Self::StepComplete => "Step complete".to_string(),
+            Self::AccessViolation { address } => {
+                format!("Access violation at 0x{:x}", address)
+            }
+            Self::ModuleLoaded { name } => format!("Module loaded: {}", name),
+            Self::ThreadCreated => "Thread created".to_string(),
+            Self::Exited { code } => format!("Exited with code {}", code),
+            Self::Unknown => "Unknown stop reason".to_string(),
+        }
+    }
+
+    /// Whether this stop reason implies the thread is stopped (can resume).
+    pub fn is_stopped(&self) -> bool {
+        !matches!(self, Self::Exited { .. })
+    }
+}
+
 /// A dbgeng thread within a process.
 ///
 /// Each thread in dbgeng has an internal thread number, an OS-level TID,
@@ -120,6 +198,12 @@ pub struct DbgEngThread {
     pub process_num: u32,
     /// Thread Environment Block address, if known.
     pub teb: Option<u64>,
+    /// Last known stop reason, if any.
+    pub stop_reason: Option<DbgEngStopReason>,
+    /// Cached display string.
+    pub display: Option<String>,
+    /// Cached short display string.
+    pub short_display: Option<String>,
 }
 
 impl DbgEngThread {
@@ -134,6 +218,9 @@ impl DbgEngThread {
             synced: false,
             process_num: 0,
             teb: None,
+            stop_reason: None,
+            display: None,
+            short_display: None,
         }
     }
 
@@ -167,6 +254,18 @@ impl DbgEngThread {
     /// Set the TEB address.
     pub fn with_teb(mut self, teb: u64) -> Self {
         self.teb = Some(teb);
+        self
+    }
+
+    /// Set the display string.
+    pub fn with_display(mut self, display: impl Into<String>) -> Self {
+        self.display = Some(display.into());
+        self
+    }
+
+    /// Set the stop reason.
+    pub fn with_stop_reason(mut self, reason: DbgEngStopReason) -> Self {
+        self.stop_reason = Some(reason);
         self
     }
 
@@ -366,6 +465,70 @@ impl DbgEngThread {
             self.process_num, self.num
         )
     }
+
+    /// Get the trace path for a specific frame in this thread.
+    pub fn frame_path(&self, level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}]",
+            self.process_num, self.num, level
+        )
+    }
+
+    /// Get the trace path for a specific frame's registers.
+    pub fn frame_registers_path(&self, level: u32) -> String {
+        format!(
+            "Processes[{}].Threads[{}].Stack[{}].Registers",
+            self.process_num, self.num, level
+        )
+    }
+
+    /// Get a mutable reference to a frame by level.
+    pub fn get_frame_mut(&mut self, level: u32) -> Option<&mut DbgEngStackFrame> {
+        self.frames.get_mut(&level)
+    }
+
+    /// Get the outermost frame (highest level).
+    pub fn outermost_frame(&self) -> Option<&DbgEngStackFrame> {
+        self.frames.values().next_back()
+    }
+
+    /// Get all frame levels in order (innermost to outermost).
+    pub fn frame_levels(&self) -> Vec<u32> {
+        self.frames.keys().copied().collect()
+    }
+
+    /// Whether the thread is stopped.
+    pub fn is_stopped(&self) -> bool {
+        self.state == ExecutionState::Stopped
+    }
+
+    /// Whether the thread is running.
+    pub fn is_running(&self) -> bool {
+        self.state == ExecutionState::Running
+    }
+
+    /// Whether the thread has exited.
+    pub fn is_exited(&self) -> bool {
+        self.state == ExecutionState::Exited
+    }
+
+    /// Get the stop reason description, if any.
+    pub fn stop_reason_description(&self) -> Option<String> {
+        self.stop_reason.as_ref().map(|r| r.description())
+    }
+
+    /// Build the retain keys for this thread's frame children.
+    pub fn build_frame_retain_keys(&self) -> Vec<String> {
+        self.frames
+            .keys()
+            .map(|level| format!("[{}]", level))
+            .collect()
+    }
+
+    /// Update cached short display string.
+    pub fn update_short_display(&mut self, radix: u32) {
+        self.short_display = Some(self.build_short_display(radix));
+    }
 }
 
 /// A stack frame within a dbgeng thread.
@@ -542,6 +705,102 @@ impl DbgEngStackFrame {
     }
 }
 
+/// Tracks the event thread for a dbgeng trace.
+///
+/// Ported from `put_event_thread` in the Python agent. The event thread
+/// is the thread that caused the most recent stop event.
+#[derive(Debug, Clone, Default)]
+pub struct DbgEngEventThreadTracker {
+    /// The process number of the event thread, if any.
+    pub process_num: Option<u32>,
+    /// The thread number of the event thread, if any.
+    pub thread_num: Option<u32>,
+}
+
+impl DbgEngEventThreadTracker {
+    /// Create a new tracker.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the event thread.
+    pub fn set(&mut self, process_num: u32, thread_num: u32) {
+        self.process_num = Some(process_num);
+        self.thread_num = Some(thread_num);
+    }
+
+    /// Clear the event thread.
+    pub fn clear(&mut self) {
+        self.process_num = None;
+        self.thread_num = None;
+    }
+
+    /// Get the event thread's trace path, if set.
+    pub fn trace_path(&self) -> Option<String> {
+        match (self.process_num, self.thread_num) {
+            (Some(p), Some(t)) => Some(format!("Processes[{}].Threads[{}]", p, t)),
+            _ => None,
+        }
+    }
+
+    /// Check if a specific thread is the event thread.
+    pub fn is_event_thread(&self, process_num: u32, thread_num: u32) -> bool {
+        self.process_num == Some(process_num) && self.thread_num == Some(thread_num)
+    }
+}
+
+/// Helper for frame selection tracking in dbgeng.
+///
+/// Ported from the `restore_frame` context manager in the Python agent.
+#[derive(Debug, Clone, Default)]
+pub struct DbgEngFrameSelection {
+    /// The currently selected process.
+    pub process_num: Option<u32>,
+    /// The currently selected thread.
+    pub thread_num: Option<u32>,
+    /// The currently selected frame level.
+    pub frame_level: Option<u32>,
+}
+
+impl DbgEngFrameSelection {
+    /// Create a new frame selection.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set the complete selection.
+    pub fn set(&mut self, process_num: u32, thread_num: u32, frame_level: u32) {
+        self.process_num = Some(process_num);
+        self.thread_num = Some(thread_num);
+        self.frame_level = Some(frame_level);
+    }
+
+    /// Clear the selection.
+    pub fn clear(&mut self) {
+        self.process_num = None;
+        self.thread_num = None;
+        self.frame_level = None;
+    }
+
+    /// Get the frame trace path, if fully set.
+    pub fn frame_path(&self) -> Option<String> {
+        match (self.process_num, self.thread_num, self.frame_level) {
+            (Some(p), Some(t), Some(f)) => {
+                Some(format!("Processes[{}].Threads[{}].Stack[{}]", p, t, f))
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the thread trace path, if set.
+    pub fn thread_path(&self) -> Option<String> {
+        match (self.process_num, self.thread_num) {
+            (Some(p), Some(t)) => Some(format!("Processes[{}].Threads[{}]", p, t)),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -600,6 +859,9 @@ mod tests {
         assert!(t.frames.is_empty());
         assert_eq!(t.process_num, 0);
         assert!(t.teb.is_none());
+        assert!(t.stop_reason.is_none());
+        assert!(t.display.is_none());
+        assert!(t.short_display.is_none());
     }
 
     #[test]
@@ -882,5 +1144,208 @@ mod tests {
             f.trace_path(1, 2),
             "Processes[1].Threads[2].Stack.Frames[3]"
         );
+    }
+
+    #[test]
+    fn test_thread_state_from_trace_str() {
+        assert_eq!(DbgEngThreadState::from_trace_str("RUNNING"), DbgEngThreadState::Running);
+        assert_eq!(DbgEngThreadState::from_trace_str("STOPPED"), DbgEngThreadState::Stopped);
+        assert_eq!(DbgEngThreadState::from_trace_str("TERMINATED"), DbgEngThreadState::Exited);
+        assert_eq!(DbgEngThreadState::from_trace_str("INACTIVE"), DbgEngThreadState::Inactive);
+        assert_eq!(DbgEngThreadState::from_trace_str("UNKNOWN"), DbgEngThreadState::Inactive);
+    }
+
+    #[test]
+    fn test_thread_state_properties() {
+        assert!(DbgEngThreadState::Stopped.is_resumable());
+        assert!(!DbgEngThreadState::Running.is_resumable());
+        assert!(DbgEngThreadState::Running.is_alive_state());
+        assert!(DbgEngThreadState::Stopped.is_alive_state());
+        assert!(!DbgEngThreadState::Exited.is_alive_state());
+        assert!(!DbgEngThreadState::Inactive.is_alive_state());
+    }
+
+    #[test]
+    fn test_stop_reason() {
+        let bp = DbgEngStopReason::Breakpoint {
+            bp_number: 1,
+            address: 0x401000,
+        };
+        assert!(bp.is_stopped());
+        assert!(bp.description().contains("Breakpoint"));
+
+        let exc = DbgEngStopReason::Exception {
+            code: 0xc0000005,
+            name: Some("Access Violation".to_string()),
+        };
+        assert!(exc.is_stopped());
+        assert!(exc.description().contains("Access Violation"));
+
+        let exited = DbgEngStopReason::Exited { code: 0 };
+        assert!(!exited.is_stopped());
+    }
+
+    #[test]
+    fn test_thread_with_display() {
+        let t = DbgEngThread::new(1)
+            .with_display("Thread 1 main");
+        assert_eq!(t.display, Some("Thread 1 main".to_string()));
+    }
+
+    #[test]
+    fn test_thread_with_stop_reason() {
+        let t = DbgEngThread::new(1)
+            .with_stop_reason(DbgEngStopReason::StepComplete);
+        assert!(t.stop_reason.is_some());
+        assert_eq!(
+            t.stop_reason_description(),
+            Some("Step complete".to_string())
+        );
+    }
+
+    #[test]
+    fn test_thread_state_queries() {
+        let t_running = DbgEngThread::new(1).with_state(ExecutionState::Running);
+        assert!(t_running.is_running());
+        assert!(!t_running.is_stopped());
+        assert!(!t_running.is_exited());
+        assert!(t_running.is_alive());
+
+        let t_stopped = DbgEngThread::new(2).with_state(ExecutionState::Stopped);
+        assert!(!t_stopped.is_running());
+        assert!(t_stopped.is_stopped());
+        assert!(t_stopped.is_alive());
+
+        let t_exited = DbgEngThread::new(3).with_state(ExecutionState::Exited);
+        assert!(t_exited.is_exited());
+        assert!(!t_exited.is_alive());
+    }
+
+    #[test]
+    fn test_thread_outermost_frame() {
+        let mut t = DbgEngThread::new(1);
+        assert!(t.outermost_frame().is_none());
+
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t.add_frame(DbgEngStackFrame::new(1, 0x402000));
+        t.add_frame(DbgEngStackFrame::new(2, 0x403000));
+        assert_eq!(t.outermost_frame().unwrap().pc, 0x403000);
+    }
+
+    #[test]
+    fn test_thread_frame_levels() {
+        let mut t = DbgEngThread::new(1);
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t.add_frame(DbgEngStackFrame::new(2, 0x403000));
+        let levels = t.frame_levels();
+        assert_eq!(levels, vec![0, 2]);
+    }
+
+    #[test]
+    fn test_thread_frame_retain_keys() {
+        let mut t = DbgEngThread::new(1);
+        t.add_frame(DbgEngStackFrame::new(0, 0x401000));
+        t.add_frame(DbgEngStackFrame::new(2, 0x403000));
+        let keys = t.build_frame_retain_keys();
+        assert!(keys.contains(&"[0]".to_string()));
+        assert!(keys.contains(&"[2]".to_string()));
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn test_thread_frame_path() {
+        let t = DbgEngThread::in_process(2, 1);
+        assert_eq!(t.frame_path(0), "Processes[1].Threads[2].Stack[0]");
+        assert_eq!(
+            t.frame_registers_path(1),
+            "Processes[1].Threads[2].Stack[1].Registers"
+        );
+    }
+
+    #[test]
+    fn test_thread_update_short_display() {
+        let mut t = DbgEngThread::in_process(1, 0).with_tid(0x1234);
+        t.update_short_display(16);
+        assert_eq!(t.short_display, Some("[0.1:0x1234]".to_string()));
+    }
+
+    #[test]
+    fn test_thread_exit_clears_stop_reason() {
+        let mut t = DbgEngThread::new(1)
+            .with_state(ExecutionState::Running)
+            .with_stop_reason(DbgEngStopReason::StepComplete);
+        t.mark_exited();
+        assert!(!t.is_alive());
+        assert_eq!(t.state, ExecutionState::Exited);
+        // stop_reason is not cleared by mark_exited for dbgeng,
+        // but frames are cleared
+        assert!(t.frames.is_empty());
+    }
+
+    #[test]
+    fn test_event_thread_tracker() {
+        let mut tracker = DbgEngEventThreadTracker::new();
+        assert!(tracker.trace_path().is_none());
+        assert!(!tracker.is_event_thread(1, 1));
+
+        tracker.set(1, 2);
+        assert_eq!(
+            tracker.trace_path(),
+            Some("Processes[1].Threads[2]".to_string())
+        );
+        assert!(tracker.is_event_thread(1, 2));
+        assert!(!tracker.is_event_thread(1, 3));
+        assert!(!tracker.is_event_thread(2, 2));
+
+        tracker.clear();
+        assert!(tracker.trace_path().is_none());
+    }
+
+    #[test]
+    fn test_frame_selection() {
+        let mut sel = DbgEngFrameSelection::new();
+        assert!(sel.frame_path().is_none());
+        assert!(sel.thread_path().is_none());
+
+        sel.set(1, 2, 3);
+        assert_eq!(
+            sel.frame_path(),
+            Some("Processes[1].Threads[2].Stack[3]".to_string())
+        );
+        assert_eq!(
+            sel.thread_path(),
+            Some("Processes[1].Threads[2]".to_string())
+        );
+
+        sel.clear();
+        assert!(sel.frame_path().is_none());
+    }
+
+    #[test]
+    fn test_stop_reason_hw_breakpoint() {
+        let reason = DbgEngStopReason::HardwareBreakpoint {
+            bp_number: 0,
+            address: 0x7ff612345678,
+        };
+        assert!(reason.is_stopped());
+        assert!(reason.description().contains("Hardware breakpoint"));
+    }
+
+    #[test]
+    fn test_stop_reason_access_violation() {
+        let reason = DbgEngStopReason::AccessViolation {
+            address: 0xdeadbeef,
+        };
+        assert!(reason.is_stopped());
+        assert!(reason.description().contains("0xdeadbeef"));
+    }
+
+    #[test]
+    fn test_stop_reason_module_loaded() {
+        let reason = DbgEngStopReason::ModuleLoaded {
+            name: "kernel32.dll".to_string(),
+        };
+        assert!(reason.is_stopped());
+        assert!(reason.description().contains("kernel32.dll"));
     }
 }

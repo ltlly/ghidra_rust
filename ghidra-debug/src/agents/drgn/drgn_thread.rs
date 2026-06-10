@@ -269,6 +269,73 @@ impl DrgnThread {
             ExecutionState::Running | ExecutionState::Stopped
         )
     }
+
+    /// Build trace object key-value pairs including TID and Name.
+    ///
+    /// Extended version matching the Python agent's `put_threads` output.
+    /// The Python agent uses:
+    /// - `TID` with the raw value
+    /// - `_short_display` as `'{tnum:d} {pid:x}:{tid:x}'`
+    /// - `_display` as `'{tnum:x} {pid:x}:{tid:x} {name}'`
+    /// - `Name` for the thread name
+    /// - `CPU` for kernel CPU threads
+    pub fn build_trace_values_extended(&self) -> Vec<(String, String)> {
+        let tid = self.tid.unwrap_or(0);
+        let mut values = vec![
+            ("State".to_string(), self.state.as_trace_str().to_string()),
+            ("TID".to_string(), format!("{}", tid)),
+            (
+                "_short_display".to_string(),
+                format!(
+                    "{} {:x}:{:x}",
+                    self.num, self.process_num, tid
+                ),
+            ),
+        ];
+        let display = self.build_display_extended();
+        values.push(("_display".to_string(), display));
+        if let Some(ref name) = self.name {
+            values.push(("Name".to_string(), name.clone()));
+        }
+        if let Some(cpu) = self.cpu {
+            values.push(("CPU".to_string(), cpu.to_string()));
+        }
+        values
+    }
+
+    /// Build the extended display string matching the Python agent.
+    ///
+    /// Format for kernel: `'{tnum:x} {pid:x}:{tid:x} {name}'`
+    /// Format for user: `'{tnum:x} {pid:x}:{tid:x} {name}'`
+    pub fn build_display_extended(&self) -> String {
+        let tid = self.tid.unwrap_or(0);
+        let base = format!(
+            "{:x} {:x}:{:x}",
+            self.num, self.process_num, tid
+        );
+        match &self.name {
+            Some(n) if !n.is_empty() => format!("{} {}", base, n),
+            _ => base,
+        }
+    }
+
+    /// Get the innermost PC (program counter), if any frame exists.
+    pub fn pc(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.pc)
+    }
+
+    /// Get the innermost SP (stack pointer), if any frame exists.
+    pub fn sp(&self) -> Option<u64> {
+        self.innermost_frame().map(|f| f.sp)
+    }
+
+    /// Get all frames sorted by level (innermost first).
+    pub fn sorted_frames(&self) -> Vec<&DrgnStackFrame> {
+        let mut frames: Vec<&DrgnStackFrame> = self.frames.values().collect();
+        frames.sort_by_key(|f| f.level);
+        frames
+    }
+
 }
 
 /// Source location information for a stack frame.
@@ -870,5 +937,106 @@ mod tests {
         assert!(values.iter().any(|(k, v)| k == "Filename" && v == "kernel/sched/core.c"));
         assert!(values.iter().any(|(k, v)| k == "Line" && v == "5678"));
         assert!(values.iter().any(|(k, v)| k == "Column" && v == "12"));
+    }
+
+    #[test]
+    fn test_thread_build_trace_values_extended() {
+        let t = DrgnThread::cpu_thread(0, 1)
+            .with_tid(42)
+            .with_state(ExecutionState::Stopped);
+        let values = t.build_trace_values_extended();
+        assert!(values.iter().any(|(k, v)| k == "State" && v == "STOPPED"));
+        assert!(values.iter().any(|(k, v)| k == "TID" && v == "42"));
+        assert!(values.iter().any(|(k, v)| k == "CPU" && v == "1"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "CPU 1"));
+        assert!(values.iter().any(|(k, v)| k == "_short_display" && v.contains("0:2a")));
+    }
+
+    #[test]
+    fn test_thread_build_display_extended_user() {
+        let t = DrgnThread::in_process(1, 0)
+            .with_tid(0x1234)
+            .with_name("main");
+        let disp = t.build_display_extended();
+        assert!(disp.contains("1234"));
+        assert!(disp.contains("main"));
+    }
+
+    #[test]
+    fn test_thread_build_display_extended_kernel() {
+        let t = DrgnThread::in_process(1, 0).with_tid(0x1234);
+        let disp = t.build_display_extended();
+        assert!(disp.contains("1234"));
+    }
+
+    #[test]
+    fn test_thread_pc_sp() {
+        let mut t = DrgnThread::new(0);
+        assert!(t.pc().is_none());
+        assert!(t.sp().is_none());
+
+        t.add_frame(
+            DrgnStackFrame::new(0, 0xffffffff81234567)
+                .with_sp(0xffff888000000000)
+                .with_fp(0xffff888000001000)
+                .with_return_address(0xffffffff81234000),
+        );
+        assert_eq!(t.pc(), Some(0xffffffff81234567));
+        assert_eq!(t.sp(), Some(0xffff888000000000));
+    }
+
+    #[test]
+    fn test_thread_sorted_frames() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(2, 0x3000));
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        t.add_frame(DrgnStackFrame::new(1, 0x2000));
+        let sorted = t.sorted_frames();
+        assert_eq!(sorted.len(), 3);
+        assert_eq!(sorted[0].level, 0);
+        assert_eq!(sorted[1].level, 1);
+        assert_eq!(sorted[2].level, 2);
+    }
+
+    #[test]
+    fn test_thread_frame_mut_v2() {
+        let mut t = DrgnThread::new(0);
+        t.add_frame(DrgnStackFrame::new(0, 0x1000));
+        {
+            let f = t.get_frame_mut(0).unwrap();
+            f.sp = 0x7fff00;
+        }
+        assert_eq!(t.get_frame(0).unwrap().sp, 0x7fff00);
+    }
+
+    #[test]
+    fn test_thread_build_trace_values_with_tid_and_name() {
+        let t = DrgnThread::new(5)
+            .with_tid(100)
+            .with_name("worker")
+            .with_state(ExecutionState::Running);
+        let values = t.build_trace_values_extended();
+        assert!(values.iter().any(|(k, v)| k == "State" && v == "RUNNING"));
+        assert!(values.iter().any(|(k, v)| k == "TID" && v == "100"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "worker"));
+        assert!(values.iter().any(|(k, v)| k == "_display" && v.contains("worker")));
+    }
+
+    #[test]
+    fn test_stack_frame_build_trace_values_with_name() {
+        let f = DrgnStackFrame::new(0, 0xffffffff81234567)
+            .with_function("do_sys_open");
+        let values = f.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "do_sys_open"));
+        assert!(values.iter().any(|(k, v)| k == "_display" && v.contains("do_sys_open")));
+    }
+
+    #[test]
+    fn test_stack_frame_locals_trace_path() {
+        let f = DrgnStackFrame::new(1, 0x1000);
+        assert_eq!(
+            f.locals_trace_path(0, 2),
+            "Processes[0].Threads[2].Stack[1].Locals"
+        );
     }
 }

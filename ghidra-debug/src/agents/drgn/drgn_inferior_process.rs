@@ -11,7 +11,7 @@
 //! `put_threads`, `put_modules`, `put_regions`, `put_sections`, etc.).
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::drgn_thread::DrgnThread;
 use super::{DrgnModuleInfo, DrgnSectionInfo, DrgnSymbolInfo};
@@ -64,6 +64,12 @@ pub struct DrgnInferiorProcess {
     pub regions_changed: bool,
     /// Whether threads have changed since last sync.
     pub threads_changed: bool,
+    /// Whether breakpoints have changed since last sync.
+    pub breakpoints_changed: bool,
+    /// Whether watches have changed since last sync.
+    pub watches_changed: bool,
+    /// Relocated sections for relocatable modules.
+    pub relocated_sections: Vec<DrgnRelocatedSection>,
 }
 
 impl DrgnInferiorProcess {
@@ -88,6 +94,9 @@ impl DrgnInferiorProcess {
             modules_changed: false,
             regions_changed: false,
             threads_changed: false,
+            breakpoints_changed: false,
+            watches_changed: false,
+            relocated_sections: Vec::new(),
         }
     }
 
@@ -529,6 +538,496 @@ impl DrgnInferiorProcess {
         self.regions_changed = false;
         self.threads_changed = false;
     }
+
+    /// Find a module by name.
+    pub fn find_module(&self, name: &str) -> Option<&DrgnModuleInfo> {
+        self.modules.iter().find(|m| m.name == name)
+    }
+
+    /// Find a module by base address.
+    pub fn find_module_by_base(&self, base: u64) -> Option<&DrgnModuleInfo> {
+        self.modules.iter().find(|m| m.base() == base)
+    }
+
+    /// Find the module that contains the given address.
+    pub fn find_module_containing(&self, address: u64) -> Option<&DrgnModuleInfo> {
+        self.modules
+            .iter()
+            .find(|m| address >= m.base() && address < m.base() + m.size())
+    }
+
+    /// Get a mutable reference to a module by name.
+    pub fn get_module_mut(&mut self, name: &str) -> Option<&mut DrgnModuleInfo> {
+        self.modules.iter_mut().find(|m| m.name == name)
+    }
+
+    /// Get the number of modules.
+    pub fn module_count(&self) -> usize {
+        self.modules.len()
+    }
+
+    /// Find a memory region by base address.
+    pub fn find_region(&self, base: u64) -> Option<&MemoryRegion> {
+        self.memory_regions.iter().find(|r| r.base == base)
+    }
+
+    /// Find the memory region that contains the given address.
+    pub fn find_region_containing(&self, address: u64) -> Option<&MemoryRegion> {
+        self.memory_regions
+            .iter()
+            .find(|r| address >= r.base && address < r.base + r.size)
+    }
+
+    /// Check if a given address falls within any mapped region.
+    pub fn is_address_mapped(&self, addr: u64) -> bool {
+        self.memory_regions
+            .iter()
+            .any(|r| addr >= r.base && addr < r.base + r.size)
+    }
+
+    /// Get the number of memory regions.
+    pub fn memory_region_count(&self) -> usize {
+        self.memory_regions.len()
+    }
+
+    /// Get a sorted list of all thread numbers.
+    pub fn sorted_thread_numbers(&self) -> Vec<u32> {
+        let mut nums: Vec<u32> = self.threads.keys().copied().collect();
+        nums.sort();
+        nums
+    }
+
+    /// Get a sorted list of all module base addresses.
+    pub fn sorted_module_bases(&self) -> Vec<u64> {
+        let mut bases: Vec<u64> = self.modules.iter().map(|m| m.base()).collect();
+        bases.sort();
+        bases
+    }
+
+    /// Update this process's state from its threads.
+    pub fn refresh_state(&mut self) {
+        self.state = self.compute_state();
+    }
+
+    /// Get all running thread numbers.
+    pub fn running_thread_numbers(&self) -> Vec<u32> {
+        self.threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Running)
+            .map(|(&num, _)| num)
+            .collect()
+    }
+
+    /// Get all stopped thread numbers.
+    pub fn stopped_thread_numbers(&self) -> Vec<u32> {
+        self.threads
+            .iter()
+            .filter(|(_, t)| t.state == ExecutionState::Stopped)
+            .map(|(&num, _)| num)
+            .collect()
+    }
+
+    /// Count the total number of stack frames across all threads.
+    pub fn total_frame_count(&self) -> usize {
+        self.threads.values().map(|t| t.frame_count()).sum()
+    }
+
+    /// Check if the breakpoints dirty flag is set.
+    pub fn needs_breakpoint_sync(&self) -> bool {
+        self.breakpoints_changed
+    }
+
+    /// Mark breakpoints as changed.
+    pub fn mark_breakpoints_changed(&mut self) {
+        self.breakpoints_changed = true;
+    }
+
+    /// Check if watches dirty flag is set.
+    pub fn needs_watch_sync(&self) -> bool {
+        self.watches_changed
+    }
+
+    /// Mark watches as changed.
+    pub fn mark_watches_changed(&mut self) {
+        self.watches_changed = true;
+    }
+
+    /// Whether any child has changed since last sync.
+    pub fn has_any_changes(&self) -> bool {
+        self.modules_changed
+            || self.regions_changed
+            || self.threads_changed
+            || self.breakpoints_changed
+            || self.watches_changed
+    }
+}
+
+/// Snapshot descriptor for trace recording.
+///
+/// Ported from the Python `snapshot()` calls in `commands.py` and `hooks.py`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DrgnSnapshot {
+    /// Snapshot ID (sequential).
+    pub id: u64,
+    /// Description (e.g., "Stopped", "Continued").
+    pub description: String,
+    /// Timestamp (unix epoch millis, if available).
+    pub timestamp: Option<u64>,
+}
+
+impl DrgnSnapshot {
+    /// Create a new snapshot.
+    pub fn new(id: u64, description: impl Into<String>) -> Self {
+        Self {
+            id,
+            description: description.into(),
+            timestamp: None,
+        }
+    }
+
+    /// Set the timestamp.
+    pub fn with_timestamp(mut self, ts: u64) -> Self {
+        self.timestamp = Some(ts);
+        self
+    }
+}
+
+/// Per-process synchronization state, ported from Python `ProcessState` in hooks.py.
+///
+/// Tracks what has changed since the last stop, what has already been synced
+/// (visited), and the snapshot history for this process.
+#[derive(Debug, Clone)]
+pub struct DrgnProcessSyncState {
+    /// Whether this is the first recording for this process.
+    pub first: bool,
+    /// Whether threads need re-sync.
+    pub threads_dirty: bool,
+    /// Whether modules need re-sync.
+    pub modules_dirty: bool,
+    /// Whether regions need re-sync.
+    pub regions_dirty: bool,
+    /// Whether breakpoints need re-sync.
+    pub breaks_dirty: bool,
+    /// Whether watches need re-sync.
+    pub watches_dirty: bool,
+    /// Visited (thread_num, frame_level) pairs since last stop.
+    pub visited: BTreeSet<(u32, u32)>,
+    /// Snapshots recorded for this process.
+    pub snapshots: Vec<DrgnSnapshot>,
+    /// Next snapshot ID.
+    next_snap_id: u64,
+}
+
+impl Default for DrgnProcessSyncState {
+    fn default() -> Self {
+        Self {
+            first: true,
+            threads_dirty: false,
+            modules_dirty: false,
+            regions_dirty: false,
+            breaks_dirty: false,
+            watches_dirty: false,
+            visited: BTreeSet::new(),
+            snapshots: Vec::new(),
+            next_snap_id: 0,
+        }
+    }
+}
+
+impl DrgnProcessSyncState {
+    /// Create a new sync state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark as no longer first recording.
+    pub fn mark_recorded(&mut self) {
+        self.first = false;
+    }
+
+    /// Clear visited state (called when a new stop occurs).
+    pub fn clear_visited(&mut self) {
+        self.visited.clear();
+    }
+
+    /// Record a visit to a thread/frame combination.
+    pub fn record_visit(&mut self, thread_num: u32, frame_level: u32) {
+        self.visited.insert((thread_num, frame_level));
+    }
+
+    /// Check if a thread/frame has been visited.
+    pub fn is_visited(&self, thread_num: u32, frame_level: u32) -> bool {
+        self.visited.contains(&(thread_num, frame_level))
+    }
+
+    /// Check if a thread has any visited frames.
+    pub fn thread_visited(&self, thread_num: u32) -> bool {
+        self.visited.iter().any(|(t, _)| *t == thread_num)
+    }
+
+    /// Create a new snapshot.
+    pub fn create_snapshot(&mut self, description: impl Into<String>) -> &DrgnSnapshot {
+        let snap = DrgnSnapshot::new(self.next_snap_id, description);
+        self.next_snap_id += 1;
+        self.snapshots.push(snap);
+        self.snapshots.last().unwrap()
+    }
+
+    /// Mark threads as dirty (need re-sync).
+    pub fn mark_threads_dirty(&mut self) {
+        self.threads_dirty = true;
+    }
+
+    /// Mark modules as dirty.
+    pub fn mark_modules_dirty(&mut self) {
+        self.modules_dirty = true;
+    }
+
+    /// Mark regions as dirty.
+    pub fn mark_regions_dirty(&mut self) {
+        self.regions_dirty = true;
+    }
+
+    /// Mark breakpoints as dirty.
+    pub fn mark_breaks_dirty(&mut self) {
+        self.breaks_dirty = true;
+    }
+
+    /// Mark watches as dirty.
+    pub fn mark_watches_dirty(&mut self) {
+        self.watches_dirty = true;
+    }
+
+    /// Consume the threads dirty flag (returns true if was dirty).
+    pub fn take_threads_dirty(&mut self) -> bool {
+        let dirty = self.threads_dirty;
+        self.threads_dirty = false;
+        dirty
+    }
+
+    /// Consume the modules dirty flag.
+    pub fn take_modules_dirty(&mut self) -> bool {
+        let dirty = self.modules_dirty;
+        self.modules_dirty = false;
+        dirty
+    }
+
+    /// Consume the regions dirty flag.
+    pub fn take_regions_dirty(&mut self) -> bool {
+        let dirty = self.regions_dirty;
+        self.regions_dirty = false;
+        dirty
+    }
+
+    /// Consume the breakpoints dirty flag.
+    pub fn take_breaks_dirty(&mut self) -> bool {
+        let dirty = self.breaks_dirty;
+        self.breaks_dirty = false;
+        dirty
+    }
+
+    /// Whether anything has changed since the last sync.
+    pub fn has_dirty(&self) -> bool {
+        self.first
+            || self.threads_dirty
+            || self.modules_dirty
+            || self.regions_dirty
+            || self.breaks_dirty
+            || self.watches_dirty
+    }
+}
+
+/// Tracks the global convenience variables for the drgn agent session.
+///
+/// Ported from Python `util.py` convenience variable map. These variables
+/// control agent behavior such as the Ghidra language/compiler selection
+/// and the selected process/thread/frame.
+#[derive(Debug, Clone)]
+pub struct DrgnConvenienceState {
+    /// Currently selected process ID.
+    pub selected_pid: i64,
+    /// Currently selected thread ID.
+    pub selected_tid: i64,
+    /// Currently selected frame level.
+    pub selected_level: i64,
+    /// Variable map for other convenience variables.
+    pub variables: BTreeMap<String, String>,
+}
+
+impl Default for DrgnConvenienceState {
+    fn default() -> Self {
+        Self {
+            selected_pid: -1,
+            selected_tid: -1,
+            selected_level: -1,
+            variables: BTreeMap::new(),
+        }
+    }
+}
+
+impl DrgnConvenienceState {
+    /// Create a new convenience state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Select a process.
+    pub fn select_process(&mut self, pid: i64) {
+        self.selected_pid = pid;
+    }
+
+    /// Select a thread.
+    pub fn select_thread(&mut self, tid: i64) {
+        self.selected_tid = tid;
+    }
+
+    /// Select a frame.
+    pub fn select_frame(&mut self, level: i64) {
+        self.selected_level = level;
+    }
+
+    /// Get the selected process, or None if none selected.
+    pub fn selected_process(&self) -> Option<u32> {
+        if self.selected_pid >= 0 {
+            Some(self.selected_pid as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Get the selected thread, or None if none selected.
+    pub fn selected_thread(&self) -> Option<u32> {
+        if self.selected_tid >= 0 {
+            Some(self.selected_tid as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Get the selected frame, or None if none selected.
+    pub fn selected_frame(&self) -> Option<u32> {
+        if self.selected_level >= 0 {
+            Some(self.selected_level as u32)
+        } else {
+            None
+        }
+    }
+
+    /// Get a convenience variable.
+    pub fn get_variable(&self, key: &str) -> Option<&str> {
+        self.variables.get(key).map(|s| s.as_str())
+    }
+
+    /// Set a convenience variable.
+    pub fn set_variable(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.variables.insert(key.into(), value.into());
+    }
+
+    /// Reset all state to defaults.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
+/// An available process entry for the `Sessions[0].Available` tree.
+///
+/// This represents a process visible on the system, not necessarily being debugged.
+/// Ported from the `put_processes` pattern in `commands.py`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AvailableProcess {
+    /// Process ID.
+    pub pid: u64,
+    /// Process name.
+    pub name: String,
+}
+
+impl AvailableProcess {
+    /// Create a new available process entry.
+    pub fn new(pid: u64, name: impl Into<String>) -> Self {
+        Self {
+            pid,
+            name: name.into(),
+        }
+    }
+
+    /// Build the trace path for this available process.
+    pub fn trace_path(&self) -> String {
+        format!("Sessions[0].Available[{}]", self.pid)
+    }
+
+    /// Build trace object key-value pairs.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("PID".to_string(), format!("{}", self.pid)),
+            ("Name".to_string(), self.name.clone()),
+            (
+                "_display".to_string(),
+                format!("{} {}", self.pid, self.name),
+            ),
+        ]
+    }
+}
+
+/// drgn-specific module section with address information for relocatable modules.
+///
+/// For kernel modules (RelocatableModule in drgn), sections have relocated
+/// addresses. This extends `DrgnSectionInfo` with the module base address
+/// for proper trace path construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrgnRelocatedSection {
+    /// Section name (e.g., ".text", ".data").
+    pub name: String,
+    /// Relocated section address.
+    pub address: u64,
+    /// Section size.
+    pub size: u64,
+    /// Parent module base address.
+    pub module_base: u64,
+}
+
+impl DrgnRelocatedSection {
+    /// Create a new relocated section.
+    pub fn new(
+        name: impl Into<String>,
+        address: u64,
+        size: u64,
+        module_base: u64,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            address,
+            size,
+            module_base,
+        }
+    }
+
+    /// Get the module base formatted as hex.
+    pub fn module_base_hex(&self) -> String {
+        format!("0x{:x}", self.module_base)
+    }
+
+    /// Build the trace path for this section.
+    pub fn trace_path(&self, process_num: u32) -> String {
+        format!(
+            "Processes[{}].Modules[0x{:x}].Sections[{}]",
+            process_num, self.module_base, self.name
+        )
+    }
+
+    /// Build trace object key-value pairs for this section.
+    ///
+    /// Matches the Python `put_sections` output.
+    pub fn build_trace_values(&self) -> Vec<(String, String)> {
+        vec![
+            ("Address".to_string(), format!("0x{:x}", self.address)),
+            ("Size".to_string(), format!("0x{:x}", self.size)),
+            ("Name".to_string(), self.name.clone()),
+            (
+                "_display".to_string(),
+                format!("{} 0x{:x}", self.name, self.address),
+            ),
+        ]
+    }
 }
 
 #[cfg(test)]
@@ -945,5 +1444,212 @@ mod tests {
         p.clear_changed_flags();
         assert!(!p.needs_module_sync());
         assert!(!p.needs_region_sync());
+    }
+
+    #[test]
+    fn test_process_find_module() {
+        let mut p = DrgnInferiorProcess::new(0);
+        let m = DrgnModuleInfo {
+            name: "virtio_net".to_string(),
+            address_range: (0xffffffffa0000000, 0xffffffffa0010000),
+            build_id: None,
+            debug_file_bias: None,
+            debug_file_path: None,
+            debug_file_status: None,
+            loaded_file_bias: None,
+            loaded_file_path: None,
+            loaded_file_status: None,
+            is_relocatable: true,
+        };
+        p.add_module(m);
+        assert!(p.find_module("virtio_net").is_some());
+        assert!(p.find_module("e1000").is_none());
+        assert!(p.find_module_by_base(0xffffffffa0000000).is_some());
+        assert!(p.find_module_containing(0xffffffffa0005000).is_some());
+        assert!(p.find_module_containing(0x100000).is_none());
+    }
+
+    #[test]
+    fn test_process_find_region() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_memory_region(MemoryRegion {
+            base: 0x10000,
+            size: 0x5000,
+            offset: 0,
+            permissions: "rw-".to_string(),
+            object_file: "stack".to_string(),
+        });
+        assert!(p.find_region(0x10000).is_some());
+        assert!(p.find_region_containing(0x12000).is_some());
+        assert!(p.find_region_containing(0x20000).is_none());
+        assert!(p.is_address_mapped(0x10000));
+        assert!(p.is_address_mapped(0x14fff));
+        assert!(!p.is_address_mapped(0x15000));
+    }
+
+    #[test]
+    fn test_process_sorted_lists() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(3));
+        p.add_thread(DrgnThread::new(1));
+        p.add_thread(DrgnThread::new(2));
+        assert_eq!(p.sorted_thread_numbers(), vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_process_thread_queries() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DrgnThread::new(1).with_state(ExecutionState::Stopped));
+        p.add_thread(DrgnThread::new(2).with_state(ExecutionState::Running));
+        assert_eq!(p.running_thread_numbers(), vec![0, 2]);
+        assert_eq!(p.stopped_thread_numbers(), vec![1]);
+        assert_eq!(p.total_frame_count(), 0);
+    }
+
+    #[test]
+    fn test_process_refresh_state() {
+        let mut p = DrgnInferiorProcess::new(0);
+        p.add_thread(DrgnThread::new(0).with_state(ExecutionState::Running));
+        p.add_thread(DrgnThread::new(1).with_state(ExecutionState::Stopped));
+        p.refresh_state();
+        assert_eq!(p.state, ExecutionState::Running);
+    }
+
+    #[test]
+    fn test_process_breakpoint_watches_flags() {
+        let mut p = DrgnInferiorProcess::new(0);
+        assert!(!p.needs_breakpoint_sync());
+        p.mark_breakpoints_changed();
+        assert!(p.needs_breakpoint_sync());
+        assert!(!p.needs_watch_sync());
+        p.mark_watches_changed();
+        assert!(p.needs_watch_sync());
+        assert!(p.has_any_changes());
+    }
+
+    #[test]
+    fn test_snapshot() {
+        let snap = DrgnSnapshot::new(0, "Stopped").with_timestamp(1234567890);
+        assert_eq!(snap.id, 0);
+        assert_eq!(snap.description, "Stopped");
+        assert_eq!(snap.timestamp, Some(1234567890));
+    }
+
+    #[test]
+    fn test_process_sync_state() {
+        let mut state = DrgnProcessSyncState::new();
+        assert!(state.first);
+
+        state.mark_recorded();
+        assert!(!state.first);
+
+        state.record_visit(1, 0);
+        state.record_visit(1, 1);
+        state.record_visit(2, 0);
+        assert!(state.is_visited(1, 0));
+        assert!(state.is_visited(1, 1));
+        assert!(!state.is_visited(1, 2));
+        assert!(state.thread_visited(2));
+
+        state.clear_visited();
+        assert!(!state.is_visited(1, 0));
+    }
+
+    #[test]
+    fn test_process_sync_state_dirty_flags() {
+        let mut state = DrgnProcessSyncState::new();
+        assert!(!state.take_modules_dirty());
+
+        state.mark_modules_dirty();
+        assert!(state.take_modules_dirty());
+        assert!(!state.take_modules_dirty()); // consumed
+
+        state.mark_threads_dirty();
+        state.mark_breaks_dirty();
+        state.mark_watches_dirty();
+        assert!(state.take_threads_dirty());
+        assert!(state.take_breaks_dirty());
+        assert!(state.take_regions_dirty() == false);
+
+        assert!(state.has_dirty()); // watches_dirty is still true
+    }
+
+    #[test]
+    fn test_process_sync_state_snapshots() {
+        let mut state = DrgnProcessSyncState::new();
+        state.create_snapshot("Stopped");
+        state.create_snapshot("Continued");
+        state.create_snapshot("Stopped");
+        assert_eq!(state.snapshots.len(), 3);
+        assert_eq!(state.snapshots[0].id, 0);
+        assert_eq!(state.snapshots[1].id, 1);
+        assert_eq!(state.snapshots[2].id, 2);
+    }
+
+    #[test]
+    fn test_convenience_state() {
+        let mut state = DrgnConvenienceState::new();
+        assert_eq!(state.selected_pid, -1);
+        assert!(state.selected_process().is_none());
+
+        state.select_process(0);
+        assert_eq!(state.selected_process(), Some(0));
+
+        state.select_thread(42);
+        assert_eq!(state.selected_thread(), Some(42));
+
+        state.select_frame(2);
+        assert_eq!(state.selected_frame(), Some(2));
+
+        state.set_variable("_ghidra_tracing", "true");
+        assert_eq!(state.get_variable("_ghidra_tracing"), Some("true"));
+        assert_eq!(state.get_variable("nonexistent"), None);
+
+        state.reset();
+        assert_eq!(state.selected_pid, -1);
+    }
+
+    #[test]
+    fn test_available_process() {
+        let ap = AvailableProcess::new(1234, "bash");
+        assert_eq!(ap.trace_path(), "Sessions[0].Available[1234]");
+        let values = ap.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "PID" && v == "1234"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == "bash"));
+    }
+
+    #[test]
+    fn test_relocated_section() {
+        let sec = DrgnRelocatedSection::new(".text", 0xffffffffa0000000, 0x5000, 0xffffffffa0000000);
+        assert_eq!(sec.module_base_hex(), "0xffffffffa0000000");
+        assert_eq!(
+            sec.trace_path(0),
+            "Processes[0].Modules[0xffffffffa0000000].Sections[.text]"
+        );
+        let values = sec.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Address" && v == "0xffffffffa0000000"));
+        assert!(values.iter().any(|(k, v)| k == "Size" && v == "0x5000"));
+        assert!(values.iter().any(|(k, v)| k == "Name" && v == ".text"));
+    }
+
+    #[test]
+    fn test_process_module_count() {
+        let mut p = DrgnInferiorProcess::new(0);
+        assert_eq!(p.module_count(), 0);
+        assert_eq!(p.memory_region_count(), 0);
+        p.add_module(DrgnModuleInfo {
+            name: "virtio_net".to_string(),
+            address_range: (0xffffffffa0000000, 0xffffffffa0010000),
+            build_id: None,
+            debug_file_bias: None,
+            debug_file_path: None,
+            debug_file_status: None,
+            loaded_file_bias: None,
+            loaded_file_path: None,
+            loaded_file_status: None,
+            is_relocatable: true,
+        });
+        assert_eq!(p.module_count(), 1);
     }
 }

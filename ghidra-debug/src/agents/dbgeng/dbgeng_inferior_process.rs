@@ -21,7 +21,7 @@
 //! - TTD (Time Travel Debugging) timeline support
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::dbgeng_thread::DbgEngThread;
 use crate::agents::{
@@ -67,6 +67,8 @@ pub struct DbgEngInferiorProcess {
     pub peb: Option<u64>,
     /// Human-readable process name (from `.tlist` or module).
     pub name: Option<String>,
+    /// Breakpoint IDs associated with this process.
+    pub breakpoint_ids: Vec<u32>,
 }
 
 impl DbgEngInferiorProcess {
@@ -86,6 +88,7 @@ impl DbgEngInferiorProcess {
             is_wow64: false,
             peb: None,
             name: None,
+            breakpoint_ids: Vec::new(),
         }
     }
 
@@ -246,10 +249,14 @@ impl DbgEngInferiorProcess {
     /// These are used to populate the `Processes[N]` node in the trace.
     pub fn build_trace_values(&self) -> Vec<(String, String)> {
         let state = self.compute_state();
-        vec![
+        let mut values = vec![
             ("_state".to_string(), state.as_trace_str().to_string()),
             ("_display".to_string(), self.display.clone()),
-        ]
+        ];
+        if let Some(code) = self.exit_code {
+            values.push(("Exit Code".to_string(), code.to_string()));
+        }
+        values
     }
 
     /// Build trace object key-value pairs for this process's environment.
@@ -379,6 +386,88 @@ impl DbgEngInferiorProcess {
         let mut bases: Vec<u64> = self.modules.iter().map(|m| m.base).collect();
         bases.sort();
         bases
+    }
+
+    /// Update this process's state from its threads.
+    ///
+    /// This sets `self.state` to the computed state from threads.
+    pub fn refresh_state(&mut self) {
+        self.state = self.compute_state();
+    }
+
+    /// Get a module by name.
+    pub fn get_module(&self, name: &str) -> Option<&ModuleInfo> {
+        self.modules.iter().find(|m| m.name == name)
+    }
+
+    /// Get a mutable reference to a module by name.
+    pub fn get_module_mut(&mut self, name: &str) -> Option<&mut ModuleInfo> {
+        self.modules.iter_mut().find(|m| m.name == name)
+    }
+
+    /// Get a memory region by base address.
+    pub fn get_memory_region(&self, base: u64) -> Option<&MemoryRegion> {
+        self.memory_regions.iter().find(|r| r.base == base)
+    }
+
+    /// Check if a given address falls within any mapped region.
+    pub fn is_address_mapped(&self, addr: u64) -> bool {
+        self.memory_regions
+            .iter()
+            .any(|r| addr >= r.base && addr < r.base + r.size)
+    }
+
+    /// Get the number of modules.
+    pub fn module_count(&self) -> usize {
+        self.modules.len()
+    }
+
+    /// Get the number of memory regions.
+    pub fn memory_region_count(&self) -> usize {
+        self.memory_regions.len()
+    }
+
+    /// Add a breakpoint ID association.
+    pub fn add_breakpoint_id(&mut self, bp_id: u32) {
+        if !self.breakpoint_ids.contains(&bp_id) {
+            self.breakpoint_ids.push(bp_id);
+        }
+    }
+
+    /// Remove a breakpoint ID association.
+    pub fn remove_breakpoint_id(&mut self, bp_id: u32) {
+        self.breakpoint_ids.retain(|id| *id != bp_id);
+    }
+
+    /// Build the retain keys for process-level object children.
+    ///
+    /// This is used with `retain_values` to clean up stale children.
+    pub fn build_retain_keys(&self) -> Vec<String> {
+        vec![format!("[{}]", self.num)]
+    }
+
+    /// Build the retain keys for thread children.
+    pub fn build_thread_retain_keys(&self) -> Vec<String> {
+        self.threads
+            .keys()
+            .map(|num| format!("[{}]", num))
+            .collect()
+    }
+
+    /// Build the retain keys for module children.
+    pub fn build_module_retain_keys(&self) -> Vec<String> {
+        self.modules
+            .iter()
+            .map(|m| format!("[{}]", m.name))
+            .collect()
+    }
+
+    /// Build the retain keys for memory region children.
+    pub fn build_region_retain_keys(&self) -> Vec<String> {
+        self.memory_regions
+            .iter()
+            .map(|r| format!("[{:08x}]", r.base))
+            .collect()
     }
 
     /// Build the trace object key-value pairs for this process, including PEB.
@@ -892,6 +981,171 @@ impl TtdEvent {
     }
 }
 
+/// Snapshot descriptor for trace recording.
+///
+/// Ported from the Python `snapshot` calls in `commands.py` and `hooks.py`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    /// Snapshot ID (sequential).
+    pub id: u64,
+    /// Description (e.g., "Stopped", "Exited with code 0").
+    pub description: String,
+    /// Timestamp (unix epoch millis, if available).
+    pub timestamp: Option<u64>,
+}
+
+impl Snapshot {
+    /// Create a new snapshot.
+    pub fn new(id: u64, description: impl Into<String>) -> Self {
+        Self {
+            id,
+            description: description.into(),
+            timestamp: None,
+        }
+    }
+
+    /// Set the timestamp.
+    pub fn with_timestamp(mut self, ts: u64) -> Self {
+        self.timestamp = Some(ts);
+        self
+    }
+}
+
+/// Tracks the synchronization state for a process between stops.
+///
+/// Ported from the Python `InferiorState` class in `hooks.py`. Tracks
+/// which aspects of the process have changed and need re-sync.
+#[derive(Debug, Clone)]
+pub struct ProcessSyncState {
+    /// Whether this is the first recording for this process.
+    pub first: bool,
+    /// Last known memory regions (for change detection).
+    pub regions: Vec<MemoryRegion>,
+    /// Whether modules have changed since last stop.
+    pub modules_dirty: bool,
+    /// Whether threads have changed since last stop.
+    pub threads_dirty: bool,
+    /// Whether breakpoints have changed since last stop.
+    pub breaks_dirty: bool,
+    /// Visited (thread, frame_level) pairs since last stop.
+    pub visited: BTreeSet<(u32, u32)>,
+    /// Snapshots recorded for this process.
+    pub snapshots: Vec<Snapshot>,
+    /// Next snapshot ID.
+    next_snap_id: u64,
+}
+
+impl Default for ProcessSyncState {
+    fn default() -> Self {
+        Self {
+            first: true,
+            regions: Vec::new(),
+            modules_dirty: false,
+            threads_dirty: false,
+            breaks_dirty: false,
+            visited: BTreeSet::new(),
+            snapshots: Vec::new(),
+            next_snap_id: 0,
+        }
+    }
+}
+
+impl ProcessSyncState {
+    /// Create a new sync state.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Mark as no longer first recording.
+    pub fn mark_recorded(&mut self) {
+        self.first = false;
+    }
+
+    /// Clear visited state (called when a new stop occurs).
+    pub fn clear_visited(&mut self) {
+        self.visited.clear();
+    }
+
+    /// Record a visit to a thread/frame combination.
+    pub fn record_visit(&mut self, thread_num: u32, frame_level: u32) {
+        self.visited.insert((thread_num, frame_level));
+    }
+
+    /// Check if a thread/frame has been visited.
+    pub fn is_visited(&self, thread_num: u32, frame_level: u32) -> bool {
+        self.visited.contains(&(thread_num, frame_level))
+    }
+
+    /// Check if a thread has any visited frames.
+    pub fn thread_visited(&self, thread_num: u32) -> bool {
+        self.visited.iter().any(|(t, _)| *t == thread_num)
+    }
+
+    /// Create a new snapshot.
+    pub fn create_snapshot(&mut self, description: impl Into<String>) -> &Snapshot {
+        let snap = Snapshot::new(self.next_snap_id, description);
+        self.next_snap_id += 1;
+        self.snapshots.push(snap);
+        self.snapshots.last().unwrap()
+    }
+
+    /// Mark modules as dirty (need re-sync).
+    pub fn mark_modules_dirty(&mut self) {
+        self.modules_dirty = true;
+    }
+
+    /// Mark threads as dirty.
+    pub fn mark_threads_dirty(&mut self) {
+        self.threads_dirty = true;
+    }
+
+    /// Mark breakpoints as dirty.
+    pub fn mark_breaks_dirty(&mut self) {
+        self.breaks_dirty = true;
+    }
+
+    /// Consume the modules dirty flag (returns true if was dirty).
+    pub fn take_modules_dirty(&mut self) -> bool {
+        let dirty = self.modules_dirty;
+        self.modules_dirty = false;
+        dirty
+    }
+
+    /// Consume the threads dirty flag.
+    pub fn take_threads_dirty(&mut self) -> bool {
+        let dirty = self.threads_dirty;
+        self.threads_dirty = false;
+        dirty
+    }
+
+    /// Consume the breaks dirty flag.
+    pub fn take_breaks_dirty(&mut self) -> bool {
+        let dirty = self.breaks_dirty;
+        self.breaks_dirty = false;
+        dirty
+    }
+
+    /// Check if regions have changed compared to the provided new regions.
+    ///
+    /// Returns true if the regions differ from the last known set.
+    pub fn regions_changed(&self, new_regions: &[MemoryRegion]) -> bool {
+        if self.regions.len() != new_regions.len() {
+            return true;
+        }
+        for (old, new) in self.regions.iter().zip(new_regions.iter()) {
+            if old.base != new.base || old.size != new.size {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Update the stored regions.
+    pub fn update_regions(&mut self, regions: Vec<MemoryRegion>) {
+        self.regions = regions;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -911,6 +1165,7 @@ mod tests {
         assert!(!p.is_wow64);
         assert!(p.peb.is_none());
         assert!(p.name.is_none());
+        assert!(p.breakpoint_ids.is_empty());
     }
 
     #[test]
@@ -1315,5 +1570,208 @@ mod tests {
         );
         assert_eq!(e.description(), "[5:a] ModuleLoaded");
         assert!(e.snap.is_none());
+    }
+
+    #[test]
+    fn test_process_breakpoint_ids() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_breakpoint_id(1);
+        p.add_breakpoint_id(2);
+        p.add_breakpoint_id(1); // duplicate
+        assert_eq!(p.breakpoint_ids.len(), 2);
+        p.remove_breakpoint_id(1);
+        assert_eq!(p.breakpoint_ids.len(), 1);
+        assert_eq!(p.breakpoint_ids[0], 2);
+    }
+
+    #[test]
+    fn test_process_memory_query() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_memory_region(MemoryRegion {
+            base: 0x400000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "rwx".to_string(),
+            object_file: "test".to_string(),
+        });
+        assert!(p.is_address_mapped(0x400000));
+        assert!(p.is_address_mapped(0x400500));
+        assert!(!p.is_address_mapped(0x500000));
+        assert!(!p.is_address_mapped(0x300000));
+    }
+
+    #[test]
+    fn test_process_get_memory_region() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_memory_region(MemoryRegion {
+            base: 0x10000,
+            size: 0x5000,
+            offset: 0,
+            permissions: "rw-".to_string(),
+            object_file: "stack".to_string(),
+        });
+        assert!(p.get_memory_region(0x10000).is_some());
+        assert!(p.get_memory_region(0x20000).is_none());
+    }
+
+    #[test]
+    fn test_process_module_queries() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "kernel32.dll".to_string(),
+            base: 0x7ff800000000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        assert_eq!(p.module_count(), 1);
+        assert!(p.get_module("kernel32.dll").is_some());
+        assert!(p.get_module("ntdll.dll").is_none());
+
+        // Mutable access
+        let m = p.get_module_mut("kernel32.dll").unwrap();
+        m.size = 0x200000;
+        assert_eq!(p.get_module("kernel32.dll").unwrap().size, 0x200000);
+    }
+
+    #[test]
+    fn test_process_refresh_state() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(1).with_state(ExecutionState::Running));
+        p.add_thread(DbgEngThread::new(2).with_state(ExecutionState::Stopped));
+        p.refresh_state();
+        assert_eq!(p.state, ExecutionState::Running);
+    }
+
+    #[test]
+    fn test_process_retain_keys() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_thread(DbgEngThread::new(1));
+        p.add_thread(DbgEngThread::new(3));
+        let keys = p.build_thread_retain_keys();
+        assert!(keys.contains(&"[1]".to_string()));
+        assert!(keys.contains(&"[3]".to_string()));
+        assert_eq!(keys.len(), 2);
+    }
+
+    #[test]
+    fn test_process_build_trace_values_with_exit() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.state = ExecutionState::Stopped;
+        p.set_exit(42);
+        let values = p.build_trace_values();
+        assert!(values.iter().any(|(k, v)| k == "Exit Code" && v == "42"));
+        assert!(values.iter().any(|(k, v)| k == "_state" && v == "TERMINATED"));
+    }
+
+    #[test]
+    fn test_snapshot() {
+        let snap = Snapshot::new(0, "Stopped").with_timestamp(1234567890);
+        assert_eq!(snap.id, 0);
+        assert_eq!(snap.description, "Stopped");
+        assert_eq!(snap.timestamp, Some(1234567890));
+    }
+
+    #[test]
+    fn test_process_sync_state() {
+        let mut state = ProcessSyncState::new();
+        assert!(state.first);
+
+        state.mark_recorded();
+        assert!(!state.first);
+
+        state.record_visit(1, 0);
+        state.record_visit(1, 1);
+        state.record_visit(2, 0);
+        assert!(state.is_visited(1, 0));
+        assert!(state.is_visited(1, 1));
+        assert!(!state.is_visited(1, 2));
+        assert!(state.thread_visited(2));
+
+        state.clear_visited();
+        assert!(!state.is_visited(1, 0));
+    }
+
+    #[test]
+    fn test_process_sync_state_dirty_flags() {
+        let mut state = ProcessSyncState::new();
+        assert!(!state.take_modules_dirty());
+
+        state.mark_modules_dirty();
+        assert!(state.take_modules_dirty());
+        assert!(!state.take_modules_dirty()); // consumed
+
+        state.mark_threads_dirty();
+        state.mark_breaks_dirty();
+        assert!(state.take_threads_dirty());
+        assert!(state.take_breaks_dirty());
+    }
+
+    #[test]
+    fn test_process_sync_state_regions() {
+        let mut state = ProcessSyncState::new();
+        let regions = vec![MemoryRegion {
+            base: 0x400000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "rwx".to_string(),
+            object_file: "test".to_string(),
+        }];
+        assert!(state.regions_changed(&regions));
+        state.update_regions(regions.clone());
+        assert!(!state.regions_changed(&regions));
+
+        let different = vec![MemoryRegion {
+            base: 0x500000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "rwx".to_string(),
+            object_file: "test".to_string(),
+        }];
+        assert!(state.regions_changed(&different));
+    }
+
+    #[test]
+    fn test_process_sync_state_snapshots() {
+        let mut state = ProcessSyncState::new();
+        state.create_snapshot("Stopped");
+        state.create_snapshot("Continued");
+        state.create_snapshot("Stopped");
+        assert_eq!(state.snapshots.len(), 3);
+        assert_eq!(state.snapshots[0].id, 0);
+        assert_eq!(state.snapshots[1].id, 1);
+        assert_eq!(state.snapshots[2].id, 2);
+    }
+
+    #[test]
+    fn test_process_retain_keys_modules() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_module(ModuleInfo {
+            name: "ntdll.dll".to_string(),
+            base: 0x7ff800000000,
+            size: 0x1e6000,
+            build_id: None,
+            debug_path: None,
+            load_path: None,
+        });
+        let keys = p.build_module_retain_keys();
+        assert!(keys.contains(&"[ntdll.dll]".to_string()));
+        assert_eq!(keys.len(), 1);
+    }
+
+    #[test]
+    fn test_process_retain_keys_regions() {
+        let mut p = DbgEngInferiorProcess::new(1);
+        p.add_memory_region(MemoryRegion {
+            base: 0x400000,
+            size: 0x1000,
+            offset: 0,
+            permissions: "rwx".to_string(),
+            object_file: "test".to_string(),
+        });
+        let keys = p.build_region_retain_keys();
+        assert!(keys.contains(&"[00400000]".to_string()));
+        assert_eq!(keys.len(), 1);
     }
 }

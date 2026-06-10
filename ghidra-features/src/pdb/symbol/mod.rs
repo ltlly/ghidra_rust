@@ -157,10 +157,18 @@ pub use s_coffgroup::SPeCoffGroup;
 pub mod s_register;
 pub mod s_manyreg;
 
-pub use s_register::SRegister;
-pub use s_manyreg::SManyReg;
+pub use s_register::{SRegister, RegisterVariant};
+pub use s_manyreg::{SManyReg, ManyRegVariant};
+
+// Constant symbol alternate naming
+pub mod s_const;
 
 pub use s_block32::SBlock32;
 pub use s_with32::SWith32;
 pub use s_return::SReturn;
 pub use s_entrythis::SEntryThis;
+
+// Variant types for symbols that share binary format across multiple S_* kinds
+pub use s_end::EndVariant;
+pub use s_udt::UdtVariant;
+pub use s_objname::ObjNameVariant;

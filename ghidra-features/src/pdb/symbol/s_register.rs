@@ -1,7 +1,11 @@
 //! S_REGISTER -- Register variable symbol.
 //!
-//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.Register32MsSymbol`
-//! and `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.RegisterStMsSymbol`.
+//! Ports Ghidra's `ghidra.app.util.bin.format.pdb2.pdbreader.symbol.RegisterMsSymbol`
+//! (0x1106), `RegisterStMsSymbol` (0x1001), and `Register16MsSymbol` (0x0002).
+//!
+//! The 16-bit variant (`Register16MsSymbol`) encodes two register indices in a
+//! single u16: the high byte is the primary register, the low byte is the
+//! secondary register.
 
 use std::fmt;
 
@@ -10,13 +14,27 @@ use super::name_ms_symbol::NameMsSymbol;
 use super::record_number::{RecordCategory, RecordNumber};
 use crate::pdb::registers;
 
+/// Which variant of the register symbol was parsed.
+///
+/// The three variants share the same struct but differ in how the register
+/// field is encoded and which PDB kind they correspond to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegisterVariant {
+    /// `S_REGISTER` (0x1106) -- 32-bit type index, single u16 register, NT string.
+    Register,
+    /// `S_REGISTER_ST` (0x1001) -- 32-bit type index, single u16 register, ST string.
+    RegisterSt,
+    /// `S_REGISTER_16` (0x0002) -- 16-bit type index, dual-register (high:low byte), ST string.
+    Register16,
+}
+
 /// A register variable symbol (`S_REGISTER`).
 ///
 /// This symbol describes a variable whose value is held in a CPU register
 /// rather than in memory. It records the type, the register index, and the
 /// variable name.
 ///
-/// # PDB Binary Layout (S_REGISTER, 32-bit type index)
+/// # PDB Binary Layout (S_REGISTER, 32-bit type index, NT string)
 ///
 /// ```text
 /// type_record : u32
@@ -24,43 +42,79 @@ use crate::pdb::registers;
 /// name        : NT string
 /// ```
 ///
-/// # PDB Binary Layout (S_REGISTER_ST, 16-bit type index)
+/// # PDB Binary Layout (S_REGISTER_ST, 32-bit type index, ST string)
+///
+/// ```text
+/// type_record : u32
+/// register    : u16
+/// name        : ST string (16-bit length prefix)
+/// ```
+///
+/// # PDB Binary Layout (S_REGISTER_16, 16-bit type index, dual register)
 ///
 /// ```text
 /// type_record : u16
-/// register    : u16
-/// name        : NT string (ST format)
+/// register    : u16  (high byte = primary, low byte = secondary)
+/// name        : ST string (16-bit length prefix)
 /// ```
 ///
-/// This corresponds to `S_REGISTER` (0x0002) and `S_REGISTER_ST` (0x1001)
-/// in the CodeView symbol set.
+/// This corresponds to `S_REGISTER` (0x1106), `S_REGISTER_ST` (0x1001), and
+/// `S_REGISTER_16` (0x0002) in the CodeView symbol set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SRegister {
     /// The type record number describing this variable's type.
     pub type_record_number: RecordNumber,
 
     /// The register index (architecture-specific register number).
+    /// For the 16-bit dual-register variant, this is the primary (high byte).
     pub register_index: u16,
+
+    /// The secondary register index, only used by the 16-bit dual-register
+    /// variant (`Register16MsSymbol`). Zero for all other variants.
+    pub register_index2: u16,
 
     /// The variable name.
     pub name: String,
+
+    /// Which variant was parsed.
+    variant: RegisterVariant,
 }
 
 impl SRegister {
-    /// Create a new register variable symbol.
+    /// Create a new register variable symbol (S_REGISTER variant).
     pub fn new(type_record_number: RecordNumber, register_index: u16, name: String) -> Self {
         Self {
             type_record_number,
             register_index,
+            register_index2: 0,
             name,
+            variant: RegisterVariant::Register,
         }
     }
 
-    /// Parse an S_REGISTER symbol from a byte slice (32-bit type index).
+    /// Create a new 16-bit dual-register variable symbol (S_REGISTER_16 variant).
+    ///
+    /// `register_val` is the raw 16-bit value where the high byte is the
+    /// primary register and the low byte is the secondary register.
+    pub fn new_register16(
+        type_record_number: RecordNumber,
+        register_val: u16,
+        name: String,
+    ) -> Self {
+        Self {
+            type_record_number,
+            register_index: register_val >> 8,
+            register_index2: register_val & 0xFF,
+            name,
+            variant: RegisterVariant::Register16,
+        }
+    }
+
+    /// Parse an S_REGISTER symbol from a byte slice (32-bit type index, NT string).
     ///
     /// Expects the layout: `type_record(u32) + register(u16) + name(NT)`.
     ///
-    /// This handles `S_REGISTER` (0x0002).
+    /// This handles `S_REGISTER` (0x1106).
     pub fn parse(data: &[u8]) -> Option<Self> {
         if data.len() < 6 {
             return None;
@@ -71,7 +125,9 @@ impl SRegister {
         Some(Self {
             type_record_number: trn,
             register_index,
+            register_index2: 0,
             name,
+            variant: RegisterVariant::Register,
         })
     }
 
@@ -93,8 +149,41 @@ impl SRegister {
         Some(Self {
             type_record_number: trn,
             register_index,
+            register_index2: 0,
             name,
+            variant: RegisterVariant::RegisterSt,
         })
+    }
+
+    /// Parse an S_REGISTER_16 symbol from a byte slice (16-bit type index,
+    /// dual-register, ST string).
+    ///
+    /// Expects the layout: `type_record(u16) + register(u16) + name(ST)`.
+    ///
+    /// The Java `Register16MsSymbol` uses `recordNumberSize=16` and
+    /// `StringParseType.StringUtf8St`. The 16-bit register value is split:
+    /// high byte = primary register, low byte = secondary register.
+    ///
+    /// This handles `S_REGISTER_16` (0x0002).
+    pub fn parse_register16(data: &[u8]) -> Option<Self> {
+        if data.len() < 4 {
+            return None;
+        }
+        let (trn, _) = RecordNumber::parse(data, 0, RecordCategory::Type, 16);
+        let register_val = u16::from_le_bytes([data[2], data[3]]);
+        let name = parse_st_string(&data[4..]);
+        Some(Self {
+            type_record_number: trn,
+            register_index: register_val >> 8,
+            register_index2: register_val & 0xFF,
+            name,
+            variant: RegisterVariant::Register16,
+        })
+    }
+
+    /// Return the variant of this register symbol.
+    pub fn variant(&self) -> RegisterVariant {
+        self.variant
     }
 
     /// Return the human-readable register name for this symbol's register
@@ -105,26 +194,61 @@ impl SRegister {
     pub fn register_name(&self) -> &'static str {
         registers::register_name(self.register_index as u32)
     }
+
+    /// Return the human-readable name for the secondary register (16-bit
+    /// variant only).
+    ///
+    /// Returns `"???"` if the secondary register is zero or unrecognized.
+    pub fn register_name2(&self) -> &'static str {
+        registers::register_name(self.register_index2 as u32)
+    }
+
+    /// Whether this is the dual-register 16-bit variant.
+    pub fn is_dual_register(&self) -> bool {
+        self.variant == RegisterVariant::Register16
+    }
 }
 
 impl AbstractMsSymbol for SRegister {
     fn pdb_id(&self) -> u16 {
-        super::super::symbol_kind::S_REGISTER
+        match self.variant {
+            RegisterVariant::Register => super::super::symbol_kind::S_REGISTER,
+            RegisterVariant::RegisterSt => super::super::symbol_kind::S_REGISTER_ST,
+            RegisterVariant::Register16 => 0x0002, // S_REGISTER_16
+        }
     }
 
     fn symbol_type_name(&self) -> &'static str {
-        "S_REGISTER"
+        match self.variant {
+            RegisterVariant::Register => "S_REGISTER",
+            RegisterVariant::RegisterSt => "S_REGISTER_ST",
+            RegisterVariant::Register16 => "S_REGISTER_16",
+        }
     }
 
     fn emit(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "Register: {} ({:#X}), Type: {}, {}",
-            self.register_name(),
-            self.register_index,
-            self.type_record_number,
-            self.name
-        )
+        if self.variant == RegisterVariant::Register16 {
+            // Dual-register format: emit both register names
+            write!(
+                f,
+                "Register16: {} ({:#X}):{} ({:#X}), Type: {}, {}",
+                self.register_name(),
+                self.register_index,
+                self.register_name2(),
+                self.register_index2,
+                self.type_record_number,
+                self.name
+            )
+        } else {
+            write!(
+                f,
+                "Register: {} ({:#X}), Type: {}, {}",
+                self.register_name(),
+                self.register_index,
+                self.type_record_number,
+                self.name
+            )
+        }
     }
 }
 
@@ -184,6 +308,16 @@ mod tests {
         data
     }
 
+    fn make_register16_bytes(type_index: u16, register_val: u16, name: &[u8]) -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&type_index.to_le_bytes());
+        data.extend_from_slice(&register_val.to_le_bytes());
+        // ST string: 16-bit length prefix + raw bytes
+        data.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        data.extend_from_slice(name);
+        data
+    }
+
     #[test]
     fn test_parse_basic() {
         let data = make_register_bytes(0x1020, 20, b"eax_var");
@@ -191,6 +325,7 @@ mod tests {
         assert_eq!(sym.type_record_number.number(), 0x1020);
         assert_eq!(sym.register_index, 20);
         assert_eq!(sym.name, "eax_var");
+        assert_eq!(sym.variant, RegisterVariant::Register);
     }
 
     #[test]
@@ -225,6 +360,7 @@ mod tests {
         assert_eq!(sym.type_record_number.number(), 0x1020);
         assert_eq!(sym.register_index, 17);
         assert_eq!(sym.name, "eax_st_var");
+        assert_eq!(sym.variant, RegisterVariant::RegisterSt);
     }
 
     #[test]
@@ -243,6 +379,43 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_register16_basic() {
+        // register_val = 0x1112 => primary=0x11 (EAX), secondary=0x12 (ECX)
+        let data = make_register16_bytes(0x0100, 0x1112, b"dual_reg");
+        let sym = SRegister::parse_register16(&data).unwrap();
+        assert_eq!(sym.type_record_number.number(), 0x0100);
+        assert_eq!(sym.register_index, 0x11);
+        assert_eq!(sym.register_index2, 0x12);
+        assert_eq!(sym.name, "dual_reg");
+        assert_eq!(sym.variant, RegisterVariant::Register16);
+        assert!(sym.is_dual_register());
+    }
+
+    #[test]
+    fn test_parse_register16_truncated() {
+        let data = [0x00, 0x01]; // too short for 16-bit type + register
+        assert!(SRegister::parse_register16(&data).is_none());
+    }
+
+    #[test]
+    fn test_parse_register16_empty_name() {
+        let data = make_register16_bytes(0x0050, 0x1100, b"");
+        let sym = SRegister::parse_register16(&data).unwrap();
+        assert_eq!(sym.register_index, 0x11);
+        assert_eq!(sym.register_index2, 0x00);
+        assert_eq!(sym.name, "");
+    }
+
+    #[test]
+    fn test_parse_register16_high_byte_primary() {
+        // 0x1314 => primary=0x13 (EBX), secondary=0x14 (ESP)
+        let data = make_register16_bytes(0x0200, 0x1314, b"pair");
+        let sym = SRegister::parse_register16(&data).unwrap();
+        assert_eq!(sym.register_index, 0x13);
+        assert_eq!(sym.register_index2, 0x14);
+    }
+
+    #[test]
     fn test_trait_impls() {
         let sym = SRegister::new(
             RecordNumber::type_record_number(0x1020),
@@ -253,6 +426,21 @@ mod tests {
         assert_eq!(sym.symbol_type_name(), "S_REGISTER");
         assert_eq!(sym.name(), "local_var");
         assert_eq!(sym.register_index, 20);
+        assert!(!sym.is_dual_register());
+    }
+
+    #[test]
+    fn test_trait_impls_st() {
+        let sym = SRegister::parse_st(&make_register_st_bytes(0x1000, 17, b"eax")).unwrap();
+        assert_eq!(sym.pdb_id(), 0x1001);
+        assert_eq!(sym.symbol_type_name(), "S_REGISTER_ST");
+    }
+
+    #[test]
+    fn test_trait_impls_register16() {
+        let sym = SRegister::parse_register16(&make_register16_bytes(0x0100, 0x1112, b"d")).unwrap();
+        assert_eq!(sym.pdb_id(), 0x0002);
+        assert_eq!(sym.symbol_type_name(), "S_REGISTER_16");
     }
 
     #[test]
@@ -266,6 +454,20 @@ mod tests {
         assert!(s.contains("Register"));
         assert!(s.contains("bp_var"));
         assert!(s.contains("EBX")); // register index 20 = EBX
+    }
+
+    #[test]
+    fn test_display_register16() {
+        let sym = SRegister::new_register16(
+            RecordNumber::type_record_number(0x0100),
+            0x1112,
+            "dual".to_string(),
+        );
+        let s = format!("{}", sym);
+        assert!(s.contains("Register16"));
+        assert!(s.contains("EAX"));
+        assert!(s.contains("ECX"));
+        assert!(s.contains("dual"));
     }
 
     #[test]
@@ -358,5 +560,34 @@ mod tests {
         assert_eq!(sym.register_index, 0x0011);
         assert_eq!(sym.register_name(), "EAX");
         assert_eq!(sym.name, "eax_st");
+    }
+
+    #[test]
+    fn test_register16_secondary_register_name() {
+        let sym = SRegister::new_register16(
+            RecordNumber::type_record_number(0x0100),
+            0x1112, // primary=EAX, secondary=ECX
+            "split".to_string(),
+        );
+        assert_eq!(sym.register_name(), "EAX");
+        assert_eq!(sym.register_name2(), "ECX");
+    }
+
+    #[test]
+    fn test_variant_consistency() {
+        let sym = SRegister::new(
+            RecordNumber::type_record_number(0x1000),
+            0x0011,
+            "v".to_string(),
+        );
+        assert_eq!(sym.variant(), RegisterVariant::Register);
+
+        let data = make_register_st_bytes(0x1000, 0x0011, b"v");
+        let sym = SRegister::parse_st(&data).unwrap();
+        assert_eq!(sym.variant(), RegisterVariant::RegisterSt);
+
+        let data = make_register16_bytes(0x0100, 0x1112, b"v");
+        let sym = SRegister::parse_register16(&data).unwrap();
+        assert_eq!(sym.variant(), RegisterVariant::Register16);
     }
 }
