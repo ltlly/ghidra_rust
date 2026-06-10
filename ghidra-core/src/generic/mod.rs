@@ -25,6 +25,8 @@ pub mod undoable_domain_object;
 pub mod option_type;
 pub mod options;
 pub mod application_settings;
+pub mod generic_run_info;
+pub mod shutdown_hook_registry;
 
 pub use system::SystemInfo;
 pub use task::{

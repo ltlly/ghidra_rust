@@ -39,10 +39,16 @@ pub use record_number::{RecordCategory, RecordNumber};
 pub use string_parse_type::StringParseType;
 
 // Concrete symbol types ported from Ghidra Java
+pub mod s_callsiteinfo;
 pub mod s_constant;
+pub mod s_gdata32;
 pub mod s_gproc32;
 pub mod s_label32;
 pub mod s_ldata32;
+pub mod s_lproc32;
+pub mod s_lthread32;
+pub mod s_procref;
+pub mod s_pub32;
 pub mod s_thunk32;
 pub mod s_udt;
 
@@ -52,9 +58,15 @@ pub use abstract_compile2::AbstractCompile2;
 pub use abstract_constant::AbstractConstant;
 pub use abstract_data::AbstractData;
 
+pub use s_callsiteinfo::SCallSiteInfo;
 pub use s_constant::SConstant;
+pub use s_gdata32::SGData32;
 pub use s_gproc32::SGProc32;
 pub use s_label32::SLabel32;
 pub use s_ldata32::SLData32;
+pub use s_lproc32::SLProc32;
+pub use s_lthread32::SLThread32;
+pub use s_procref::SProcRef;
+pub use s_pub32::SPub32;
 pub use s_thunk32::SThunk32;
 pub use s_udt::SUdt;

@@ -105,6 +105,9 @@ pub mod statusbar;
 pub mod tool;
 pub mod window_manager;
 pub mod window_position;
+pub mod docking_frame;
+pub mod header_cursor;
+pub mod wizard;
 
 // Re-export the most commonly-used types at the docking module level for
 // convenience.
@@ -160,3 +163,9 @@ pub use docking_tool::{
 };
 pub use drop_target_handler::{DropRegionVisual, DropTargetHandler};
 pub use window_position::{DockEdge, WindowPositionInfo};
+pub use docking_frame::{DockingFrame, FrameConfig, FrameState};
+pub use header_cursor::{CursorShape, HeaderCursor, HeaderCursorRegion};
+pub use wizard::{
+    StepDirection, WizardState, WizardStep, WizardStepId,
+    wizard_step::{StepResult, SimpleWizardStep},
+};

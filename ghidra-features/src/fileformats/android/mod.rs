@@ -25,5 +25,5 @@ pub use dex_format::DexHeader;
 pub use dex_method::{CodeItem, EncodedMethod, MethodIDItem};
 pub use dex_string::{StringDataItem, StringIDItem};
 pub use dex_type::{ProtoIDItem, TypeIDItem, TypeItem, TypeList};
-pub use oat::OatHeader;
+pub use oat::{is_oat, OatHeaderVersion, OatMethod};
 pub use vdex::VdexHeader;

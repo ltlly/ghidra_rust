@@ -33,7 +33,13 @@ pub mod abstract_enum_ms_type;
 pub mod abstract_field_list_ms_type;
 
 // Concrete LF_* type records.
+pub mod lf_arglist;
 pub mod lf_array;
+pub mod lf_bitfield;
+pub mod lf_enum;
+pub mod lf_fieldlist;
+pub mod lf_member;
+pub mod lf_mfunction;
 pub mod lf_modifier;
 pub mod lf_pointer;
 pub mod lf_procedure;
@@ -52,7 +58,13 @@ pub use abstract_enum_ms_type::AbstractEnumMsType;
 pub use abstract_field_list_ms_type::AbstractFieldListMsType;
 
 // Re-export concrete LF_* types.
+pub use lf_arglist::LfArglist;
 pub use lf_array::LfArray;
+pub use lf_bitfield::LfBitfield;
+pub use lf_enum::LfEnum;
+pub use lf_fieldlist::LfFieldlist;
+pub use lf_member::LfMember;
+pub use lf_mfunction::LfMfunction;
 pub use lf_modifier::LfModifier;
 pub use lf_pointer::LfPointer;
 pub use lf_procedure::LfProcedure;
